@@ -5,3 +5,7 @@ version = 3
 [[package]]
 name = "reth"
 version = "0.1.0"
+
+[[package]]
+name = "reth-crate-template"
+version = "0.1.0"
