@@ -646,6 +646,10 @@ name = "reth-crate-template"
 version = "0.1.0"
 
 [[package]]
+name = "reth-p2p"
+version = "0.1.0"
+
+[[package]]
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
