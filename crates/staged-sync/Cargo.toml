@@ -1,0 +1,14 @@
+[package]
+name = "reth-staged-sync"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = "Staged syncing primitives used in reth."
+
+[dependencies]
+reth-primitives = { path = "../primitives" }
+
+eyre = "0.6.8"
+async-trait = "0.1.57"
