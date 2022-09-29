@@ -8,6 +8,7 @@ env:
   NEXTEST_EXPERIMENTAL_FILTER_EXPR: 1
   CARGO_TERM_COLOR: always
 
+name: ci
 jobs:
   test:
     runs-on: ubuntu-latest
