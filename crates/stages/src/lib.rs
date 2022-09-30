@@ -10,6 +10,7 @@
 
 use async_trait::async_trait;
 use reth_primitives::U64;
+use thiserror::Error;
 
 mod pipeline;
 pub use pipeline::*;
@@ -53,13 +54,15 @@ pub struct UnwindOutput {
 }
 
 /// A stage execution error.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum StageError {
     /// The stage encountered a state validation error.
     ///
     /// TODO: This depends on the consensus engine and should include the validation failure reason
+    #[error("Stage encountered a validation error.")]
     Validation,
     /// The stage encountered an internal error.
+    #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
