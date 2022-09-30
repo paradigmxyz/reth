@@ -43,11 +43,11 @@ mod queued;
 
 // TODO find better name
 pub struct Pool<PoolApi: PoolClient> {
-    /// Chain/Storage access
+    /// Chain/Storage access.
     client: Arc<PoolApi>,
-    /// Pool settings
+    /// Pool settings.
     config: PoolConfig,
-    /// Listeners for transaction state change events
+    /// Listeners for transaction state change events.
     listeners: RwLock<PoolEventListener<PoolApi::Hash, PoolApi::BlockHash>>, /* TODO needs the actual sub-pools
                                                                               * TODO needs listeners for incoming transactions */
 }
