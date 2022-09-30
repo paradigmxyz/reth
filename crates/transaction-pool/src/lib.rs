@@ -9,41 +9,51 @@
 
 pub mod error;
 
-mod chain;
+mod client;
 mod validate;
 
-pub use chain::ChainInfo;
+pub use client::PoolClient;
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 mod config;
-use crate::traits::TransactionPool;
 pub use config::PoolConfig;
 
-mod traits;
+mod ordering;
 
-/// A generic `TransactionPool` implementation.
-pub struct Pool<ChainApi, Transaction> {
-    // TODO rm later
-    _marker: std::marker::PhantomData<(ChainApi, Transaction)>,
+mod pool;
+
+mod traits;
+pub use crate::{traits::TransactionPool, validate::TransactionValidator};
+
+/// A generic, customizable `TransactionPool` implementation.
+// TODO: This is a more feature rich pool, any additional features should go here, like metrics,
+// etc...
+pub struct Pool<PoolApi> {
+    /// The actual transaction pool where transactions are handled.
+    inner: Arc<pool::Pool<PoolApi>>,
+    /// Chain/Storage access
+    client: Arc<PoolApi>,
+    // TODO how to revalidate
+    // TODO provide a way to add listeners for ready transactions
 }
 
 // === impl Pool ===
 
-impl<ChainApi, Transaction> Pool<ChainApi, Transaction>
+impl<PoolApi> Pool<PoolApi>
 where
-    ChainApi: ChainInfo,
+    PoolApi: PoolClient,
 {
     /// Creates a new `Pool` with the given config and chain api
-    pub fn new(config: PoolConfig, api: Arc<ChainApi>) -> Self {
+    pub fn new(config: PoolConfig, api: Arc<PoolApi>) -> Self {
         unimplemented!()
     }
 }
 
 /// implements the `TransactionPool` interface for the `Poll`.
-impl<ChainApi, Transaction> TransactionPool for Pool<ChainApi, Transaction>
+impl<PoolApi> TransactionPool for Pool<PoolApi>
 where
-    ChainApi: ChainInfo,
-    // TODO this could be unified by moving it ChaiApi trait
-    Transaction: Send + Sync,
+    PoolApi: PoolClient,
+    PoolApi: TransactionValidator<Transaction = <PoolApi as PoolClient>::Transaction>,
 {
 }

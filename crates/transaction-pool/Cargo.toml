@@ -23,3 +23,4 @@ parking_lot = "0.12"
 thiserror = "1.0"
 tracing = "0.1"
 serde = { version = "1.0", features = ["derive"] }
+linked-hash-map = "0.5"
