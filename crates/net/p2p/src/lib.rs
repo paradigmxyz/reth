@@ -5,4 +5,4 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! utilities for interacting with ethereum's peer to peer network
+//! Utilities for interacting with ethereum's peer to peer network.
