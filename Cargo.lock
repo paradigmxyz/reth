@@ -646,7 +646,7 @@ name = "reth-crate-template"
 version = "0.1.0"
 
 [[package]]
-name = "reth-primtiives"
+name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "ethers-core",
