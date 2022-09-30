@@ -6,8 +6,11 @@ edition = "2021"
 [workspace]
 members = [
     "crate-template",
+    "crates/net/p2p",
+    "crates/rpc",
+    "crates/rpc-api",
+    "crates/rpc-types",
     "crates/primitives",
-    "crates/net/p2p"
 ]
 
 [dependencies]
