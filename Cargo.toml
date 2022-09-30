@@ -6,7 +6,8 @@ edition = "2021"
 [workspace]
 members = [
     "crate-template",
-    "crates/*"
+    "crates/primitives",
+    "crates/net/p2p"
 ]
 
 [dependencies]
