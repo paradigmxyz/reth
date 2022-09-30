@@ -10,5 +10,4 @@ description = "Staged syncing primitives used in reth."
 [dependencies]
 reth-primitives = { path = "../primitives" }
 
-eyre = "0.6.8"
 async-trait = "0.1.57"

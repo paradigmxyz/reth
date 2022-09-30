@@ -60,13 +60,7 @@ pub enum StageError {
     /// TODO: This depends on the consensus engine and should include the validation failure reason
     Validation,
     /// The stage encountered an internal error.
-    Internal(eyre::Error),
-}
-
-impl From<eyre::Error> for StageError {
-    fn from(err: eyre::Error) -> Self {
-        StageError::Internal(err)
-    }
+    Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// The ID of a stage.
@@ -103,7 +97,7 @@ pub trait Stage {
         &mut self,
         tx: &mut dyn Transaction,
         input: UnwindInput,
-    ) -> eyre::Result<UnwindOutput>;
+    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// TODO: Stand-in for database-related abstractions.

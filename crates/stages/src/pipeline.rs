@@ -92,7 +92,7 @@ impl Pipeline {
     }
 
     /// Run the pipeline.
-    pub async fn run(&mut self) -> eyre::Result<()> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         todo!()
     }
 }
