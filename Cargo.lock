@@ -1162,9 +1162,6 @@ dependencies = [
  "jsonrpsee",
  "reth-primitives",
  "reth-rpc-types",
- "serde",
- "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -1175,7 +1172,6 @@ dependencies = [
  "reth-primitives",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
