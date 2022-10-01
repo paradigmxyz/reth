@@ -2,10 +2,7 @@ use crate::eth::transaction::typed::{
     EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
     TransactionKind, TypedTransactionRequest,
 };
-
-use reth_primitives::{
-    transaction::eip2930::AccessListItem, Address, Bytes, U256,
-};
+use reth_primitives::{transaction::eip2930::AccessListItem, Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
@@ -45,7 +42,10 @@ pub struct TransactionRequest {
 // == impl TransactionRequest ==
 
 impl TransactionRequest {
-    /// Converts the request into a [TypedTransactionRequest]
+    /// Converts the request into a [`TypedTransactionRequest`]
+    ///
+    /// Returns None if mutual exclusive fields `gasPrice` and `max_fee_per_gas` are either missing
+    /// or both set.
     pub fn into_typed_request(self) -> Option<TypedTransactionRequest> {
         let TransactionRequest {
             to,

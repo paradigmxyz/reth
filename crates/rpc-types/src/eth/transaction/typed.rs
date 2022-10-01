@@ -1,4 +1,7 @@
 #![allow(missing_docs)]
+//! The [`TransactionRequest`] is a universal representation for a transaction deserialized from the
+//! json input of an RPC call. Depending on what fields are set, it can be converted into the
+//! container type [`TypedTransactionRequest`].
 
 use fastrlp::{RlpDecodable, RlpEncodable};
 use reth_primitives::{transaction::eip2930::AccessListItem, Address, Bytes, U256};
