@@ -10,3 +10,5 @@
 //! Provides all relevant types for the various RPC endpoints, grouped by namespace.
 
 mod eth;
+
+pub use eth::*;
