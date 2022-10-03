@@ -18,6 +18,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "async-trait"
+version = "0.1.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76464446b8bc32758d7e88ee1a804d9914cd9b1cb264c029899680b0be29826f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "auto_impl"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -654,6 +665,15 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "ethers-core",
+]
+
+[[package]]
+name = "reth-stages"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reth-primitives",
+ "thiserror",
 ]
 
 [[package]]

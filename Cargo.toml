@@ -7,7 +7,8 @@ edition = "2021"
 members = [
     "crate-template",
     "crates/primitives",
-    "crates/net/p2p"
+    "crates/net/p2p",
+    "crates/stages"
 ]
 
 [dependencies]

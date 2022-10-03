@@ -91,17 +91,17 @@ pub trait Stage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut dyn Transaction,
+        tx: &mut dyn DbTransaction,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut dyn Transaction,
+        tx: &mut dyn DbTransaction,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// TODO: Stand-in for database-related abstractions.
-pub trait Transaction {}
+pub trait DbTransaction {}
