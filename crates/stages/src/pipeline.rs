@@ -1,8 +1,10 @@
-use crate::Stage;
+use crate::{DbTransaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use reth_primitives::U64;
-use std::fmt::{Debug, Formatter};
+use std::{
+    cmp::max,
+    fmt::{Debug, Formatter},
+};
 
-#[allow(dead_code)]
 struct QueuedStage {
     /// The actual stage to execute.
     stage: Box<dyn Stage>,
@@ -21,31 +23,25 @@ struct QueuedStage {
 /// tip.
 ///
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
-/// [Pipeline::set_exit_after_sync]).
+/// [Pipeline::set_max_block]).
 ///
 /// # Unwinding
 ///
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages according to their unwind priority. It is also possible to
-/// request an unwind manually (see [Pipeline::start_with_unwind]).
+/// request an unwind manually (see [Pipeline::unwind]).
 ///
 /// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
 /// priorities are unwound first.
 #[derive(Default)]
 pub struct Pipeline {
     stages: Vec<QueuedStage>,
-    unwind_to: Option<U64>,
     max_block: Option<U64>,
-    exit_after_sync: bool,
 }
 
 impl Debug for Pipeline {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Pipeline")
-            .field("unwind_to", &self.unwind_to)
-            .field("max_block", &self.max_block)
-            .field("exit_after_sync", &self.exit_after_sync)
-            .finish()
+        f.debug_struct("Pipeline").field("max_block", &self.max_block).finish()
     }
 }
 
@@ -84,20 +80,144 @@ impl Pipeline {
         self
     }
 
-    /// Start the pipeline by unwinding to the specified block.
-    pub fn start_with_unwind(&mut self, unwind_to: Option<U64>) -> &mut Self {
-        self.unwind_to = unwind_to;
-        self
-    }
-
-    /// Control whether the pipeline should exit after syncing.
-    pub fn set_exit_after_sync(&mut self, exit: bool) -> &mut Self {
-        self.exit_after_sync = exit;
-        self
-    }
-
     /// Run the pipeline.
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        todo!()
+        let mut previous_stage = None;
+        let mut minimum_progress = None;
+        let mut maximum_progress = None;
+        let mut reached_tip_flag = true;
+
+        'run: loop {
+            for (_, QueuedStage { stage, require_tip, .. }) in self.stages.iter_mut().enumerate() {
+                let stage_id = stage.id();
+                let block_reached = loop {
+                    // TODO: Load stage progress
+                    let prev_progress = Some(0.into());
+
+                    let reached_virtual_tip = maximum_progress
+                        .zip(self.max_block)
+                        .map_or(false, |(progress, target)| progress >= target);
+
+                    // Execute stage
+                    let output = if !reached_tip_flag && *require_tip && !reached_virtual_tip {
+                        // Stage requires us to reach the tip of the chain first, but we have not.
+                        Ok(ExecOutput {
+                            stage_progress: prev_progress.unwrap_or_default(),
+                            done: true,
+                            reached_tip: false,
+                        })
+                    } else if prev_progress
+                        .zip(self.max_block)
+                        .map_or(false, |(prev_progress, target)| prev_progress >= target)
+                    {
+                        // We reached the maximum block, so we skip the stage
+                        Ok(ExecOutput {
+                            stage_progress: prev_progress.unwrap_or_default(),
+                            done: true,
+                            reached_tip: true,
+                        })
+                    } else {
+                        stage
+                            .execute(
+                                &mut T,
+                                ExecInput { previous_stage, stage_progress: prev_progress },
+                            )
+                            .await
+                    };
+
+                    match output {
+                        Ok(ExecOutput { stage_progress, done, reached_tip }) => {
+                            // TODO: Save stage progress
+                            // TODO: Commit tx
+
+                            minimum_progress =
+                                minimum_progress.map(|min| std::cmp::min(min, stage_progress));
+                            maximum_progress =
+                                maximum_progress.map(|max| std::cmp::max(max, stage_progress));
+
+                            if done {
+                                reached_tip_flag = reached_tip;
+                                break stage_progress
+                            }
+                        }
+                        Err(StageError::Validation { block }) => {
+                            // We unwind because of a validation error. If the unwind itself fails,
+                            // we bail entirely, otherwise we restart the execution loop from the
+                            // beginning.
+                            match self.unwind(prev_progress.unwrap_or_default(), Some(block)).await
+                            {
+                                Ok(()) => continue 'run,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        Err(StageError::Internal(e)) => return Err(e),
+                    }
+                };
+
+                // Set previous stage and continue on to next stage.
+                previous_stage = Some((stage_id, block_reached));
+            }
+
+            // TODO: Commit tx
+            // Check if we've reached our desired target block
+            if minimum_progress
+                .zip(self.max_block)
+                .map_or(false, |(progress, target)| progress >= target)
+            {
+                return Ok(())
+            }
+        }
     }
+
+    /// Unwind the stages to the target block.
+    ///
+    /// If the unwind is due to a bad block the number of that block should be specified.
+    pub async fn unwind(
+        &mut self,
+        to: U64,
+        bad_block: Option<U64>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut unwind_pipeline = {
+            let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
+            stages.sort_by_key(|(id, stage)| {
+                if stage.unwind_priority > 0 {
+                    (id - stage.unwind_priority, 0)
+                } else {
+                    (*id, 1)
+                }
+            });
+            stages.reverse();
+            stages
+        };
+
+        for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
+            // TODO: Load stage progress
+            let mut stage_progress = Some(0.into()).unwrap_or_default();
+            while stage_progress > to {
+                let unwind_output = stage
+                    .unwind(&mut T, UnwindInput { stage_progress, unwind_to: to, bad_block })
+                    .await?;
+                stage_progress = unwind_output.stage_progress;
+
+                // TODO: Save progress
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct T;
+impl DbTransaction for T {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn run_pipeline() {}
+
+    #[test]
+    fn run_pipeline_with_unwind() {}
+
+    #[test]
+    fn start_with_unwind() {}
 }
