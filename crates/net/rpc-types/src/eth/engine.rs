@@ -2,6 +2,7 @@
 //! Engine API types: <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md>
 
 use reth_primitives::{Address, BlockNumber, Bloom, Bytes, H256, H64, U256, U64};
+use serde::{Deserialize, Serialize};
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
