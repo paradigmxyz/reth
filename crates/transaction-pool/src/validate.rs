@@ -1,5 +1,6 @@
 //! Transaction validation abstractions.
 
+use crate::traits::PoolTransaction;
 use std::{fmt, hash::Hash};
 
 /// Result returned after checking a transaction's validity
@@ -9,7 +10,7 @@ type TransactionValidationResult<Transaction> = Result<(), TransactionValidation
 #[async_trait::async_trait]
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate
-    type Transaction: Send + Sync;
+    type Transaction: PoolTransaction + Send + Sync;
 
     /// Validates the transaction and returns a validated outcome
     ///

@@ -29,9 +29,9 @@ pub use crate::{traits::TransactionPool, validate::TransactionValidator};
 /// A generic, customizable `TransactionPool` implementation.
 // TODO: This is a more feature rich pool, any additional features should go here, like metrics,
 // etc...
-pub struct Pool<PoolApi> {
+pub struct Pool<PoolApi: PoolClient> {
     /// The actual transaction pool where transactions are handled.
-    inner: Arc<pool::Pool<PoolApi>>,
+    inner: Arc<pool::PoolInner<PoolApi>>,
     /// Chain/Storage access
     client: Arc<PoolApi>,
     // TODO how to revalidate

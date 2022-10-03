@@ -1,6 +1,6 @@
 //! Provides access to the chain's storage
 
-use crate::{traits, validate::TransactionValidator};
+use crate::{traits, traits::PoolTransaction, validate::TransactionValidator};
 use std::hash;
 
 // TODO could just merge with `TransactionValidator` into a single trait
@@ -10,13 +10,13 @@ pub trait PoolClient: Send + Sync + TransactionValidator {
     type Error: Into<crate::error::Error>;
 
     /// Transaction type for this client.
-    type Transaction;
+    type Transaction: PoolTransaction + Send + Sync;
 
     /// Transaction hash type.
-    type Hash: hash::Hash + Eq;
+    type Hash: hash::Hash + Eq + Send + Sync;
 
     /// Block hash type
-    type BlockHash: hash::Hash + Eq;
+    type BlockHash: hash::Hash + Eq + Send + Sync;
 
     // TODO add functions to fetch Block/Hashes etc...
 }
