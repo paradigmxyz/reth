@@ -16,16 +16,19 @@ pub trait TransactionValidator: Send + Sync {
     ///
     /// This is used by the transaction-pool check the transaction's validity against the state of
     /// the given block hash.
+    ///
+    /// This is supposed to extend the `transaction` with its identifying markers in the graph of
+    /// transactions for the sender.
     async fn validate_transaction(
         &self,
         transaction: Self::Transaction,
         block_hash: (),
-    ) -> TransactionValidationResult<Self::Transaction> {
+    ) -> TransactionValidationResult<ValidPoolTransaction<Self::Transaction>> {
         unimplemented!()
     }
 }
 
-/// Errors thrown during validity checks of a transaction
+/// Errors thrown during validity checks of a transaction.
 #[derive(Clone, PartialEq, Eq)]
 pub enum TransactionValidationError<Transaction> {
     /// The transaction is considered invalid.
@@ -35,23 +38,19 @@ pub enum TransactionValidationError<Transaction> {
     // TODO need variants for `Never`, or `At`?
 }
 
-/// Already validated transaction that can be queued.
-pub trait ValidatedTransaction: fmt::Debug {
-    /// Transaction hash type.
-    type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash;
-
-    /// Transaction sender type.
-    type Sender: fmt::Debug + Eq + Clone + Hash + Send;
-
-    /// Transaction hash
-    fn hash(&self) -> &Self::Hash;
-
-    /// Memory usage of this transaction
-    fn size(&self) -> usize;
-
-    /// Transaction sender
-    fn sender(&self) -> &Self::Sender;
-
-    /// Does it have zero gas price?
-    fn has_zero_gas_price(&self) -> bool;
+/// A valida transaction in the pool.
+#[derive(Debug)]
+pub struct ValidPoolTransaction<T: PoolTransaction> {
+    /// The transaction
+    pub transaction: T,
+    /// Ids required by the transaction.
+    ///
+    /// This lists all unique transactions that need to be mined before this transaction can be
+    /// considered `pending` and itself be included.
+    pub depends_on: Vec<T::Id>,
+    /// Ids that this transaction provides
+    ///
+    /// This contains the inverse of `depends_on` which provides the dependencies this transaction
+    /// unlocks once it's mined.
+    pub provides: Vec<T::Id>,
 }

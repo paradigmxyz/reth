@@ -13,7 +13,7 @@ pub trait PoolClient: Send + Sync + TransactionValidator {
     type Transaction: PoolTransaction + Send + Sync;
 
     /// Transaction hash type.
-    type Hash: hash::Hash + Eq + Send + Sync;
+    type Hash: hash::Hash + Eq + Send + Sync + Sync;
 
     /// Block hash type
     type BlockHash: hash::Hash + Eq + Send + Sync;
