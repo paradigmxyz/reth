@@ -3,6 +3,7 @@
 mod account;
 mod block;
 mod call;
+pub mod engine;
 mod fee;
 mod filter;
 mod index;
