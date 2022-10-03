@@ -8,3 +8,8 @@ readme = "README.md"
 description = "Utilities for interacting with ethereum's peer to peer network."
 
 [dependencies]
+enr = { version = "0.6.2", features = ["serde", "rust-secp256k1"] }
+serde = "1.0.145"
+serde_derive = "1.0.145"
+thiserror = "1.0.37"
+toml = "0.5.9"
