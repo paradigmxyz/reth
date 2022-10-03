@@ -34,13 +34,21 @@ where
 ///
 /// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
 /// priorities are unwound first.
-#[derive(Default)]
 pub struct Pipeline<'db, E>
 where
     E: mdbx::EnvironmentKind,
 {
     stages: Vec<QueuedStage<'db, E>>,
     max_block: Option<U64>,
+}
+
+impl<'db, E> Default for Pipeline<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
+    fn default() -> Self {
+        Self { stages: Vec::new(), max_block: None }
+    }
 }
 
 impl<'db, E> Debug for Pipeline<'db, E>
@@ -96,8 +104,8 @@ where
         db: &'db mdbx::Environment<E>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut previous_stage = None;
-        let mut minimum_progress = None;
-        let mut maximum_progress = None;
+        let mut minimum_progress: Option<U64> = None;
+        let mut maximum_progress: Option<U64> = None;
         let mut reached_tip_flag = true;
 
         'run: loop {
@@ -145,10 +153,17 @@ where
                             tx.commit()?;
                             tx = db.begin_rw_txn()?;
 
-                            minimum_progress =
-                                minimum_progress.map(|min| std::cmp::min(min, stage_progress));
-                            maximum_progress =
-                                maximum_progress.map(|max| std::cmp::max(max, stage_progress));
+                            // TODO: Clean up
+                            if let Some(min) = &mut minimum_progress {
+                                *min = std::cmp::min(*min, stage_progress);
+                            } else {
+                                minimum_progress = Some(stage_progress);
+                            }
+                            if let Some(max) = &mut maximum_progress {
+                                *max = std::cmp::max(*max, stage_progress);
+                            } else {
+                                maximum_progress = Some(stage_progress);
+                            }
 
                             if done {
                                 reached_tip_flag = reached_tip;
@@ -228,12 +243,92 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn run_pipeline() {}
+    use super::*;
+    use crate::{StageId, UnwindOutput};
+    use async_trait::async_trait;
+    use reth_db::mdbx;
+    use std::error::Error;
+    use tempfile::tempdir;
 
-    #[test]
-    fn run_pipeline_with_unwind() {}
+    struct A;
 
-    #[test]
-    fn start_with_unwind() {}
+    #[async_trait]
+    impl<'db, E> Stage<'db, E> for A
+    where
+        E: mdbx::EnvironmentKind,
+    {
+        fn id(&self) -> StageId {
+            StageId("A")
+        }
+
+        async fn execute<'tx>(
+            &mut self,
+            _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+            _: ExecInput,
+        ) -> Result<ExecOutput, StageError>
+        where
+            'db: 'tx,
+        {
+            Ok(ExecOutput { stage_progress: 10.into(), done: true, reached_tip: true })
+        }
+
+        async fn unwind<'tx>(
+            &mut self,
+            _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+            _: UnwindInput,
+        ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
+        where
+            'db: 'tx,
+        {
+            Ok(UnwindOutput { stage_progress: Default::default() })
+        }
+    }
+
+    // TODO: This is... not great.
+    fn test_db() -> Result<mdbx::Environment<mdbx::WriteMap>, mdbx::Error> {
+        const DB_TABLES: usize = 10;
+
+        // Build environment
+        let mut builder = mdbx::Environment::<mdbx::WriteMap>::new();
+        builder.set_max_dbs(DB_TABLES);
+        builder.set_geometry(mdbx::Geometry {
+            size: Some(0..usize::MAX),
+            growth_step: None,
+            shrink_threshold: None,
+            page_size: None,
+        });
+        builder.set_rp_augment_limit(16 * 256 * 1024);
+
+        // Open
+        let tempdir = tempdir().unwrap();
+        let path = tempdir.path();
+        std::fs::DirBuilder::new().recursive(true).create(path).unwrap();
+        let db = builder.open(path)?;
+
+        // Create tables
+        let tx = db.begin_rw_txn()?;
+        tx.create_db(Some("SyncStage"), mdbx::DatabaseFlags::default())?;
+        tx.commit()?;
+
+        Ok(db)
+    }
+
+    #[tokio::test]
+    async fn run_pipeline() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let db = test_db()?;
+
+        Pipeline::<mdbx::WriteMap>::default()
+            .push(A, false)
+            .set_max_block(Some(10.into()))
+            .run(&db)
+            .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unwind_pipeline() {}
+
+    #[tokio::test]
+    async fn run_pipeline_with_unwind() {}
 }

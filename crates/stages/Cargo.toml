@@ -12,3 +12,7 @@ reth-primitives = { path = "../primitives" }
 reth-db = { path = "../db" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
+
+[dev-dependencies]
+tokio = { version = "1.21.2", features = ["rt", "macros"] }
+tempfile = "3.3.0"
