@@ -60,7 +60,10 @@ pub enum StageError {
     ///
     /// TODO: This depends on the consensus engine and should include the validation failure reason
     #[error("Stage encountered a validation error.")]
-    Validation { block: U64 },
+    Validation {
+        /// The block that failed validation.
+        block: U64,
+    },
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

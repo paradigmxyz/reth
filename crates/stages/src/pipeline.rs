@@ -1,9 +1,6 @@
 use crate::{DbTransaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use reth_primitives::U64;
-use std::{
-    cmp::max,
-    fmt::{Debug, Formatter},
-};
+use std::fmt::{Debug, Formatter};
 
 struct QueuedStage {
     /// The actual stage to execute.
