@@ -10,7 +10,7 @@ Reth RPC types
 """
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
+reth-primitives = { path = "../../primitives" }
 
 # eth
 fastrlp = { version = "0.1" }

@@ -10,7 +10,7 @@ Reth RPC implementation
 """
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
+reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-types = { path = "../rpc-types" }
 

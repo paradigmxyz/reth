@@ -7,9 +7,9 @@ edition = "2021"
 members = [
     "crate-template",
     "crates/net/p2p",
-    "crates/rpc",
-    "crates/rpc-api",
-    "crates/rpc-types",
+    "crates/net/rpc",
+    "crates/net/rpc-api",
+    "crates/net/rpc-types",
     "crates/primitives",
 ]
 
