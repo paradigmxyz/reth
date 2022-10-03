@@ -21,17 +21,19 @@ pub use config::PoolConfig;
 
 mod ordering;
 
-mod pool;
+pub mod pool;
 
 mod traits;
-pub use crate::{traits::TransactionPool, validate::TransactionValidator};
+pub use crate::{
+    ordering::TransactionOrdering, traits::TransactionPool, validate::TransactionValidator,
+};
 
 /// A generic, customizable `TransactionPool` implementation.
 // TODO: This is a more feature rich pool, any additional features should go here, like metrics,
 // etc...
-pub struct Pool<PoolApi: PoolClient> {
+pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// The actual transaction pool where transactions are handled.
-    inner: Arc<pool::PoolInner<PoolApi>>,
+    inner: Arc<pool::PoolInner<PoolApi, Ordering>>,
     /// Chain/Storage access
     client: Arc<PoolApi>,
     // TODO how to revalidate
@@ -40,9 +42,10 @@ pub struct Pool<PoolApi: PoolClient> {
 
 // === impl Pool ===
 
-impl<PoolApi> Pool<PoolApi>
+impl<PoolApi, Ordering> Pool<PoolApi, Ordering>
 where
     PoolApi: PoolClient,
+    Ordering: TransactionOrdering,
 {
     /// Creates a new `Pool` with the given config and chain api
     pub fn new(config: PoolConfig, api: Arc<PoolApi>) -> Self {
@@ -51,9 +54,10 @@ where
 }
 
 /// implements the `TransactionPool` interface for the `Poll`.
-impl<PoolApi> TransactionPool for Pool<PoolApi>
+impl<PoolApi, Ordering> TransactionPool for Pool<PoolApi, Ordering>
 where
     PoolApi: PoolClient,
     PoolApi: TransactionValidator<Transaction = <PoolApi as PoolClient>::Transaction>,
+    Ordering: TransactionOrdering,
 {
 }

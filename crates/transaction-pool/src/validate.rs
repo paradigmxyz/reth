@@ -39,7 +39,6 @@ pub enum TransactionValidationError<Transaction> {
 }
 
 /// A valida transaction in the pool.
-#[derive(Debug)]
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,
@@ -53,4 +52,16 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// This contains the inverse of `depends_on` which provides the dependencies this transaction
     /// unlocks once it's mined.
     pub provides: Vec<T::Id>,
+}
+
+impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "Transaction {{ ")?;
+        write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
+        write!(fmt, "provides: {:?}, ", &self.provides)?;
+        write!(fmt, "depends_on: {:?}, ", &self.depends_on)?;
+        write!(fmt, "raw tx: {:?}", &self.transaction)?;
+        write!(fmt, "}}")?;
+        Ok(())
+    }
 }

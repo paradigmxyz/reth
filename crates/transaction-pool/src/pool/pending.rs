@@ -13,7 +13,7 @@ use std::{
 /// Each transaction in this pool is valid on its own, i.e. they are not dependent on transaction
 /// that must be executed first. Each of these transaction can be executed independently on the
 /// current state
-pub struct PendingTransactions<T: PoolTransaction> {
+pub(crate) struct PendingTransactions<T: PoolTransaction> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions where submitted to the pool.

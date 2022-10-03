@@ -1,4 +1,11 @@
+use std::fmt;
+
 /// Transaction ordering.
 ///
 /// Decides how transactions should be ordered within the pool.
-pub trait TransactionOrdering {}
+///
+/// The returned priority must reflect natural `Ordering`.
+pub trait TransactionOrdering: Send + Sync {
+    /// Priority of a transaction.
+    type Priority: Ord + Clone + Default + fmt::Debug + fmt::LowerHex + Send + Sync;
+}

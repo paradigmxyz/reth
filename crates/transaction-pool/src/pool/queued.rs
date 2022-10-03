@@ -14,7 +14,7 @@ use std::{
 ///     - state changes that turns them valid (e.g. basefee)
 ///
 /// Keeps a set of transactions that are waiting until their dependencies are unlocked.
-pub struct QueuedTransactions<T: PoolTransaction> {
+pub(crate) struct QueuedTransactions<T: PoolTransaction> {
     /// Dependencies that aren't yet provided by any transaction.
     dependencies: HashMap<T::Id, HashSet<T::Hash>>,
     /// Mapping of the dependencies of a transaction to the hash of the transaction

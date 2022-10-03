@@ -33,12 +33,9 @@
 //!       transactions are _currently_ waiting for state changes that eventually move them into
 //!       category (2.) and become pending.
 use crate::{
-    pool::{
-        listener::PoolEventListener, pending::PendingTransactions, queued::QueuedTransactions,
-        transactions::TransactionsPerSender,
-    },
+    pool::{listener::PoolEventListener, pending::PendingTransactions, queued::QueuedTransactions},
     traits::PoolTransaction,
-    PoolClient, PoolConfig,
+    PoolClient, PoolConfig, TransactionOrdering,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -47,22 +44,20 @@ mod events;
 mod listener;
 mod pending;
 mod queued;
-mod transactions;
 
 // TODO find better name
-pub struct Pool<PoolApi: PoolClient> {
-    pool: Arc<PoolInner<PoolApi>>,
+pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
+    pool: Arc<PoolInner<PoolApi, Ordering>>,
 }
 
 // A pool that manages transactions
-pub struct PoolInner<PoolApi: PoolClient> {
+pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Chain/Storage access.
     client: Arc<PoolApi>,
+    /// How to order transactions.
+    ordering: Ordering,
     /// Pool settings.
     config: PoolConfig,
-    /// Stats about senders
-    // TODO this should perhaps be moved to `QueuedTransactions`
-    transactions_per_sender: TransactionsPerSender<<PoolApi as PoolClient>::Transaction>,
     /// Listeners for transaction state change events.
     listeners: RwLock<PoolEventListener<PoolApi::Hash, PoolApi::BlockHash>>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
