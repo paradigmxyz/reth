@@ -11,7 +11,6 @@ members = [
     "crates/net/rpc-api",
     "crates/net/rpc-types",
     "crates/primitives",
-    "crates/net/p2p",
     "crates/stages"
 ]
 
