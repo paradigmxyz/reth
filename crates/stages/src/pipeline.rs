@@ -105,9 +105,7 @@ where
             for (_, QueuedStage { stage, require_tip, .. }) in self.stages.iter_mut().enumerate() {
                 let stage_id = stage.id();
                 let block_reached = loop {
-                    // TODO: Load stage progress
-                    let prev_progress = Some(0.into());
-
+                    let prev_progress = stage_id.get_progress(&tx)?;
                     let reached_virtual_tip = maximum_progress
                         .zip(self.max_block)
                         .map_or(false, |(progress, target)| progress >= target);
@@ -141,7 +139,8 @@ where
 
                     match output {
                         Ok(ExecOutput { stage_progress, done, reached_tip }) => {
-                            // TODO: Save stage progress
+                            stage_id.save_progress(&tx, stage_progress)?;
+
                             // TODO: Make the commit interval configurable
                             tx.commit()?;
                             tx = db.begin_rw_txn()?;
@@ -211,15 +210,14 @@ where
         };
 
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
-            // TODO: Load stage progress
-            let mut stage_progress = Some(0.into()).unwrap_or_default();
+            let stage_id = stage.id();
+            let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
             while stage_progress > to {
                 let unwind_output = stage
                     .unwind(&mut tx, UnwindInput { stage_progress, unwind_to: to, bad_block })
                     .await?;
                 stage_progress = unwind_output.stage_progress;
-
-                // TODO: Save progress
+                stage_id.save_progress(&tx, stage_progress)?;
             }
         }
 

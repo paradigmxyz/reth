@@ -76,6 +76,41 @@ pub enum StageError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StageId(pub &'static str);
 
+impl StageId {
+    /// Get the last committed progress of this stage.
+    pub fn get_progress<'db, K, E>(
+        &self,
+        tx: &mdbx::Transaction<'db, K, E>,
+    ) -> Result<Option<U64>, mdbx::Error>
+    where
+        K: mdbx::TransactionKind,
+        E: mdbx::EnvironmentKind,
+    {
+        // TODO: Clean up when we get better database abstractions
+        let bytes: Option<Vec<u8>> = tx.get(&tx.open_db(Some("SyncStage"))?, self.0.as_ref())?;
+
+        Ok(bytes.map(|b| U64::from_big_endian(b.as_ref())))
+    }
+
+    /// Save the progress of this stage.
+    pub fn save_progress<'db, E>(
+        &self,
+        tx: &mdbx::Transaction<'db, mdbx::RW, E>,
+        block: U64,
+    ) -> Result<(), mdbx::Error>
+    where
+        E: mdbx::EnvironmentKind,
+    {
+        // TODO: Clean up when we get better database abstractions
+        tx.put(
+            &tx.open_db(Some("SyncStage"))?,
+            self.0,
+            block.0[0].to_be_bytes(),
+            mdbx::WriteFlags::UPSERT,
+        )
+    }
+}
+
 /// A stage is a segmented part of the syncing process of the node.
 ///
 /// Each stage takes care of a well-defined task, such as downloading headers or executing
