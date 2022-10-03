@@ -1,0 +1,20 @@
+[package]
+name = "reth-rpc"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = """
+Reth RPC implementation
+"""
+[dependencies]
+# reth
+reth-primitives = { path = "../../primitives" }
+reth-rpc-api = { path = "../rpc-api" }
+reth-rpc-types = { path = "../rpc-types" }
+
+# misc
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
