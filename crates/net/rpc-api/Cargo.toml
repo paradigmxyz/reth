@@ -1,0 +1,18 @@
+[package]
+name = "reth-rpc-api"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = """
+Reth RPC interfaces
+"""
+
+[dependencies]
+# reth
+reth-primitives = { path = "../../primitives" }
+reth-rpc-types = { path = "../rpc-types" }
+
+# misc
+jsonrpsee = { version = "0.15", features = ["server", "macros"] }
