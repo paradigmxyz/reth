@@ -1,6 +1,4 @@
-use crate::Header;
-use crate::Receipt;
-use crate::Transaction;
+use crate::{Header, Receipt, Transaction};
 
 /// Ethereum full block
 

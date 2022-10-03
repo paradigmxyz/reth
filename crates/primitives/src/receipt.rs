@@ -1,6 +1,4 @@
-use crate::Log;
-use crate::TxType;
-use crate::H256;
+use crate::{Log, TxType, H256};
 
 /// Receipt containing result of transaction execution.
 #[derive(Clone, Debug, PartialEq, Eq)]

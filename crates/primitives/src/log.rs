@@ -1,7 +1,4 @@
-use crate::Address;
-use crate::H256;
-use bytes::Bytes;
-
+use crate::{Address, Bytes, H256};
 
 /// Ethereum Log
 #[derive(Clone, Debug, PartialEq, Eq)]

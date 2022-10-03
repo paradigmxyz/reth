@@ -1,5 +1,4 @@
-use crate::{BlockNumber, H160, H256, U256};
-use bytes::Bytes;
+use crate::{BlockNumber, Bytes, H160, H256, U256};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 /// Block header
@@ -49,7 +48,7 @@ pub struct Header {
     /// been carried out on this block; formally Hn.
     pub nonce: u64,
     /// A scalar representing EIP1559 base fee which can move up or down each block according
-    /// to a formula which is a function of gas used in parent block and gas target 
+    /// to a formula which is a function of gas used in parent block and gas target
     /// (block gas limit divided by elasticity multiplier) of parent block.
     /// The algorithm results in the base fee per gas increasing when blocks are
     /// above the gas target, and decreasing when blocks are below the gas target. The base fee per gas is burned.

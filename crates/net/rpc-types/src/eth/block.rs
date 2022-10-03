@@ -1,6 +1,7 @@
-use reth_primitives::{Address, Bloom, Bytes, Transaction, H256, H64, U256};
+use reth_primitives::{Address, Bloom, H256,Bytes, rpc::H64, U256};
 use serde::{ser::Error, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
+use crate::Transaction;
 
 /// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]

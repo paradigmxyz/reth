@@ -14,18 +14,17 @@ mod receipt;
 mod transaction;
 
 pub use block::Block;
-pub use header::Header;
-pub use header::HeaderLocked;
+pub use header::{Header, HeaderLocked};
 pub use log::Log;
 pub use receipt::Receipt;
-pub use transaction::Transaction;
-pub use transaction::TransactionSigned;
-pub use transaction::TxType;
+pub use transaction::{Transaction, TransactionSigned, TxType};
 
 /// Block Number
 pub type BlockNumber = u64;
 /// Ethereum address
 pub type Address = H160;
 
-
-pub use ethers_core::types::*;
+// There is a benefit of using wrapped Bytes as it gives u serde and debug
+pub use ethers_core::types::{Bloom, Bytes};
+pub use ethers_core::types::{H160, H256, H512, H64, U256, U64};
+pub use ethers_core::types as rpc;

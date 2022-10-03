@@ -1,7 +1,7 @@
 //! Ethereum types for pub-sub
 
-use crate::{Filter, Log, RichHeader};
-use reth_primitives::H256;
+use crate::{Log, RichHeader};
+use reth_primitives::{rpc::Filter, H256};
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Subscription result.
@@ -86,7 +86,7 @@ impl<'a> Deserialize<'a> for Params {
         let v = serde_json::Value::deserialize(deserializer)?;
 
         if v.is_null() {
-            return Ok(Params::None)
+            return Ok(Params::None);
         }
 
         serde_json::from_value(v)
