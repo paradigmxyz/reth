@@ -1321,6 +1321,7 @@ name = "reth-stages"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "reth-db",
  "reth-primitives",
  "thiserror",
 ]

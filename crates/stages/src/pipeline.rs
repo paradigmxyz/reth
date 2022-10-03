@@ -1,10 +1,14 @@
-use crate::{DbTransaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput};
+use reth_db::mdbx;
 use reth_primitives::U64;
 use std::fmt::{Debug, Formatter};
 
-struct QueuedStage {
+struct QueuedStage<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
     /// The actual stage to execute.
-    stage: Box<dyn Stage>,
+    stage: Box<dyn Stage<'db, E>>,
     /// The unwind priority of the stage.
     unwind_priority: usize,
     /// Whether or not this stage can only execute when we reach what we believe to be the tip of
@@ -31,18 +35,27 @@ struct QueuedStage {
 /// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
 /// priorities are unwound first.
 #[derive(Default)]
-pub struct Pipeline {
-    stages: Vec<QueuedStage>,
+pub struct Pipeline<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
+    stages: Vec<QueuedStage<'db, E>>,
     max_block: Option<U64>,
 }
 
-impl Debug for Pipeline {
+impl<'db, E> Debug for Pipeline<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline").field("max_block", &self.max_block).finish()
     }
 }
 
-impl Pipeline {
+impl<'db, E> Pipeline<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
     /// Add a stage to the pipeline.
     ///
     /// # Unwinding
@@ -50,7 +63,7 @@ impl Pipeline {
     /// The unwind priority is set to 0.
     pub fn push<S>(&mut self, stage: S, require_tip: bool) -> &mut Self
     where
-        S: Stage + 'static,
+        S: Stage<'db, E> + 'static,
     {
         self.push_with_unwind_priority(stage, require_tip, 0)
     }
@@ -63,7 +76,7 @@ impl Pipeline {
         unwind_priority: usize,
     ) -> &mut Self
     where
-        S: Stage + 'static,
+        S: Stage<'db, E> + 'static,
     {
         self.stages.push(QueuedStage { stage: Box::new(stage), require_tip, unwind_priority });
         self
@@ -78,13 +91,17 @@ impl Pipeline {
     }
 
     /// Run the pipeline.
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(
+        &mut self,
+        db: &'db mdbx::Environment<E>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut previous_stage = None;
         let mut minimum_progress = None;
         let mut maximum_progress = None;
         let mut reached_tip_flag = true;
 
         'run: loop {
+            let mut tx = db.begin_rw_txn()?;
             for (_, QueuedStage { stage, require_tip, .. }) in self.stages.iter_mut().enumerate() {
                 let stage_id = stage.id();
                 let block_reached = loop {
@@ -116,7 +133,7 @@ impl Pipeline {
                     } else {
                         stage
                             .execute(
-                                &mut T,
+                                &mut tx,
                                 ExecInput { previous_stage, stage_progress: prev_progress },
                             )
                             .await
@@ -125,7 +142,9 @@ impl Pipeline {
                     match output {
                         Ok(ExecOutput { stage_progress, done, reached_tip }) => {
                             // TODO: Save stage progress
-                            // TODO: Commit tx
+                            // TODO: Make the commit interval configurable
+                            tx.commit()?;
+                            tx = db.begin_rw_txn()?;
 
                             minimum_progress =
                                 minimum_progress.map(|min| std::cmp::min(min, stage_progress));
@@ -141,7 +160,9 @@ impl Pipeline {
                             // We unwind because of a validation error. If the unwind itself fails,
                             // we bail entirely, otherwise we restart the execution loop from the
                             // beginning.
-                            match self.unwind(prev_progress.unwrap_or_default(), Some(block)).await
+                            match self
+                                .unwind(db, prev_progress.unwrap_or_default(), Some(block))
+                                .await
                             {
                                 Ok(()) => continue 'run,
                                 Err(e) => return Err(e),
@@ -154,8 +175,8 @@ impl Pipeline {
                 // Set previous stage and continue on to next stage.
                 previous_stage = Some((stage_id, block_reached));
             }
+            tx.commit()?;
 
-            // TODO: Commit tx
             // Check if we've reached our desired target block
             if minimum_progress
                 .zip(self.max_block)
@@ -171,9 +192,11 @@ impl Pipeline {
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
+        db: &'db mdbx::Environment<E>,
         to: U64,
         bad_block: Option<U64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut tx = db.begin_rw_txn()?;
         let mut unwind_pipeline = {
             let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
             stages.sort_by_key(|(id, stage)| {
@@ -192,7 +215,7 @@ impl Pipeline {
             let mut stage_progress = Some(0.into()).unwrap_or_default();
             while stage_progress > to {
                 let unwind_output = stage
-                    .unwind(&mut T, UnwindInput { stage_progress, unwind_to: to, bad_block })
+                    .unwind(&mut tx, UnwindInput { stage_progress, unwind_to: to, bad_block })
                     .await?;
                 stage_progress = unwind_output.stage_progress;
 
@@ -200,12 +223,10 @@ impl Pipeline {
             }
         }
 
+        tx.commit()?;
         Ok(())
     }
 }
-
-struct T;
-impl DbTransaction for T {}
 
 #[cfg(test)]
 mod tests {

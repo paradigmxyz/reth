@@ -9,6 +9,7 @@
 //! See [Stage] and [Pipeline].
 
 use async_trait::async_trait;
+use reth_db::mdbx;
 use reth_primitives::U64;
 use thiserror::Error;
 
@@ -85,26 +86,30 @@ pub struct StageId(pub &'static str);
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 #[async_trait]
-pub trait Stage {
+pub trait Stage<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.
     fn id(&self) -> StageId;
 
     /// Execute the stage.
-    async fn execute(
+    async fn execute<'tx>(
         &mut self,
-        tx: &mut dyn DbTransaction,
+        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError>;
+    ) -> Result<ExecOutput, StageError>
+    where
+        'db: 'tx;
 
     /// Unwind the stage.
-    async fn unwind(
+    async fn unwind<'tx>(
         &mut self,
-        tx: &mut dyn DbTransaction,
+        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>
+    where
+        'db: 'tx;
 }
-
-/// TODO: Stand-in for database-related abstractions.
-pub trait DbTransaction {}
