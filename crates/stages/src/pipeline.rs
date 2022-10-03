@@ -4,8 +4,12 @@ use std::fmt::{Debug, Formatter};
 
 #[allow(dead_code)]
 struct QueuedStage {
+    /// The actual stage to execute.
     stage: Box<dyn Stage>,
+    /// The unwind priority of the stage.
     unwind_priority: usize,
+    /// Whether or not this stage can only execute when we reach what we believe to be the tip of
+    /// the chain.
     require_tip: bool,
 }
 
@@ -25,7 +29,8 @@ struct QueuedStage {
 /// pipeline will unwind the stages according to their unwind priority. It is also possible to
 /// request an unwind manually (see [Pipeline::start_with_unwind]).
 ///
-/// The unwind priority is set with [Pipeline::push_with_unwind_priority].
+/// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
+/// priorities are unwound first.
 #[derive(Default)]
 pub struct Pipeline {
     stages: Vec<QueuedStage>,
