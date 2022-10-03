@@ -1,8 +1,14 @@
-use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{Address, BlockNumber, Bytes, H256, H64, U256, U64};
+use jsonrpsee::{
+    core::{RpcResult as Result, __reexports::serde_json},
+    proc_macros::rpc,
+};
+use reth_primitives::{
+    transaction, transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumber, Bytes,
+    H256, H64, U256, U64,
+};
 use reth_rpc_types::{
-    CallRequest, FeeHistory, Index, RichBlock, SyncStatus, Transaction, TransactionReceipt,
-    TransactionRequest, Work,
+    CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
+    Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface.
@@ -97,7 +103,7 @@ pub trait EthApi {
 
     /// Returns balance of the given account.
     #[method(name = "eth_getBalance")]
-    fn balance(&self, address: Address, number: Option<BlockNumber>) -> Result<U256>;
+    fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256>;
 
     /// Returns content of the storage at given address.
     #[method(name = "eth_getStorageAt")]
@@ -105,25 +111,46 @@ pub trait EthApi {
         &self,
         address: Address,
         index: U256,
-        number: Option<BlockNumber>,
+        block_number: Option<BlockId>,
     ) -> Result<H256>;
 
     /// Returns the number of transactions sent from given address at given time (block number).
     #[method(name = "eth_getTransactionCount")]
-    fn transaction_count(&self, address: Address, number: Option<BlockNumber>) -> Result<U256>;
+    fn transaction_count(&self, address: Address, block_number: Option<BlockId>) -> Result<U256>;
 
     /// Returns the code at given address at given time (block number).
     #[method(name = "eth_getCode")]
-    fn code_at(&self, address: Address, number: Option<BlockNumber>) -> Result<Bytes>;
+    fn code_at(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes>;
 
     /// Call contract, returning the output data.
     #[method(name = "eth_call")]
-    fn call(&self, request: CallRequest, number: Option<BlockNumber>) -> Result<Bytes>;
+    fn call(&self, request: CallRequest, block_number: Option<BlockId>) -> Result<Bytes>;
+
+    /// This method creates an EIP2930 type accessList based on a given Transaction. The accessList
+    /// contains all storage slots and addresses read and written by the transaction, except for the
+    /// sender account and the precompiles.
+    ///
+    /// It returns list of addresses and storage keys used by the transaction, plus the gas
+    /// consumed when the access list is added. That is, it gives you the list of addresses and
+    /// storage keys that will be used by that transaction, plus the gas consumed if the access
+    /// list is included. Like eth_estimateGas, this is an estimation; the list could change
+    /// when the transaction is actually mined. Adding an accessList to your transaction does
+    /// not necessary result in lower gas usage compared to a transaction without an access
+    /// list.
+    #[method(name = "eth_createAccessList")]
+    async fn create_access_list(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+    ) -> Result<AccessListWithGasUsed>;
 
     /// Estimate gas needed for execution of given contract.
     #[method(name = "eth_estimateGas")]
-    async fn estimate_gas(&self, request: CallRequest, number: Option<BlockNumber>)
-        -> Result<U256>;
+    async fn estimate_gas(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+    ) -> Result<U256>;
 
     /// Returns current gas_price.
     #[method(name = "eth_gasPrice")]
@@ -171,4 +198,28 @@ pub trait EthApi {
     /// Sends signed transaction, returning its hash.
     #[method(name = "eth_sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> Result<H256>;
+
+    /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
+    /// + len(message) + message))).
+    #[method(name = "eth_sign")]
+    async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes>;
+
+    /// Signs a transaction that can be submitted to the network at a later time using with
+    /// `eth_sendRawTransaction.`
+    #[method(name = "eth_signTransaction")]
+    async fn sign_transaction(&self, transaction: CallRequest) -> Result<Bytes>;
+
+    /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
+    #[method(name = "eth_signTypedData")]
+    async fn sign_typed_data(&self, address: Address, data: serde_json::Value) -> Result<Bytes>;
+
+    /// Returns the account and storage values of the specified account including the Merkle-proof.
+    /// This call can be used to verify that the data you are pulling from is not tampered with.
+    #[method(name = "eth_getProof")]
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<H256>,
+        block_number: Option<BlockId>,
+    ) -> Result<EIP1186AccountProofResponse>;
 }

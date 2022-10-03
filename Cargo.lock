@@ -1144,6 +1144,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-rpc"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+ "reth-rpc-api",
+ "reth-rpc-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "reth-rpc-api"
+version = "0.1.0"
+dependencies = [
+ "jsonrpsee",
+ "reth-primitives",
+ "reth-rpc-types",
+]
+
+[[package]]
+name = "reth-rpc-types"
+version = "0.1.0"
+dependencies = [
+ "fastrlp",
+ "reth-primitives",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reth-stages"
 version = "0.1.0"
 dependencies = [
