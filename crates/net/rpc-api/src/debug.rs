@@ -22,6 +22,6 @@ pub trait DebugApi {
     async fn raw_receipts(&self, block_id: BlockId) -> Result<Vec<Bytes>>;
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
-    #[method(name = "debug_getRawReceipts")]
+    #[method(name = "debug_getBadBlocks")]
     async fn bad_blocks(&self) -> Result<Vec<RichBlock>>;
 }
