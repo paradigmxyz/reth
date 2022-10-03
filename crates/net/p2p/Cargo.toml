@@ -7,6 +7,17 @@ repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 description = "Utilities for interacting with ethereum's peer to peer network."
 
+[dev-dependencies]
+async-trait = "0.1.57"
+bytes = "1.2.1"
+cidr = "0.2.1"
+devp2p-rs = { git = "https://github.com/rjected/devp2p-rs" }
+tokio-stream = "0.1.10"
+arrayvec = "0.7.2"
+secp256k1 = { version = "0.24.0", features = ["rand-std"] }
+tokio = "1.21.2"
+tempfile = "3.3.0"
+
 [dependencies]
 enr = { git = "https://github.com/sigp/enr", features = ["serde", "rust-secp256k1"] }
 serde = "1.0.145"
@@ -14,10 +25,3 @@ serde_derive = "1.0.145"
 thiserror = "1.0.37"
 toml = "0.5.9"
 tracing = "0.1.36"
-
-[dev-dependencies]
-tempfile = "3.3.0"
-
-[dev-dependencies.secp256k1]
-version = "0.24"
-features = ["rand-std"]
