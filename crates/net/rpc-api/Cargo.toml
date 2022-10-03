@@ -11,7 +11,7 @@ Reth RPC interfaces
 
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
+reth-primitives = { path = "../../primitives" }
 reth-rpc-types = { path = "../rpc-types" }
 
 # misc
