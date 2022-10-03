@@ -10,6 +10,7 @@
 //! Provides all RPC interfaces.
 
 mod debug;
+mod engine;
 mod eth;
 mod eth_filter;
 mod eth_pubsub;
@@ -18,6 +19,7 @@ mod trace;
 mod web3;
 
 pub use self::{
-    debug::DebugApiServer, eth::EthApiServer, eth_filter::EthFilterApiServer,
-    eth_pubsub::EthPubSubApiServer, net::NetApiServer, web3::Web3ApiServer,
+    debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
+    eth_filter::EthFilterApiServer, eth_pubsub::EthPubSubApiServer, net::NetApiServer,
+    web3::Web3ApiServer,
 };
