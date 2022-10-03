@@ -1282,6 +1282,7 @@ version = "0.1.0"
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "ethers-core",
 ]
 

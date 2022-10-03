@@ -7,4 +7,25 @@
 
 //! Commonly used types in reth.
 
+mod block;
+mod header;
+mod log;
+mod receipt;
+mod transaction;
+
+pub use block::Block;
+pub use header::Header;
+pub use header::HeaderLocked;
+pub use log::Log;
+pub use receipt::Receipt;
+pub use transaction::Transaction;
+pub use transaction::TransactionSigned;
+pub use transaction::TxType;
+
+/// Block Number
+pub type BlockNumber = u64;
+/// Ethereum address
+pub type Address = H160;
+
+
 pub use ethers_core::types::*;
