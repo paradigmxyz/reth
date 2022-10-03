@@ -15,7 +15,7 @@ pub trait PoolTransaction: Send + Send {
     type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash;
 
     /// Transaction sender type.
-    type Sender: fmt::Debug + Eq + Clone + Hash + Send;
+    type Sender: fmt::Debug + Eq + Clone + Hash + Send + Sync;
 
     /// Hash of the transaction
     fn hash(&self) -> &Self::Hash;
