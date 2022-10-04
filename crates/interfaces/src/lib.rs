@@ -6,6 +6,6 @@
 ))]
 
 //! Reth interface bindings
-//! 
 
+/// Block Execution traits.
 pub mod executor;
