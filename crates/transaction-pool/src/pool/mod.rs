@@ -56,7 +56,7 @@ pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Chain/Storage access.
     client: Arc<PoolApi>,
     /// How to order transactions.
-    ordering: Ordering,
+    ordering: Arc<Ordering>,
     /// Pool settings.
     config: PoolConfig,
     /// Listeners for transaction state change events.

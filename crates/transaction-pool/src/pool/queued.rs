@@ -11,15 +11,15 @@ use tracing::warn;
 /// that turn them valid.
 ///
 /// This could include transactions with nonce gaps: Transactions that are waiting until for a
-/// transaction to arrive that closes the nonce gap
+/// transaction to arrive that closes the nonce gap.
 ///
 /// Keeps a set of transactions that are waiting until their dependencies are unlocked.
 pub(crate) struct QueuedTransactions<T: PoolTransaction> {
     /// Dependencies that aren't yet provided by any transaction.
     required_dependencies: HashMap<T::Id, HashSet<T::Hash>>,
-    /// Mapping of the dependencies of a transaction to the hash of the transaction
+    /// Mapping of the dependencies of a transaction to the hash of the transaction,
     waiting_dependencies: HashMap<Vec<T::Id>, T::Hash>,
-    /// the transactions that are not ready yet are waiting for another tx to finish
+    /// Transactions that are not ready yet are waiting for another tx to finish,
     waiting_queue: HashMap<T::Hash, QueuedPoolTransaction<T>>,
 }
 
@@ -27,17 +27,17 @@ pub(crate) struct QueuedTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> QueuedTransactions<T> {
     /// Returns the number of transactions that are currently waiting in this pool for new
-    /// transactions to satisfy their dependencies
+    /// transactions to satisfy their dependencies.
     pub fn len(&self) -> usize {
         self.waiting_queue.len()
     }
 
-    /// Whether this pool is empty
+    /// Whether this pool is empty.
     pub fn is_empty(&self) -> bool {
         self.waiting_queue.is_empty()
     }
 
-    /// Returns an iterator over all transactions waiting in this pool
+    /// Returns an iterator over all transactions waiting in this pool.
     pub fn transactions(&self) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
         self.waiting_queue.values().map(|tx| Arc::clone(&tx.transaction))
     }
@@ -149,7 +149,7 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
 /// A transaction submitted to the pool.
 #[derive(Clone)]
 pub struct QueuedPoolTransaction<T: PoolTransaction> {
-    /// The actual validated transaction
+    /// The actual validated transaction.
     pub transaction: Arc<ValidPoolTransaction<T>>,
     /// Transactions required for and have not been satisfied yet by other transactions in the
     /// pool.
@@ -183,7 +183,7 @@ impl<T: PoolTransaction> QueuedPoolTransaction<T> {
         Self { transaction: Arc::new(transaction), missing_dependencies, added_at: Instant::now() }
     }
 
-    /// Removes the required dependency
+    /// Removes the required dependency.
     pub fn satisfy(&mut self, id: &T::Id) {
         self.missing_dependencies.remove(id);
     }

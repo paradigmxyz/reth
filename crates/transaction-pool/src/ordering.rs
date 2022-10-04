@@ -8,4 +8,7 @@ use std::fmt;
 pub trait TransactionOrdering: Send + Sync {
     /// Priority of a transaction.
     type Priority: Ord + Clone + Default + fmt::Debug + fmt::LowerHex + Send + Sync;
+
+    /// Returns the priority score for the given transaction.
+    fn priority(&self, transaction: ()) -> Self::Priority;
 }

@@ -1,11 +1,14 @@
-use crate::{traits::PoolTransaction, validate::ValidPoolTransaction, TransactionOrdering};
+use crate::{error, traits::PoolTransaction, validate::ValidPoolTransaction, TransactionOrdering};
 use parking_lot::RwLock;
-use reth_primitives::{TxHash, H256, U256};
+use reth_primitives::{H256, U256};
 use std::{
     cmp::Ordering,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
+    fmt,
     sync::Arc,
 };
+use tracing::{trace, warn};
+use crate::pool::queued::QueuedPoolTransaction;
 
 /// A pool of validated transactions that are ready on the current state and are waiting to be
 /// included in a block.
@@ -18,8 +21,10 @@ pub(crate) struct PendingTransactions<T: PoolTransaction, O: TransactionOrdering
     ///
     /// This way we can determine when transactions where submitted to the pool.
     id: u64,
+    /// How to order transactions.
+    ordering: Arc<O>,
     /// Dependencies that are provided by `PendingTransaction`s
-    provided_ids: HashMap<T::Id, T::Hash>,
+    provided_dependencies: HashMap<T::Id, T::Hash>,
     /// Pending transactions that are currently on hold until the `baseFee` of the pending block
     /// changes in favor of the parked transactions: the `pendingBlock.baseFee` must decrease
     /// before they can be moved to the ready pool and are ready to be executed.
@@ -36,19 +41,313 @@ pub(crate) struct PendingTransactions<T: PoolTransaction, O: TransactionOrdering
     independent_transactions: BTreeSet<PoolTransactionRef<T, O>>,
 }
 
+// === impl PendingTransactions ===
+
+impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
+    // /// Returns an iterator over all transactions
+    // pub fn get_transactions(&self) -> TransactionsIterator {
+    //     TransactionsIterator {
+    //         all: self.ready_tx.read().clone(),
+    //         independent: self.independent_transactions.clone(),
+    //         awaiting: Default::default(),
+    //         _invalid: Default::default(),
+    //     }
+    // }
+
+    /// Returns true if the transaction is part of the queue.
+    pub fn contains(&self, hash: &T::Hash) -> bool {
+        self.ready_transactions.read().contains_key(hash)
+    }
+
+    /// Returns the transaction for the hash if it's in the ready pool but not yet mined
+    pub fn get(&self, hash: &T::Hash) -> Option<PendingTransaction<T, O>> {
+        self.ready_transactions.read().get(hash).cloned()
+    }
+
+    pub fn provided_dependencies(&self) -> &HashMap<T::Id, T::Hash> {
+        &self.provided_dependencies
+    }
+
+    fn next_id(&mut self) -> u64 {
+        let id = self.id;
+        self.id = self.id.wrapping_add(1);
+        id
+    }
+
+    /// Adds a new transactions to the pending queue
+    ///
+    /// # Panics
+    ///
+    /// if the pending transaction is not ready
+    /// or the transaction is already included
+    pub fn add_transaction(
+        &mut self,
+        tx: QueuedPoolTransaction<T>,
+    ) -> error::Result<Vec<Arc<ValidPoolTransaction<T>>>> {
+        assert!(tx.is_ready(), "transaction must be ready",);
+        assert!(
+            !self.ready_transactions.read().contains_key(tx.transaction.hash()),
+            "transaction already included"
+        );
+
+        let (replaced_tx, unlocks) = self.replaced_transactions(&tx.transaction)?;
+
+        let submission_id = self.next_id();
+        let hash = *tx.transaction.hash();
+
+        let mut independent = true;
+        let mut requires_offset = 0;
+        let mut ready = self.ready_transactions.write();
+
+        // Add links to transactions that unlock the current one
+        for dependency in &tx.transaction.depends_on {
+            // Check if the transaction that satisfies the mark is still in the queue.
+            if let Some(other) = self.provided_dependencies.get(dependency) {
+                let tx = ready.get_mut(other).expect("hash included;");
+                tx.unlocks.push(hash);
+                // tx still depends on other tx
+                independent = false;
+            } else {
+                requires_offset += 1;
+            }
+        }
+
+        // update dependencies
+        for mark in tx.transaction.provides.iter().cloned() {
+            self.provided_dependencies.insert(mark, hash);
+        }
+
+        let priority = self.ordering.priority(());
+        let transaction =
+            PoolTransactionRef { submission_id, transaction: tx.transaction, priority };
+
+        // TODO check basefee requirement
+
+        // add to the independent set
+        if independent {
+            self.independent_transactions.insert(transaction.clone());
+        }
+
+        // insert to ready queue
+        ready.insert(hash, PendingTransaction { transaction, unlocks, requires_offset });
+
+        Ok(replaced_tx)
+    }
+
+    /// Removes and returns those transactions that got replaced by the `tx`
+    fn replaced_transactions(
+        &mut self,
+        tx: &ValidPoolTransaction<T>,
+    ) -> error::Result<(Vec<Arc<ValidPoolTransaction<T>>>, Vec<T::Hash>)> {
+        // check if we are replacing transactions
+        let remove_hashes: HashSet<_> =
+            tx.provides.iter().filter_map(|mark| self.provided_dependencies.get(mark)).collect();
+
+        // early exit if we are not replacing anything.
+        if remove_hashes.is_empty() {
+            return Ok((Vec::new(), Vec::new()))
+        }
+
+        // check if we're replacing the same transaction and if it can be replaced
+
+        let mut unlocked_tx = Vec::new();
+        {
+            // construct a list of unlocked transactions
+            // also check for transactions that shouldn't be replaced because underpriced
+            let ready = self.ready_transactions.read();
+            for to_remove in remove_hashes.iter().filter_map(|hash| ready.get(hash)) {
+                // if we're attempting to replace a transaction that provides the exact same dependencies
+                // (addr + nonce) then we check for gas price
+                if to_remove.provides() == tx.provides {
+                    // check if underpriced
+                    // TODO check if underpriced
+                    // if tx.pending_transaction.transaction.gas_price() <= to_remove.gas_price() {
+                    //     warn!(target: "txpool", "ready replacement transaction underpriced [{:?}]", tx.hash());
+                    //     return Err(PoolError::ReplacementUnderpriced(Box::new(tx.clone())))
+                    // } else {
+                    //     trace!(target: "txpool", "replacing ready transaction [{:?}] with higher gas price [{:?}]", to_remove.transaction.transaction.hash(), tx.hash());
+                    // }
+                }
+
+                unlocked_tx.extend(to_remove.unlocks.iter().cloned())
+            }
+        }
+
+        let remove_hashes = remove_hashes.into_iter().copied().collect::<Vec<_>>();
+
+        let new_provides = tx.provides.iter().cloned().collect::<HashSet<_>>();
+        let removed_tx = self.remove_with_dependencies(remove_hashes, Some(new_provides));
+
+        Ok((removed_tx, unlocked_tx))
+    }
+
+    /// Removes the transactions from the ready queue and returns the removed transactions.
+    /// This will also remove all transactions that depend on those.
+    pub fn clear_transactions(
+        &mut self,
+        tx_hashes: &[T::Hash],
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        self.remove_with_dependencies(tx_hashes.to_vec(), None)
+    }
+
+    /// Removes the transactions that provide the dependency id.
+    ///
+    /// This will also remove all transactions that lead to the transaction that provides the
+    /// id.
+    pub fn prune_tags(&mut self, id: T::Id) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut removed_tx = vec![];
+
+        // the dependencies to remove
+        let mut remove = vec![id];
+
+        while let Some(dependency) = remove.pop() {
+            let res = self
+                .provided_dependencies
+                .remove(&dependency)
+                .and_then(|hash| self.ready_transactions.write().remove(&hash));
+
+            if let Some(tx) = res {
+                let unlocks = tx.unlocks;
+                self.independent_transactions.remove(&tx.transaction);
+                let tx = tx.transaction.transaction;
+
+                // also remove previous transactions
+                {
+                    let hash = tx.hash();
+                    let mut ready = self.ready_transactions.write();
+
+                    let mut previous_dependency = |dependency| -> Option<Vec<T::Id>> {
+                        let prev_hash = self.provided_dependencies.get(dependency)?;
+                        let tx2 = ready.get_mut(prev_hash)?;
+                        // remove hash
+                        if let Some(idx) = tx2.unlocks.iter().position(|i| i == hash) {
+                            tx2.unlocks.swap_remove(idx);
+                        }
+                        if tx2.unlocks.is_empty() {
+                            Some(tx2.transaction.transaction.provides.clone())
+                        } else {
+                            None
+                        }
+                    };
+
+                    // find previous transactions
+                    for dep in &tx.depends_on {
+                        if let Some(mut dependency_to_remove) = previous_dependency(dep) {
+                            remove.append(&mut dependency_to_remove);
+                        }
+                    }
+                }
+
+                // add the transactions that just got unlocked to independent set
+                for hash in unlocks {
+                    if let Some(tx) = self.ready_transactions.write().get_mut(&hash) {
+                        tx.requires_offset += 1;
+                        if tx.requires_offset == tx.transaction.transaction.depends_on.len() {
+                            self.independent_transactions.insert(tx.transaction.clone());
+                        }
+                    }
+                }
+                // finally, remove the dependencies that this transaction provides
+                let current_dependency = &dependency;
+                for dependency in &tx.provides {
+                    let removed = self.provided_dependencies.remove(dependency);
+                    assert_eq!(
+                        removed.as_ref(),
+                        if current_dependency == dependency { None } else { Some(tx.hash()) },
+                        "The pool contains exactly one transaction providing given tag; the removed transaction
+						claims to provide that tag, so it has to be mapped to it's hash; qed"
+                    );
+                }
+                removed_tx.push(tx);
+            }
+        }
+
+        removed_tx
+    }
+
+    /// Removes transactions and those that depend on them and satisfy at least one dependency in the
+    /// given filter set.
+    pub fn remove_with_dependencies(
+        &mut self,
+        mut tx_hashes: Vec<T::Hash>,
+        dependency_filter: Option<HashSet<T::Id>>,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut removed = Vec::new();
+        let mut ready = self.ready_transactions.write();
+
+        while let Some(hash) = tx_hashes.pop() {
+            if let Some(mut tx) = ready.remove(&hash) {
+                let invalidated = tx.transaction.transaction.provides.iter().filter(|mark| {
+                    dependency_filter.as_ref().map(|filter| !filter.contains(&**mark)).unwrap_or(true)
+                });
+
+                let mut removed_some_marks = false;
+                // remove entries from provided_dependencies
+                for mark in invalidated {
+                    removed_some_marks = true;
+                    self.provided_dependencies.remove(mark);
+                }
+
+                // remove from unlocks
+                for mark in &tx.transaction.transaction.depends_on {
+                    if let Some(hash) = self.provided_dependencies.get(mark) {
+                        if let Some(tx) = ready.get_mut(hash) {
+                            if let Some(idx) = tx.unlocks.iter().position(|i| i == hash) {
+                                tx.unlocks.swap_remove(idx);
+                            }
+                        }
+                    }
+                }
+
+                // remove from the independent set
+                self.independent_transactions.remove(&tx.transaction);
+
+                if removed_some_marks {
+                    // remove all transactions that the current one unlocks
+                    tx_hashes.append(&mut tx.unlocks);
+                }
+
+                // remove transaction
+                removed.push(tx.transaction.transaction);
+            }
+        }
+
+        removed
+    }
+}
+
 /// A transaction that is ready to be included in a block.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PendingTransaction<T: PoolTransaction, O: TransactionOrdering> {
     /// Reference to the actual transaction.
     pub transaction: PoolTransactionRef<T, O>,
     /// Tracks the transactions that get unlocked by this transaction.
     pub unlocks: Vec<T::Hash>,
-    /// Amount of required markers that are inherently provided
+    /// Amount of required dependencies that are inherently provided.
     pub requires_offset: usize,
 }
 
+// == impl PendingTransaction ===
+
+impl<T: PoolTransaction, O: TransactionOrdering> PendingTransaction<T, O> {
+    /// Returns all ids this transaction satisfies.
+    pub fn provides(&self) -> &[T::Id] {
+        &self.transaction.transaction.provides
+    }
+}
+
+impl<T: PoolTransaction, O: TransactionOrdering> Clone for PendingTransaction<T, O> {
+    fn clone(&self) -> Self {
+        Self {
+            transaction: self.transaction.clone(),
+            unlocks: self.unlocks.clone(),
+            requires_offset: self.requires_offset
+        }
+    }
+}
+
 /// A reference to a transaction in the _pending_ pool
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PoolTransactionRef<T: PoolTransaction, O: TransactionOrdering> {
     /// Actual transaction.
     pub transaction: Arc<ValidPoolTransaction<T>>,
@@ -56,6 +355,16 @@ pub struct PoolTransactionRef<T: PoolTransaction, O: TransactionOrdering> {
     pub submission_id: u64,
     /// The priority value assigned by the used `Ordering` function.
     pub priority: O::Priority,
+}
+
+impl<T: PoolTransaction, O: TransactionOrdering> Clone for PoolTransactionRef<T, O> {
+    fn clone(&self) -> Self {
+        Self {
+            transaction: Arc::clone(&self.transaction),
+            submission_id: self.submission_id,
+            priority: self.priority.clone()
+        }
+    }
 }
 
 impl<T: PoolTransaction, O: TransactionOrdering> Eq for PoolTransactionRef<T, O> {}
@@ -102,7 +411,7 @@ pub struct ParkedTransaction<T: PoolTransaction, O: TransactionOrdering> {
     transaction: PoolTransactionRef<T, O>,
     /// Tracks the transactions that get unlocked by this transaction.
     unlocks: Vec<T::Hash>,
-    /// Amount of required markers that are inherently provided
+    /// Amount of required dependencies that are inherently provided
     requires_offset: usize,
 }
 
