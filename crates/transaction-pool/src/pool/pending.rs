@@ -3,14 +3,14 @@ use crate::{
     validate::ValidPoolTransaction, TransactionOrdering,
 };
 use parking_lot::RwLock;
-use reth_primitives::{H256, U256};
+use reth_primitives::{TxHash, H256, U256};
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
     sync::Arc,
 };
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 /// A pool of validated transactions that are ready on the current state and are waiting to be
 /// included in a block.
@@ -46,6 +46,33 @@ pub(crate) struct PendingTransactions<T: PoolTransaction, O: TransactionOrdering
 // === impl PendingTransactions ===
 
 impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
+    /// Returns an iterator over all transactions that are _currently_ ready.
+    ///
+    /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
+    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
+    /// previously. In other words: The nonces of transactions with the same sender will _always_
+    /// increase by exactly 1.
+    ///
+    /// The order of transactions which satisfy (1.) is determent by their computed priority: A
+    /// transaction with a higher priority is returned before a transaction with a lower priority.
+    ///
+    /// If two transactions have the same priority score, then the transactions which spent more
+    /// time in pool (were added earlier) are returned first.
+    ///
+    /// NOTE: while this iterator returns transaction that pool considers valid at this point, they
+    /// could potentially be become invalid at point of execution. Therefore this iterator
+    /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
+    /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
+    /// Invalid transactions are skipped.
+    pub fn get_transactions(&self) -> TransactionsIterator<T, O> {
+        TransactionsIterator {
+            all: self.ready_transactions.read().clone(),
+            independent: self.independent_transactions.clone(),
+            awaiting: Default::default(),
+            invalid: Default::default(),
+        }
+    }
+
     // /// Returns an iterator over all transactions
     // pub fn get_transactions(&self) -> TransactionsIterator {
     //     TransactionsIterator {
@@ -78,7 +105,8 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
 
     /// Adds a new transactions to the pending queue.
     ///
-    /// Depending on the transaction's feeCap, this will either move it into the ready queue or park it until a future baseFee unlocks it.
+    /// Depending on the transaction's feeCap, this will either move it into the ready queue or park
+    /// it until a future baseFee unlocks it.
     ///
     /// # Panics
     ///
@@ -457,5 +485,90 @@ impl<T: PoolTransaction, O: TransactionOrdering> Ord for ParkedTransactionRef<T,
             .cmp(&other.max_fee_per_gas)
             .then_with(|| self.priority.cmp(&other.priority))
             .then_with(|| other.submission_id.cmp(&self.submission_id))
+    }
+}
+
+pub struct TransactionsIterator<T: PoolTransaction, O: TransactionOrdering> {
+    all: HashMap<T::Hash, PendingTransaction<T, O>>,
+    awaiting: HashMap<T::Hash, (usize, PoolTransactionRef<T, O>)>,
+    independent: BTreeSet<PoolTransactionRef<T, O>>,
+    invalid: HashSet<T::Hash>,
+}
+
+// == impl TransactionsIterator ==
+
+impl<T: PoolTransaction, O: TransactionOrdering> TransactionsIterator<T, O> {
+    /// Mark the transaction as invalid.
+    ///
+    /// As a consequence, all values that depend on the invalid one will be skipped.
+    /// When given transaction is not in the pool it has no effect.
+    /// When invoked on a fully drained iterator it has no effect either.
+    pub fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T>>) {
+        if let Some(invalid_transaction) = self.all.get(tx.hash()) {
+            debug!(
+                target: "txpool",
+                "[{:?}] Marked as invalid",
+                invalid_transaction.transaction.transaction.hash()
+            );
+            for hash in &invalid_transaction.unlocks {
+                self.invalid.insert(hash.clone());
+            }
+        }
+    }
+
+    /// Depending on number of satisfied requirements insert given ref
+    /// either to awaiting set or to best set.
+    fn independent_or_awaiting(&mut self, satisfied: usize, tx_ref: PoolTransactionRef<T, O>) {
+        if satisfied >= tx_ref.transaction.depends_on.len() {
+            // If we have satisfied all deps insert to best
+            self.independent.insert(tx_ref);
+        } else {
+            // otherwise we're still waiting for some deps
+            self.awaiting.insert(*tx_ref.transaction.hash(), (satisfied, tx_ref));
+        }
+    }
+}
+
+impl<T: PoolTransaction, O: TransactionOrdering> Iterator for TransactionsIterator<T, O> {
+    type Item = Arc<ValidPoolTransaction<T>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let best = self.independent.iter().next_back()?.clone();
+            let best = self.independent.take(&best)?;
+            let hash = best.transaction.hash();
+
+            // skip transactions that were marked as invalid
+            if self.invalid.contains(hash) {
+                debug!(
+                    target: "txpool",
+                    "[{:?}] skipping invalid transaction",
+                    hash
+                );
+                continue
+            }
+
+            let ready =
+                if let Some(ready) = self.all.get(hash).cloned() { ready } else { continue };
+
+            // Insert transactions that just got unlocked.
+            for hash in &ready.unlocks {
+                // first check local awaiting transactions
+                let res = if let Some((mut satisfied, tx_ref)) = self.awaiting.remove(hash) {
+                    satisfied += 1;
+                    Some((satisfied, tx_ref))
+                    // then get from the pool
+                } else {
+                    self.all
+                        .get(hash)
+                        .map(|next| (next.requires_offset + 1, next.transaction.clone()))
+                };
+                if let Some((satisfied, tx_ref)) = res {
+                    self.independent_or_awaiting(satisfied, tx_ref)
+                }
+            }
+
+            return Some(best.transaction)
+        }
     }
 }

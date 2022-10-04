@@ -36,12 +36,12 @@ use crate::{
     error::{PoolError, PoolResult},
     pool::{
         listener::PoolEventListener,
-        pending::PendingTransactions,
+        pending::{PendingTransactions, TransactionsIterator},
         queued::{QueuedPoolTransaction, QueuedTransactions},
     },
     traits::PoolTransaction,
     validate::ValidPoolTransaction,
-    PoolClient, PoolConfig, TransactionOrdering,
+    PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use parking_lot::RwLock;
 use reth_primitives::TxHash;
@@ -59,6 +59,9 @@ pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     pool: Arc<PoolInner<PoolApi, Ordering>>,
 }
 
+type TransactionHashFor<PoolApi> =
+    <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Hash;
+
 // A pool that manages transactions
 pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Chain/Storage access.
@@ -68,7 +71,7 @@ pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Listeners for transaction state change events.
-    listeners: RwLock<PoolEventListener<PoolApi::Hash, PoolApi::BlockHash>>,
+    listeners: RwLock<PoolEventListener<TransactionHashFor<PoolApi>, PoolApi::BlockHash>>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
     pending: PendingTransactions<PoolApi::Transaction, Ordering>,
     /// Sub-Pool of transactions that are waiting for state changes that eventually turn them
@@ -76,14 +79,17 @@ pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     queued: QueuedTransactions<PoolApi::Transaction>,
 }
 
-type TransactionHashFor<PoolApi: PoolClient> = <PoolApi::Transaction as PoolTransaction>::Hash;
-
 // === impl PoolInner ===
 
-impl<PoolApi: PoolClient, Ordering: TransactionOrdering> PoolInner<PoolApi, Ordering> {
+impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
     /// Returns if the transaction for the given hash is already included in this pool
     pub fn contains(&self, tx_hash: &TransactionHashFor<PoolApi>) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
+    }
+
+    /// Returns an iterator that yields transactions that are ready to be included in the block.
+    pub fn ready(&self) -> TransactionsIterator<PoolApi::Transaction, O> {
+        self.pending.get_transactions()
     }
 
     /// Adds the transaction into the pool
@@ -124,7 +130,8 @@ impl<PoolApi: PoolClient, Ordering: TransactionOrdering> PoolInner<PoolApi, Orde
 
     /// Adds the transaction to the pending pool.
     ///
-    /// This will also move all transaction that get unlocked by the dependency id this transaction provides from the queued pool into the pending pool.
+    /// This will also move all transaction that get unlocked by the dependency id this transaction
+    /// provides from the queued pool into the pending pool.
     ///
     /// CAUTION: this expects that transaction's dependencies are fully satisfied
     fn add_pending_transaction(
@@ -135,7 +142,8 @@ impl<PoolApi: PoolClient, Ordering: TransactionOrdering> PoolInner<PoolApi, Orde
         trace!(target: "txpool", "adding pending transaction [{:?}]", hash);
         let mut pending = AddedPendingTransaction::new(hash);
 
-        // tracks all transaction that can be moved to the pending pool, starting the given transaction
+        // tracks all transaction that can be moved to the pending pool, starting the given
+        // transaction
         let mut pending_transactions = VecDeque::from([tx]);
         // tracks whether we're processing the given `tx`
         let mut is_new_tx = true;
@@ -143,7 +151,8 @@ impl<PoolApi: PoolClient, Ordering: TransactionOrdering> PoolInner<PoolApi, Orde
         // take first transaction from the list
         while let Some(current_tx) = pending_transactions.pop_front() {
             // also add the transaction that the current transaction unlocks
-            pending_transactions.extend(self.queued.satisfy_and_unlock(&current_tx.transaction.provides));
+            pending_transactions
+                .extend(self.queued.satisfy_and_unlock(&current_tx.transaction.provides));
 
             let current_hash = *current_tx.transaction.hash();
 
