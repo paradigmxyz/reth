@@ -55,19 +55,19 @@ impl Anchor {
     }
 }
 
-#[derive(Debug, Error)]
 /// An error that can occur while parsing a peer list from a file
+#[derive(Debug, Error)]
 pub enum AnchorError {
     /// Error opening the anchor file
-    #[error("error opening or writing the anchor file")]
+    #[error("Could not open or write to the anchor file.")]
     IoError(#[from] std::io::Error),
 
     /// Error occurred when loading the anchor file from TOML
-    #[error("error deserializing the peer list from TOML")]
+    #[error("Could not deserialize the peer list from TOML.")]
     LoadError(#[from] toml::de::Error),
 
     /// Error occurred when saving the anchor file to TOML
-    #[error("error serializing the peer list as TOML")]
+    #[error("Could not serialize the peer list as TOML.")]
     SaveError(#[from] toml::ser::Error),
 }
 
