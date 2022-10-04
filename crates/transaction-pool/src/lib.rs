@@ -33,7 +33,7 @@ pub use crate::{
 // etc...
 pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// The actual transaction pool where transactions are handled.
-    inner: Arc<pool::Pool<PoolApi, Ordering>>,
+    inner: Arc<pool::PoolInner<PoolApi, Ordering>>,
     /// Chain/Storage access
     client: Arc<PoolApi>,
     // TODO how to revalidate

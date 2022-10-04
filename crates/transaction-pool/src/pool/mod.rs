@@ -61,18 +61,42 @@ type TransactionHashFor<PoolApi> =
 type TransactionIdFor<PoolApi> =
     <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Id;
 
-// TODO find better name
+/// Shareable Transaction pool.
 pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
+    /// Arc'ed instance of the pool internals
+    pool: Arc<PoolInner<PoolApi, Ordering>>,
+}
+
+// === impl Pool ===
+
+impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {}
+
+impl <P: PoolClient, O: TransactionOrdering> Clone for Pool<P,O> {
+    fn clone(&self) -> Self {
+        Self {
+            pool: Arc::clone(&self.pool)
+        }
+    }
+}
+
+/// Transaction pool internals.
+pub struct PoolInner<P: PoolClient, O: TransactionOrdering> {
     /// Chain/Storage access.
-    client: Arc<PoolApi>,
-    /// The internal pool
-    pool: Arc<PoolInner<PoolApi::Transaction, Ordering>>,
+    client: Arc<P>,
+    /// The internal pool that manages
+    pool: RwLock<GraphPool<P::Transaction, O>>,
     /// Pool settings.
     config: PoolConfig,
     /// Listeners for transaction state change events.
-    event_listeners: RwLock<PoolEventListener<TransactionHashFor<PoolApi>, PoolApi::BlockHash>>,
+    event_listeners: RwLock<PoolEventListener<TransactionHashFor<P>, P::BlockHash>>,
     /// Listeners for new ready transactions.
-    added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<PoolApi>>>>,
+    added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<P>>>>,
+}
+
+// === impl PoolInner ===
+
+impl<P: PoolClient, O: TransactionOrdering> PoolInner<P, O> {
+
 }
 
 /// A pool that only manages transactions.
@@ -81,7 +105,7 @@ pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
 /// transactions.
 
 // TODO could unify over `TransactionOrdering::Transaction`
-pub struct PoolInner<T: PoolTransaction, O: TransactionOrdering> {
+pub struct GraphPool<T: PoolTransaction, O: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<O>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
@@ -93,7 +117,7 @@ pub struct PoolInner<T: PoolTransaction, O: TransactionOrdering> {
 
 // === impl PoolInner ===
 
-impl<T: PoolTransaction, O: TransactionOrdering> PoolInner<T, O> {
+impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
     /// Returns if the transaction for the given hash is already included in this pool
     pub fn contains(&self, tx_hash: &T::Hash) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
