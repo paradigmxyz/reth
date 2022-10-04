@@ -1,10 +1,12 @@
 //! Transaction validation abstractions.
 
 use crate::traits::PoolTransaction;
+use reth_primitives::BlockId;
 use std::fmt;
 
 /// Result returned after checking a transaction's validity
-type TransactionValidationResult<Transaction> = Result<(), TransactionValidationError<Transaction>>;
+pub type TransactionValidationResult<Transaction> =
+    Result<(), TransactionValidationError<Transaction>>;
 
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
@@ -21,8 +23,9 @@ pub trait TransactionValidator: Send + Sync {
     /// transactions for the sender.
     async fn validate_transaction(
         &self,
+        block_id: &BlockId,
         transaction: Self::Transaction,
-        block_hash: (),
+        // TODO this should return a subset of `ValidPoolTransaction`, maybe an enum
     ) -> TransactionValidationResult<ValidPoolTransaction<Self::Transaction>> {
         unimplemented!()
     }
@@ -52,6 +55,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// This contains the inverse of `depends_on` which provides the dependencies this transaction
     /// unlocks once it's mined.
     pub provides: Vec<T::Id>,
+    // TODO add a block timestamp that marks validity
 }
 
 // === impl ValidPoolTransaction ===

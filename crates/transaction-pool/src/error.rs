@@ -1,5 +1,7 @@
 //! Transaction pool errors
 
+use reth_primitives::BlockId;
+
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
 
@@ -16,4 +18,7 @@ pub enum PoolError {
     AlreadyAdded(Box<dyn std::any::Any + Send + Sync>),
     #[error("Transaction with cyclic dependent transactions")]
     CyclicTransaction,
+    /// Thrown if no number was found for the given block id
+    #[error("Invalid block id: {0:?}")]
+    BlockNumberNotFound(BlockId),
 }

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 mod config;
 pub use config::PoolConfig;
+use reth_primitives::BlockId;
 
 mod ordering;
 
@@ -33,7 +34,7 @@ pub use crate::{
 // etc...
 pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// The actual transaction pool where transactions are handled.
-    inner: Arc<pool::PoolInner<PoolApi, Ordering>>,
+    inner: pool::PoolInner<PoolApi, Ordering>,
     /// Chain/Storage access
     client: Arc<PoolApi>,
     // TODO how to revalidate

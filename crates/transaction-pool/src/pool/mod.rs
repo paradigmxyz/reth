@@ -33,6 +33,7 @@
 //!       transactions are _currently_ waiting for state changes that eventually move them into
 //!       category (2.) and become pending.
 use crate::{
+    error,
     error::{PoolError, PoolResult},
     pool::{
         listener::PoolEventListener,
@@ -40,13 +41,17 @@ use crate::{
         queued::{QueuedPoolTransaction, QueuedTransactions},
     },
     traits::PoolTransaction,
-    validate::ValidPoolTransaction,
-    PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
+    validate::{TransactionValidationResult, ValidPoolTransaction},
+    BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use futures::channel::mpsc::Sender;
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::TxHash;
-use std::{collections::VecDeque, fmt, sync::Arc};
+use reth_primitives::{TxHash, H256, U64};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt,
+    sync::Arc,
+};
 use tracing::{debug, trace, warn};
 
 mod events;
@@ -69,13 +74,55 @@ pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
 
 // === impl Pool ===
 
-impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {}
+impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {
+    /// Returns the actual block number for the block id
+    fn resolve_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
+        self.pool.client().ensure_block_number(block_id)
+    }
 
-impl <P: PoolClient, O: TransactionOrdering> Clone for Pool<P,O> {
+    /// Returns future that validates all transaction in the given iterator at the block the
+    /// `block_id` points to.
+    async fn validate_all(
+        &self,
+        block_id: &BlockId,
+        transactions: impl IntoIterator<Item = P::Transaction>,
+    ) -> PoolResult<HashMap<TransactionHashFor<P>, TransactionValidationResult<P::Transaction>>>
+    {
+        // get the actual block number which is required to validate to validate the transactions
+        let block_number = self.resolve_block_number(block_id)?;
+
+        let outcome = futures::future::join_all(
+            transactions.into_iter().map(|tx| self.validate(block_id, block_number, tx)),
+        )
+        .await
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+        Ok(outcome)
+    }
+
+    /// Validates the given transaction at the given block
+    ///
+    /// Returns future that validates single transaction at given block.
+    async fn validate(
+        &self,
+        block_id: &BlockId,
+        block_number: U64,
+        transaction: P::Transaction,
+    ) -> (TransactionHashFor<P>, TransactionValidationResult<P::Transaction>) {
+        let hash = *transaction.hash();
+        // TODO this is where additional validate checks would go, like banned senders etc...
+        let res = self.pool.client().validate_transaction(block_id, transaction).await;
+
+        // TODO blockstamp the transaction
+
+        todo!()
+    }
+}
+
+impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {
     fn clone(&self) -> Self {
-        Self {
-            pool: Arc::clone(&self.pool)
-        }
+        Self { pool: Arc::clone(&self.pool) }
     }
 }
 
@@ -88,7 +135,7 @@ pub struct PoolInner<P: PoolClient, O: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Listeners for transaction state change events.
-    event_listeners: RwLock<PoolEventListener<TransactionHashFor<P>, P::BlockHash>>,
+    event_listeners: RwLock<PoolEventListener<TransactionHashFor<P>, H256>>,
     /// Listeners for new ready transactions.
     added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<P>>>>,
 }
@@ -96,7 +143,10 @@ pub struct PoolInner<P: PoolClient, O: TransactionOrdering> {
 // === impl PoolInner ===
 
 impl<P: PoolClient, O: TransactionOrdering> PoolInner<P, O> {
-
+    /// Get client reference.
+    pub fn client(&self) -> &P {
+        &self.client
+    }
 }
 
 /// A pool that only manages transactions.
