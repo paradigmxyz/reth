@@ -74,10 +74,7 @@ where
 
     /// Create a new pipeline with a channel for receiving events (see [PipelineEvent]).
     pub fn new_with_channel(sender: Sender<PipelineEvent>) -> Self {
-        let mut pipeline = Self::new();
-        pipeline.events_sender = Some(sender);
-
-        pipeline
+        Self::new().set_channel(sender)
     }
 
     /// Add a stage to the pipeline.
@@ -85,7 +82,7 @@ where
     /// # Unwinding
     ///
     /// The unwind priority is set to 0.
-    pub fn push<S>(&mut self, stage: S, require_tip: bool) -> &mut Self
+    pub fn push<S>(self, stage: S, require_tip: bool) -> Self
     where
         S: Stage<'db, E> + 'static,
     {
@@ -94,11 +91,11 @@ where
 
     /// Add a stage to the pipeline, specifying the unwind priority.
     pub fn push_with_unwind_priority<S>(
-        &mut self,
+        mut self,
         stage: S,
         require_tip: bool,
         unwind_priority: usize,
-    ) -> &mut Self
+    ) -> Self
     where
         S: Stage<'db, E> + 'static,
     {
@@ -109,8 +106,14 @@ where
     /// Set the target block.
     ///
     /// Once this block is reached, syncing will stop.
-    pub fn set_max_block(&mut self, block: Option<U64>) -> &mut Self {
+    pub fn set_max_block(mut self, block: Option<U64>) -> Self {
         self.max_block = block;
+        self
+    }
+
+    /// Set a channel the pipeline will transmit events over (see [PipelineEvent]).
+    pub fn set_channel(mut self, sender: Sender<PipelineEvent>) -> Self {
+        self.events_sender = Some(sender);
         self
     }
 
@@ -216,6 +219,13 @@ where
                             // We unwind because of a validation error. If the unwind itself fails,
                             // we bail entirely, otherwise we restart the execution loop from the
                             // beginning.
+                            //
+                            // Note on the drop: The transaction needs to be dropped in order for
+                            // unwind to create a new one. Dropping the
+                            // transaction will abort it; there is no
+                            // other way currently to abort the transaction. It will be re-created
+                            // if the loop restarts.
+                            drop(tx);
                             match self
                                 .unwind(db, prev_progress.unwrap_or_default(), Some(block))
                                 .await
@@ -279,16 +289,24 @@ where
             let unwind: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
                 if stage_progress < to {
                     debug!(from = %stage_progress, %to, "Unwind point too far for stage");
+                    if let Some(rx) = &self.events_sender {
+                        rx.send(PipelineEvent::Unwound {
+                            stage_id,
+                            result: Some(UnwindOutput { stage_progress }),
+                        })
+                        .await?
+                    }
+
                     return Ok(())
                 }
 
                 debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
                 while stage_progress > to {
                     let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-
                     if let Some(rx) = &self.events_sender {
                         rx.send(PipelineEvent::Unwinding { stage_id, input }).await?
                     }
+
                     let output = stage.unwind(&mut tx, input).await;
                     match output {
                         Ok(unwind_output) => {
@@ -376,6 +394,7 @@ mod tests {
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
 
+    /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
         let (tx, rx) = channel(2);
@@ -431,6 +450,7 @@ mod tests {
         );
     }
 
+    /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
         let (tx, rx) = channel(2);
@@ -438,44 +458,38 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            // Sync first
-            Pipeline::<mdbx::WriteMap>::new()
-                .push(
-                    TestStage::new(StageId("A")).add_exec(Ok(ExecOutput {
-                        stage_progress: 100.into(),
-                        done: true,
-                        reached_tip: true,
-                    })),
-                    false,
-                )
-                .push(
-                    TestStage::new(StageId("B")).add_exec(Ok(ExecOutput {
-                        stage_progress: 10.into(),
-                        done: true,
-                        reached_tip: true,
-                    })),
-                    false,
-                )
-                .set_max_block(Some(10.into()))
-                .run(&db)
-                .await
-                .expect("Could not run pipeline");
-
-            // Unwind
-            Pipeline::<mdbx::WriteMap>::new_with_channel(tx)
+            let mut pipeline = Pipeline::<mdbx::WriteMap>::new()
                 .push(
                     TestStage::new(StageId("A"))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 100.into(),
+                            done: true,
+                            reached_tip: true,
+                        }))
                         .add_unwind(Ok(UnwindOutput { stage_progress: 1.into() })),
                     false,
                 )
                 .push(
                     TestStage::new(StageId("B"))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10.into(),
+                            done: true,
+                            reached_tip: true,
+                        }))
                         .add_unwind(Ok(UnwindOutput { stage_progress: 1.into() })),
                     false,
                 )
+                .set_max_block(Some(10.into()));
+
+            // Sync first
+            pipeline.run(&db).await.expect("Could not run pipeline");
+
+            // Unwind
+            pipeline
+                .set_channel(tx)
                 .unwind(&db, 1.into(), None)
                 .await
-                .expect("Could not run pipeline");
+                .expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -508,12 +522,109 @@ mod tests {
                 },
             ]
         );
-
-        // TODO: Compare StageSync table entry
     }
 
+    /// Runs a pipeline that unwinds during sync.
+    ///
+    /// The flow is:
+    ///
+    /// - Stage A syncs to block 10
+    /// - Stage B triggers an unwind, marking block 5 as bad
+    /// - Stage B unwinds to it's previous progress, block 0 but since it is still at block 0, it is
+    ///   skipped entirely (there is nothing to unwind)
+    /// - Stage A unwinds to it's previous progress, block 0
+    /// - Stage A syncs back up to block 10
+    /// - Stage B syncs to block 10
+    /// - The pipeline finishes
     #[tokio::test]
-    async fn run_pipeline_with_unwind() {}
+    async fn run_pipeline_with_unwind() {
+        let (tx, rx) = channel(2);
+        let db = utils::test_db().expect("Could not open test database");
+
+        // Run pipeline
+        tokio::spawn(async move {
+            Pipeline::<mdbx::WriteMap>::new()
+                .push(
+                    TestStage::new(StageId("A"))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10.into(),
+                            done: true,
+                            reached_tip: true,
+                        }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 0.into() }))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10.into(),
+                            done: true,
+                            reached_tip: true,
+                        })),
+                    false,
+                )
+                .push(
+                    TestStage::new(StageId("B"))
+                        .add_exec(Err(StageError::Validation { block: 5.into() }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 0.into() }))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10.into(),
+                            done: true,
+                            reached_tip: true,
+                        })),
+                    false,
+                )
+                .set_max_block(Some(10.into()))
+                .set_channel(tx)
+                .run(&db)
+                .await
+                .expect("Could not run pipeline");
+        });
+
+        // Check that the stages were unwound in reverse order
+        assert_eq!(
+            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            vec![
+                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("A"),
+                    result: Some(ExecOutput {
+                        stage_progress: 10.into(),
+                        done: true,
+                        reached_tip: true,
+                    }),
+                },
+                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Ran { stage_id: StageId("B"), result: None },
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("A"),
+                    input: UnwindInput {
+                        stage_progress: 10.into(),
+                        unwind_to: 0.into(),
+                        bad_block: Some(5.into())
+                    }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("A"),
+                    result: Some(UnwindOutput { stage_progress: 0.into() }),
+                },
+                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: Some(0.into()) },
+                PipelineEvent::Ran {
+                    stage_id: StageId("A"),
+                    result: Some(ExecOutput {
+                        stage_progress: 10.into(),
+                        done: true,
+                        reached_tip: true,
+                    }),
+                },
+                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("B"),
+                    result: Some(ExecOutput {
+                        stage_progress: 10.into(),
+                        done: true,
+                        reached_tip: true,
+                    }),
+                },
+            ]
+        );
+    }
 
     mod utils {
         use super::*;
@@ -591,7 +702,9 @@ mod tests {
             where
                 'db: 'tx,
             {
-                self.exec_outputs.pop_front().expect("Test stage executed too many times.")
+                self.exec_outputs
+                    .pop_front()
+                    .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
             }
 
             async fn unwind<'tx>(
@@ -602,7 +715,9 @@ mod tests {
             where
                 'db: 'tx,
             {
-                self.unwind_outputs.pop_front().expect("Test stage unwound too many times.")
+                self.unwind_outputs
+                    .pop_front()
+                    .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
             }
         }
     }
