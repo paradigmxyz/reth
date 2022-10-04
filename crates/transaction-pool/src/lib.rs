@@ -5,7 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! reth's transaction pool implementation
+//! Reth's transaction pool implementation
 
 pub mod error;
 
@@ -33,7 +33,7 @@ pub use crate::{
 // etc...
 pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// The actual transaction pool where transactions are handled.
-    inner: Arc<pool::PoolInner<PoolApi, Ordering>>,
+    inner: Arc<pool::Pool<PoolApi, Ordering>>,
     /// Chain/Storage access
     client: Arc<PoolApi>,
     // TODO how to revalidate

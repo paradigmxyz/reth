@@ -43,7 +43,8 @@ use crate::{
     validate::ValidPoolTransaction,
     PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
 };
-use parking_lot::RwLock;
+use futures::channel::mpsc::Sender;
+use parking_lot::{Mutex, RwLock};
 use reth_primitives::TxHash;
 use std::{collections::VecDeque, fmt, sync::Arc};
 use tracing::{debug, trace, warn};
@@ -54,44 +55,52 @@ mod pending;
 mod queued;
 mod transaction;
 
-// TODO find better name
-pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
-    pool: Arc<PoolInner<PoolApi, Ordering>>,
-}
-
+// Helper type aliases for associated types
 type TransactionHashFor<PoolApi> =
     <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Hash;
-
 type TransactionIdFor<PoolApi> =
     <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Id;
 
-// A pool that manages transactions
-pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
+// TODO find better name
+pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Chain/Storage access.
     client: Arc<PoolApi>,
-    /// How to order transactions.
-    ordering: Arc<Ordering>,
+    /// The internal pool
+    pool: Arc<PoolInner<PoolApi::Transaction, Ordering>>,
     /// Pool settings.
     config: PoolConfig,
     /// Listeners for transaction state change events.
-    listeners: RwLock<PoolEventListener<TransactionHashFor<PoolApi>, PoolApi::BlockHash>>,
+    event_listeners: RwLock<PoolEventListener<TransactionHashFor<PoolApi>, PoolApi::BlockHash>>,
+    /// Listeners for new ready transactions.
+    added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<PoolApi>>>>,
+}
+
+/// A pool that only manages transactions.
+///
+/// This pool maintains a dependency graph of transactions and provides the currently ready
+/// transactions.
+
+// TODO could unify over `TransactionOrdering::Transaction`
+pub struct PoolInner<T: PoolTransaction, O: TransactionOrdering> {
+    /// How to order transactions.
+    ordering: Arc<O>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
-    pending: PendingTransactions<PoolApi::Transaction, Ordering>,
+    pending: PendingTransactions<T, O>,
     /// Sub-Pool of transactions that are waiting for state changes that eventually turn them
     /// valid, so they can be moved in the `pending` pool.
-    queued: QueuedTransactions<PoolApi::Transaction>,
+    queued: QueuedTransactions<T>,
 }
 
 // === impl PoolInner ===
 
-impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
+impl<T: PoolTransaction, O: TransactionOrdering> PoolInner<T, O> {
     /// Returns if the transaction for the given hash is already included in this pool
-    pub fn contains(&self, tx_hash: &TransactionHashFor<PoolApi>) -> bool {
+    pub fn contains(&self, tx_hash: &T::Hash) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
-    pub fn ready(&self) -> TransactionsIterator<PoolApi::Transaction, O> {
+    pub fn ready(&self) -> TransactionsIterator<T, O> {
         self.pending.get_transactions()
     }
 
@@ -109,11 +118,8 @@ impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
     /// With the EIP-1559, transactions can become executable or not without any changes to the
     /// sender's balance or nonce and instead their feeCap determines whether the transaction is
     /// _currently_ (on the current state) ready or needs to be parked until the feeCap satisfies
-    /// the block's basFee.
-    fn add_transaction(
-        &mut self,
-        tx: ValidPoolTransaction<PoolApi::Transaction>,
-    ) -> PoolResult<AddedTransaction<PoolApi::Transaction>> {
+    /// the block's baseFee.
+    fn add_transaction(&mut self, tx: ValidPoolTransaction<T>) -> PoolResult<AddedTransaction<T>> {
         if self.contains(tx.hash()) {
             warn!(target: "txpool", "[{:?}] Already added", tx.hash());
             return Err(PoolError::AlreadyAdded(Box::new(*tx.hash())))
@@ -139,8 +145,8 @@ impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
     /// CAUTION: this expects that transaction's dependencies are fully satisfied
     fn add_pending_transaction(
         &mut self,
-        tx: QueuedPoolTransaction<PoolApi::Transaction>,
-    ) -> PoolResult<AddedTransaction<PoolApi::Transaction>> {
+        tx: QueuedPoolTransaction<T>,
+    ) -> PoolResult<AddedTransaction<T>> {
         let hash = *tx.transaction.hash();
         trace!(target: "txpool", "adding pending transaction [{:?}]", hash);
         let mut pending = AddedPendingTransaction::new(hash);
@@ -199,8 +205,8 @@ impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
     /// And queued transactions might get promoted if the pruned dependencies unlock them.
     pub fn prune_dependencies(
         &mut self,
-        dependencies: impl IntoIterator<Item = TransactionIdFor<PoolApi>>,
-    ) -> PruneResult<PoolApi::Transaction> {
+        dependencies: impl IntoIterator<Item = T::Id>,
+    ) -> PruneResult<T> {
         let mut imports = vec![];
         let mut pruned = vec![];
 
@@ -227,11 +233,8 @@ impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
         PruneResult { pruned, failed, promoted }
     }
 
-    /// Remove the given transactions from the pool
-    pub fn remove_invalid(
-        &mut self,
-        tx_hashes: Vec<TransactionHashFor<PoolApi>>,
-    ) -> Vec<Arc<ValidPoolTransaction<PoolApi::Transaction>>> {
+    /// Remove the given transactions from the pool.
+    pub fn remove_invalid(&mut self, tx_hashes: Vec<T::Hash>) -> Vec<Arc<ValidPoolTransaction<T>>> {
         // early exit in case there is no invalid transactions.
         if tx_hashes.is_empty() {
             return vec![]
@@ -244,6 +247,19 @@ impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
         trace!(target: "txpool", "Removed invalid transactions: {:?}", removed);
 
         removed
+    }
+
+    /// Returns the current size of the entire pool
+    pub fn size_of(&self) -> usize {
+        unimplemented!()
+    }
+
+    /// Ensures that the transactions in the sub-pools are within the given bounds.
+    ///
+    /// If the current size exceeds the given bounds, the worst transactions are evicted from the
+    /// pool and returned.
+    pub fn enforce_size_limits(&mut self) {
+        unimplemented!()
     }
 }
 
