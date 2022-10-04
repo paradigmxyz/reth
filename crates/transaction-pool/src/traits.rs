@@ -13,10 +13,10 @@ pub trait TransactionPool: Send + Sync {
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Send {
     /// Transaction hash type.
-    type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Copy + Hash + Send + Sync;
+    type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Copy + Hash + Send + Sync + 'static;
 
     /// Unique identifier for this transaction.
-    type Id: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + Send + Sync;
+    type Id: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + AsRef<Self::Id> + Send + Sync;
 
     /// Transaction sender type.
     type Sender: fmt::Debug + Eq + Clone + Hash + Send + Sync;

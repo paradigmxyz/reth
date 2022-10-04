@@ -1,4 +1,9 @@
-use crate::{error, error::Error, traits::PoolTransaction, validate::ValidPoolTransaction};
+use crate::{
+    error,
+    error::{PoolError, PoolResult},
+    traits::PoolTransaction,
+    validate::ValidPoolTransaction,
+};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -43,8 +48,8 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
     }
 
     /// Adds a transaction to the queue of transactions
-    pub fn add_transaction(&mut self, tx: QueuedPoolTransaction<T>) -> error::Result<()> {
-        assert!(!tx.is_ready(), "transaction must not be ready");
+    pub fn add_transaction(&mut self, tx: QueuedPoolTransaction<T>) -> PoolResult<()> {
+        assert!(!tx.is_satisfied(), "transaction must not be ready");
         assert!(
             !self.waiting_queue.contains_key(tx.transaction.hash()),
             "transaction is already added"
@@ -99,14 +104,14 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
         dependencies: impl IntoIterator<Item = impl AsRef<T::Id>>,
     ) -> Vec<QueuedPoolTransaction<T>> {
         let mut unlocked_ready = Vec::new();
-        for mark in dependencies {
-            let mark = mark.as_ref();
+        for dependency in dependencies {
+            let mark = dependency.as_ref();
             if let Some(tx_hashes) = self.required_dependencies.remove(mark) {
                 for hash in tx_hashes {
                     let tx = self.waiting_queue.get_mut(&hash).expect("tx is included;");
                     tx.satisfy(mark);
 
-                    if tx.is_ready() {
+                    if tx.is_satisfied() {
                         let tx = self.waiting_queue.remove(&hash).expect("tx is included;");
                         self.waiting_dependencies.remove(&tx.transaction.provides);
 
@@ -189,7 +194,7 @@ impl<T: PoolTransaction> QueuedPoolTransaction<T> {
     }
 
     /// Returns true if transaction has all dependencies are satisfied.
-    pub fn is_ready(&self) -> bool {
+    pub fn is_satisfied(&self) -> bool {
         self.missing_dependencies.is_empty()
     }
 }

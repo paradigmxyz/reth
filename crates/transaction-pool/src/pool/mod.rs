@@ -33,12 +33,20 @@
 //!       transactions are _currently_ waiting for state changes that eventually move them into
 //!       category (2.) and become pending.
 use crate::{
-    pool::{listener::PoolEventListener, pending::PendingTransactions, queued::QueuedTransactions},
+    error::{PoolError, PoolResult},
+    pool::{
+        listener::PoolEventListener,
+        pending::PendingTransactions,
+        queued::{QueuedPoolTransaction, QueuedTransactions},
+    },
     traits::PoolTransaction,
+    validate::ValidPoolTransaction,
     PoolClient, PoolConfig, TransactionOrdering,
 };
 use parking_lot::RwLock;
-use std::sync::Arc;
+use reth_primitives::TxHash;
+use std::{collections::VecDeque, fmt, sync::Arc};
+use tracing::{debug, trace, warn};
 
 mod events;
 mod listener;
@@ -62,8 +70,187 @@ pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Listeners for transaction state change events.
     listeners: RwLock<PoolEventListener<PoolApi::Hash, PoolApi::BlockHash>>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
-    pending: PendingTransactions<<PoolApi as PoolClient>::Transaction, Ordering>,
+    pending: PendingTransactions<PoolApi::Transaction, Ordering>,
     /// Sub-Pool of transactions that are waiting for state changes that eventually turn them
     /// valid, so they can be moved in the `pending` pool.
-    queued: QueuedTransactions<<PoolApi as PoolClient>::Transaction>,
+    queued: QueuedTransactions<PoolApi::Transaction>,
+}
+
+type TransactionHashFor<PoolApi: PoolClient> = <PoolApi::Transaction as PoolTransaction>::Hash;
+
+// === impl PoolInner ===
+
+impl<PoolApi: PoolClient, Ordering: TransactionOrdering> PoolInner<PoolApi, Ordering> {
+    /// Returns if the transaction for the given hash is already included in this pool
+    pub fn contains(&self, tx_hash: &TransactionHashFor<PoolApi>) -> bool {
+        self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
+    }
+
+    /// Adds the transaction into the pool
+    ///
+    /// This pool consists of two sub-pools: `Queued` and `Pending`.
+    ///
+    /// The `Queued` pool contains transaction with gaps in its dependency tree: It requires
+    /// additional transaction that are note yet present in the pool.
+    ///
+    /// The `Pending` pool contains all transactions that have all their dependencies satisfied (no
+    /// nonce gaps). It consists of two parts: `Parked` and `Ready`.
+    ///
+    /// The `Ready` queue contains transactions that are ready to be included in the pending block.
+    /// With the EIP-1559, transactions can become executable or not without any changes to the
+    /// sender's balance or nonce and instead their feeCap determines whether the transaction is
+    /// _currently_ (on the current state) ready or needs to be parked until the feeCap satisfies
+    /// the block's basFee.
+    fn add_transaction(
+        &mut self,
+        tx: ValidPoolTransaction<PoolApi::Transaction>,
+    ) -> PoolResult<AddedTransaction<PoolApi::Transaction>> {
+        if self.contains(tx.hash()) {
+            warn!(target: "txpool", "[{:?}] Already added", tx.hash());
+            return Err(PoolError::AlreadyAdded(Box::new(*tx.hash())))
+        }
+
+        let tx = QueuedPoolTransaction::new(tx, self.pending.provided_dependencies());
+        trace!(target: "txpool", "[{:?}] {:?}", tx.transaction.hash(), tx);
+
+        // If all markers are not satisfied import to future
+        if !tx.is_satisfied() {
+            let hash = *tx.transaction.hash();
+            self.queued.add_transaction(tx)?;
+            return Ok(AddedTransaction::Queued { hash })
+        }
+        self.add_pending_transaction(tx)
+    }
+
+    /// Adds the transaction to the pending pool.
+    ///
+    /// This will also move all transaction that get unlocked by the dependency id this transaction provides from the queued pool into the pending pool.
+    ///
+    /// CAUTION: this expects that transaction's dependencies are fully satisfied
+    fn add_pending_transaction(
+        &mut self,
+        tx: QueuedPoolTransaction<PoolApi::Transaction>,
+    ) -> PoolResult<AddedTransaction<PoolApi::Transaction>> {
+        let hash = *tx.transaction.hash();
+        trace!(target: "txpool", "adding pending transaction [{:?}]", hash);
+        let mut pending = AddedPendingTransaction::new(hash);
+
+        // tracks all transaction that can be moved to the pending pool, starting the given transaction
+        let mut pending_transactions = VecDeque::from([tx]);
+        // tracks whether we're processing the given `tx`
+        let mut is_new_tx = true;
+
+        // take first transaction from the list
+        while let Some(current_tx) = pending_transactions.pop_front() {
+            // also add the transaction that the current transaction unlocks
+            pending_transactions.extend(self.queued.satisfy_and_unlock(&current_tx.transaction.provides));
+
+            let current_hash = *current_tx.transaction.hash();
+
+            // try to add the transaction to the ready pool
+            match self.pending.add_transaction(current_tx) {
+                Ok(replaced_transactions) => {
+                    if !is_new_tx {
+                        pending.promoted.push(current_hash);
+                    }
+                    // tx removed from ready pool
+                    pending.removed.extend(replaced_transactions);
+                }
+                Err(err) => {
+                    // failed to add transaction
+                    if is_new_tx {
+                        debug!(target: "txpool", "[{:?}] Failed to add tx: {:?}", current_hash,
+        err);
+                        return Err(err)
+                    } else {
+                        pending.discarded.push(current_hash);
+                    }
+                }
+            }
+            is_new_tx = false;
+        }
+
+        // check for a cycle where importing a transaction resulted in pending transactions to be
+        // added while removing current transaction. in which case we move this transaction back to
+        // the pending queue
+        if pending.removed.iter().any(|tx| *tx.hash() == hash) {
+            self.pending.clear_transactions(&pending.promoted);
+            return Err(PoolError::CyclicTransaction)
+        }
+
+        Ok(AddedTransaction::Pending(pending))
+    }
+}
+
+// /// Represents the outcome of a prune
+// pub struct PruneResult {
+//     /// a list of added transactions that a pruned marker satisfied
+//     pub promoted: Vec<AddedTransaction>,
+//     /// all transactions that  failed to be promoted and now are discarded
+//     pub failed: Vec<TxHash>,
+//     /// all transactions that were pruned from the ready pool
+//     pub pruned: Vec<Arc<PoolTransaction>>,
+// }
+//
+// impl fmt::Debug for PruneResult {
+//     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+//         write!(fmt, "PruneResult {{ ")?;
+//         write!(
+//             fmt,
+//             "promoted: {:?}, ",
+//             self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
+//         )?;
+//         write!(fmt, "failed: {:?}, ", self.failed)?;
+//         write!(
+//             fmt,
+//             "pruned: {:?}, ",
+//             self.pruned.iter().map(|tx| *tx.pending_transaction.hash()).collect::<Vec<_>>()
+//         )?;
+//         write!(fmt, "}}")?;
+//         Ok(())
+//     }
+// }
+
+#[derive(Debug, Clone)]
+pub struct AddedPendingTransaction<T: PoolTransaction> {
+    /// the hash of the submitted transaction
+    hash: T::Hash,
+    /// transactions promoted to the ready queue
+    promoted: Vec<T::Hash>,
+    /// transaction that failed and became discarded
+    discarded: Vec<T::Hash>,
+    /// Transactions removed from the Ready pool
+    removed: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+impl<T: PoolTransaction> AddedPendingTransaction<T> {
+    pub fn new(hash: T::Hash) -> Self {
+        Self {
+            hash,
+            promoted: Default::default(),
+            discarded: Default::default(),
+            removed: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AddedTransaction<T: PoolTransaction> {
+    /// Transaction was successfully added and moved to the pending pool.
+    Pending(AddedPendingTransaction<T>),
+    /// Transaction was successfully added but not yet queued for processing and moved to the
+    /// queued pool instead.
+    Queued {
+        /// the hash of the submitted transaction
+        hash: T::Hash,
+    },
+}
+
+impl<T: PoolTransaction> AddedTransaction<T> {
+    pub fn hash(&self) -> &T::Hash {
+        match self {
+            AddedTransaction::Pending(tx) => &tx.hash,
+            AddedTransaction::Queued { hash } => hash,
+        }
+    }
 }

@@ -7,10 +7,7 @@ use std::hash;
 #[async_trait::async_trait]
 pub trait PoolClient: Send + Sync + TransactionValidator {
     /// Error type that can be converted to the crate's internal Error.
-    type Error: Into<crate::error::Error>;
-
-    /// Transaction type for this client.
-    type Transaction: PoolTransaction + Send + Sync;
+    type Error: Into<crate::error::PoolError>;
 
     /// Transaction hash type.
     type Hash: hash::Hash + Eq + Send + Sync + Sync;
