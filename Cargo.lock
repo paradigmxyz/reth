@@ -1456,6 +1456,7 @@ name = "reth-p2p"
 version = "0.1.0"
 dependencies = [
  "enr",
+ "secp256k1",
  "serde",
  "serde_derive",
  "thiserror",
@@ -1662,6 +1663,7 @@ version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7649a0b3ffb32636e60c7ce0d70511eda9c52c658cd0634e194d5a19943aeff"
 dependencies = [
+ "rand",
  "secp256k1-sys",
 ]
 

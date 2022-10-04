@@ -13,3 +13,7 @@ serde = "1.0.145"
 serde_derive = "1.0.145"
 thiserror = "1.0.37"
 toml = "0.5.9"
+
+[dev-dependencies.secp256k1]
+version = "0.24"
+features = ["rand-std"]

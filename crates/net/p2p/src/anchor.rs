@@ -2,7 +2,7 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::{BufReader, Read, Write},
+    io::{Read, Write},
     path::Path,
 };
 
@@ -27,7 +27,7 @@ use thiserror::Error;
 ///      for that peer, if a node record exists.
 ///    * Updates for inbound connections must NOT be based on the peer's remote address, since its
 ///      port may be ephemeral.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Anchor {
     /// Peers that have been obtained discovery sources when the node is running
     pub discovered_peers: Vec<Enr<SecretKey>>,
@@ -52,6 +52,11 @@ impl Anchor {
     pub fn add_static(&mut self, new_peers: Vec<Enr<SecretKey>>) {
         self.static_peers.extend(new_peers);
         self.static_peers.dedup();
+    }
+
+    /// Returns true if both peer lists are empty
+    pub fn is_empty(&self) -> bool {
+        self.static_peers.is_empty() && self.discovered_peers.is_empty()
     }
 }
 
@@ -86,15 +91,36 @@ impl PersistentAnchor {
     /// This will attempt to load the [`Anchor`] from a file, and if the file doesn't exist it will
     /// attempt to initialize it with an empty peer list.
     pub fn new_from_file<P: AsRef<Path>>(path: P) -> Result<Self, AnchorError> {
-        let file = OpenOptions::new().write(true).create(true).open(path)?;
+        let file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+
+        // if the file does not exist then we should create it
+        if file.metadata()?.len() == 0 {
+            let mut anchor = Self {
+                anchor: Anchor::default(),
+                file,
+            };
+            anchor.save_toml()?;
+            return Ok(anchor)
+        }
+
         Self::from_toml(file)
     }
 
     /// Load the [`Anchor`] from the given TOML file.
-    pub fn from_toml(file: File) -> Result<Self, AnchorError> {
-        let mut reader = BufReader::new(&file);
+    pub fn from_toml(mut file: File) -> Result<Self, AnchorError> {
         let mut contents = String::new();
-        reader.read_to_string(&mut contents)?;
+        file.read_to_string(&mut contents)?;
+
+        // if the file exists but is empty then we should initialize the file format and return an
+        // empty [`Anchor`]
+        if contents.is_empty() {
+            let mut anchor = Self {
+                anchor: Anchor::default(),
+                file,
+            };
+            anchor.save_toml()?;
+            return Ok(anchor)
+        }
 
         let anchor: Anchor = toml::from_str(&contents)?;
         Ok(Self { anchor, file })
@@ -102,21 +128,28 @@ impl PersistentAnchor {
 
     /// Save the contents of the [`Anchor`] into the associated file as TOML.
     pub fn save_toml(&mut self) -> Result<(), AnchorError> {
-        let anchor_contents = toml::to_vec(&self.anchor)?;
-        self.file.write_all(anchor_contents.as_ref())?;
+        if !self.anchor.is_empty() {
+            let anchor_contents = toml::to_string_pretty(&self.anchor)?;
+            self.file.write_all(anchor_contents.as_bytes())?;
+        }
         Ok(())
     }
 }
 
 impl Drop for PersistentAnchor {
     fn drop(&mut self) {
-        self.save_toml().unwrap()
+        if let Err(save_error) = self.save_toml() {
+            println!("Could not save anchor to file: {}", save_error)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Anchor;
+    use std::{fs::{remove_file, OpenOptions}, net::Ipv4Addr};
+    use enr::{secp256k1::{SecretKey, rand::thread_rng}, EnrBuilder};
+
+    use super::{Anchor, PersistentAnchor};
 
     #[test]
     fn serde_read_toml() {
@@ -130,5 +163,52 @@ mod tests {
                 "enr:-Iu4QBHuAmMN5ogZP_Mwh_bADnIOS2xqj8yyJI3EbxW66WKtO_JorshNQJ1NY8zo-u3G7HQvGW3zkV6_kRx5d0R19bETgmlkgnY0gmlwhDRCMUyJc2VjcDI1NmsxoQJZ8jY1HYauxirnJkVI32FoN7_7KrE05asCkZb7nj_b-YN0Y3CCIyiDdWRwgiMo",
             ]
         "#).expect("Parsing valid TOML into an Anchor should not fail");
+    }
+
+    #[test]
+    fn create_empty_anchor() {
+        let file_name = "temp_anchor.toml";
+        let temp_file_path = std::env::temp_dir().with_file_name(file_name);
+
+        // this test's purpose is to make sure new_from_file works if the file doesn't exist
+        assert!(!temp_file_path.exists());
+        let persistent_anchor = PersistentAnchor::new_from_file(&temp_file_path);
+
+        // make sure to clean up
+        remove_file(temp_file_path).unwrap();
+        persistent_anchor.unwrap();
+    }
+
+    #[test]
+    fn save_temp_anchor() {
+        let file_name = "temp_anchor_two.toml";
+        let temp_file_path = std::env::temp_dir().with_file_name(file_name);
+        let temp_file = OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
+
+        let mut persistent_anchor = PersistentAnchor::from_toml(temp_file).unwrap();
+
+        // add some ENRs to both lists
+        let mut rng = thread_rng();
+
+        let key = SecretKey::new(&mut rng);
+        let ip = Ipv4Addr::new(192,168,1,1);
+        let enr = EnrBuilder::new("v4").ip4(ip).tcp4(8000).build(&key).unwrap();
+        persistent_anchor.anchor.add_discovered(vec![enr]);
+
+        let key = SecretKey::new(&mut rng);
+        let ip = Ipv4Addr::new(192,168,1,2);
+        let enr = EnrBuilder::new("v4").ip4(ip).tcp4(8000).build(&key).unwrap();
+        persistent_anchor.anchor.add_static(vec![enr]);
+
+        // save the old struct before dropping
+        let prev_anchor = persistent_anchor.anchor.clone();
+        drop(persistent_anchor);
+
+        // finally check file contents
+        let prev_file = OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
+        let new_anchor = PersistentAnchor::from_toml(prev_file).unwrap();
+
+        remove_file(temp_file_path).unwrap();
+        assert_eq!(new_anchor.anchor, prev_anchor);
     }
 }
