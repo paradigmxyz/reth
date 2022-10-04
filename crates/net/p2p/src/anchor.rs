@@ -37,11 +37,6 @@ pub struct Anchor {
 }
 
 impl Anchor {
-    /// Creates an empty [`Anchor`]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Adds peers to the discovered peer list
     pub fn add_discovered(&mut self, new_peers: Vec<Enr<SecretKey>>) {
         self.discovered_peers.extend(new_peers);
