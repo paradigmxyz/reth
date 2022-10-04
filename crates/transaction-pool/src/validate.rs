@@ -54,6 +54,15 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub provides: Vec<T::Id>,
 }
 
+// === impl ValidPoolTransaction ===
+
+impl<T: PoolTransaction> ValidPoolTransaction<T> {
+    /// Returns the hash of the transaction
+    pub fn hash(&self) -> &T::Hash {
+        self.transaction.hash()
+    }
+}
+
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(fmt, "Transaction {{ ")?;

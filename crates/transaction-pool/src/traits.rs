@@ -1,3 +1,4 @@
+use reth_primitives::U256;
 use std::{fmt, hash::Hash};
 
 /// General purpose abstraction fo a transaction-pool
@@ -12,7 +13,7 @@ pub trait TransactionPool: Send + Sync {
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Send {
     /// Transaction hash type.
-    type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + Send + Sync;
+    type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Copy + Hash + Send + Sync;
 
     /// Unique identifier for this transaction.
     type Id: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + Send + Sync;
@@ -28,4 +29,14 @@ pub trait PoolTransaction: fmt::Debug + Send + Send {
 
     /// Creates the unique identifier for this transaction.
     fn id(&self) -> Self::Id;
+
+    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    ///
+    /// This will return `None` for non-EIP1559 transactions
+    fn max_fee_per_gas(&self) -> Option<&U256>;
+
+    /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
+    ///
+    /// This will return `None` for non-EIP1559 transactions
+    fn max_priority_fee_per_gas(&self) -> Option<&U256>;
 }

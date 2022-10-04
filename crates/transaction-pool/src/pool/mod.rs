@@ -44,6 +44,7 @@ mod events;
 mod listener;
 mod pending;
 mod queued;
+mod transaction;
 
 // TODO find better name
 pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
@@ -61,7 +62,7 @@ pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Listeners for transaction state change events.
     listeners: RwLock<PoolEventListener<PoolApi::Hash, PoolApi::BlockHash>>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
-    pending: PendingTransactions<<PoolApi as PoolClient>::Transaction>,
+    pending: PendingTransactions<<PoolApi as PoolClient>::Transaction, Ordering>,
     /// Sub-Pool of transactions that are waiting for state changes that eventually turn them
     /// valid, so they can be moved in the `pending` pool.
     queued: QueuedTransactions<<PoolApi as PoolClient>::Transaction>,
