@@ -1,7 +1,7 @@
 //! Transaction validation abstractions.
 
 use crate::traits::PoolTransaction;
-use std::{fmt, hash::Hash};
+use std::fmt;
 
 /// Result returned after checking a transaction's validity
 type TransactionValidationResult<Transaction> = Result<(), TransactionValidationError<Transaction>>;

@@ -62,6 +62,9 @@ pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
 type TransactionHashFor<PoolApi> =
     <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Hash;
 
+type TransactionIdFor<PoolApi> =
+    <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Id;
+
 // A pool that manages transactions
 pub struct PoolInner<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// Chain/Storage access.
@@ -189,36 +192,89 @@ impl<PoolApi: PoolClient, O: TransactionOrdering> PoolInner<PoolApi, O> {
 
         Ok(AddedTransaction::Pending(pending))
     }
+
+    /// Prunes the transactions that provide the given dependencies.
+    ///
+    /// This will effectively remove those transactions that satisfy the dependencies.
+    /// And queued transactions might get promoted if the pruned dependencies unlock them.
+    pub fn prune_dependencies(
+        &mut self,
+        dependencies: impl IntoIterator<Item = TransactionIdFor<PoolApi>>,
+    ) -> PruneResult<PoolApi::Transaction> {
+        let mut imports = vec![];
+        let mut pruned = vec![];
+
+        for dependency in dependencies {
+            // mark as satisfied and store the transactions that got unlocked
+            imports.extend(self.queued.satisfy_and_unlock(Some(&dependency)));
+            // prune transactions
+            pruned.extend(self.pending.prune_dependencies(dependency.clone()));
+        }
+
+        let mut promoted = vec![];
+        let mut failed = vec![];
+        for tx in imports {
+            let hash = *tx.transaction.hash();
+            match self.add_pending_transaction(tx) {
+                Ok(res) => promoted.push(res),
+                Err(e) => {
+                    warn!(target: "txpool", "Failed to promote tx [{:?}] : {:?}", hash, e);
+                    failed.push(hash)
+                }
+            }
+        }
+
+        PruneResult { pruned, failed, promoted }
+    }
+
+    /// Remove the given transactions from the pool
+    pub fn remove_invalid(
+        &mut self,
+        tx_hashes: Vec<TransactionHashFor<PoolApi>>,
+    ) -> Vec<Arc<ValidPoolTransaction<PoolApi::Transaction>>> {
+        // early exit in case there is no invalid transactions.
+        if tx_hashes.is_empty() {
+            return vec![]
+        }
+        trace!(target: "txpool", "Removing invalid transactions: {:?}", tx_hashes);
+
+        let mut removed = self.pending.remove_with_dependencies(tx_hashes.clone(), None);
+        removed.extend(self.queued.remove(tx_hashes));
+
+        trace!(target: "txpool", "Removed invalid transactions: {:?}", removed);
+
+        removed
+    }
 }
 
-// /// Represents the outcome of a prune
-// pub struct PruneResult {
-//     /// a list of added transactions that a pruned marker satisfied
-//     pub promoted: Vec<AddedTransaction>,
-//     /// all transactions that  failed to be promoted and now are discarded
-//     pub failed: Vec<TxHash>,
-//     /// all transactions that were pruned from the ready pool
-//     pub pruned: Vec<Arc<PoolTransaction>>,
-// }
-//
-// impl fmt::Debug for PruneResult {
-//     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-//         write!(fmt, "PruneResult {{ ")?;
-//         write!(
-//             fmt,
-//             "promoted: {:?}, ",
-//             self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
-//         )?;
-//         write!(fmt, "failed: {:?}, ", self.failed)?;
-//         write!(
-//             fmt,
-//             "pruned: {:?}, ",
-//             self.pruned.iter().map(|tx| *tx.pending_transaction.hash()).collect::<Vec<_>>()
-//         )?;
-//         write!(fmt, "}}")?;
-//         Ok(())
-//     }
-// }
+/// Represents the outcome of a prune
+pub struct PruneResult<T: PoolTransaction> {
+    /// a list of added transactions that a pruned marker satisfied
+    pub promoted: Vec<AddedTransaction<T>>,
+    /// all transactions that  failed to be promoted and now are discarded
+    pub failed: Vec<T::Hash>,
+    /// all transactions that were pruned from the ready pool
+    pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "PruneResult {{ ")?;
+        write!(
+            fmt,
+            "promoted: {:?}, ",
+            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
+        )?;
+        write!(fmt, "failed: {:?}, ", self.failed)?;
+        write!(
+            fmt,
+            "pruned: {:?}, ",
+            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
+        )?;
+        write!(fmt, "}}")?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {

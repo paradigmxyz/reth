@@ -228,7 +228,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     ///
     /// This will also remove all transactions that lead to the transaction that provides the
     /// id.
-    pub fn prune_tags(&mut self, id: T::Id) -> Vec<Arc<ValidPoolTransaction<T>>> {
+    pub fn prune_dependencies(&mut self, id: T::Id) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed_tx = vec![];
 
         // the dependencies to remove
