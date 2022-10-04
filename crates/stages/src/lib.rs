@@ -71,6 +71,44 @@ pub enum StageError {
     Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// A stage is a segmented part of the syncing process of the node.
+///
+/// Each stage takes care of a well-defined task, such as downloading headers or executing
+/// transactions, and persist their results to a database.
+///
+/// Stages must have a unique [ID][StageId] and implement a way to "roll forwards"
+/// ([Stage::execute]) and a way to "roll back" ([Stage::unwind]).
+///
+/// Stages are executed as part of a pipeline where they are executed serially.
+#[async_trait]
+pub trait Stage<'db, E>: Send + Sync
+where
+    E: mdbx::EnvironmentKind,
+{
+    /// Get the ID of the stage.
+    ///
+    /// Stage IDs must be unique.
+    fn id(&self) -> StageId;
+
+    /// Execute the stage.
+    async fn execute<'tx>(
+        &mut self,
+        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError>
+    where
+        'db: 'tx;
+
+    /// Unwind the stage.
+    async fn unwind<'tx>(
+        &mut self,
+        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>
+    where
+        'db: 'tx;
+}
+
 /// The ID of a stage.
 ///
 /// Each stage ID must be unique.
@@ -116,42 +154,4 @@ impl StageId {
             mdbx::WriteFlags::UPSERT,
         )
     }
-}
-
-/// A stage is a segmented part of the syncing process of the node.
-///
-/// Each stage takes care of a well-defined task, such as downloading headers or executing
-/// transactions, and persist their results to a database.
-///
-/// Stages must have a unique [ID][StageId] and implement a way to "roll forwards"
-/// ([Stage::execute]) and a way to "roll back" ([Stage::unwind]).
-///
-/// Stages are executed as part of a pipeline where they are executed serially.
-#[async_trait]
-pub trait Stage<'db, E>: Send + Sync
-where
-    E: mdbx::EnvironmentKind,
-{
-    /// Get the ID of the stage.
-    ///
-    /// Stage IDs must be unique.
-    fn id(&self) -> StageId;
-
-    /// Execute the stage.
-    async fn execute<'tx>(
-        &mut self,
-        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError>
-    where
-        'db: 'tx;
-
-    /// Unwind the stage.
-    async fn unwind<'tx>(
-        &mut self,
-        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>
-    where
-        'db: 'tx;
 }

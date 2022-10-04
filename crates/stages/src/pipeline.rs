@@ -268,7 +268,7 @@ where
         to: U64,
         bad_block: Option<U64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut tx = db.begin_rw_txn()?;
+        // Sort stages by unwind priority
         let mut unwind_pipeline = {
             let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
             stages.sort_by_key(|(id, stage)| {
@@ -282,6 +282,8 @@ where
             stages
         };
 
+        // Unwind stages in reverse order of priority (i.e. higher priority = first)
+        let mut tx = db.begin_rw_txn()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
