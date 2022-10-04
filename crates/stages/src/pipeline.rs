@@ -370,98 +370,57 @@ pub enum PipelineEvent {
 mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
-    use async_trait::async_trait;
     use reth_db::mdbx;
-    use std::error::Error;
     use tempfile::tempdir;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-
-    struct A;
-
-    #[async_trait]
-    impl<'db, E> Stage<'db, E> for A
-    where
-        E: mdbx::EnvironmentKind,
-    {
-        fn id(&self) -> StageId {
-            StageId("A")
-        }
-
-        async fn execute<'tx>(
-            &mut self,
-            _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
-            _: ExecInput,
-        ) -> Result<ExecOutput, StageError>
-        where
-            'db: 'tx,
-        {
-            Ok(ExecOutput { stage_progress: 10.into(), done: true, reached_tip: true })
-        }
-
-        async fn unwind<'tx>(
-            &mut self,
-            _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
-            _: UnwindInput,
-        ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
-        where
-            'db: 'tx,
-        {
-            Ok(UnwindOutput { stage_progress: Default::default() })
-        }
-    }
-
-    // TODO: This is... not great.
-    fn test_db() -> Result<mdbx::Environment<mdbx::WriteMap>, mdbx::Error> {
-        const DB_TABLES: usize = 10;
-
-        // Build environment
-        let mut builder = mdbx::Environment::<mdbx::WriteMap>::new();
-        builder.set_max_dbs(DB_TABLES);
-        builder.set_geometry(mdbx::Geometry {
-            size: Some(0..usize::MAX),
-            growth_step: None,
-            shrink_threshold: None,
-            page_size: None,
-        });
-        builder.set_rp_augment_limit(16 * 256 * 1024);
-
-        // Open
-        let tempdir = tempdir().unwrap();
-        let path = tempdir.path();
-        std::fs::DirBuilder::new().recursive(true).create(path).unwrap();
-        let db = builder.open(path)?;
-
-        // Create tables
-        let tx = db.begin_rw_txn()?;
-        tx.create_db(Some("SyncStage"), mdbx::DatabaseFlags::default())?;
-        tx.commit()?;
-
-        Ok(db)
-    }
+    use utils::TestStage;
 
     #[tokio::test]
     async fn run_pipeline() {
         let (tx, rx) = channel(2);
-        let db = test_db().expect("Could not open test database");
+        let db = utils::test_db().expect("Could not open test database");
 
         // Run pipeline
         tokio::spawn(async move {
             Pipeline::<mdbx::WriteMap>::new_with_channel(tx)
-                .push(A, false)
+                .push(
+                    TestStage::new(StageId("A")).add_exec(Ok(ExecOutput {
+                        stage_progress: 20.into(),
+                        done: true,
+                        reached_tip: true,
+                    })),
+                    false,
+                )
+                .push(
+                    TestStage::new(StageId("B")).add_exec(Ok(ExecOutput {
+                        stage_progress: 10.into(),
+                        done: true,
+                        reached_tip: true,
+                    })),
+                    false,
+                )
                 .set_max_block(Some(10.into()))
                 .run(&db)
                 .await
         });
 
         // Check that the stages were run in order
-        let stage_id_a = <A as Stage<'_, mdbx::WriteMap>>::id(&A);
         assert_eq!(
             ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
             vec![
-                PipelineEvent::Running { stage_id: stage_id_a, stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
                 PipelineEvent::Ran {
-                    stage_id: stage_id_a,
+                    stage_id: StageId("A"),
+                    result: Some(ExecOutput {
+                        stage_progress: 20.into(),
+                        done: true,
+                        reached_tip: true,
+                    }),
+                },
+                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("B"),
                     result: Some(ExecOutput {
                         stage_progress: 10.into(),
                         done: true,
@@ -470,13 +429,181 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn unwind_pipeline() {
+        let (tx, rx) = channel(2);
+        let db = utils::test_db().expect("Could not open test database");
+
+        // Run pipeline
+        tokio::spawn(async move {
+            // Sync first
+            Pipeline::<mdbx::WriteMap>::new()
+                .push(
+                    TestStage::new(StageId("A")).add_exec(Ok(ExecOutput {
+                        stage_progress: 100.into(),
+                        done: true,
+                        reached_tip: true,
+                    })),
+                    false,
+                )
+                .push(
+                    TestStage::new(StageId("B")).add_exec(Ok(ExecOutput {
+                        stage_progress: 10.into(),
+                        done: true,
+                        reached_tip: true,
+                    })),
+                    false,
+                )
+                .set_max_block(Some(10.into()))
+                .run(&db)
+                .await
+                .expect("Could not run pipeline");
+
+            // Unwind
+            Pipeline::<mdbx::WriteMap>::new_with_channel(tx)
+                .push(
+                    TestStage::new(StageId("A"))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1.into() })),
+                    false,
+                )
+                .push(
+                    TestStage::new(StageId("B"))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1.into() })),
+                    false,
+                )
+                .unwind(&db, 1.into(), None)
+                .await
+                .expect("Could not run pipeline");
+        });
+
+        // Check that the stages were unwound in reverse order
+        assert_eq!(
+            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            vec![
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("B"),
+                    input: UnwindInput {
+                        stage_progress: 10.into(),
+                        unwind_to: 1.into(),
+                        bad_block: None
+                    }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("B"),
+                    result: Some(UnwindOutput { stage_progress: 1.into() }),
+                },
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("A"),
+                    input: UnwindInput {
+                        stage_progress: 100.into(),
+                        unwind_to: 1.into(),
+                        bad_block: None
+                    }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("A"),
+                    result: Some(UnwindOutput { stage_progress: 1.into() }),
+                },
+            ]
+        );
 
         // TODO: Compare StageSync table entry
     }
 
     #[tokio::test]
-    async fn unwind_pipeline() {}
-
-    #[tokio::test]
     async fn run_pipeline_with_unwind() {}
+
+    mod utils {
+        use super::*;
+        use async_trait::async_trait;
+        use std::{collections::VecDeque, error::Error};
+
+        // TODO: This is... not great.
+        pub(crate) fn test_db() -> Result<mdbx::Environment<mdbx::WriteMap>, mdbx::Error> {
+            const DB_TABLES: usize = 10;
+
+            // Build environment
+            let mut builder = mdbx::Environment::<mdbx::WriteMap>::new();
+            builder.set_max_dbs(DB_TABLES);
+            builder.set_geometry(mdbx::Geometry {
+                size: Some(0..usize::MAX),
+                growth_step: None,
+                shrink_threshold: None,
+                page_size: None,
+            });
+            builder.set_rp_augment_limit(16 * 256 * 1024);
+
+            // Open
+            let tempdir = tempdir().unwrap();
+            let path = tempdir.path();
+            std::fs::DirBuilder::new().recursive(true).create(path).unwrap();
+            let db = builder.open(path)?;
+
+            // Create tables
+            let tx = db.begin_rw_txn()?;
+            tx.create_db(Some("SyncStage"), mdbx::DatabaseFlags::default())?;
+            tx.commit()?;
+
+            Ok(db)
+        }
+
+        pub(crate) struct TestStage {
+            id: StageId,
+            exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
+            unwind_outputs: VecDeque<Result<UnwindOutput, Box<dyn Error + Send + Sync>>>,
+        }
+
+        impl TestStage {
+            pub(crate) fn new(id: StageId) -> Self {
+                Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
+            }
+
+            pub(crate) fn add_exec(mut self, output: Result<ExecOutput, StageError>) -> Self {
+                self.exec_outputs.push_back(output);
+                self
+            }
+
+            pub(crate) fn add_unwind(
+                mut self,
+                output: Result<UnwindOutput, Box<dyn Error + Send + Sync>>,
+            ) -> Self {
+                self.unwind_outputs.push_back(output);
+                self
+            }
+        }
+
+        #[async_trait]
+        impl<'db, E> Stage<'db, E> for TestStage
+        where
+            E: mdbx::EnvironmentKind,
+        {
+            fn id(&self) -> StageId {
+                self.id
+            }
+
+            async fn execute<'tx>(
+                &mut self,
+                _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+                _: ExecInput,
+            ) -> Result<ExecOutput, StageError>
+            where
+                'db: 'tx,
+            {
+                self.exec_outputs.pop_front().expect("Test stage executed too many times.")
+            }
+
+            async fn unwind<'tx>(
+                &mut self,
+                _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+                _: UnwindInput,
+            ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
+            where
+                'db: 'tx,
+            {
+                self.unwind_outputs.pop_front().expect("Test stage unwound too many times.")
+            }
+        }
+    }
 }
