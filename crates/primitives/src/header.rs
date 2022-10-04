@@ -19,11 +19,12 @@ pub struct Header {
     /// block; formally Ht.
     pub transactions_root: H256,
     /// The Keccak 256-bit hash of the root
-    /// node of the trie structure populated with the receipts of each transaction in the transactions list
-    /// portion of the block; formally He.
+    /// node of the trie structure populated with the receipts of each transaction in the
+    /// transactions list portion of the block; formally He.
     pub receipts_root: H256,
     /// The Bloom filter composed from indexable information (logger address and log topics)
-    /// contained in each log entry from the receipt of each transaction in the transactions list; formally Hb.
+    /// contained in each log entry from the receipt of each transaction in the transactions list;
+    /// formally Hb.
     pub logs_bloom: H256, // change to Bloom
     /// A scalar value corresponding to the difficulty level of this block. This can be calculated
     /// from the previous block’s difficulty level and the timestamp; formally Hd.
@@ -42,16 +43,18 @@ pub struct Header {
     /// fewer; formally Hx.
     pub extra_data: Bytes,
     /// A 256-bit hash which, combined with the
-    /// nonce, proves that a sufficient amount of computation has been carried out on this block; formally Hm.
+    /// nonce, proves that a sufficient amount of computation has been carried out on this block;
+    /// formally Hm.
     pub mix_hash: H256,
-    /// A 64-bit value which, combined with the mixhash, proves that a sufficient amount of computation has
-    /// been carried out on this block; formally Hn.
+    /// A 64-bit value which, combined with the mixhash, proves that a sufficient amount of
+    /// computation has been carried out on this block; formally Hn.
     pub nonce: u64,
     /// A scalar representing EIP1559 base fee which can move up or down each block according
     /// to a formula which is a function of gas used in parent block and gas target
     /// (block gas limit divided by elasticity multiplier) of parent block.
     /// The algorithm results in the base fee per gas increasing when blocks are
-    /// above the gas target, and decreasing when blocks are below the gas target. The base fee per gas is burned.
+    /// above the gas target, and decreasing when blocks are below the gas target. The base fee per
+    /// gas is burned.
     pub base_fee_per_gas: Option<u64>,
 }
 

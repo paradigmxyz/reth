@@ -1,5 +1,3 @@
-
-
 /// Transaction Type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TxType {

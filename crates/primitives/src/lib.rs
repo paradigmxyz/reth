@@ -25,6 +25,7 @@ pub type BlockNumber = u64;
 pub type Address = H160;
 
 // There is a benefit of using wrapped Bytes as it gives u serde and debug
-pub use ethers_core::types::{Bloom, Bytes};
-pub use ethers_core::types::{H160, H256, H512, H64, U256, U64};
-pub use ethers_core::types as rpc;
+pub use ethers_core::{
+    types as rpc,
+    types::{Bloom, Bytes, H160, H256, H512, H64, U256, U64},
+};
