@@ -11,6 +11,7 @@
 use async_trait::async_trait;
 use reth_db::mdbx;
 use reth_primitives::U64;
+use std::fmt::Display;
 use thiserror::Error;
 
 mod pipeline;
@@ -75,6 +76,12 @@ pub enum StageError {
 /// Each stage ID must be unique.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StageId(pub &'static str);
+
+impl Display for StageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl StageId {
     /// Get the last committed progress of this stage.

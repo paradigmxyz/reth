@@ -2,6 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use reth_db::mdbx;
 use reth_primitives::U64;
 use std::fmt::{Debug, Formatter};
+use tracing::*;
 
 struct QueuedStage<'db, E>
 where
@@ -119,34 +120,43 @@ where
                         .map_or(false, |(progress, target)| progress >= target);
 
                     // Execute stage
-                    let output = if !reached_tip_flag && *require_tip && !reached_virtual_tip {
-                        // Stage requires us to reach the tip of the chain first, but we have not.
-                        Ok(ExecOutput {
-                            stage_progress: prev_progress.unwrap_or_default(),
-                            done: true,
-                            reached_tip: false,
-                        })
-                    } else if prev_progress
-                        .zip(self.max_block)
-                        .map_or(false, |(prev_progress, target)| prev_progress >= target)
-                    {
-                        // We reached the maximum block, so we skip the stage
-                        Ok(ExecOutput {
-                            stage_progress: prev_progress.unwrap_or_default(),
-                            done: true,
-                            reached_tip: true,
-                        })
-                    } else {
-                        stage
-                            .execute(
-                                &mut tx,
-                                ExecInput { previous_stage, stage_progress: prev_progress },
-                            )
-                            .await
-                    };
+                    let output = async {
+                        if !reached_tip_flag && *require_tip && !reached_virtual_tip {
+                            info!("Tip not reached, skipping.");
+
+                            // Stage requires us to reach the tip of the chain first, but we have
+                            // not.
+                            Ok(ExecOutput {
+                                stage_progress: prev_progress.unwrap_or_default(),
+                                done: true,
+                                reached_tip: false,
+                            })
+                        } else if prev_progress
+                            .zip(self.max_block)
+                            .map_or(false, |(prev_progress, target)| prev_progress >= target)
+                        {
+                            info!("Stage reached maximum block, skipping.");
+                            // We reached the maximum block, so we skip the stage
+                            Ok(ExecOutput {
+                                stage_progress: prev_progress.unwrap_or_default(),
+                                done: true,
+                                reached_tip: true,
+                            })
+                        } else {
+                            stage
+                                .execute(
+                                    &mut tx,
+                                    ExecInput { previous_stage, stage_progress: prev_progress },
+                                )
+                                .await
+                        }
+                    }
+                    .instrument(info_span!("Running", stage = %stage_id))
+                    .await;
 
                     match output {
                         Ok(ExecOutput { stage_progress, done, reached_tip }) => {
+                            debug!(stage = %stage_id, checkpoint = %stage_progress, %done, "Stage made progress");
                             stage_id.save_progress(&tx, stage_progress)?;
 
                             // TODO: Make the commit interval configurable
@@ -171,6 +181,8 @@ where
                             }
                         }
                         Err(StageError::Validation { block }) => {
+                            debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
+
                             // We unwind because of a validation error. If the unwind itself fails,
                             // we bail entirely, otherwise we restart the execution loop from the
                             // beginning.
@@ -227,13 +239,27 @@ where
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
-            while stage_progress > to {
-                let unwind_output = stage
-                    .unwind(&mut tx, UnwindInput { stage_progress, unwind_to: to, bad_block })
-                    .await?;
-                stage_progress = unwind_output.stage_progress;
-                stage_id.save_progress(&tx, stage_progress)?;
+
+            let unwind: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
+                if stage_progress < to {
+                    debug!(from = %stage_progress, %to, "Unwind point too far for stage");
+                    return Ok(())
+                }
+
+                debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
+                while stage_progress > to {
+                    let unwind_output = stage
+                        .unwind(&mut tx, UnwindInput { stage_progress, unwind_to: to, bad_block })
+                        .await?;
+                    stage_progress = unwind_output.stage_progress;
+                    stage_id.save_progress(&tx, stage_progress)?;
+                }
+
+                Ok(())
             }
+            .instrument(info_span!("Unwinding", stage = %stage_id))
+            .await;
+            unwind?
         }
 
         tx.commit()?;

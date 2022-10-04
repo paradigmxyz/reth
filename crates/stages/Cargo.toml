@@ -12,6 +12,8 @@ reth-primitives = { path = "../primitives" }
 reth-db = { path = "../db" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
+tracing = "0.1.36"
+tracing-futures = "0.2.5"
 
 [dev-dependencies]
 tokio = { version = "1.21.2", features = ["rt", "macros"] }

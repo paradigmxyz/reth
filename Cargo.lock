@@ -1353,6 +1353,8 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
+ "tracing-futures",
 ]
 
 [[package]]
