@@ -1,7 +1,8 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::mdbx;
 use reth_primitives::U64;
 use std::fmt::{Debug, Formatter};
+use tokio::sync::mpsc::Sender;
 use tracing::*;
 
 struct QueuedStage<'db, E>
@@ -41,6 +42,7 @@ where
 {
     stages: Vec<QueuedStage<'db, E>>,
     max_block: Option<U64>,
+    events_sender: Option<Sender<PipelineEvent>>,
 }
 
 impl<'db, E> Default for Pipeline<'db, E>
@@ -48,7 +50,7 @@ where
     E: mdbx::EnvironmentKind,
 {
     fn default() -> Self {
-        Self { stages: Vec::new(), max_block: None }
+        Self { stages: Vec::new(), max_block: None, events_sender: None }
     }
 }
 
@@ -65,6 +67,19 @@ impl<'db, E> Pipeline<'db, E>
 where
     E: mdbx::EnvironmentKind,
 {
+    /// Create a new pipeline.
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Create a new pipeline with a channel for receiving events (see [PipelineEvent]).
+    pub fn new_with_channel(sender: Sender<PipelineEvent>) -> Self {
+        let mut pipeline = Self::new();
+        pipeline.events_sender = Some(sender);
+
+        pipeline
+    }
+
     /// Add a stage to the pipeline.
     ///
     /// # Unwinding
@@ -115,6 +130,12 @@ where
                 let stage_id = stage.id();
                 let block_reached = loop {
                     let prev_progress = stage_id.get_progress(&tx)?;
+
+                    if let Some(rx) = &self.events_sender {
+                        rx.send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
+                            .await?
+                    }
+
                     let reached_virtual_tip = maximum_progress
                         .zip(self.max_block)
                         .map_or(false, |(progress, target)| progress >= target);
@@ -155,9 +176,14 @@ where
                     .await;
 
                     match output {
-                        Ok(ExecOutput { stage_progress, done, reached_tip }) => {
-                            debug!(stage = %stage_id, checkpoint = %stage_progress, %done, "Stage made progress");
+                        Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
+                            debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
                             stage_id.save_progress(&tx, stage_progress)?;
+
+                            if let Some(rx) = &self.events_sender {
+                                rx.send(PipelineEvent::Ran { stage_id, result: Some(out.clone()) })
+                                    .await?
+                            }
 
                             // TODO: Make the commit interval configurable
                             tx.commit()?;
@@ -183,6 +209,10 @@ where
                         Err(StageError::Validation { block }) => {
                             debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
 
+                            if let Some(rx) = &self.events_sender {
+                                rx.send(PipelineEvent::Ran { stage_id, result: None }).await?
+                            }
+
                             // We unwind because of a validation error. If the unwind itself fails,
                             // we bail entirely, otherwise we restart the execution loop from the
                             // beginning.
@@ -194,7 +224,13 @@ where
                                 Err(e) => return Err(e),
                             }
                         }
-                        Err(StageError::Internal(e)) => return Err(e),
+                        Err(StageError::Internal(e)) => {
+                            if let Some(rx) = &self.events_sender {
+                                rx.send(PipelineEvent::Ran { stage_id, result: None }).await?
+                            }
+
+                            return Err(e)
+                        }
                     }
                 };
 
@@ -248,11 +284,33 @@ where
 
                 debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
                 while stage_progress > to {
-                    let unwind_output = stage
-                        .unwind(&mut tx, UnwindInput { stage_progress, unwind_to: to, bad_block })
-                        .await?;
-                    stage_progress = unwind_output.stage_progress;
-                    stage_id.save_progress(&tx, stage_progress)?;
+                    let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
+
+                    if let Some(rx) = &self.events_sender {
+                        rx.send(PipelineEvent::Unwinding { stage_id, input }).await?
+                    }
+                    let output = stage.unwind(&mut tx, input).await;
+                    match output {
+                        Ok(unwind_output) => {
+                            stage_progress = unwind_output.stage_progress;
+                            stage_id.save_progress(&tx, stage_progress)?;
+
+                            if let Some(rx) = &self.events_sender {
+                                rx.send(PipelineEvent::Unwound {
+                                    stage_id,
+                                    result: Some(unwind_output),
+                                })
+                                .await?
+                            }
+                        }
+                        Err(err) => {
+                            if let Some(rx) = &self.events_sender {
+                                rx.send(PipelineEvent::Unwound { stage_id, result: None }).await?
+                            }
+
+                            return Err(err)
+                        }
+                    }
                 }
 
                 Ok(())
@@ -267,6 +325,47 @@ where
     }
 }
 
+/// An event emitted by a [Pipeline].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum PipelineEvent {
+    /// Emitted when a stage is about to be run.
+    Running {
+        /// The stage that is about to be run.
+        stage_id: StageId,
+        /// The previous checkpoint of the stage.
+        stage_progress: Option<U64>,
+    },
+    /// Emitted when a stage has run a single time.
+    ///
+    /// It is possible for multiple of these events to be emitted over the duration of a pipeline's
+    /// execution:
+    /// - If the pipeline loops, the stage will be run again at some point
+    /// - If the stage exits early but has acknowledged that it is not entirely done
+    Ran {
+        /// The stage that was run.
+        stage_id: StageId,
+        /// The result of executing the stage. If it is None then an error was encountered.
+        result: Option<ExecOutput>,
+    },
+    /// Emitted when a stage is about to be unwound.
+    Unwinding {
+        /// The stage that is about to be unwound.
+        stage_id: StageId,
+        /// The unwind parameters.
+        input: UnwindInput,
+    },
+    /// Emitted when a stage has been unwound.
+    ///
+    /// It is possible for multiple of these events to be emitted over the duration of a pipeline's
+    /// execution, since other stages may ask the pipeline to unwind.
+    Unwound {
+        /// The stage that was unwound.
+        stage_id: StageId,
+        /// The result of unwinding the stage. If it is None then an error was encountered.
+        result: Option<UnwindOutput>,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +374,8 @@ mod tests {
     use reth_db::mdbx;
     use std::error::Error;
     use tempfile::tempdir;
+    use tokio::sync::mpsc::channel;
+    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     struct A;
 
@@ -340,16 +441,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_pipeline() -> Result<(), Box<dyn Error + Send + Sync>> {
-        let db = test_db()?;
+    async fn run_pipeline() {
+        let (tx, rx) = channel(2);
+        let db = test_db().expect("Could not open test database");
 
-        Pipeline::<mdbx::WriteMap>::default()
-            .push(A, false)
-            .set_max_block(Some(10.into()))
-            .run(&db)
-            .await?;
+        // Run pipeline
+        tokio::spawn(async move {
+            Pipeline::<mdbx::WriteMap>::new_with_channel(tx)
+                .push(A, false)
+                .set_max_block(Some(10.into()))
+                .run(&db)
+                .await
+        });
 
-        Ok(())
+        // Check that the stages were run in order
+        let stage_id_a = <A as Stage<'_, mdbx::WriteMap>>::id(&A);
+        assert_eq!(
+            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            vec![
+                PipelineEvent::Running { stage_id: stage_id_a, stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: stage_id_a,
+                    result: Some(ExecOutput {
+                        stage_progress: 10.into(),
+                        done: true,
+                        reached_tip: true,
+                    }),
+                },
+            ]
+        );
+
+        // TODO: Compare StageSync table entry
     }
 
     #[tokio::test]

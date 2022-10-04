@@ -18,7 +18,7 @@ mod pipeline;
 pub use pipeline::*;
 
 /// Stage execution input, see [Stage::execute].
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
     /// The stage that was run before the current stage and the block number it reached.
     pub previous_stage: Option<(StageId, U64)>,
@@ -27,7 +27,7 @@ pub struct ExecInput {
 }
 
 /// Stage unwind input, see [Stage::unwind].
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
     /// The current highest block of the stage.
     pub stage_progress: U64,
@@ -38,7 +38,7 @@ pub struct UnwindInput {
 }
 
 /// The output of a stage execution.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ExecOutput {
     /// How far the stage got.
     pub stage_progress: U64,
@@ -49,7 +49,7 @@ pub struct ExecOutput {
 }
 
 /// The output of a stage unwinding.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwindOutput {
     /// The block at which the stage has unwound to.
     pub stage_progress: U64,
@@ -128,7 +128,7 @@ impl StageId {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 #[async_trait]
-pub trait Stage<'db, E>
+pub trait Stage<'db, E>: Send + Sync
 where
     E: mdbx::EnvironmentKind,
 {
