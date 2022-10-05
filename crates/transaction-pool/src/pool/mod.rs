@@ -95,20 +95,25 @@ mod queued;
 mod transaction;
 
 // Helper type aliases for associated types
-type TransactionHashFor<PoolApi> =
-    <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Hash;
-type TransactionIdFor<PoolApi> =
-    <<PoolApi as TransactionValidator>::Transaction as PoolTransaction>::Id;
+pub(crate) type TransactionHashFor<T> =
+    <<T as TransactionOrdering>::Transaction as PoolTransaction>::Hash;
+
+pub(crate) type TransactionIdFor<T> =
+    <<T as TransactionOrdering>::Transaction as PoolTransaction>::Id;
 
 /// Shareable Transaction pool.
-pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
+pub struct Pool<P: PoolClient, T: TransactionOrdering> {
     /// Arc'ed instance of the pool internals
-    pool: Arc<PoolInner<PoolApi, Ordering>>,
+    pool: Arc<PoolInner<P, T>>,
 }
 
 // === impl Pool ===
 
-impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {
+impl<P: PoolClient, T: TransactionOrdering> Pool<P, T>
+where
+    P: PoolClient,
+    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+{
     /// Returns the actual block number for the block id
     fn resolve_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
         self.pool.client().ensure_block_number(block_id)
@@ -120,7 +125,7 @@ impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {
         &self,
         block_id: &BlockId,
         transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<HashMap<TransactionHashFor<P>, TransactionValidationResult<P::Transaction>>>
+    ) -> PoolResult<HashMap<TransactionHashFor<T>, TransactionValidationResult<P::Transaction>>>
     {
         // get the actual block number which is required to validate the transactions
         let block_number = self.resolve_block_number(block_id)?;
@@ -143,7 +148,7 @@ impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {
         block_id: &BlockId,
         block_number: U64,
         transaction: P::Transaction,
-    ) -> (TransactionHashFor<P>, TransactionValidationResult<P::Transaction>) {
+    ) -> (TransactionHashFor<T>, TransactionValidationResult<P::Transaction>) {
         let hash = *transaction.hash();
         // TODO this is where additional validate checks would go, like banned senders etc...
         let res = self.pool.client().validate_transaction(block_id, transaction).await;
@@ -161,22 +166,26 @@ impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {
 }
 
 /// Transaction pool internals.
-pub struct PoolInner<P: PoolClient, O: TransactionOrdering> {
+pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     /// Chain/Storage access.
     client: Arc<P>,
     /// The internal pool that manages
-    pool: RwLock<GraphPool<P::Transaction, O>>,
+    pool: RwLock<GraphPool<T>>,
     /// Pool settings.
     config: PoolConfig,
     /// Listeners for transaction state change events.
-    event_listeners: RwLock<PoolEventListener<TransactionHashFor<P>, H256>>,
+    event_listeners: RwLock<PoolEventListener<TransactionHashFor<T>, H256>>,
     /// Listeners for new ready transactions.
-    added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<P>>>>,
+    added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<T>>>>,
 }
 
 // === impl PoolInner ===
 
-impl<P: PoolClient, O: TransactionOrdering> PoolInner<P, O> {
+impl<P: PoolClient, T: TransactionOrdering> PoolInner<P, T>
+where
+    P: PoolClient,
+    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+{
     /// Get client reference.
     pub fn client(&self) -> &P {
         &self.client
@@ -187,13 +196,11 @@ impl<P: PoolClient, O: TransactionOrdering> PoolInner<P, O> {
 ///
 /// This pool maintains a dependency graph of transactions and provides the currently ready
 /// transactions.
-
-// TODO could unify over `TransactionOrdering::Transaction`
-pub struct GraphPool<T: PoolTransaction, O: TransactionOrdering> {
+pub struct GraphPool<T: TransactionOrdering> {
     /// How to order transactions.
-    ordering: Arc<O>,
+    ordering: Arc<T>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
-    pending: PendingTransactions<T, O>,
+    pending: PendingTransactions<T>,
     /// Sub-Pool of transactions that are waiting for state changes that eventually turn them
     /// valid, so they can be moved in the `pending` pool.
     queued: QueuedTransactions<T>,
@@ -201,14 +208,14 @@ pub struct GraphPool<T: PoolTransaction, O: TransactionOrdering> {
 
 // === impl PoolInner ===
 
-impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
+impl<T: TransactionOrdering> GraphPool<T> {
     /// Returns if the transaction for the given hash is already included in this pool
-    pub fn contains(&self, tx_hash: &T::Hash) -> bool {
+    pub fn contains(&self, tx_hash: &TransactionHashFor<T>) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
-    pub fn ready(&self) -> TransactionsIterator<T, O> {
+    pub fn ready(&self) -> TransactionsIterator<T> {
         self.pending.get_transactions()
     }
 
@@ -227,7 +234,10 @@ impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
     /// sender's balance or nonce and instead their feeCap determines whether the transaction is
     /// _currently_ (on the current state) ready or needs to be parked until the feeCap satisfies
     /// the block's baseFee.
-    fn add_transaction(&mut self, tx: ValidPoolTransaction<T>) -> PoolResult<AddedTransaction<T>> {
+    fn add_transaction(
+        &mut self,
+        tx: ValidPoolTransaction<T::Transaction>,
+    ) -> PoolResult<AddedTransaction<T::Transaction>> {
         if self.contains(tx.hash()) {
             warn!(target: "txpool", "[{:?}] Already added", tx.hash());
             return Err(PoolError::AlreadyAdded(Box::new(*tx.hash())))
@@ -254,7 +264,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
     fn add_pending_transaction(
         &mut self,
         tx: QueuedPoolTransaction<T>,
-    ) -> PoolResult<AddedTransaction<T>> {
+    ) -> PoolResult<AddedTransaction<T::Transaction>> {
         let hash = *tx.transaction.hash();
         trace!(target: "txpool", "adding pending transaction [{:?}]", hash);
         let mut pending = AddedPendingTransaction::new(hash);
@@ -313,8 +323,8 @@ impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
     /// And queued transactions might get promoted if the pruned dependencies unlock them.
     pub fn prune_dependencies(
         &mut self,
-        dependencies: impl IntoIterator<Item = T::Id>,
-    ) -> PruneResult<T> {
+        dependencies: impl IntoIterator<Item = TransactionIdFor<T>>,
+    ) -> PruneResult<T::Transaction> {
         let mut imports = vec![];
         let mut pruned = vec![];
 
@@ -342,7 +352,10 @@ impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
     }
 
     /// Remove the given transactions from the pool.
-    pub fn remove_invalid(&mut self, tx_hashes: Vec<T::Hash>) -> Vec<Arc<ValidPoolTransaction<T>>> {
+    pub fn remove_invalid(
+        &mut self,
+        tx_hashes: Vec<TransactionHashFor<T>>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         // early exit in case there is no invalid transactions.
         if tx_hashes.is_empty() {
             return vec![]

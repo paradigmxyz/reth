@@ -58,6 +58,6 @@ where
 impl<PoolApi, Ordering> TransactionPool for Pool<PoolApi, Ordering>
 where
     PoolApi: PoolClient,
-    Ordering: TransactionOrdering,
+    Ordering: TransactionOrdering<Transaction = <PoolApi as TransactionValidator>::Transaction>,
 {
 }

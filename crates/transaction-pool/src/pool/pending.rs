@@ -1,6 +1,10 @@
 use crate::{
-    error, error::PoolResult, pool::queued::QueuedPoolTransaction, traits::PoolTransaction,
-    validate::ValidPoolTransaction, TransactionOrdering,
+    error,
+    error::PoolResult,
+    pool::{queued::QueuedPoolTransaction, TransactionHashFor, TransactionIdFor},
+    traits::PoolTransaction,
+    validate::ValidPoolTransaction,
+    TransactionOrdering,
 };
 use parking_lot::RwLock;
 use reth_primitives::{TxHash, H256, U256};
@@ -18,34 +22,34 @@ use tracing::{debug, trace, warn};
 /// Each transaction in this pool is valid on its own, i.e. they are not dependent on transaction
 /// that must be executed first. Each of these transaction can be executed independently on the
 /// current state
-pub(crate) struct PendingTransactions<T: PoolTransaction, O: TransactionOrdering> {
+pub(crate) struct PendingTransactions<T: TransactionOrdering> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions where submitted to the pool.
     id: u64,
     /// How to order transactions.
-    ordering: Arc<O>,
+    ordering: Arc<T>,
     /// Dependencies that are provided by `PendingTransaction`s
-    provided_dependencies: HashMap<T::Id, T::Hash>,
+    provided_dependencies: HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
     /// Pending transactions that are currently on hold until the `baseFee` of the pending block
     /// changes in favor of the parked transactions: the `pendingBlock.baseFee` must decrease
     /// before they can be moved to the ready pool and are ready to be executed.
-    parked: ParkedTransactions<T, O>,
+    parked: ParkedTransactions<T>,
     /// All Transactions that are currently ready.
     ///
     /// Meaning, there are no nonce gaps in these transactions and all of them satisfy the
     /// `baseFee` condition: transaction `maxFeePerGas >= pendingBlock.baseFee`
-    ready_transactions: Arc<RwLock<HashMap<T::Hash, PendingTransaction<T, O>>>>,
+    ready_transactions: Arc<RwLock<HashMap<TransactionHashFor<T>, PendingTransaction<T>>>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
     /// Sorted by their scoring value.
-    independent_transactions: BTreeSet<PoolTransactionRef<T, O>>,
+    independent_transactions: BTreeSet<PoolTransactionRef<T>>,
 }
 
 // === impl PendingTransactions ===
 
-impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
+impl<T: TransactionOrdering> PendingTransactions<T> {
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
@@ -64,7 +68,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
-    pub fn get_transactions(&self) -> TransactionsIterator<T, O> {
+    pub fn get_transactions(&self) -> TransactionsIterator<T> {
         TransactionsIterator {
             all: self.ready_transactions.read().clone(),
             independent: self.independent_transactions.clone(),
@@ -84,16 +88,16 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     // }
 
     /// Returns true if the transaction is part of the queue.
-    pub fn contains(&self, hash: &T::Hash) -> bool {
+    pub fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
         self.ready_transactions.read().contains_key(hash)
     }
 
     /// Returns the transaction for the hash if it's in the ready pool but not yet mined
-    pub(crate) fn get(&self, hash: &T::Hash) -> Option<PendingTransaction<T, O>> {
+    pub(crate) fn get(&self, hash: &TransactionHashFor<T>) -> Option<PendingTransaction<T>> {
         self.ready_transactions.read().get(hash).cloned()
     }
 
-    pub fn provided_dependencies(&self) -> &HashMap<T::Id, T::Hash> {
+    pub fn provided_dependencies(&self) -> &HashMap<TransactionIdFor<T>, TransactionHashFor<T>> {
         &self.provided_dependencies
     }
 
@@ -115,7 +119,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     pub fn add_transaction(
         &mut self,
         tx: QueuedPoolTransaction<T>,
-    ) -> PoolResult<Vec<Arc<ValidPoolTransaction<T>>>> {
+    ) -> PoolResult<Vec<Arc<ValidPoolTransaction<T::Transaction>>>> {
         assert!(tx.is_satisfied(), "transaction must be ready",);
         assert!(
             !self.ready_transactions.read().contains_key(tx.transaction.hash()),
@@ -149,7 +153,8 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
             self.provided_dependencies.insert(mark, hash);
         }
 
-        let priority = self.ordering.priority(());
+        let priority = self.ordering.priority(&tx.transaction.transaction);
+
         let transaction =
             PoolTransactionRef { submission_id, transaction: tx.transaction, priority };
 
@@ -169,8 +174,9 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     /// Removes and returns those transactions that got replaced by the `tx`
     fn replaced_transactions(
         &mut self,
-        tx: &ValidPoolTransaction<T>,
-    ) -> PoolResult<(Vec<Arc<ValidPoolTransaction<T>>>, Vec<T::Hash>)> {
+        tx: &ValidPoolTransaction<T::Transaction>,
+    ) -> PoolResult<(Vec<Arc<ValidPoolTransaction<T::Transaction>>>, Vec<TransactionHashFor<T>>)>
+    {
         // check if we are replacing transactions
         let remove_hashes: HashSet<_> =
             tx.provides.iter().filter_map(|mark| self.provided_dependencies.get(mark)).collect();
@@ -219,8 +225,8 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     /// This will also remove all transactions that depend on those.
     pub fn clear_transactions(
         &mut self,
-        tx_hashes: &[T::Hash],
-    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        tx_hashes: &[TransactionHashFor<T>],
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.remove_with_dependencies(tx_hashes.to_vec(), None)
     }
 
@@ -228,7 +234,10 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     ///
     /// This will also remove all transactions that lead to the transaction that provides the
     /// id.
-    pub fn prune_dependencies(&mut self, id: T::Id) -> Vec<Arc<ValidPoolTransaction<T>>> {
+    pub fn prune_dependencies(
+        &mut self,
+        id: TransactionIdFor<T>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed_tx = vec![];
 
         // the dependencies to remove
@@ -250,7 +259,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
                     let hash = tx.hash();
                     let mut ready = self.ready_transactions.write();
 
-                    let mut previous_dependency = |dependency| -> Option<Vec<T::Id>> {
+                    let mut previous_dependency = |dependency| -> Option<Vec<TransactionIdFor<T>>> {
                         let prev_hash = self.provided_dependencies.get(dependency)?;
                         let tx2 = ready.get_mut(prev_hash)?;
                         // remove hash
@@ -303,9 +312,9 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
     /// the given filter set.
     pub fn remove_with_dependencies(
         &mut self,
-        mut tx_hashes: Vec<T::Hash>,
-        dependency_filter: Option<HashSet<T::Id>>,
-    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        mut tx_hashes: Vec<TransactionHashFor<T>>,
+        dependency_filter: Option<HashSet<TransactionIdFor<T>>>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
         let mut ready = self.ready_transactions.write();
 
@@ -355,25 +364,25 @@ impl<T: PoolTransaction, O: TransactionOrdering> PendingTransactions<T, O> {
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug)]
-pub(crate) struct PendingTransaction<T: PoolTransaction, O: TransactionOrdering> {
+pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
-    transaction: PoolTransactionRef<T, O>,
+    transaction: PoolTransactionRef<T>,
     /// Tracks the transactions that get unlocked by this transaction.
-    unlocks: Vec<T::Hash>,
+    unlocks: Vec<TransactionHashFor<T>>,
     /// Amount of required dependencies that are inherently provided.
     requires_offset: usize,
 }
 
 // == impl PendingTransaction ===
 
-impl<T: PoolTransaction, O: TransactionOrdering> PendingTransaction<T, O> {
+impl<T: TransactionOrdering> PendingTransaction<T> {
     /// Returns all ids this transaction satisfies.
-    pub fn provides(&self) -> &[T::Id] {
+    pub fn provides(&self) -> &[TransactionIdFor<T>] {
         &self.transaction.transaction.provides
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Clone for PendingTransaction<T, O> {
+impl<T: TransactionOrdering> Clone for PendingTransaction<T> {
     fn clone(&self) -> Self {
         Self {
             transaction: self.transaction.clone(),
@@ -385,16 +394,16 @@ impl<T: PoolTransaction, O: TransactionOrdering> Clone for PendingTransaction<T,
 
 /// A reference to a transaction in the _pending_ pool
 #[derive(Debug)]
-pub struct PoolTransactionRef<T: PoolTransaction, O: TransactionOrdering> {
+pub struct PoolTransactionRef<T: TransactionOrdering> {
     /// Actual transaction.
-    pub transaction: Arc<ValidPoolTransaction<T>>,
+    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// Identifier that tags when transaction was submitted in the pool.
     pub submission_id: u64,
     /// The priority value assigned by the used `Ordering` function.
-    pub priority: O::Priority,
+    pub priority: T::Priority,
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Clone for PoolTransactionRef<T, O> {
+impl<T: TransactionOrdering> Clone for PoolTransactionRef<T> {
     fn clone(&self) -> Self {
         Self {
             transaction: Arc::clone(&self.transaction),
@@ -404,21 +413,21 @@ impl<T: PoolTransaction, O: TransactionOrdering> Clone for PoolTransactionRef<T,
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Eq for PoolTransactionRef<T, O> {}
+impl<T: TransactionOrdering> Eq for PoolTransactionRef<T> {}
 
-impl<T: PoolTransaction, O: TransactionOrdering> PartialEq<Self> for PoolTransactionRef<T, O> {
+impl<T: TransactionOrdering> PartialEq<Self> for PoolTransactionRef<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> PartialOrd<Self> for PoolTransactionRef<T, O> {
+impl<T: TransactionOrdering> PartialOrd<Self> for PoolTransactionRef<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Ord for PoolTransactionRef<T, O> {
+impl<T: TransactionOrdering> Ord for PoolTransactionRef<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // This compares by `priority` and only if two tx have the exact same priority this compares
         // the unique `submission_id`. This ensures that transactions with same priority are not
@@ -430,55 +439,55 @@ impl<T: PoolTransaction, O: TransactionOrdering> Ord for PoolTransactionRef<T, O
 }
 
 /// Pending Transactions that are currently parked until their set baseFee becomes valid
-struct ParkedTransactions<T: PoolTransaction, O: TransactionOrdering> {
+struct ParkedTransactions<T: TransactionOrdering> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions where submitted to the pool.
     id: u64,
     /// All transactions that are currently parked due to their fee.
-    parked_transactions: HashMap<T::Hash, ParkedTransaction<T, O>>,
+    parked_transactions: HashMap<TransactionHashFor<T>, ParkedTransaction<T>>,
     /// Same transactions but sorted by their fee and priority
-    sorted_transactions: BTreeSet<ParkedTransactionRef<T, O>>,
+    sorted_transactions: BTreeSet<ParkedTransactionRef<T>>,
 }
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug, Clone)]
-pub struct ParkedTransaction<T: PoolTransaction, O: TransactionOrdering> {
+pub struct ParkedTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
-    transaction: PoolTransactionRef<T, O>,
+    transaction: PoolTransactionRef<T>,
     /// Tracks the transactions that get unlocked by this transaction.
-    unlocks: Vec<T::Hash>,
+    unlocks: Vec<TransactionHashFor<T>>,
     /// Amount of required dependencies that are inherently provided
     requires_offset: usize,
 }
 
 /// A reference to a currently _parked_ transaction.
-struct ParkedTransactionRef<T: PoolTransaction, O: TransactionOrdering> {
+struct ParkedTransactionRef<T: TransactionOrdering> {
     /// Actual transaction.
-    transaction: Arc<ValidPoolTransaction<T>>,
+    transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// Identifier that tags when transaction was submitted in the pool.
     submission_id: u64,
     /// The priority value assigned by the used `Ordering` function.
-    priority: O::Priority,
+    priority: T::Priority,
     /// EIP-1559 Max base fee the caller is willing to pay.
     max_fee_per_gas: U256,
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Eq for ParkedTransactionRef<T, O> {}
+impl<T: TransactionOrdering> Eq for ParkedTransactionRef<T> {}
 
-impl<T: PoolTransaction, O: TransactionOrdering> PartialEq<Self> for ParkedTransactionRef<T, O> {
+impl<T: TransactionOrdering> PartialEq<Self> for ParkedTransactionRef<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> PartialOrd<Self> for ParkedTransactionRef<T, O> {
+impl<T: TransactionOrdering> PartialOrd<Self> for ParkedTransactionRef<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Ord for ParkedTransactionRef<T, O> {
+impl<T: TransactionOrdering> Ord for ParkedTransactionRef<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // This compares the `max_fee_per_gas` value of the transaction
         self.max_fee_per_gas
@@ -488,22 +497,22 @@ impl<T: PoolTransaction, O: TransactionOrdering> Ord for ParkedTransactionRef<T,
     }
 }
 
-pub struct TransactionsIterator<T: PoolTransaction, O: TransactionOrdering> {
-    all: HashMap<T::Hash, PendingTransaction<T, O>>,
-    awaiting: HashMap<T::Hash, (usize, PoolTransactionRef<T, O>)>,
-    independent: BTreeSet<PoolTransactionRef<T, O>>,
-    invalid: HashSet<T::Hash>,
+pub struct TransactionsIterator<T: TransactionOrdering> {
+    all: HashMap<TransactionHashFor<T>, PendingTransaction<T>>,
+    awaiting: HashMap<TransactionHashFor<T>, (usize, PoolTransactionRef<T>)>,
+    independent: BTreeSet<PoolTransactionRef<T>>,
+    invalid: HashSet<TransactionHashFor<T>>,
 }
 
 // == impl TransactionsIterator ==
 
-impl<T: PoolTransaction, O: TransactionOrdering> TransactionsIterator<T, O> {
+impl<T: TransactionOrdering> TransactionsIterator<T> {
     /// Mark the transaction as invalid.
     ///
     /// As a consequence, all values that depend on the invalid one will be skipped.
     /// When given transaction is not in the pool it has no effect.
     /// When invoked on a fully drained iterator it has no effect either.
-    pub fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T>>) {
+    pub fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
         if let Some(invalid_transaction) = self.all.get(tx.hash()) {
             debug!(
                 target: "txpool",
@@ -518,7 +527,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> TransactionsIterator<T, O> {
 
     /// Depending on number of satisfied requirements insert given ref
     /// either to awaiting set or to best set.
-    fn independent_or_awaiting(&mut self, satisfied: usize, tx_ref: PoolTransactionRef<T, O>) {
+    fn independent_or_awaiting(&mut self, satisfied: usize, tx_ref: PoolTransactionRef<T>) {
         if satisfied >= tx_ref.transaction.depends_on.len() {
             // If we have satisfied all deps insert to best
             self.independent.insert(tx_ref);
@@ -529,8 +538,8 @@ impl<T: PoolTransaction, O: TransactionOrdering> TransactionsIterator<T, O> {
     }
 }
 
-impl<T: PoolTransaction, O: TransactionOrdering> Iterator for TransactionsIterator<T, O> {
-    type Item = Arc<ValidPoolTransaction<T>>;
+impl<T: TransactionOrdering> Iterator for TransactionsIterator<T> {
+    type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

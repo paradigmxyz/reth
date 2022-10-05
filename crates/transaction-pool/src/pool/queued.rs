@@ -1,9 +1,4 @@
-use crate::{
-    error,
-    error::{PoolError, PoolResult},
-    traits::PoolTransaction,
-    validate::ValidPoolTransaction,
-};
+use crate::{error, error::{PoolError, PoolResult}, traits::PoolTransaction, TransactionOrdering, validate::ValidPoolTransaction};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -11,6 +6,7 @@ use std::{
     time::Instant,
 };
 use tracing::warn;
+use crate::pool::{TransactionHashFor, TransactionIdFor};
 
 /// A pool of transactions that are not ready on the current state and are waiting for state changes
 /// that turn them valid.
@@ -19,18 +15,18 @@ use tracing::warn;
 /// transaction to arrive that closes the nonce gap.
 ///
 /// Keeps a set of transactions that are waiting until their dependencies are unlocked.
-pub(crate) struct QueuedTransactions<T: PoolTransaction> {
+pub(crate) struct QueuedTransactions<T: TransactionOrdering> {
     /// Dependencies that aren't yet provided by any transaction.
-    required_dependencies: HashMap<T::Id, HashSet<T::Hash>>,
+    required_dependencies: HashMap<TransactionIdFor<T>, HashSet<TransactionHashFor<T>>>,
     /// Mapping of the dependencies of a transaction to the hash of the transaction,
-    waiting_dependencies: HashMap<Vec<T::Id>, T::Hash>,
+    waiting_dependencies: HashMap<Vec<TransactionIdFor<T>>, TransactionHashFor<T>>,
     /// Transactions that are not ready yet are waiting for another tx to finish,
-    waiting_queue: HashMap<T::Hash, QueuedPoolTransaction<T>>,
+    waiting_queue: HashMap<TransactionHashFor<T>, QueuedPoolTransaction<T>>,
 }
 
 // == impl QueuedTransactions ==
 
-impl<T: PoolTransaction> QueuedTransactions<T> {
+impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// Returns the number of transactions that are currently waiting in this pool for new
     /// transactions to satisfy their dependencies.
     pub fn len(&self) -> usize {
@@ -43,7 +39,7 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
     }
 
     /// Returns an iterator over all transactions waiting in this pool.
-    pub fn transactions(&self) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
+    pub fn transactions(&self) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.waiting_queue.values().map(|tx| Arc::clone(&tx.transaction))
     }
 
@@ -86,12 +82,12 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
     }
 
     /// Returns true if given transaction is part of the queue
-    pub fn contains(&self, hash: &T::Hash) -> bool {
+    pub fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
         self.waiting_queue.contains_key(hash)
     }
 
     /// Returns the transaction for the hash if it's waiting
-    pub fn get(&self, hash: &T::Hash) -> Option<&QueuedPoolTransaction<T>> {
+    pub fn get(&self, hash: &TransactionHashFor<T>) -> Option<&QueuedPoolTransaction<T>> {
         self.waiting_queue.get(hash)
     }
 
@@ -101,7 +97,7 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
     /// moved to the ready queue.
     pub fn satisfy_and_unlock(
         &mut self,
-        dependencies: impl IntoIterator<Item = impl AsRef<T::Id>>,
+        dependencies: impl IntoIterator<Item = impl AsRef<TransactionIdFor<T>>>,
     ) -> Vec<QueuedPoolTransaction<T>> {
         let mut unlocked_ready = Vec::new();
         for dependency in dependencies {
@@ -127,7 +123,7 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
     /// Removes the transactions associated with the given hashes
     ///
     /// Returns all removed transactions.
-    pub fn remove(&mut self, hashes: Vec<T::Hash>) -> Vec<Arc<ValidPoolTransaction<T>>> {
+    pub fn remove(&mut self, hashes: Vec<TransactionHashFor<T>>) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = vec![];
         for hash in hashes {
             if let Some(waiting_tx) = self.waiting_queue.remove(&hash) {
@@ -153,27 +149,27 @@ impl<T: PoolTransaction> QueuedTransactions<T> {
 
 /// A transaction submitted to the pool.
 #[derive(Clone)]
-pub struct QueuedPoolTransaction<T: PoolTransaction> {
+pub struct QueuedPoolTransaction<T: TransactionOrdering> {
     /// The actual validated transaction.
-    pub transaction: Arc<ValidPoolTransaction<T>>,
+    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// Transactions required for and have not been satisfied yet by other transactions in the
     /// pool.
     ///
     /// This will be an empty list if there are no nonce gaps across multiple transactions of the
     /// same sender in the pool. If there are gaps, this will include the missing transactions.
-    pub missing_dependencies: HashSet<T::Id>,
+    pub missing_dependencies: HashSet<TransactionIdFor<T>>,
     /// Timestamp when the tx was added.
     pub added_at: Instant,
 }
 
 // === impl QuQueuedPoolTransaction ===
 
-impl<T: PoolTransaction> QueuedPoolTransaction<T> {
+impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     /// Creates a new `QueuedPoolTransaction`.
     ///
     /// Determines the dependent transaction that are still missing before this transaction can be
     /// moved to the queue.
-    pub fn new(transaction: ValidPoolTransaction<T>, provided: &HashMap<T::Id, T::Hash>) -> Self {
+    pub fn new(transaction: ValidPoolTransaction<T::Transaction>, provided: &HashMap<TransactionIdFor<T>, TransactionHashFor<T>>) -> Self {
         let missing_dependencies = transaction
             .depends_on
             .iter()
@@ -189,7 +185,7 @@ impl<T: PoolTransaction> QueuedPoolTransaction<T> {
     }
 
     /// Removes the required dependency.
-    pub fn satisfy(&mut self, id: &T::Id) {
+    pub fn satisfy(&mut self, id: &TransactionIdFor<T>) {
         self.missing_dependencies.remove(id);
     }
 
@@ -199,7 +195,7 @@ impl<T: PoolTransaction> QueuedPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction> fmt::Debug for QueuedPoolTransaction<T> {
+impl<T: TransactionOrdering> fmt::Debug for QueuedPoolTransaction<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(fmt, "QueuedPoolTransaction {{ ")?;
         write!(fmt, "added_at: {:?}, ", self.added_at)?;

@@ -11,7 +11,7 @@ pub type TransactionValidationResult<Transaction> =
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
 pub trait TransactionValidator: Send + Sync {
-    /// The transaction type to validate
+    /// The transaction type to validate.
     type Transaction: PoolTransaction + Send + Sync;
 
     /// Validates the transaction and returns a validated outcome

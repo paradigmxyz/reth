@@ -1,3 +1,4 @@
+use crate::traits::PoolTransaction;
 use std::fmt;
 
 /// Transaction ordering.
@@ -9,6 +10,9 @@ pub trait TransactionOrdering: Send + Sync {
     /// Priority of a transaction.
     type Priority: Ord + Clone + Default + fmt::Debug + fmt::LowerHex + Send + Sync;
 
+    /// The transaction type to score.
+    type Transaction: PoolTransaction + Send + Sync;
+
     /// Returns the priority score for the given transaction.
-    fn priority(&self, transaction: ()) -> Self::Priority;
+    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority;
 }
