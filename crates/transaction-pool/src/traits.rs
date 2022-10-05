@@ -1,10 +1,7 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockId};
+use futures::channel::mpsc::Receiver;
 use reth_primitives::{U256, U64};
-use std::{
-    fmt,
-    hash::Hash,
-    sync::{mpsc::Receiver, Arc},
-};
+use std::{fmt, hash::Hash, sync::Arc};
 
 pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::Hash;
 
@@ -18,24 +15,24 @@ pub trait TransactionPool: Send + Sync {
     /// The transaction type of the pool
     type Transaction: PoolTransaction + Send + Sync;
 
-    /// Adds an unvalidated transaction into the pool.
+    /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
     async fn add_transaction(
         &self,
-        block_id: &BlockId,
+        block_id: BlockId,
         transaction: Self::Transaction,
     ) -> PoolResult<HashFor<Self>>;
 
-    /// Adds all unvalidated transaction into the pool.
+    /// Adds the given _unvalidated_ transaction into the pool.
     ///
     /// Returns a list of results.
     ///
     /// Consumer: RPC
     async fn add_transactions(
         &self,
-        block_id: &BlockId,
-        transaction: Self::Transaction,
+        block_id: BlockId,
+        transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<HashFor<Self>>>>;
 
     /// Returns a new Stream that yields transactions hashes for new ready transactions.

@@ -1,12 +1,18 @@
 //! Transaction validation abstractions.
 
-use crate::traits::PoolTransaction;
+use crate::{error::PoolError, traits::PoolTransaction};
 use reth_primitives::BlockId;
 use std::fmt;
 
-/// Result returned after checking a transaction's validity
-pub(crate) type TransactionValidationResult<Transaction> =
-    Result<(), TransactionValidationError<Transaction>>;
+/// A Result type returned after checking a transaction's validity.
+pub enum TransactionValidationOutcome<T: PoolTransaction> {
+    /// Transaction successfully validated
+    Valid(ValidPoolTransaction<T>),
+    /// The transaction is considered invalid.
+    ///
+    /// Note: This does not indicate whether the transaction will not be valid in the future
+    Invalid(T, PoolError),
+}
 
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
@@ -25,20 +31,9 @@ pub trait TransactionValidator: Send + Sync {
         &self,
         _block_id: &BlockId,
         _transaction: Self::Transaction,
-        // TODO this should return a subset of `ValidPoolTransaction`, maybe an enum
-    ) -> TransactionValidationResult<ValidPoolTransaction<Self::Transaction>> {
+    ) -> TransactionValidationOutcome<Self::Transaction> {
         unimplemented!()
     }
-}
-
-/// Errors thrown during validity checks of a transaction.
-#[derive(Clone, PartialEq, Eq)]
-pub enum TransactionValidationError<Transaction> {
-    /// The transaction is considered invalid.
-    ///
-    /// Note: This does not indicate whether the transaction will not be valid in the future
-    Invalid(Transaction),
-    // TODO need variants for `Never`, or `At`?
 }
 
 /// A valida transaction in the pool.

@@ -74,7 +74,7 @@ use crate::{
         queued::{QueuedPoolTransaction, QueuedTransactions},
     },
     traits::PoolTransaction,
-    validate::{TransactionValidationResult, ValidPoolTransaction},
+    validate::ValidPoolTransaction,
     BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use futures::channel::mpsc::{channel, Receiver, Sender};
@@ -93,6 +93,7 @@ mod pending;
 mod queued;
 mod transaction;
 
+use crate::validate::TransactionValidationOutcome;
 pub use events::TransactionEvent;
 pub use pending::TransactionsIterator;
 
@@ -126,13 +127,36 @@ where
         self.pool.client().ensure_block_number(block_id)
     }
 
+    /// Add a single _unverified_ transaction into the pool.
+    pub async fn add_transaction(
+        &self,
+        block_id: &BlockId,
+        transaction: P::Transaction,
+    ) -> PoolResult<TransactionHashFor<T>> {
+        self.add_transactions(block_id, Some(transaction))
+            .await?
+            .pop()
+            .expect("transaction exists; qed")
+    }
+
+    /// Adds all given transactions into the pool
+    pub async fn add_transactions(
+        &self,
+        block_id: &BlockId,
+        transactions: impl IntoIterator<Item = P::Transaction>,
+    ) -> PoolResult<Vec<PoolResult<TransactionHashFor<T>>>> {
+        let validated = self.validate_all(block_id, transactions).await?;
+        let transactions = self.pool.add_transactions(validated.into_values());
+        Ok(transactions)
+    }
+
     /// Returns future that validates all transaction in the given iterator at the block the
     /// `block_id` points to.
     async fn validate_all(
         &self,
         block_id: &BlockId,
         transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<HashMap<TransactionHashFor<T>, TransactionValidationResult<P::Transaction>>>
+    ) -> PoolResult<HashMap<TransactionHashFor<T>, TransactionValidationOutcome<P::Transaction>>>
     {
         // get the actual block number which is required to validate the transactions
         let block_number = self.resolve_block_number(block_id)?;
@@ -155,7 +179,7 @@ where
         block_id: &BlockId,
         _block_number: U64,
         transaction: P::Transaction,
-    ) -> (TransactionHashFor<T>, TransactionValidationResult<P::Transaction>) {
+    ) -> (TransactionHashFor<T>, TransactionValidationOutcome<P::Transaction>) {
         let _hash = *transaction.hash();
         // TODO this is where additional validate checks would go, like banned senders etc...
         let _res = self.pool.client().validate_transaction(block_id, transaction).await;
@@ -163,6 +187,11 @@ where
         // TODO blockstamp the transaction
 
         todo!()
+    }
+
+    /// Registers a new transaction listener and returns the receiver stream.
+    pub fn ready_transactions(&self) -> Receiver<TransactionHashFor<T>> {
+        self.pool.add_ready_listener()
     }
 }
 
@@ -229,23 +258,31 @@ where
     /// Add a single validated transaction into the pool.
     fn add_transaction(
         &self,
-        tx: ValidPoolTransaction<T::Transaction>,
+        tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TransactionHashFor<T>> {
-        let added = self.pool.write().add_transaction(tx)?;
+        match tx {
+            TransactionValidationOutcome::Valid(tx) => {
+                let added = self.pool.write().add_transaction(tx)?;
 
-        if let Some(ready) = added.as_ready() {
-            self.on_new_ready_transaction(ready);
+                if let Some(ready) = added.as_ready() {
+                    self.on_new_ready_transaction(ready);
+                }
+
+                self.notify_event_listeners(&added);
+
+                Ok(*added.hash())
+            }
+            TransactionValidationOutcome::Invalid(_tx, err) => {
+                // TODO notify listeners about invalid
+                Err(err)
+            }
         }
-
-        self.notify_event_listeners(&added);
-
-        Ok(*added.hash())
     }
 
     /// Adds all transactions in the iterator to the pool, returning a list of results.
     pub fn add_transactions(
         &self,
-        transactions: impl IntoIterator<Item = ValidPoolTransaction<T::Transaction>>,
+        transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
     ) -> Vec<PoolResult<TransactionHashFor<T>>> {
         // TODO check pool limits
 

@@ -7,8 +7,9 @@
 
 //! Reth's transaction pool implementation
 
+use futures::channel::mpsc::Receiver;
 use reth_primitives::{BlockId, U64};
-use std::sync::{mpsc::Receiver, Arc};
+use std::sync::Arc;
 
 mod client;
 mod config;
@@ -24,7 +25,7 @@ pub use crate::{
     ordering::TransactionOrdering,
     pool::BasicPool,
     traits::{PoolTransaction, ReadyTransactions, TransactionPool},
-    validate::TransactionValidator,
+    validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{error::PoolResult, traits::HashFor, validate::ValidPoolTransaction};
 
@@ -50,7 +51,7 @@ where
     }
 }
 
-/// implements the `TransactionPool` interface for the `Poll`.
+/// implements the `TransactionPool` interface for various transaction pool API consumers.
 #[async_trait::async_trait]
 impl<P, T> TransactionPool for Pool<P, T>
 where
@@ -61,22 +62,22 @@ where
 
     async fn add_transaction(
         &self,
-        _block_id: &BlockId,
-        _transaction: Self::Transaction,
+        block_id: BlockId,
+        transaction: Self::Transaction,
     ) -> PoolResult<HashFor<Self>> {
-        todo!()
+        self.pool.clone().add_transaction(&block_id, transaction).await
     }
 
     async fn add_transactions(
         &self,
-        _block_id: &BlockId,
-        _transaction: Self::Transaction,
+        block_id: BlockId,
+        transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<HashFor<Self>>>> {
-        todo!()
+        self.pool.clone().add_transactions(&block_id, transactions).await
     }
 
     fn ready_transactions(&self) -> Receiver<HashFor<Self>> {
-        todo!()
+        self.pool.ready_transactions()
     }
 
     async fn ready_transactions_at(
