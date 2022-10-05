@@ -22,8 +22,7 @@ pub trait PoolClient: Send + Sync + TransactionValidator {
     /// Same as [`PoolClient::convert_block_id()`] but returns an error if no matching block number
     /// was found
     fn ensure_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
-        self.convert_block_id(block_id).and_then(|number| {
-            number.ok_or_else(|| PoolError::BlockNumberNotFound(block_id.clone()))
-        })
+        self.convert_block_id(block_id)
+            .and_then(|number| number.ok_or_else(|| PoolError::BlockNumberNotFound(*block_id)))
     }
 }

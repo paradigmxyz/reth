@@ -1,9 +1,10 @@
 //! Transaction Pool internals.
 //!
 //! Incoming transactions are validated first. The validation outcome can have 3 states:
-//!     1. Transaction can _never_ be valid
-//!     2. Transaction is _currently_ valid
-//!     3. Transaction is _currently_ invalid, but could potentially become valid in the future
+//!
+//!      1. Transaction can _never_ be valid
+//!      2. Transaction is _currently_ valid
+//!      3. Transaction is _currently_ invalid, but could potentially become valid in the future
 //!
 //! However, (2.) and (3.) of a transaction can only be determined on the basis of the current
 //! state, whereas (1.) holds indefinitely. This means once the state changes (2.) and (3.) need to
@@ -15,8 +16,41 @@
 //!
 //! However, the score is also only valid for the current state.
 //!
-//! In essence the transaction pool is made of two separate sub-pools for currently valid (2.) and
-//! currently invalid (3.).
+//! Furthermore, the following characteristics fall under (3.):
+//!
+//!     a) Nonce of a transaction is higher than the expected nonce for the next transaction of its
+//! sender. A distinction is made here whether multiple transactions from the same sender have
+//! gapless nonce increments.         a)(1) If _no_ transaction is missing in a chain of multiple
+//! transactions from the same sender (all nonce in row), all of them can in principle be executed
+//! on the current state one after the other.         a)(2) If there's a nonce gap, then all
+//! transactions after the missing transaction are blocked until the missing transaction arrives.
+//!     b) Transaction does not meet the dynamic fee cap requirement introduced by EIP-1559: The fee
+//! cap of the transaction needs to be no less than the base fee of block.
+//!
+//!
+//! In essence the transaction pool is made of two separate sub-pools:
+//!
+//!      _Pending Pool_: Contains all transactions that are valid on the current state and satisfy
+//! (3. a)(1): _No_ nonce gaps      _Queued Pool_: Contains all transactions that are currently
+//! blocked by missing transactions: (3. a)(2): _With_ nonce gaps
+//!
+//! To account for the dynamic base fee requirement (3. b) which could render an EIP-1559 and all
+//! subsequent transactions of the sender currently invalid, the pending pool itself consists of two
+//! queues:
+//!
+//!      _Ready Queue_: Contains all transactions that can be executed on the current state
+//!      _Parked Queue_: Contains all transactions that either do not currently meet the dynamic
+//! base fee requirement or are blocked by a previous transaction that violates it.
+//!
+//! The classification of transaction in which queue it belongs depends on the current base fee and
+//! must be updated after changes:
+//!
+//!      - Base Fee increases: recheck the _Ready Queue_ and evict transactions that don't satisfy
+//!        the new base fee, or depend on a transaction that no longer satisfies it, and move them
+//!        to the _Parked Queue_.
+//!      - Base Fee decreases: recheck the _Parked Queue_ and move all transactions that now satisfy
+//!        the new base fee to the _Ready Queue_.
+//!
 //!
 //! Depending on the use case, consumers of the [`TransactionPool`](crate::traits::TransactionPool)
 //! are interested in (2.) and/or (3.).
@@ -88,7 +122,7 @@ impl<P: PoolClient, O: TransactionOrdering> Pool<P, O> {
         transactions: impl IntoIterator<Item = P::Transaction>,
     ) -> PoolResult<HashMap<TransactionHashFor<P>, TransactionValidationResult<P::Transaction>>>
     {
-        // get the actual block number which is required to validate to validate the transactions
+        // get the actual block number which is required to validate the transactions
         let block_number = self.resolve_block_number(block_id)?;
 
         let outcome = futures::future::join_all(
@@ -189,7 +223,7 @@ impl<T: PoolTransaction, O: TransactionOrdering> GraphPool<T, O> {
     /// nonce gaps). It consists of two parts: `Parked` and `Ready`.
     ///
     /// The `Ready` queue contains transactions that are ready to be included in the pending block.
-    /// With the EIP-1559, transactions can become executable or not without any changes to the
+    /// With EIP-1559, transactions can become executable or not without any changes to the
     /// sender's balance or nonce and instead their feeCap determines whether the transaction is
     /// _currently_ (on the current state) ready or needs to be parked until the feeCap satisfies
     /// the block's baseFee.
