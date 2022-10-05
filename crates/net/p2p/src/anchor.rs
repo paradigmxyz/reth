@@ -60,15 +60,15 @@ impl Anchor {
 #[derive(Debug, Error)]
 pub enum AnchorError {
     /// Error opening the anchor file
-    #[error("Could not open or write to the anchor file.")]
+    #[error("Could not open or write to the anchor file: {0}")]
     IoError(#[from] std::io::Error),
 
     /// Error occurred when loading the anchor file from TOML
-    #[error("Could not deserialize the peer list from TOML.")]
+    #[error("Could not deserialize the peer list from TOML: {0}")]
     LoadError(#[from] toml::de::Error),
 
     /// Error occurred when saving the anchor file to TOML
-    #[error("Could not serialize the peer list as TOML.")]
+    #[error("Could not serialize the peer list as TOML: {0}")]
     SaveError(#[from] toml::ser::Error),
 }
 
