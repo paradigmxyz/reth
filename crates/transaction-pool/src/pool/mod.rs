@@ -224,6 +224,18 @@ where
         Ok(*added.hash())
     }
 
+    /// Adds all transactions in the iterator to the pool, returning a list of results.
+    pub fn add_transactions(
+        &self,
+        transactions: impl IntoIterator<Item = ValidPoolTransaction<T::Transaction>>,
+    ) -> Vec<PoolResult<TransactionHashFor<T>>> {
+        let added = transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>();
+
+        // TODO check pool limits
+
+        added
+    }
+
     /// Notify all listeners about the new transaction.
     fn on_new_ready_transaction(&self, ready: &TransactionHashFor<T>) {
         let mut transaction_listeners = self.ready_transaction_listener.lock();
