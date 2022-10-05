@@ -122,6 +122,11 @@ where
         Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
     }
 
+    /// Returns the wrapped pool
+    pub(crate) fn inner(&self) -> &PoolInner<P, T> {
+        &self.pool
+    }
+
     /// Returns the actual block number for the block id
     fn resolve_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
         self.pool.client().ensure_block_number(block_id)
@@ -190,7 +195,7 @@ where
     }
 
     /// Registers a new transaction listener and returns the receiver stream.
-    pub fn ready_transactions(&self) -> Receiver<TransactionHashFor<T>> {
+    pub fn ready_transactions_listener(&self) -> Receiver<TransactionHashFor<T>> {
         self.pool.add_ready_listener()
     }
 }
@@ -323,6 +328,11 @@ where
             }
         }
     }
+
+    /// Returns an iterator that yields transactions that are ready to be included in the block.
+    pub(crate) fn ready_transactions(&self) -> TransactionsIterator<T> {
+        self.pool.read().ready_transactions()
+    }
 }
 
 /// A pool that only manages transactions.
@@ -354,7 +364,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
-    pub fn ready(&self) -> TransactionsIterator<T> {
+    pub fn ready_transactions(&self) -> TransactionsIterator<T> {
         self.pending.get_transactions()
     }
 

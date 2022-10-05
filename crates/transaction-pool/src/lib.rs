@@ -60,7 +60,7 @@ where
 {
     type Transaction = T::Transaction;
 
-    async fn on_chain_event(&self, event: ChainEvent) {
+    async fn on_chain_event(&self, _event: ChainEvent) {
         // TODO perform maintenance: update pool accordingly
         todo!()
     }
@@ -81,15 +81,14 @@ where
         self.pool.clone().add_transactions(&block_id, transactions).await
     }
 
-    fn ready_transactions(&self) -> Receiver<HashFor<Self>> {
-        self.pool.ready_transactions()
+    fn ready_transactions_listener(&self) -> Receiver<HashFor<Self>> {
+        self.pool.ready_transactions_listener()
     }
 
-    async fn ready_transactions_at(
+    fn ready_transactions(
         &self,
-        _block: U64,
-    ) -> Box<dyn ReadyTransactions<Item = ValidPoolTransaction<Self::Transaction>>> {
-        todo!()
+    ) -> Box<dyn ReadyTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        Box::new(self.pool.inner().ready_transactions())
     }
 
     fn remove_invalid(

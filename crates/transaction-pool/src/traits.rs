@@ -13,7 +13,7 @@ pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::
 #[async_trait::async_trait]
 pub trait TransactionPool: Send + Sync {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction + Send + Sync;
+    type Transaction: PoolTransaction + Send + Sync + 'static;
 
     /// Event listener for chain events that affect the pool.
     ///
@@ -45,20 +45,14 @@ pub trait TransactionPool: Send + Sync {
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
-    fn ready_transactions(&self) -> Receiver<HashFor<Self>>;
+    fn ready_transactions_listener(&self) -> Receiver<HashFor<Self>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
-    /// This provides the block at which the pool should be updated at.
-    ///
-    /// Implementers must ensure that the iterator yields only transaction that are valid for the
-    /// given `block` and return `None` otherwise.
-    ///
     /// Consumer: Block production
-    async fn ready_transactions_at(
+    fn ready_transactions(
         &self,
-        block: U64,
-    ) -> Box<dyn ReadyTransactions<Item = ValidPoolTransaction<Self::Transaction>>>;
+    ) -> Box<dyn ReadyTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Removes all transactions corresponding to the given hashes.
     ///
@@ -109,7 +103,7 @@ impl<T> ReadyTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction: fmt::Debug + Send + Send {
+pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// Transaction hash type.
     type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Copy + Hash + Send + Sync + 'static;
 
