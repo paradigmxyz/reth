@@ -1,8 +1,7 @@
 use crate::{
     error::PoolResult,
     pool::{queued::QueuedPoolTransaction, TransactionHashFor, TransactionIdFor},
-    validate::ValidPoolTransaction,
-    TransactionOrdering,
+    validate::ValidPoolTransaction, TransactionOrdering,
 };
 use parking_lot::RwLock;
 use reth_primitives::U256;
@@ -53,6 +52,17 @@ pub(crate) struct PendingTransactions<T: TransactionOrdering> {
 // === impl PendingTransactions ===
 
 impl<T: TransactionOrdering> PendingTransactions<T> {
+    /// Create a new pool instance
+    pub(crate) fn new(ordering: Arc<T>) -> Self {
+        Self {
+            id: 0,
+            provided_dependencies: Default::default(),
+            parked: Default::default(),
+            ready_transactions: Arc::new(Default::default()),
+            ordering,
+            independent_transactions: Default::default(),
+        }
+    }
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
@@ -452,6 +462,16 @@ struct ParkedTransactions<T: TransactionOrdering> {
     parked_transactions: HashMap<TransactionHashFor<T>, ParkedTransaction<T>>,
     /// Same transactions but sorted by their fee and priority
     sorted_transactions: BTreeSet<ParkedTransactionRef<T>>,
+}
+
+impl<T:TransactionOrdering> Default for ParkedTransactions<T> {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            parked_transactions: Default::default(),
+            sorted_transactions: Default::default()
+        }
+    }
 }
 
 /// A transaction that is ready to be included in a block.

@@ -116,6 +116,11 @@ where
     P: PoolClient,
     T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
+    /// Create a new transaction pool instance.
+    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
+        Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
+    }
+
     /// Returns the actual block number for the block id
     fn resolve_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
         self.pool.client().ensure_block_number(block_id)
@@ -188,6 +193,17 @@ where
     P: PoolClient,
     T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
+    /// Create a new transaction pool instance.
+    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
+        Self {
+            client,
+            config,
+            event_listener: Default::default(),
+            pool: RwLock::new(GraphPool::new(ordering)),
+            ready_transaction_listener: Default::default(),
+        }
+    }
+
     /// Get client reference.
     pub fn client(&self) -> &P {
         &self.client
@@ -289,6 +305,12 @@ pub struct GraphPool<T: TransactionOrdering> {
 // === impl PoolInner ===
 
 impl<T: TransactionOrdering> GraphPool<T> {
+    /// Create a new graph pool instance.
+    pub fn new(ordering: Arc<T>) -> Self {
+        let pending = PendingTransactions::new(Arc::clone(&ordering));
+        Self { ordering, pending, queued: Default::default() }
+    }
+
     /// Returns if the transaction for the given hash is already included in this pool
     pub fn contains(&self, tx_hash: &TransactionHashFor<T>) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)

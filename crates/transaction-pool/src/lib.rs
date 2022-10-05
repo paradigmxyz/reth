@@ -28,32 +28,31 @@ pub use crate::{
 };
 
 /// A generic, customizable `TransactionPool` implementation.
-pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
+pub struct Pool<P: PoolClient, T: TransactionOrdering> {
     /// The actual transaction pool where transactions are handled.
-    pool: BasicPool<PoolApi, Ordering>,
+    pool: BasicPool<P, T>,
     /// Chain/Storage access
-    client: Arc<PoolApi>,
-    // TODO how to revalidate
-    // TODO provide a way to add listeners for ready transactions
+    client: Arc<P>,
 }
 
 // === impl Pool ===
 
-impl<PoolApi, Ordering> Pool<PoolApi, Ordering>
-where
-    PoolApi: PoolClient,
-    Ordering: TransactionOrdering,
+impl<P, T> Pool<P, T>
+    where
+        P: PoolClient,
+        T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
-    /// Creates a new `Pool` with the given config and chain api
-    pub fn new(_config: PoolConfig, _api: Arc<PoolApi>) -> Self {
-        unimplemented!()
+    /// Creates a new `Pool` with the given config and client and ordering.
+    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
+        let pool = BasicPool::new(Arc::clone(&client), ordering, config);
+        Self { pool, client }
     }
 }
 
 /// implements the `TransactionPool` interface for the `Poll`.
-impl<PoolApi, Ordering> TransactionPool for Pool<PoolApi, Ordering>
+impl<P, T> TransactionPool for Pool<P, T>
 where
-    PoolApi: PoolClient,
-    Ordering: TransactionOrdering<Transaction = <PoolApi as TransactionValidator>::Transaction>,
+    P: PoolClient,
+    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
 }
