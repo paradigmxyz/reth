@@ -22,16 +22,15 @@ pub use crate::{
     client::PoolClient,
     config::PoolConfig,
     ordering::TransactionOrdering,
+    pool::BasicPool,
     traits::{PoolTransaction, TransactionPool},
     validate::TransactionValidator,
 };
 
 /// A generic, customizable `TransactionPool` implementation.
-// TODO: This is a more feature rich pool, any additional features should go here, like metrics,
-// etc...
 pub struct Pool<PoolApi: PoolClient, Ordering: TransactionOrdering> {
     /// The actual transaction pool where transactions are handled.
-    inner: pool::PoolInner<PoolApi, Ordering>,
+    pool: BasicPool<PoolApi, Ordering>,
     /// Chain/Storage access
     client: Arc<PoolApi>,
     // TODO how to revalidate

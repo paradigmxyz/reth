@@ -104,14 +104,14 @@ pub(crate) type TransactionIdFor<T> =
     <<T as TransactionOrdering>::Transaction as PoolTransaction>::Id;
 
 /// Shareable Transaction pool.
-pub struct Pool<P: PoolClient, T: TransactionOrdering> {
+pub struct BasicPool<P: PoolClient, T: TransactionOrdering> {
     /// Arc'ed instance of the pool internals
     pool: Arc<PoolInner<P, T>>,
 }
 
 // === impl Pool ===
 
-impl<P: PoolClient, T: TransactionOrdering> Pool<P, T>
+impl<P: PoolClient, T: TransactionOrdering> BasicPool<P, T>
 where
     P: PoolClient,
     T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
@@ -161,7 +161,7 @@ where
     }
 }
 
-impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {
+impl<P: PoolClient, O: TransactionOrdering> Clone for BasicPool<P, O> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
     }
