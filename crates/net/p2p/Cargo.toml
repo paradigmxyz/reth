@@ -13,6 +13,7 @@ serde = "1.0.145"
 serde_derive = "1.0.145"
 thiserror = "1.0.37"
 toml = "0.5.9"
+tracing = "0.1.36"
 
 [dev-dependencies.secp256k1]
 version = "0.24"

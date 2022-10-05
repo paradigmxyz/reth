@@ -6,6 +6,7 @@ use std::{
     path::Path,
 };
 
+use tracing::error;
 use enr::{secp256k1::SecretKey, Enr};
 use serde_derive::{Deserialize, Serialize};
 use thiserror::Error;
@@ -134,7 +135,7 @@ impl PersistentAnchor {
 impl Drop for PersistentAnchor {
     fn drop(&mut self) {
         if let Err(save_error) = self.save_toml() {
-            println!("Could not save anchor to file: {}", save_error)
+            error!("Could not save anchor to file: {}", save_error)
         }
     }
 }
