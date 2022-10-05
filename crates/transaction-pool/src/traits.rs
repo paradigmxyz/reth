@@ -1,6 +1,6 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockId};
 use futures::channel::mpsc::Receiver;
-use reth_primitives::{U256, U64};
+use reth_primitives::{H256, U256, U64};
 use std::{fmt, hash::Hash, sync::Arc};
 
 pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::Hash;
@@ -14,6 +14,13 @@ pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::
 pub trait TransactionPool: Send + Sync {
     /// The transaction type of the pool
     type Transaction: PoolTransaction + Send + Sync;
+
+    /// Event listener for chain events that affect the pool.
+    ///
+    /// Implementers need to update the pool accordingly.
+    /// For example the base fee of the pending block is determined after a block is mined which
+    /// affects the dynamic fee requirement of pending transactions in the pool.
+    async fn on_chain_event(&self, event: ChainEvent);
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
@@ -62,6 +69,25 @@ pub trait TransactionPool: Send + Sync {
         &self,
         tx_hashes: &[HashFor<Self>],
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+}
+
+/// Various Events the pool listens for and needs to apply changes.
+#[derive(Debug, Clone)]
+pub enum ChainEvent {
+    /// New best block have been added to the chain.
+    NewBestBlock {
+        /// Hash of the added block.
+        hash: H256,
+        /// EIP-1559 Base fee of the _next_ (pending) block
+        ///
+        /// The base fee of a block depends on the utilization of the last block and its base fee.
+        next_base_fee: U256,
+    },
+    /// An existing block has been finalized.
+    Finalized {
+        /// Hash of just finalized block.
+        hash: H256,
+    },
 }
 
 /// An `Iterator` that only returns transactions that are ready to be executed.

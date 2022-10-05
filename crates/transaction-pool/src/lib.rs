@@ -24,7 +24,7 @@ pub use crate::{
     config::PoolConfig,
     ordering::TransactionOrdering,
     pool::BasicPool,
-    traits::{PoolTransaction, ReadyTransactions, TransactionPool},
+    traits::{ChainEvent, PoolTransaction, ReadyTransactions, TransactionPool},
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{error::PoolResult, traits::HashFor, validate::ValidPoolTransaction};
@@ -59,6 +59,11 @@ where
     T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
     type Transaction = T::Transaction;
+
+    async fn on_chain_event(&self, event: ChainEvent) {
+        // TODO perform maintenance: update pool accordingly
+        todo!()
+    }
 
     async fn add_transaction(
         &self,
