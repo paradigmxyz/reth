@@ -8,4 +8,6 @@ readme = "README.md"
 description = "Staged syncing primitives used in reth."
 
 [dependencies]
+eyre = "0.6.8"
 libmdbx = "0.1.8"
+page_size = "0.4.2"
