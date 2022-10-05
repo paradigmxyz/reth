@@ -7,8 +7,8 @@
 
 //! Reth's transaction pool implementation
 
-use reth_primitives::BlockId;
-use std::sync::Arc;
+use reth_primitives::{BlockId, U64};
+use std::sync::{mpsc::Receiver, Arc};
 
 mod client;
 mod config;
@@ -23,9 +23,10 @@ pub use crate::{
     config::PoolConfig,
     ordering::TransactionOrdering,
     pool::BasicPool,
-    traits::{PoolTransaction, TransactionPool},
+    traits::{PoolTransaction, ReadyTransactions, TransactionPool},
     validate::TransactionValidator,
 };
+use crate::{error::PoolResult, traits::HashFor, validate::ValidPoolTransaction};
 
 /// A generic, customizable `TransactionPool` implementation.
 pub struct Pool<P: PoolClient, T: TransactionOrdering> {
@@ -38,9 +39,9 @@ pub struct Pool<P: PoolClient, T: TransactionOrdering> {
 // === impl Pool ===
 
 impl<P, T> Pool<P, T>
-    where
-        P: PoolClient,
-        T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+where
+    P: PoolClient,
+    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
     /// Creates a new `Pool` with the given config and client and ordering.
     pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
@@ -50,9 +51,45 @@ impl<P, T> Pool<P, T>
 }
 
 /// implements the `TransactionPool` interface for the `Poll`.
+#[async_trait::async_trait]
 impl<P, T> TransactionPool for Pool<P, T>
 where
     P: PoolClient,
     T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
+    type Transaction = T::Transaction;
+
+    async fn add_transaction(
+        &self,
+        _block_id: &BlockId,
+        _transaction: Self::Transaction,
+    ) -> PoolResult<HashFor<Self>> {
+        todo!()
+    }
+
+    async fn add_transactions(
+        &self,
+        _block_id: &BlockId,
+        _transaction: Self::Transaction,
+    ) -> PoolResult<Vec<PoolResult<HashFor<Self>>>> {
+        todo!()
+    }
+
+    fn ready_transactions(&self) -> Receiver<HashFor<Self>> {
+        todo!()
+    }
+
+    async fn ready_transactions_at(
+        &self,
+        _block: U64,
+    ) -> Box<dyn ReadyTransactions<Item = ValidPoolTransaction<Self::Transaction>>> {
+        todo!()
+    }
+
+    fn remove_invalid(
+        &self,
+        _tx_hashes: &[HashFor<Self>],
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        todo!()
+    }
 }

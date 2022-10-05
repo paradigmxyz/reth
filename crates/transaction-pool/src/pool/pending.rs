@@ -1,7 +1,9 @@
 use crate::{
     error::PoolResult,
     pool::{queued::QueuedPoolTransaction, TransactionHashFor, TransactionIdFor},
-    validate::ValidPoolTransaction, TransactionOrdering,
+    traits::ReadyTransactions,
+    validate::ValidPoolTransaction,
+    TransactionOrdering,
 };
 use parking_lot::RwLock;
 use reth_primitives::U256;
@@ -464,12 +466,12 @@ struct ParkedTransactions<T: TransactionOrdering> {
     sorted_transactions: BTreeSet<ParkedTransactionRef<T>>,
 }
 
-impl<T:TransactionOrdering> Default for ParkedTransactions<T> {
+impl<T: TransactionOrdering> Default for ParkedTransactions<T> {
     fn default() -> Self {
         Self {
             id: 0,
             parked_transactions: Default::default(),
-            sorted_transactions: Default::default()
+            sorted_transactions: Default::default(),
         }
     }
 }
@@ -536,7 +538,6 @@ impl<T: TransactionOrdering> TransactionsIterator<T> {
     ///
     /// As a consequence, all values that depend on the invalid one will be skipped.
     /// When given transaction is not in the pool it has no effect.
-    /// When invoked on a fully drained iterator it has no effect either.
     pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
         if let Some(invalid_transaction) = self.all.get(tx.hash()) {
             debug!(
@@ -560,6 +561,12 @@ impl<T: TransactionOrdering> TransactionsIterator<T> {
             // otherwise we're still waiting for some deps
             self.awaiting.insert(*tx_ref.transaction.hash(), (satisfied, tx_ref));
         }
+    }
+}
+
+impl<T: TransactionOrdering> ReadyTransactions for TransactionsIterator<T> {
+    fn mark_invalid(&mut self, tx: &Self::Item) {
+        TransactionsIterator::mark_invalid(self, tx)
     }
 }
 

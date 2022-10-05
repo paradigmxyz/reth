@@ -46,12 +46,9 @@ impl<Hash: hash::Hash + Eq + Clone> PoolEventListener<Hash> {
     }
 }
 
-
 impl<Hash: hash::Hash + Eq> Default for PoolEventListener<Hash> {
     fn default() -> Self {
-        Self {
-            listeners: Default::default()
-        }
+        Self { listeners: Default::default() }
     }
 }
 

@@ -182,12 +182,12 @@ pub(crate) struct QueuedPoolTransaction<T: TransactionOrdering> {
     pub(crate) added_at: Instant,
 }
 
-impl<T:TransactionOrdering> Default for QueuedTransactions<T> {
+impl<T: TransactionOrdering> Default for QueuedTransactions<T> {
     fn default() -> Self {
         Self {
             required_dependencies: Default::default(),
             waiting_dependencies: Default::default(),
-            waiting_queue: Default::default()
+            waiting_queue: Default::default(),
         }
     }
 }
