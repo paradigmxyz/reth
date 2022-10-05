@@ -1,14 +1,10 @@
 //! Provides access to the chain's storage
 
 use crate::{
-    error,
     error::{PoolError, PoolResult},
-    traits,
-    traits::PoolTransaction,
     validate::TransactionValidator,
 };
 use reth_primitives::{BlockId, U64};
-use std::hash;
 
 /// The interface used to interact with the blockchain and access storage.
 #[async_trait::async_trait]
@@ -23,6 +19,6 @@ pub trait PoolClient: Send + Sync + TransactionValidator {
     /// was found
     fn ensure_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
         self.convert_block_id(block_id)
-            .and_then(|number| number.ok_or_else(|| PoolError::BlockNumberNotFound(*block_id)))
+            .and_then(|number| number.ok_or(PoolError::BlockNumberNotFound(*block_id)))
     }
 }

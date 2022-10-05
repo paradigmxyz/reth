@@ -3,12 +3,11 @@
 use crate::pool::events::TransactionEvent;
 use futures::channel::mpsc::UnboundedSender;
 use std::{collections::HashMap, hash};
-use tracing::trace;
 
 type EventSink<Hash> = UnboundedSender<TransactionEvent<Hash>>;
 
 /// Transaction pool event listeners.
-pub struct PoolEventListener<Hash: hash::Hash + Eq> {
+pub(crate) struct PoolEventListener<Hash: hash::Hash + Eq> {
     /// All listeners for certain transaction events.
     listeners: HashMap<Hash, PoolEventNotifier<Hash>>,
 }
@@ -32,7 +31,7 @@ impl<Hash: hash::Hash + Eq + Clone> PoolEventListener<Hash> {
     }
 
     /// Notify listeners about a transaction that was added to the ready queue.
-    pub fn ready(&mut self, tx: &Hash, replaced: Option<&Hash>) {
+    pub(crate) fn ready(&mut self, tx: &Hash, replaced: Option<&Hash>) {
         self.notify_with(tx, |notifier| notifier.ready());
 
         if let Some(replaced) = replaced {
@@ -42,14 +41,14 @@ impl<Hash: hash::Hash + Eq + Clone> PoolEventListener<Hash> {
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.
-    pub fn queued(&mut self, tx: &Hash) {
+    pub(crate) fn queued(&mut self, tx: &Hash) {
         self.notify_with(tx, |notifier| notifier.queued());
     }
 }
 
 /// Sender half(s) of the event channels for a specific transaction
 #[derive(Debug)]
-pub struct PoolEventNotifier<Hash> {
+struct PoolEventNotifier<Hash> {
     /// Tracks whether the transaction this notifier can stop because the transaction was
     /// completed, or removed.
     is_done: bool,
@@ -67,17 +66,17 @@ impl<Hash: Clone> PoolEventNotifier<Hash> {
     }
 
     /// Transaction became ready.
-    pub fn ready(&mut self) {
+    fn ready(&mut self) {
         self.notify(TransactionEvent::Pending)
     }
 
     /// Transaction was moved to the queued pool
-    pub fn queued(&mut self) {
+    fn queued(&mut self) {
         self.notify(TransactionEvent::Queued)
     }
 
     /// Transaction was replaced with the given transaction
-    pub fn replaced(&mut self, hash: Hash) {
+    fn replaced(&mut self, hash: Hash) {
         self.notify(TransactionEvent::Replaced(hash));
         self.is_done = true;
     }

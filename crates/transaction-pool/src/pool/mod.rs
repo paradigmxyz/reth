@@ -67,11 +67,10 @@
 //!       transactions are _currently_ waiting for state changes that eventually move them into
 //!       category (2.) and become pending.
 use crate::{
-    error,
     error::{PoolError, PoolResult},
     pool::{
         listener::PoolEventListener,
-        pending::{PendingTransactions, TransactionsIterator},
+        pending::PendingTransactions,
         queued::{QueuedPoolTransaction, QueuedTransactions},
     },
     traits::PoolTransaction,
@@ -80,7 +79,7 @@ use crate::{
 };
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{TxHash, H256, U64};
+use reth_primitives::U64;
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -93,6 +92,9 @@ mod listener;
 mod pending;
 mod queued;
 mod transaction;
+
+pub use events::TransactionEvent;
+pub use pending::TransactionsIterator;
 
 // Helper type aliases for associated types
 pub(crate) type TransactionHashFor<T> =
@@ -146,12 +148,12 @@ where
     async fn validate(
         &self,
         block_id: &BlockId,
-        block_number: U64,
+        _block_number: U64,
         transaction: P::Transaction,
     ) -> (TransactionHashFor<T>, TransactionValidationResult<P::Transaction>) {
-        let hash = *transaction.hash();
+        let _hash = *transaction.hash();
         // TODO this is where additional validate checks would go, like banned senders etc...
-        let res = self.pool.client().validate_transaction(block_id, transaction).await;
+        let _res = self.pool.client().validate_transaction(block_id, transaction).await;
 
         // TODO blockstamp the transaction
 
@@ -203,7 +205,7 @@ where
     /// Resubmits transactions back into the pool.
     pub fn resubmit(
         &self,
-        transactions: HashMap<TransactionHashFor<T>, ValidPoolTransaction<T::Transaction>>,
+        _transactions: HashMap<TransactionHashFor<T>, ValidPoolTransaction<T::Transaction>>,
     ) {
         unimplemented!()
     }
@@ -229,11 +231,9 @@ where
         &self,
         transactions: impl IntoIterator<Item = ValidPoolTransaction<T::Transaction>>,
     ) -> Vec<PoolResult<TransactionHashFor<T>>> {
-        let added = transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>();
-
         // TODO check pool limits
 
-        added
+        transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>()
     }
 
     /// Notify all listeners about the new transaction.
@@ -493,6 +493,7 @@ impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
     }
 }
 
+/// Tracks an added transaction and all graph changes caused by adding it.
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// the hash of the submitted transaction
@@ -506,7 +507,8 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
-    pub fn new(hash: T::Hash) -> Self {
+    /// Create a new, empty transaction.
+    fn new(hash: T::Hash) -> Self {
         Self {
             hash,
             promoted: Default::default(),
@@ -516,6 +518,7 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
     }
 }
 
+/// Represents a transaction that was added into the pool and its state
 #[derive(Debug, Clone)]
 pub enum AddedTransaction<T: PoolTransaction> {
     /// Transaction was successfully added and moved to the pending pool.

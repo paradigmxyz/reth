@@ -1,20 +1,23 @@
 use crate::{
-    error,
     error::PoolResult,
     pool::{queued::QueuedPoolTransaction, TransactionHashFor, TransactionIdFor},
-    traits::PoolTransaction,
     validate::ValidPoolTransaction,
     TransactionOrdering,
 };
 use parking_lot::RwLock;
-use reth_primitives::{TxHash, H256, U256};
+use reth_primitives::U256;
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
-    fmt,
     sync::Arc,
 };
-use tracing::{debug, trace, warn};
+use tracing::debug;
+
+/// Type alias for replaced transactions
+pub(crate) type ReplacedTransactions<T> = (
+    Vec<Arc<ValidPoolTransaction<<T as TransactionOrdering>::Transaction>>>,
+    Vec<TransactionHashFor<T>>,
+);
 
 /// A pool of validated transactions that are ready on the current state and are waiting to be
 /// included in a block.
@@ -68,7 +71,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
-    pub fn get_transactions(&self) -> TransactionsIterator<T> {
+    pub(crate) fn get_transactions(&self) -> TransactionsIterator<T> {
         TransactionsIterator {
             all: self.ready_transactions.read().clone(),
             independent: self.independent_transactions.clone(),
@@ -78,7 +81,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     }
 
     // /// Returns an iterator over all transactions
-    // pub fn get_transactions(&self) -> TransactionsIterator {
+    // pub(crate) fn get_transactions(&self) -> TransactionsIterator {
     //     TransactionsIterator {
     //         all: self.ready_tx.read().clone(),
     //         independent: self.independent_transactions.clone(),
@@ -88,7 +91,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     // }
 
     /// Returns true if the transaction is part of the queue.
-    pub fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
+    pub(crate) fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
         self.ready_transactions.read().contains_key(hash)
     }
 
@@ -97,7 +100,9 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
         self.ready_transactions.read().get(hash).cloned()
     }
 
-    pub fn provided_dependencies(&self) -> &HashMap<TransactionIdFor<T>, TransactionHashFor<T>> {
+    pub(crate) fn provided_dependencies(
+        &self,
+    ) -> &HashMap<TransactionIdFor<T>, TransactionHashFor<T>> {
         &self.provided_dependencies
     }
 
@@ -116,7 +121,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     ///
     /// if the pending transaction is not ready
     /// or the transaction is already included
-    pub fn add_transaction(
+    pub(crate) fn add_transaction(
         &mut self,
         tx: QueuedPoolTransaction<T>,
     ) -> PoolResult<Vec<Arc<ValidPoolTransaction<T::Transaction>>>> {
@@ -175,8 +180,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     fn replaced_transactions(
         &mut self,
         tx: &ValidPoolTransaction<T::Transaction>,
-    ) -> PoolResult<(Vec<Arc<ValidPoolTransaction<T::Transaction>>>, Vec<TransactionHashFor<T>>)>
-    {
+    ) -> PoolResult<ReplacedTransactions<T>> {
         // check if we are replacing transactions
         let remove_hashes: HashSet<_> =
             tx.provides.iter().filter_map(|mark| self.provided_dependencies.get(mark)).collect();
@@ -223,7 +227,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
 
     /// Removes the transactions from the ready queue and returns the removed transactions.
     /// This will also remove all transactions that depend on those.
-    pub fn clear_transactions(
+    pub(crate) fn clear_transactions(
         &mut self,
         tx_hashes: &[TransactionHashFor<T>],
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -234,7 +238,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     ///
     /// This will also remove all transactions that lead to the transaction that provides the
     /// id.
-    pub fn prune_dependencies(
+    pub(crate) fn prune_dependencies(
         &mut self,
         id: TransactionIdFor<T>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -310,7 +314,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
 
     /// Removes transactions and those that depend on them and satisfy at least one dependency in
     /// the given filter set.
-    pub fn remove_with_dependencies(
+    pub(crate) fn remove_with_dependencies(
         &mut self,
         mut tx_hashes: Vec<TransactionHashFor<T>>,
         dependency_filter: Option<HashSet<TransactionIdFor<T>>>,
@@ -377,7 +381,7 @@ pub(crate) struct PendingTransaction<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
     /// Returns all ids this transaction satisfies.
-    pub fn provides(&self) -> &[TransactionIdFor<T>] {
+    pub(crate) fn provides(&self) -> &[TransactionIdFor<T>] {
         &self.transaction.transaction.provides
     }
 }
@@ -394,13 +398,13 @@ impl<T: TransactionOrdering> Clone for PendingTransaction<T> {
 
 /// A reference to a transaction in the _pending_ pool
 #[derive(Debug)]
-pub struct PoolTransactionRef<T: TransactionOrdering> {
+pub(crate) struct PoolTransactionRef<T: TransactionOrdering> {
     /// Actual transaction.
-    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// Identifier that tags when transaction was submitted in the pool.
-    pub submission_id: u64,
+    pub(crate) submission_id: u64,
     /// The priority value assigned by the used `Ordering` function.
-    pub priority: T::Priority,
+    pub(crate) priority: T::Priority,
 }
 
 impl<T: TransactionOrdering> Clone for PoolTransactionRef<T> {
@@ -452,7 +456,7 @@ struct ParkedTransactions<T: TransactionOrdering> {
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug, Clone)]
-pub struct ParkedTransaction<T: TransactionOrdering> {
+pub(crate) struct ParkedTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
     transaction: PoolTransactionRef<T>,
     /// Tracks the transactions that get unlocked by this transaction.
@@ -497,6 +501,7 @@ impl<T: TransactionOrdering> Ord for ParkedTransactionRef<T> {
     }
 }
 
+/// An iterator that returns transactions that can be executed on the current state.
 pub struct TransactionsIterator<T: TransactionOrdering> {
     all: HashMap<TransactionHashFor<T>, PendingTransaction<T>>,
     awaiting: HashMap<TransactionHashFor<T>, (usize, PoolTransactionRef<T>)>,
@@ -512,7 +517,7 @@ impl<T: TransactionOrdering> TransactionsIterator<T> {
     /// As a consequence, all values that depend on the invalid one will be skipped.
     /// When given transaction is not in the pool it has no effect.
     /// When invoked on a fully drained iterator it has no effect either.
-    pub fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
+    pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
         if let Some(invalid_transaction) = self.all.get(tx.hash()) {
             debug!(
                 target: "txpool",
@@ -520,7 +525,7 @@ impl<T: TransactionOrdering> TransactionsIterator<T> {
                 invalid_transaction.transaction.transaction.hash()
             );
             for hash in &invalid_transaction.unlocks {
-                self.invalid.insert(hash.clone());
+                self.invalid.insert(*hash);
             }
         }
     }

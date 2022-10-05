@@ -1,4 +1,4 @@
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub)]
+#![warn(missing_docs)] // unreachable_pub, missing_debug_implementations
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
@@ -7,26 +7,23 @@
 
 //! Reth's transaction pool implementation
 
-pub mod error;
-
-mod client;
-mod validate;
-
-pub use client::PoolClient;
-use parking_lot::RwLock;
+use reth_primitives::BlockId;
 use std::sync::Arc;
 
+mod client;
 mod config;
-pub use config::PoolConfig;
-use reth_primitives::BlockId;
-
+pub mod error;
 mod ordering;
-
 pub mod pool;
-
 mod traits;
+mod validate;
+
 pub use crate::{
-    ordering::TransactionOrdering, traits::TransactionPool, validate::TransactionValidator,
+    client::PoolClient,
+    config::PoolConfig,
+    ordering::TransactionOrdering,
+    traits::{PoolTransaction, TransactionPool},
+    validate::TransactionValidator,
 };
 
 /// A generic, customizable `TransactionPool` implementation.
@@ -49,7 +46,7 @@ where
     Ordering: TransactionOrdering,
 {
     /// Creates a new `Pool` with the given config and chain api
-    pub fn new(config: PoolConfig, api: Arc<PoolApi>) -> Self {
+    pub fn new(_config: PoolConfig, _api: Arc<PoolApi>) -> Self {
         unimplemented!()
     }
 }

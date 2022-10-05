@@ -5,7 +5,7 @@ use reth_primitives::BlockId;
 use std::fmt;
 
 /// Result returned after checking a transaction's validity
-pub type TransactionValidationResult<Transaction> =
+pub(crate) type TransactionValidationResult<Transaction> =
     Result<(), TransactionValidationError<Transaction>>;
 
 /// Provides support for validating transaction at any given state of the chain
@@ -23,8 +23,8 @@ pub trait TransactionValidator: Send + Sync {
     /// transactions for the sender.
     async fn validate_transaction(
         &self,
-        block_id: &BlockId,
-        transaction: Self::Transaction,
+        _block_id: &BlockId,
+        _transaction: Self::Transaction,
         // TODO this should return a subset of `ValidPoolTransaction`, maybe an enum
     ) -> TransactionValidationResult<ValidPoolTransaction<Self::Transaction>> {
         unimplemented!()

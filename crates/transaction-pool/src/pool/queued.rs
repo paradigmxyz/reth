@@ -1,6 +1,5 @@
 use crate::{
-    error,
-    error::{PoolError, PoolResult},
+    error::PoolResult,
     pool::{TransactionHashFor, TransactionIdFor},
     traits::PoolTransaction,
     validate::ValidPoolTransaction,
@@ -12,7 +11,6 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-use tracing::warn;
 
 /// A pool of transactions that are not ready on the current state and are waiting for state changes
 /// that turn them valid.
@@ -35,31 +33,31 @@ pub(crate) struct QueuedTransactions<T: TransactionOrdering> {
 impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// Returns the number of transactions that are currently waiting in this pool for new
     /// transactions to satisfy their dependencies.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.waiting_queue.len()
     }
 
     /// Whether this pool is empty.
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.waiting_queue.is_empty()
     }
 
     /// Returns an iterator over all transactions waiting in this pool.
-    pub fn transactions(
+    pub(crate) fn transactions(
         &self,
     ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.waiting_queue.values().map(|tx| Arc::clone(&tx.transaction))
     }
 
     /// Adds a transaction to the queue of transactions
-    pub fn add_transaction(&mut self, tx: QueuedPoolTransaction<T>) -> PoolResult<()> {
+    pub(crate) fn add_transaction(&mut self, tx: QueuedPoolTransaction<T>) -> PoolResult<()> {
         assert!(!tx.is_satisfied(), "transaction must not be ready");
         assert!(
             !self.waiting_queue.contains_key(tx.transaction.hash()),
             "transaction is already added"
         );
 
-        if let Some(replace) = self
+        if let Some(_replace) = self
             .waiting_dependencies
             .get(&tx.transaction.provides)
             .and_then(|hash| self.waiting_queue.get(hash))
@@ -90,17 +88,17 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     }
 
     /// Returns true if given transaction is part of the queue
-    pub fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
+    pub(crate) fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
         self.waiting_queue.contains_key(hash)
     }
 
     /// Returns the transaction for the hash if it's waiting
-    pub fn get(&self, tx_hash: &TransactionHashFor<T>) -> Option<&QueuedPoolTransaction<T>> {
+    pub(crate) fn get(&self, tx_hash: &TransactionHashFor<T>) -> Option<&QueuedPoolTransaction<T>> {
         self.waiting_queue.get(tx_hash)
     }
 
     /// Returns the transactions for the given hashes, `None` if no transaction exists
-    pub fn get_all(
+    pub(crate) fn get_all(
         &self,
         tx_hashes: &[TransactionHashFor<T>],
     ) -> Vec<Option<Arc<ValidPoolTransaction<T::Transaction>>>> {
@@ -114,7 +112,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     ///
     /// Returns the those transactions that become unlocked (all dependencies checked) and can be
     /// moved to the ready queue.
-    pub fn satisfy_and_unlock(
+    pub(crate) fn satisfy_and_unlock(
         &mut self,
         dependencies: impl IntoIterator<Item = impl AsRef<TransactionIdFor<T>>>,
     ) -> Vec<QueuedPoolTransaction<T>> {
@@ -142,7 +140,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// Removes the transactions associated with the given hashes
     ///
     /// Returns all removed transactions.
-    pub fn remove(
+    pub(crate) fn remove(
         &mut self,
         hashes: Vec<TransactionHashFor<T>>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -171,17 +169,17 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
 
 /// A transaction submitted to the pool.
 #[derive(Clone)]
-pub struct QueuedPoolTransaction<T: TransactionOrdering> {
+pub(crate) struct QueuedPoolTransaction<T: TransactionOrdering> {
     /// The actual validated transaction.
-    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// Transactions required for and have not been satisfied yet by other transactions in the
     /// pool.
     ///
     /// This will be an empty list if there are no nonce gaps across multiple transactions of the
     /// same sender in the pool. If there are gaps, this will include the missing transactions.
-    pub missing_dependencies: HashSet<TransactionIdFor<T>>,
+    pub(crate) missing_dependencies: HashSet<TransactionIdFor<T>>,
     /// Timestamp when the tx was added.
-    pub added_at: Instant,
+    pub(crate) added_at: Instant,
 }
 
 // === impl QuQueuedPoolTransaction ===
@@ -191,7 +189,7 @@ impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     ///
     /// Determines the dependent transaction that are still missing before this transaction can be
     /// moved to the queue.
-    pub fn new(
+    pub(crate) fn new(
         transaction: ValidPoolTransaction<T::Transaction>,
         provided: &HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
     ) -> Self {
@@ -210,12 +208,12 @@ impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     }
 
     /// Removes the required dependency.
-    pub fn satisfy(&mut self, id: &TransactionIdFor<T>) {
+    pub(crate) fn satisfy(&mut self, id: &TransactionIdFor<T>) {
         self.missing_dependencies.remove(id);
     }
 
     /// Returns true if transaction has all dependencies are satisfied.
-    pub fn is_satisfied(&self) -> bool {
+    pub(crate) fn is_satisfied(&self) -> bool {
         self.missing_dependencies.is_empty()
     }
 }
