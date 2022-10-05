@@ -33,6 +33,8 @@ pub(crate) struct PendingTransactions<T: TransactionOrdering> {
     id: u64,
     /// How to order transactions.
     ordering: Arc<T>,
+    /// Base fee of the next block.
+    next_base_fee: U256,
     /// Dependencies that are provided by `PendingTransaction`s
     provided_dependencies: HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
     /// Pending transactions that are currently on hold until the `baseFee` of the pending block
@@ -63,6 +65,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
             ready_transactions: Arc::new(Default::default()),
             ordering,
             independent_transactions: Default::default(),
+            next_base_fee: Default::default(),
         }
     }
     /// Returns an iterator over all transactions that are _currently_ ready.
@@ -92,15 +95,10 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
         }
     }
 
-    // /// Returns an iterator over all transactions
-    // pub(crate) fn get_transactions(&self) -> TransactionsIterator {
-    //     TransactionsIterator {
-    //         all: self.ready_tx.read().clone(),
-    //         independent: self.independent_transactions.clone(),
-    //         awaiting: Default::default(),
-    //         _invalid: Default::default(),
-    //     }
-    // }
+    /// Sets the given base fee and returns the old one.
+    pub(crate) fn set_next_base_fee(&mut self, base_fee: U256) -> U256 {
+        std::mem::replace(&mut self.next_base_fee, base_fee)
+    }
 
     /// Returns true if the transaction is part of the queue.
     pub(crate) fn contains(&self, hash: &TransactionHashFor<T>) -> bool {

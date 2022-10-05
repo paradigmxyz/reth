@@ -8,7 +8,8 @@
 //! Reth's transaction pool implementation
 
 use futures::channel::mpsc::Receiver;
-use reth_primitives::{BlockId, U64};
+use parking_lot::Mutex;
+use reth_primitives::{BlockId, U256, U64};
 use std::sync::Arc;
 
 mod client;
@@ -31,9 +32,11 @@ use crate::{error::PoolResult, traits::HashFor, validate::ValidPoolTransaction};
 
 /// A generic, customizable `TransactionPool` implementation.
 pub struct Pool<P: PoolClient, T: TransactionOrdering> {
-    /// The actual transaction pool where transactions are handled.
+    /// The actual transaction pool where transactions and subscriptions are handled.
     pool: BasicPool<P, T>,
-    /// Chain/Storage access
+    /// Tracks status updates linked to chain events.
+    update_status: Arc<Mutex<UpdateStatus>>,
+    /// Chain/Storage access.
     client: Arc<P>,
 }
 
@@ -47,7 +50,7 @@ where
     /// Creates a new `Pool` with the given config and client and ordering.
     pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
         let pool = BasicPool::new(Arc::clone(&client), ordering, config);
-        Self { pool, client }
+        Self { pool, update_status: Arc::new(Default::default()), client }
     }
 }
 
@@ -97,4 +100,13 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         todo!()
     }
+}
+
+/// Tracks the current update status of the pool.
+#[derive(Debug, Clone, Default)]
+struct UpdateStatus {
+    /// Block number when the pool was last updated.
+    updated_at: U64,
+    /// Current base fee that needs to be enforced
+    base_fee: U256,
 }

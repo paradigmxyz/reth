@@ -1,6 +1,6 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockId};
 use futures::channel::mpsc::Receiver;
-use reth_primitives::{H256, U256, U64};
+use reth_primitives::{H256, U256};
 use std::{fmt, hash::Hash, sync::Arc};
 
 pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::Hash;

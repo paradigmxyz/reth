@@ -75,7 +75,7 @@ use crate::{
     },
     traits::PoolTransaction,
     validate::ValidPoolTransaction,
-    BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
+    BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
@@ -238,6 +238,11 @@ where
         }
     }
 
+    /// Updates the pool
+    pub(crate) fn update_base_fee(&self, base_fee: U256) {
+        self.pool.write().update_base_fee(base_fee);
+    }
+
     /// Get client reference.
     pub fn client(&self) -> &P {
         &self.client
@@ -358,13 +363,26 @@ impl<T: TransactionOrdering> GraphPool<T> {
         Self { ordering, pending, queued: Default::default() }
     }
 
+    /// Updates the pool based on the changed base fee.
+    ///
+    /// This enforces the dynamic fee requirement.
+    /// If the `new_base_fee` is _higher_ than previous base fee, all EIP-1559 transactions in the
+    /// ready queue that now violate the dynamic fee requirement need to parked.
+    /// If the `new_base_fee` is _lower_ than the previous base fee, all parked transactions that
+    /// now satisfy the dynamic fee requirement need to moved to the ready queue.
+    pub(crate) fn update_base_fee(&mut self, new_base_fee: U256) {
+        let _old_base_fee = self.pending.set_next_base_fee(new_base_fee);
+        // TODO update according to the changed base_fee
+        todo!()
+    }
+
     /// Returns if the transaction for the given hash is already included in this pool
-    pub fn contains(&self, tx_hash: &TransactionHashFor<T>) -> bool {
+    pub(crate) fn contains(&self, tx_hash: &TransactionHashFor<T>) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
-    pub fn ready_transactions(&self) -> TransactionsIterator<T> {
+    pub(crate) fn ready_transactions(&self) -> TransactionsIterator<T> {
         self.pending.get_transactions()
     }
 
