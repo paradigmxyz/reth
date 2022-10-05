@@ -1,7 +1,7 @@
 use crate::{BlockNumber, Bytes, H160, H256, U256};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
 /// Block header
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.
@@ -62,7 +62,7 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use lock, HeaderLocked and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> H256 {
-        H256::zero()
+        todo!()
     }
 
     /// Calculate hash and lock the Header so that it can't be changed.

@@ -4,13 +4,12 @@ mod tx_type;
 use signature::Signature;
 pub use tx_type::TxType;
 
-/// Raw Transaction
-
+/// Raw Transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
     /// Legacy transaciton.
     Legacy {
-        /// Nonce
+        /// Nonce.
         nonce: u64,
     },
     /// Transaction with AccessList.
@@ -25,8 +24,7 @@ pub enum Transaction {
     },
 }
 
-/// Signed transaction
-
+/// Signed transaction.
 #[derive(Debug, Clone)]
 pub struct TransactionSigned {
     transaction: Transaction,

@@ -1,13 +1,12 @@
 use crate::{Header, Receipt, Transaction};
 
-/// Ethereum full block
-
+/// Ethereum full block.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Block {
-    /// Block Header.
+    /// Block header.
     pub header: Header,
-    /// Block body with all transactions.
+    /// Transactions in this block.
     pub body: Vec<Transaction>,
-    /// Blcok receipts.
+    /// Block receipts.
     pub receipts: Vec<Receipt>,
 }

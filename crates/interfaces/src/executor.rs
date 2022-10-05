@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use reth_primitives::Block;
+use thiserror::Error;
 
 /// Takes block and executes it, returns error
 #[async_trait]
@@ -11,8 +12,9 @@ pub trait BlockExecutor {
 }
 
 /// BlockExecutor Errors
-#[derive(Debug, Clone)]
+#[derive(Error, Debug, Clone)]
 pub enum Error {
     /// Example of error
+    #[error("Example of error.")]
     VerificationFailed,
 }
