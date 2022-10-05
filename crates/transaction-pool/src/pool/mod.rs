@@ -78,7 +78,7 @@ use crate::{
     validate::{TransactionValidationResult, ValidPoolTransaction},
     BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator,
 };
-use futures::channel::mpsc::Sender;
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{TxHash, H256, U64};
 use std::{
@@ -173,10 +173,10 @@ pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     pool: RwLock<GraphPool<T>>,
     /// Pool settings.
     config: PoolConfig,
-    /// Listeners for transaction state change events.
-    event_listeners: RwLock<PoolEventListener<TransactionHashFor<T>, H256>>,
+    /// Manages listeners for transaction state change events.
+    event_listener: RwLock<PoolEventListener<TransactionHashFor<T>>>,
     /// Listeners for new ready transactions.
-    added_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<T>>>>,
+    ready_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<T>>>>,
 }
 
 // === impl PoolInner ===
@@ -189,6 +189,74 @@ where
     /// Get client reference.
     pub fn client(&self) -> &P {
         &self.client
+    }
+
+    /// Adds a new transaction listener to the pool that gets notified about every new ready
+    /// transaction
+    pub fn add_ready_listener(&self) -> Receiver<TransactionHashFor<T>> {
+        const TX_LISTENER_BUFFER_SIZE: usize = 2048;
+        let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
+        self.ready_transaction_listener.lock().push(tx);
+        rx
+    }
+
+    /// Resubmits transactions back into the pool.
+    pub fn resubmit(
+        &self,
+        transactions: HashMap<TransactionHashFor<T>, ValidPoolTransaction<T::Transaction>>,
+    ) {
+        unimplemented!()
+    }
+
+    /// Add a single validated transaction into the pool.
+    fn add_transaction(
+        &self,
+        tx: ValidPoolTransaction<T::Transaction>,
+    ) -> PoolResult<TransactionHashFor<T>> {
+        let added = self.pool.write().add_transaction(tx)?;
+
+        if let Some(ready) = added.as_ready() {
+            self.on_new_ready_transaction(ready);
+        }
+
+        self.notify_event_listeners(&added);
+
+        Ok(*added.hash())
+    }
+
+    /// Notify all listeners about the new transaction.
+    fn on_new_ready_transaction(&self, ready: &TransactionHashFor<T>) {
+        let mut transaction_listeners = self.ready_transaction_listener.lock();
+        transaction_listeners.retain_mut(|listener| match listener.try_send(*ready) {
+            Ok(()) => true,
+            Err(e) => {
+                if e.is_full() {
+                    warn!(
+                        target: "txpool",
+                        "[{:?}] dropping full ready transaction listener",
+                        ready,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
+        });
+    }
+
+    /// Fire events for the newly added transaction.
+    fn notify_event_listeners(&self, tx: &AddedTransaction<T::Transaction>) {
+        let mut listener = self.event_listener.write();
+
+        match tx {
+            AddedTransaction::Pending(tx) => {
+                listener.ready(&tx.hash, None);
+                // TODO  more listeners for discarded, removed etc...
+            }
+            AddedTransaction::Queued { hash } => {
+                listener.queued(hash);
+            }
+        }
     }
 }
 
@@ -449,6 +517,16 @@ pub enum AddedTransaction<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
+    /// Returns the hash of the transaction if it's ready
+    pub fn as_ready(&self) -> Option<&T::Hash> {
+        if let AddedTransaction::Pending(tx) = self {
+            Some(&tx.hash)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the hash of the transaction
     pub fn hash(&self) -> &T::Hash {
         match self {
             AddedTransaction::Pending(tx) => &tx.hash,

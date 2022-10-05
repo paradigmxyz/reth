@@ -1,4 +1,11 @@
-use crate::{error, error::{PoolError, PoolResult}, traits::PoolTransaction, TransactionOrdering, validate::ValidPoolTransaction};
+use crate::{
+    error,
+    error::{PoolError, PoolResult},
+    pool::{TransactionHashFor, TransactionIdFor},
+    traits::PoolTransaction,
+    validate::ValidPoolTransaction,
+    TransactionOrdering,
+};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -6,7 +13,6 @@ use std::{
     time::Instant,
 };
 use tracing::warn;
-use crate::pool::{TransactionHashFor, TransactionIdFor};
 
 /// A pool of transactions that are not ready on the current state and are waiting for state changes
 /// that turn them valid.
@@ -39,7 +45,9 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     }
 
     /// Returns an iterator over all transactions waiting in this pool.
-    pub fn transactions(&self) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+    pub fn transactions(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.waiting_queue.values().map(|tx| Arc::clone(&tx.transaction))
     }
 
@@ -87,8 +95,19 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     }
 
     /// Returns the transaction for the hash if it's waiting
-    pub fn get(&self, hash: &TransactionHashFor<T>) -> Option<&QueuedPoolTransaction<T>> {
-        self.waiting_queue.get(hash)
+    pub fn get(&self, tx_hash: &TransactionHashFor<T>) -> Option<&QueuedPoolTransaction<T>> {
+        self.waiting_queue.get(tx_hash)
+    }
+
+    /// Returns the transactions for the given hashes, `None` if no transaction exists
+    pub fn get_all(
+        &self,
+        tx_hashes: &[TransactionHashFor<T>],
+    ) -> Vec<Option<Arc<ValidPoolTransaction<T::Transaction>>>> {
+        tx_hashes
+            .iter()
+            .map(|hash| self.waiting_queue.get(hash).map(|tx| Arc::clone(&tx.transaction)))
+            .collect()
     }
 
     /// This will check off the dependencies of queued transactions.
@@ -123,7 +142,10 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// Removes the transactions associated with the given hashes
     ///
     /// Returns all removed transactions.
-    pub fn remove(&mut self, hashes: Vec<TransactionHashFor<T>>) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    pub fn remove(
+        &mut self,
+        hashes: Vec<TransactionHashFor<T>>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = vec![];
         for hash in hashes {
             if let Some(waiting_tx) = self.waiting_queue.remove(&hash) {
@@ -169,7 +191,10 @@ impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     ///
     /// Determines the dependent transaction that are still missing before this transaction can be
     /// moved to the queue.
-    pub fn new(transaction: ValidPoolTransaction<T::Transaction>, provided: &HashMap<TransactionIdFor<T>, TransactionHashFor<T>>) -> Self {
+    pub fn new(
+        transaction: ValidPoolTransaction<T::Transaction>,
+        provided: &HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
+    ) -> Self {
         let missing_dependencies = transaction
             .depends_on
             .iter()

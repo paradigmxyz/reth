@@ -55,6 +55,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// This contains the inverse of `depends_on` which provides the dependencies this transaction
     /// unlocks once it's mined.
     pub provides: Vec<T::Id>,
+    /// Whether to propagate the transaction.
+    pub propagate: bool,
     // TODO add a block timestamp that marks validity
 }
 
