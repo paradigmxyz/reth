@@ -6,6 +6,7 @@ use libmdbx::{
 use std::{ops::Deref, path::Path};
 
 pub mod table;
+pub mod tables;
 use table::{Decode, DupSort, Encode, Table};
 
 pub mod cursor;

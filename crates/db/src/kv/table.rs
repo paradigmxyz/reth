@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use std::fmt::Debug;
 
 pub trait Encode: Send + Sync + Sized {
@@ -19,9 +20,37 @@ pub trait Table: Send + Sync + Debug + 'static {
     type Value: Object;
     type SeekKey: Encode;
 
-    fn db_name(&self) -> &str; //string::String<Bytes>; todo
+    fn db_name(&self) -> &'static str; //string::String<Bytes>; todo
 }
 
 pub trait DupSort: Table {
     type SubKey: Object;
+}
+
+impl Encode for Vec<u8> {
+    type Encoded = Self;
+
+    fn encode(self) -> Self::Encoded {
+        self
+    }
+}
+
+impl Decode for Vec<u8> {
+    fn decode(b: &[u8]) -> eyre::Result<Self> {
+        Ok(b.to_vec())
+    }
+}
+
+impl Encode for Bytes {
+    type Encoded = Self;
+
+    fn encode(self) -> Self::Encoded {
+        self
+    }
+}
+
+impl Decode for Bytes {
+    fn decode(b: &[u8]) -> eyre::Result<Self> {
+        Ok(b.to_vec().into())
+    }
 }

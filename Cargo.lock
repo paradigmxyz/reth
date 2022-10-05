@@ -1297,6 +1297,7 @@ version = "0.1.0"
 name = "reth-db"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "eyre",
  "libmdbx",
  "page_size",
