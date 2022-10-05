@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     pub inner: libmdbx::Cursor<'tx, K>,
-    pub table: String, // todo
+    pub table: String, // TODO
     pub _dbi: std::marker::PhantomData<T>,
 }
 

@@ -30,7 +30,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
 
         Ok(Cursor {
             inner: self.inner.cursor(&self.inner.open_db(Some(table_name))?)?,
-            table: table_name.to_string(), // todo
+            table: table_name.to_string(), // TODO
             _dbi: PhantomData,
         })
     }
@@ -40,6 +40,10 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
             .get(&self.inner.open_db(Some(table.db_name()))?, key.encode().as_ref())?
             .map(decode_one::<T>)
             .transpose()
+    }
+
+    pub fn commit(self) -> eyre::Result<bool> {
+        self.inner.commit().map_err(From::from)
     }
 }
 
@@ -77,9 +81,5 @@ impl<'a, E: EnvironmentKind> Tx<'a, RW, E> {
         self.inner.clear_db(&self.inner.open_db(Some(table.db_name()))?)?;
 
         Ok(())
-    }
-
-    pub fn commit(self) -> eyre::Result<bool> {
-        self.inner.commit().map_err(From::from)
     }
 }

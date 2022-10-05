@@ -1,4 +1,4 @@
-pub const TEMP_PLACEHOLDER_NUM_TABLES: usize = 10;
+pub const TEMP_PLACEHOLDER_NUM_TABLES: usize = 2;
 
 /// Returns the default page size that can be used in this OS.
 pub fn default_page_size() -> usize {

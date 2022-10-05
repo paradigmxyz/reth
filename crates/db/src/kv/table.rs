@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use reth_primitives::Address;
 use std::fmt::Debug;
 
 pub trait Encode: Send + Sync + Sized {
@@ -20,7 +21,7 @@ pub trait Table: Send + Sync + Debug + 'static {
     type Value: Object;
     type SeekKey: Encode;
 
-    fn db_name(&self) -> &'static str; //string::String<Bytes>; todo
+    fn db_name(&self) -> &'static str; //string::String<Bytes>; TODO
 }
 
 pub trait DupSort: Table {
@@ -52,5 +53,19 @@ impl Encode for Bytes {
 impl Decode for Bytes {
     fn decode(b: &[u8]) -> eyre::Result<Self> {
         Ok(b.to_vec().into())
+    }
+}
+
+impl Encode for Address {
+    type Encoded = [u8; 20];
+
+    fn encode(self) -> Self::Encoded {
+        self.0
+    }
+}
+
+impl Decode for Address {
+    fn decode(b: &[u8]) -> eyre::Result<Self> {
+        Ok(Address::from_slice(b))
     }
 }

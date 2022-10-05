@@ -1,3 +1,5 @@
+use reth_primitives::Address;
+
 #[macro_export]
 macro_rules! table {
     ($name:ident => $key:ty => $value:ty => $seek:ty) => {
@@ -14,6 +16,12 @@ macro_rules! table {
             }
         }
 
+        impl $name {
+            pub fn name() -> &'static str {
+                stringify!($name)
+            }
+        }
+
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}", stringify!($name))
@@ -25,4 +33,5 @@ macro_rules! table {
     };
 }
 
-table!(Account => Vec<u8> => Vec<u8> => Vec<u8>);
+table!(Account => Address => Vec<u8>);
+table!(Storage => Address => Vec<u8>);

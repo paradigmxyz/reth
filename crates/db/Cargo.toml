@@ -8,7 +8,15 @@ readme = "README.md"
 description = "Staged syncing primitives used in reth."
 
 [dependencies]
+
+# reth
+reth-primitives = { path = "../primitives" }
+
+# misc
 bytes = "1.2.1"
 eyre = "0.6.8"
 libmdbx = "0.1.8"
 page_size = "0.4.2"
+
+[dev-dependencies]
+tempfile = "3.3.0"
