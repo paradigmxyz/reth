@@ -12,7 +12,7 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
     pub inner: libmdbx::Cursor<'tx, K>,
     /// Table name as is inside the database.
-    pub table: String, // TODO
+    pub table: &'static str,
     /// Phantom data to enforce encoding/decoding.
     pub _dbi: std::marker::PhantomData<T>,
 }

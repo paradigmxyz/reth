@@ -41,7 +41,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
 
         Ok(Cursor {
             inner: self.inner.cursor(&self.inner.open_db(Some(table_name))?)?,
-            table: table_name.to_string(), // TODO
+            table: table_name,
             _dbi: PhantomData,
         })
     }
