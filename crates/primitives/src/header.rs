@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::{BlockNumber, Bytes, H160, H256, U256};
 
 /// Block header
@@ -83,6 +85,14 @@ pub struct HeaderLocked {
 
 impl AsRef<Header> for HeaderLocked {
     fn as_ref(&self) -> &Header {
+        &self.header
+    }
+}
+
+impl Deref for HeaderLocked {
+    type Target = Header;
+
+    fn deref(&self) -> &Self::Target {
         &self.header
     }
 }

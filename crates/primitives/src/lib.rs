@@ -12,12 +12,14 @@ mod header;
 mod log;
 mod receipt;
 mod transaction;
+mod account;
 
-pub use block::Block;
+pub use block::{Block, BlockLocked};
 pub use header::{Header, HeaderLocked};
 pub use log::Log;
 pub use receipt::Receipt;
-pub use transaction::{Transaction, TransactionSigned, TxType};
+pub use transaction::{AccessList, AccessListItem, Transaction, TransactionSigned, TxType};
+pub use account::Account;
 
 /// Block Number is height of chain
 pub type BlockNumber = u64;
