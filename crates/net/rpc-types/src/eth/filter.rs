@@ -1,6 +1,5 @@
 use crate::Log;
 use reth_primitives::H256;
-pub use reth_primitives::{Filter, FilteredParams};
 use serde::{Serialize, Serializer};
 
 /// Response of the `eth_getFilterChanges` RPC.

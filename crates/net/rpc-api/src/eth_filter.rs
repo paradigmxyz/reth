@@ -1,6 +1,6 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::U256;
-use reth_rpc_types::{Filter, FilterChanges, Index, Log};
+use reth_primitives::{rpc::Filter, U256};
+use reth_rpc_types::{FilterChanges, Index, Log};
 
 /// Rpc Interface for poll-based ethereum filter API.
 #[rpc(server)]

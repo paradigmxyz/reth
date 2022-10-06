@@ -1,4 +1,4 @@
-use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockId};
+use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockID};
 use futures::channel::mpsc::Receiver;
 use reth_primitives::{Address, TxHash, H256, U256};
 use std::{fmt, hash::Hash, sync::Arc};
@@ -25,7 +25,7 @@ pub trait TransactionPool: Send + Sync {
     /// Consumer: RPC
     async fn add_transaction(
         &self,
-        block_id: BlockId,
+        block_id: BlockID,
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash>;
 
@@ -36,7 +36,7 @@ pub trait TransactionPool: Send + Sync {
     /// Consumer: RPC
     async fn add_transactions(
         &self,
-        block_id: BlockId,
+        block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 

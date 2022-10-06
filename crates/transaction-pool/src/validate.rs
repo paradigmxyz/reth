@@ -5,7 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::PoolTransaction,
 };
-use reth_primitives::{BlockId, TxHash, U256};
+use reth_primitives::{BlockID, TxHash, U256};
 use std::fmt;
 
 /// A Result type returned after checking a transaction's validity.
@@ -40,7 +40,7 @@ pub trait TransactionValidator: Send + Sync {
     /// transactions for the sender.
     async fn validate_transaction(
         &self,
-        _block_id: &BlockId,
+        _block_id: &BlockID,
         _transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         unimplemented!()

@@ -77,8 +77,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
         }
 
         // also track identifying dependencies
-        self.waiting_dependencies
-            .insert(tx.transaction.transaction_id, *tx.transaction.hash());
+        self.waiting_dependencies.insert(tx.transaction.transaction_id, *tx.transaction.hash());
 
         // add tx to the queue
         self.waiting_queue.insert(*tx.transaction.hash(), tx);

@@ -4,7 +4,7 @@
 //! container type [`TypedTransactionRequest`].
 
 use fastrlp::{RlpDecodable, RlpEncodable};
-use reth_primitives::{transaction::eip2930::AccessListItem, Address, Bytes, U256};
+use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests

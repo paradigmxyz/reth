@@ -2,7 +2,7 @@ use crate::eth::transaction::typed::{
     EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
     TransactionKind, TypedTransactionRequest,
 };
-use reth_primitives::{transaction::eip2930::AccessListItem, Address, Bytes, U256};
+use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC

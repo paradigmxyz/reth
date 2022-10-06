@@ -75,7 +75,7 @@ use crate::{
     },
     traits::PoolTransaction,
     validate::ValidPoolTransaction,
-    BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
+    BlockID, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
 use fnv::FnvHashMap;
 use futures::channel::mpsc::{channel, Receiver, Sender};
@@ -125,14 +125,14 @@ where
     }
 
     /// Returns the actual block number for the block id
-    fn resolve_block_number(&self, block_id: &BlockId) -> PoolResult<U64> {
+    fn resolve_block_number(&self, block_id: &BlockID) -> PoolResult<U64> {
         self.pool.client().ensure_block_number(block_id)
     }
 
     /// Add a single _unverified_ transaction into the pool.
     pub async fn add_transaction(
         &self,
-        block_id: &BlockId,
+        block_id: &BlockID,
         transaction: P::Transaction,
     ) -> PoolResult<TxHash> {
         self.add_transactions(block_id, Some(transaction))
@@ -144,7 +144,7 @@ where
     /// Adds all given transactions into the pool
     pub async fn add_transactions(
         &self,
-        block_id: &BlockId,
+        block_id: &BlockID,
         transactions: impl IntoIterator<Item = P::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(block_id, transactions).await?;
@@ -156,7 +156,7 @@ where
     /// `block_id` points to.
     async fn validate_all(
         &self,
-        block_id: &BlockId,
+        block_id: &BlockID,
         transactions: impl IntoIterator<Item = P::Transaction>,
     ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
         // get the actual block number which is required to validate the transactions
@@ -175,7 +175,7 @@ where
     /// Validates the given transaction at the given block
     async fn validate(
         &self,
-        block_id: &BlockId,
+        block_id: &BlockID,
         _block_number: U64,
         transaction: P::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {

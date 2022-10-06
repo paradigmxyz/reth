@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use reth_primitives::BlockId;
+use reth_primitives::BlockID;
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -19,5 +19,5 @@ pub enum PoolError {
     CyclicTransaction,
     /// Thrown if no number was found for the given block id
     #[error("Invalid block id: {0:?}")]
-    BlockNumberNotFound(BlockId),
+    BlockNumberNotFound(BlockID),
 }

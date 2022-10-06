@@ -10,7 +10,7 @@
 
 use futures::channel::mpsc::Receiver;
 use parking_lot::Mutex;
-use reth_primitives::{BlockId, TxHash, U256, U64};
+use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::sync::Arc;
 
 mod client;
@@ -72,7 +72,7 @@ where
 
     async fn add_transaction(
         &self,
-        block_id: BlockId,
+        block_id: BlockID,
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         self.pool.clone().add_transaction(&block_id, transaction).await
@@ -80,7 +80,7 @@ where
 
     async fn add_transactions(
         &self,
-        block_id: BlockId,
+        block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         self.pool.clone().add_transactions(&block_id, transactions).await
