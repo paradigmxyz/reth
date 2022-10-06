@@ -28,6 +28,12 @@ pub type BlockID = H256;
 /// TxHash is Kecack hash of rlp encoded signed transaction
 pub type TxHash = H256;
 
+/// Storage Key
+pub type StorageKey = H256;
+
+/// Storage value
+pub type StorageValue = H256;
+
 // NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
