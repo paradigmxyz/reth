@@ -61,7 +61,7 @@ pub enum StageError {
     /// The stage encountered a state validation error.
     ///
     /// TODO: This depends on the consensus engine and should include the validation failure reason
-    #[error("Stage encountered a validation error.")]
+    #[error("Stage encountered a validation error in block {block}.")]
     Validation {
         /// The block that failed validation.
         block: U64,
