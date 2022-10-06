@@ -77,6 +77,7 @@ use crate::{
     validate::ValidPoolTransaction,
     BlockId, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
+use fnv::FnvHashMap;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::U64;
@@ -93,7 +94,7 @@ mod pending;
 mod queued;
 mod transaction;
 
-use crate::validate::TransactionValidationOutcome;
+use crate::{identifier::SenderId, validate::TransactionValidationOutcome};
 pub use events::TransactionEvent;
 pub use pending::TransactionsIterator;
 
@@ -271,16 +272,20 @@ where
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TransactionHashFor<T>> {
         match tx {
-            TransactionValidationOutcome::Valid(tx) => {
-                let added = self.pool.write().add_transaction(tx)?;
+            TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
+                // TODO create `ValidPoolTransaction`
 
-                if let Some(ready) = added.as_ready() {
-                    self.on_new_ready_transaction(ready);
-                }
+                // let added = self.pool.write().add_transaction(tx)?;
+                //
+                // if let Some(ready) = added.as_ready() {
+                //     self.on_new_ready_transaction(ready);
+                // }
+                //
+                // self.notify_event_listeners(&added);
+                //
+                // Ok(*added.hash())
 
-                self.notify_event_listeners(&added);
-
-                Ok(*added.hash())
+                todo!()
             }
             TransactionValidationOutcome::Invalid(_tx, err) => {
                 // TODO notify listeners about invalid
@@ -347,6 +352,8 @@ where
 pub struct GraphPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<T>,
+    /// Contains the currently known info
+    sender_info: FnvHashMap<SenderId, SenderInfo>,
     /// Sub-Pool of transactions that are ready and waiting to be executed
     pending: PendingTransactions<T>,
     /// Sub-Pool of transactions that are waiting for state changes that eventually turn them
@@ -360,7 +367,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
     /// Create a new graph pool instance.
     pub fn new(ordering: Arc<T>) -> Self {
         let pending = PendingTransactions::new(Arc::clone(&ordering));
-        Self { ordering, pending, queued: Default::default() }
+        Self { ordering, sender_info: Default::default(), pending, queued: Default::default() }
     }
 
     /// Updates the pool based on the changed base fee.
@@ -602,6 +609,26 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
             discarded: Default::default(),
             removed: Default::default(),
         }
+    }
+}
+
+/// Stores relevant context about a sender.
+#[derive(Debug, Clone)]
+struct SenderInfo {
+    /// current nonce of the sender
+    state_nonce: u64,
+    /// Balance of the sender at the current point.
+    balance: U256,
+    /// How many transactions of this sender are currently in the pool.
+    num_transactions: u64,
+}
+
+// === impl SenderInfo ===
+
+impl SenderInfo {
+    /// Creates a new entry for an incoming, not yet tracked sender.
+    fn new_incoming(state_nonce: u64, balance: U256) -> Self {
+        Self { state_nonce, balance, num_transactions: 1 }
     }
 }
 

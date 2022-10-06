@@ -1,13 +1,20 @@
 //! Transaction validation abstractions.
 
-use crate::{error::PoolError, traits::PoolTransaction};
-use reth_primitives::BlockId;
+use crate::{error::PoolError, identifier::SenderId, traits::PoolTransaction};
+use reth_primitives::{BlockId, U256};
 use std::fmt;
 
 /// A Result type returned after checking a transaction's validity.
 pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// Transaction successfully validated
-    Valid(ValidPoolTransaction<T>),
+    Valid {
+        /// Balance of the sender at the current point.
+        balance: U256,
+        /// current nonce of the sender
+        state_nonce: u64,
+        /// Validated transaction.
+        transaction: T,
+    },
     /// The transaction is considered invalid.
     ///
     /// Note: This does not indicate whether the transaction will not be valid in the future
@@ -50,6 +57,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction_id: T::Id,
     /// Whether to propagate the transaction.
     pub propagate: bool,
+    /// Internal `Sender` identifier
+    pub sender_id: SenderId,
     // TODO add a block timestamp that marks validity
 }
 

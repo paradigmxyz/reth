@@ -120,6 +120,9 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     // TODO change this to nonce
     fn id(&self) -> Self::Id;
 
+    /// Returns the nonce for this transaction.
+    fn nonce(&self) -> u64;
+
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// This will return `None` for non-EIP1559 transactions
