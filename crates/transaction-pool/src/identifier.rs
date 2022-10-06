@@ -53,6 +53,9 @@ impl SenderIdentifiers {
 pub struct SenderId(u64);
 
 /// A unique identifier of a transaction of a Sender.
+///
+/// This serves as an identifier for dependencies of a transaction:
+/// A transaction with a nonce higher than the current state nonce depends on `tx.nonce - 1`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TransactionId {
     /// Sender of this transaction

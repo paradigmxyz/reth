@@ -1,9 +1,6 @@
 use crate::{
-    error::PoolResult,
-    pool::{TransactionHashFor, TransactionIdFor},
-    traits::PoolTransaction,
-    validate::ValidPoolTransaction,
-    TransactionOrdering,
+    error::PoolResult, identifier::TransactionId, pool::TransactionHashFor,
+    traits::PoolTransaction, validate::ValidPoolTransaction, TransactionOrdering,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -21,9 +18,9 @@ use std::{
 /// Keeps a set of transactions that are waiting until their dependencies are unlocked.
 pub(crate) struct QueuedTransactions<T: TransactionOrdering> {
     /// Dependencies that aren't yet provided by any transaction.
-    required_dependencies: HashMap<TransactionIdFor<T>, HashSet<TransactionHashFor<T>>>,
+    required_dependencies: HashMap<TransactionId, HashSet<TransactionHashFor<T>>>,
     /// Mapping of the dependencies of a transaction to the hash of the transaction,
-    waiting_dependencies: HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
+    waiting_dependencies: HashMap<TransactionId, TransactionHashFor<T>>,
     /// Transactions that are not ready yet are waiting for another tx to finish,
     waiting_queue: HashMap<TransactionHashFor<T>, QueuedPoolTransaction<T>>,
 }
@@ -115,7 +112,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// moved to the ready queue.
     pub(crate) fn satisfy_and_unlock(
         &mut self,
-        id: &TransactionIdFor<T>,
+        id: &TransactionId,
     ) -> Vec<QueuedPoolTransaction<T>> {
         let mut unlocked_ready = Vec::new();
         if let Some(tx_hashes) = self.required_dependencies.remove(id) {
@@ -173,7 +170,7 @@ pub(crate) struct QueuedPoolTransaction<T: TransactionOrdering> {
     ///
     /// This will be an empty list if there are no nonce gaps across multiple transactions of the
     /// same sender in the pool. If there are gaps, this will include the missing transactions.
-    pub(crate) missing_dependencies: HashSet<TransactionIdFor<T>>,
+    pub(crate) missing_dependencies: HashSet<TransactionId>,
     /// Timestamp when the tx was added.
     pub(crate) added_at: Instant,
 }
@@ -197,7 +194,7 @@ impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     /// moved to the queue.
     pub(crate) fn new(
         transaction: ValidPoolTransaction<T::Transaction>,
-        provided: &HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
+        provided: &HashMap<TransactionId, TransactionHashFor<T>>,
     ) -> Self {
         let missing_dependencies = transaction
             .depends_on
@@ -214,7 +211,7 @@ impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     }
 
     /// Removes the required dependency.
-    pub(crate) fn satisfy(&mut self, id: &TransactionIdFor<T>) {
+    pub(crate) fn satisfy(&mut self, id: &TransactionId) {
         self.missing_dependencies.remove(id);
     }
 

@@ -102,9 +102,6 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// Transaction hash type.
     type Hash: fmt::Debug + Eq + Clone + Copy + Hash + Send + Sync + 'static;
 
-    /// Unique identifier for this transaction.
-    type Id: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + AsRef<Self::Id> + Send + Sync;
-
     /// Hash of the transaction
     fn hash(&self) -> &Self::Hash;
 

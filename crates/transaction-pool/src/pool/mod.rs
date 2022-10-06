@@ -94,16 +94,16 @@ mod pending;
 mod queued;
 mod transaction;
 
-use crate::{identifier::SenderId, validate::TransactionValidationOutcome};
+use crate::{
+    identifier::{SenderId, TransactionId},
+    validate::TransactionValidationOutcome,
+};
 pub use events::TransactionEvent;
 pub use pending::TransactionsIterator;
 
 // Helper type aliases for associated types
 pub(crate) type TransactionHashFor<T> =
     <<T as TransactionOrdering>::Transaction as PoolTransaction>::Hash;
-
-pub(crate) type TransactionIdFor<T> =
-    <<T as TransactionOrdering>::Transaction as PoolTransaction>::Id;
 
 /// Shareable Transaction pool.
 pub struct BasicPool<P: PoolClient, T: TransactionOrdering> {
@@ -495,7 +495,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
     /// And queued transactions might get promoted if the pruned dependencies unlock them.
     pub fn prune_transactions(
         &mut self,
-        dependencies: impl IntoIterator<Item = TransactionIdFor<T>>,
+        dependencies: impl IntoIterator<Item = TransactionId>,
     ) -> PruneResult<T::Transaction> {
         let mut imports = vec![];
         let mut pruned = vec![];

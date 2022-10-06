@@ -1,6 +1,7 @@
 use crate::{
     error::PoolResult,
-    pool::{queued::QueuedPoolTransaction, TransactionHashFor, TransactionIdFor},
+    identifier::TransactionId,
+    pool::{queued::QueuedPoolTransaction, TransactionHashFor},
     traits::BestTransactions,
     validate::ValidPoolTransaction,
     TransactionOrdering,
@@ -36,7 +37,7 @@ pub(crate) struct PendingTransactions<T: TransactionOrdering> {
     /// Base fee of the next block.
     pending_base_fee: U256,
     /// Dependencies that are provided by `PendingTransaction`s
-    provided_dependencies: HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
+    provided_dependencies: HashMap<TransactionId, TransactionHashFor<T>>,
     /// Pending transactions that are currently on hold until the `baseFee` of the pending block
     /// changes in favor of the parked transactions: the `pendingBlock.baseFee` must decrease
     /// before they can be moved to the ready pool and are ready to be executed.
@@ -110,9 +111,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
         self.ready_transactions.read().get(hash).cloned()
     }
 
-    pub(crate) fn provided_dependencies(
-        &self,
-    ) -> &HashMap<TransactionIdFor<T>, TransactionHashFor<T>> {
+    pub(crate) fn provided_dependencies(&self) -> &HashMap<TransactionId, TransactionHashFor<T>> {
         &self.provided_dependencies
     }
 
@@ -252,7 +251,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     /// id.
     pub(crate) fn remove_mined(
         &mut self,
-        id: TransactionIdFor<T>,
+        id: TransactionId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed_tx = vec![];
 
@@ -275,7 +274,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
                     let hash = tx.hash();
                     let mut ready = self.ready_transactions.write();
 
-                    let mut previous_dependency = |dependency| -> Option<Vec<TransactionIdFor<T>>> {
+                    let mut previous_dependency = |dependency| -> Option<Vec<TransactionId>> {
                         let prev_hash = self.provided_dependencies.get(dependency)?;
                         let tx2 = ready.get_mut(prev_hash)?;
                         // remove hash
@@ -327,7 +326,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     pub(crate) fn remove_with_dependencies(
         &mut self,
         mut tx_hashes: Vec<TransactionHashFor<T>>,
-        dependency_filter: Option<HashSet<TransactionIdFor<T>>>,
+        dependency_filter: Option<HashSet<TransactionId>>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
         let mut ready = self.ready_transactions.write();
@@ -391,7 +390,7 @@ pub(crate) struct PendingTransaction<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
     /// Returns all ids this transaction satisfies.
-    pub(crate) fn id(&self) -> &TransactionIdFor<T> {
+    pub(crate) fn id(&self) -> &TransactionId {
         &self.transaction.transaction.transaction_id
     }
 }

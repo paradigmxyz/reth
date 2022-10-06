@@ -1,6 +1,10 @@
 //! Transaction validation abstractions.
 
-use crate::{error::PoolError, identifier::SenderId, traits::PoolTransaction};
+use crate::{
+    error::PoolError,
+    identifier::{SenderId, TransactionId},
+    traits::PoolTransaction,
+};
 use reth_primitives::{BlockId, U256};
 use std::fmt;
 
@@ -51,10 +55,9 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     ///
     /// This lists all unique transactions that need to be mined before this transaction can be
     /// considered `pending` and itself be included.
-    // TODO change this to previous nonce
-    pub depends_on: Vec<T::Id>,
+    pub depends_on: Vec<TransactionId>,
     /// The identifier for this transaction.
-    pub transaction_id: T::Id,
+    pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
     /// Internal `Sender` identifier
