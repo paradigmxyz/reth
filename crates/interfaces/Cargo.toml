@@ -10,3 +10,4 @@ readme = "README.md"
 reth-primitives = { path = "../primitives" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
+auto_impl = "1.0"

@@ -19,10 +19,20 @@ pub use log::Log;
 pub use receipt::Receipt;
 pub use transaction::{Transaction, TransactionSigned, TxType};
 
-/// Block Number
+/// Block Number is height of chain
 pub type BlockNumber = u64;
 /// Ethereum address
 pub type Address = H160;
+/// BlockId is Keccak hash of the header
+pub type BlockID = H256;
+/// TxHash is Kecack hash of rlp encoded signed transaction
+pub type TxHash = H256;
+
+/// Storage Key
+pub type StorageKey = H256;
+
+/// Storage value
+pub type StorageValue = H256;
 
 // NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{

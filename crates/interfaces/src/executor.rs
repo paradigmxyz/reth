@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use reth_primitives::Block;
+use reth_primitives::{Address, Block, BlockNumber, StorageKey, StorageValue};
 use thiserror::Error;
 
 /// Takes block and executes it, returns error
@@ -17,4 +17,13 @@ pub enum Error {
     /// Example of error
     #[error("Example of error.")]
     VerificationFailed,
+}
+
+/// Function needed for executor
+pub trait ExecutorDb {
+    /// Get Block by BlockNumber.
+    fn get_block(&self, _height: BlockNumber) -> Option<Block>;
+
+    /// Get storage.
+    fn get_storage(&self, account: Address, storage_key: StorageKey) -> Option<StorageValue>;
 }

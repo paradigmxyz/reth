@@ -9,3 +9,6 @@
 
 /// Block Execution traits.
 pub mod executor;
+
+/// Consensus traits.
+pub mod consensus;
