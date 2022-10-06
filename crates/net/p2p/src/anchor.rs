@@ -6,10 +6,10 @@ use std::{
     path::Path,
 };
 
-use tracing::error;
 use enr::{secp256k1::SecretKey, Enr};
 use serde_derive::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::error;
 
 // TODO: impl Hash for Enr<K> upstream and change to HashSet to prevent duplicates
 // TODO: enforce one-to-one mapping between IP and key
@@ -91,10 +91,7 @@ impl PersistentAnchor {
 
         // if the file does not exist then we should create it
         if file.metadata()?.len() == 0 {
-            let mut anchor = Self {
-                anchor: Anchor::default(),
-                file,
-            };
+            let mut anchor = Self { anchor: Anchor::default(), file };
             anchor.save_toml()?;
             return Ok(anchor)
         }
@@ -110,10 +107,7 @@ impl PersistentAnchor {
         // if the file exists but is empty then we should initialize the file format and return an
         // empty [`Anchor`]
         if contents.is_empty() {
-            let mut anchor = Self {
-                anchor: Anchor::default(),
-                file,
-            };
+            let mut anchor = Self { anchor: Anchor::default(), file };
             anchor.save_toml()?;
             return Ok(anchor)
         }
@@ -142,8 +136,14 @@ impl Drop for PersistentAnchor {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::{remove_file, OpenOptions}, net::Ipv4Addr};
-    use enr::{secp256k1::{SecretKey, rand::thread_rng}, EnrBuilder};
+    use enr::{
+        secp256k1::{rand::thread_rng, SecretKey},
+        EnrBuilder,
+    };
+    use std::{
+        fs::{remove_file, OpenOptions},
+        net::Ipv4Addr,
+    };
 
     use super::{Anchor, PersistentAnchor};
 
@@ -179,7 +179,8 @@ mod tests {
     fn save_temp_anchor() {
         let file_name = "temp_anchor_two.toml";
         let temp_file_path = std::env::temp_dir().with_file_name(file_name);
-        let temp_file = OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
+        let temp_file =
+            OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
 
         let mut persistent_anchor = PersistentAnchor::from_toml(temp_file).unwrap();
 
@@ -187,12 +188,12 @@ mod tests {
         let mut rng = thread_rng();
 
         let key = SecretKey::new(&mut rng);
-        let ip = Ipv4Addr::new(192,168,1,1);
+        let ip = Ipv4Addr::new(192, 168, 1, 1);
         let enr = EnrBuilder::new("v4").ip4(ip).tcp4(8000).build(&key).unwrap();
         persistent_anchor.anchor.add_discovered(vec![enr]);
 
         let key = SecretKey::new(&mut rng);
-        let ip = Ipv4Addr::new(192,168,1,2);
+        let ip = Ipv4Addr::new(192, 168, 1, 2);
         let enr = EnrBuilder::new("v4").ip4(ip).tcp4(8000).build(&key).unwrap();
         persistent_anchor.anchor.add_static(vec![enr]);
 
@@ -201,7 +202,8 @@ mod tests {
         drop(persistent_anchor);
 
         // finally check file contents
-        let prev_file = OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
+        let prev_file =
+            OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
         let new_anchor = PersistentAnchor::from_toml(prev_file).unwrap();
 
         remove_file(temp_file_path).unwrap();
