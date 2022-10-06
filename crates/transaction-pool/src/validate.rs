@@ -32,7 +32,7 @@ pub trait TransactionValidator: Send + Sync {
     /// This is used by the transaction-pool check the transaction's validity against the state of
     /// the given block hash.
     ///
-    /// This is supposed to extend the `transaction` with its identifying markers in the graph of
+    /// This is supposed to extend the `transaction` with its id in the graph of
     /// transactions for the sender.
     async fn validate_transaction(
         &self,
@@ -59,6 +59,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub propagate: bool,
     /// Internal `Sender` identifier
     pub sender_id: SenderId,
+    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`
+    pub cost: U256,
     // TODO add a block timestamp that marks validity
 }
 

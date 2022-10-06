@@ -51,3 +51,12 @@ impl SenderIdentifiers {
 /// program.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SenderId(u64);
+
+/// A unique identifier of a transaction of a Sender.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct TransactionId {
+    /// Sender of this transaction
+    pub sender: SenderId,
+    /// Nonce of this transaction
+    pub nonce: u64,
+}

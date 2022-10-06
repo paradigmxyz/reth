@@ -1,7 +1,7 @@
 use crate::{
     error::PoolResult,
     pool::{queued::QueuedPoolTransaction, TransactionHashFor, TransactionIdFor},
-    traits::ReadyTransactions,
+    traits::BestTransactions,
     validate::ValidPoolTransaction,
     TransactionOrdering,
 };
@@ -553,7 +553,7 @@ impl<T: TransactionOrdering> TransactionsIterator<T> {
     /// either to awaiting set or to best set.
     fn independent_or_awaiting(&mut self, satisfied: usize, tx_ref: PoolTransactionRef<T>) {
         if satisfied >= tx_ref.transaction.depends_on.len() {
-            // If we have satisfied all deps insert to best
+            // If we have satisfied all deps insert to the best set
             self.independent.insert(tx_ref);
         } else {
             // otherwise we're still waiting for some deps
@@ -562,7 +562,7 @@ impl<T: TransactionOrdering> TransactionsIterator<T> {
     }
 }
 
-impl<T: TransactionOrdering> ReadyTransactions for TransactionsIterator<T> {
+impl<T: TransactionOrdering> BestTransactions for TransactionsIterator<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
         TransactionsIterator::mark_invalid(self, tx)
     }

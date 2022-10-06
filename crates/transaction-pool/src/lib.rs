@@ -26,7 +26,7 @@ pub use crate::{
     config::PoolConfig,
     ordering::TransactionOrdering,
     pool::BasicPool,
-    traits::{ChainEvent, PoolTransaction, ReadyTransactions, TransactionPool},
+    traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{error::PoolResult, traits::HashFor, validate::ValidPoolTransaction};
@@ -64,7 +64,7 @@ where
 {
     type Transaction = T::Transaction;
 
-    async fn on_chain_event(&self, _event: ChainEvent) {
+    async fn on_new_block(&self, _event: NewBlockEvent) {
         // TODO perform maintenance: update pool accordingly
         todo!()
     }
@@ -89,9 +89,9 @@ where
         self.pool.ready_transactions_listener()
     }
 
-    fn ready_transactions(
+    fn best_transactions(
         &self,
-    ) -> Box<dyn ReadyTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(self.pool.inner().ready_transactions())
     }
 

@@ -178,8 +178,6 @@ where
     }
 
     /// Validates the given transaction at the given block
-    ///
-    /// Returns future that validates single transaction at given block.
     async fn validate(
         &self,
         block_id: &BlockId,
@@ -420,7 +418,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
         let tx = QueuedPoolTransaction::new(tx, self.pending.provided_dependencies());
         trace!(target: "txpool", "[{:?}] {:?}", tx.transaction.hash(), tx);
 
-        // If all markers are not satisfied import to future
+        // If all ids are not satisfied import to queued
         if !tx.is_satisfied() {
             let hash = *tx.transaction.hash();
             self.queued.add_transaction(tx)?;
@@ -495,7 +493,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
     ///
     /// This will effectively remove those transactions that satisfy the dependencies.
     /// And queued transactions might get promoted if the pruned dependencies unlock them.
-    pub fn prune_dependencies(
+    pub fn prune_transactions(
         &mut self,
         dependencies: impl IntoIterator<Item = TransactionIdFor<T>>,
     ) -> PruneResult<T::Transaction> {

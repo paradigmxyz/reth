@@ -15,12 +15,12 @@ pub trait TransactionPool: Send + Sync {
     /// The transaction type of the pool
     type Transaction: PoolTransaction + Send + Sync + 'static;
 
-    /// Event listener for chain events that affect the pool.
+    /// Event listener for when a new block was mined.
     ///
     /// Implementers need to update the pool accordingly.
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
-    async fn on_chain_event(&self, event: ChainEvent);
+    async fn on_new_block(&self, event: NewBlockEvent);
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
@@ -50,9 +50,9 @@ pub trait TransactionPool: Send + Sync {
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
     /// Consumer: Block production
-    fn ready_transactions(
+    fn best_transactions(
         &self,
-    ) -> Box<dyn ReadyTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
     /// Removes all transactions corresponding to the given hashes.
     ///
@@ -65,30 +65,25 @@ pub trait TransactionPool: Send + Sync {
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
-/// Various Events the pool listens for and needs to apply changes.
+/// Event fired when a new block was mined
 #[derive(Debug, Clone)]
-pub enum ChainEvent {
-    /// New best block have been added to the chain.
-    NewBestBlock {
-        /// Hash of the added block.
-        hash: H256,
-        /// EIP-1559 Base fee of the _next_ (pending) block
-        ///
-        /// The base fee of a block depends on the utilization of the last block and its base fee.
-        pending_block_base_fee: U256,
-    },
-    /// An existing block has been finalized.
-    Finalized {
-        /// Hash of just finalized block.
-        hash: H256,
-    },
+pub struct NewBlockEvent {
+    /// Hash of the added block.
+    pub hash: H256,
+    /// EIP-1559 Base fee of the _next_ (pending) block
+    ///
+    /// The base fee of a block depends on the utilization of the last block and its base fee.
+    pub pending_block_base_fee: U256,
+    /// Provides a set of state changes that affected the accounts.
+    // TODO based on the account changes, we can recheck balance
+    pub state_changes: (),
 }
 
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
 /// transactions are valid (no nonce gaps.).
-pub trait ReadyTransactions: Iterator + Send {
+pub trait BestTransactions: Iterator + Send {
     /// Mark the transaction as invalid.
     ///
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
@@ -98,14 +93,14 @@ pub trait ReadyTransactions: Iterator + Send {
 }
 
 /// A no-op implementation that yields no transactions.
-impl<T> ReadyTransactions for std::iter::Empty<T> {
+impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
 }
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// Transaction hash type.
-    type Hash: fmt::Debug + fmt::LowerHex + Eq + Clone + Copy + Hash + Send + Sync + 'static;
+    type Hash: fmt::Debug + Eq + Clone + Copy + Hash + Send + Sync + 'static;
 
     /// Unique identifier for this transaction.
     type Id: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + AsRef<Self::Id> + Send + Sync;
@@ -116,12 +111,13 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// The Sender of the transaction.
     fn sender(&self) -> &Address;
 
-    /// Creates the unique identifier for this transaction.
-    // TODO change this to nonce
-    fn id(&self) -> Self::Id;
-
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64;
+
+    /// Calculates the cost that this transaction is allowed to consume:
+    ///
+    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
+    fn cost(&self) -> U256;
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///

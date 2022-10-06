@@ -173,7 +173,6 @@ pub(crate) struct QueuedPoolTransaction<T: TransactionOrdering> {
     ///
     /// This will be an empty list if there are no nonce gaps across multiple transactions of the
     /// same sender in the pool. If there are gaps, this will include the missing transactions.
-    // TODO rename to nonce
     pub(crate) missing_dependencies: HashSet<TransactionIdFor<T>>,
     /// Timestamp when the tx was added.
     pub(crate) added_at: Instant,
