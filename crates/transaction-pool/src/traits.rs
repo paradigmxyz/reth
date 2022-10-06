@@ -1,9 +1,7 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockId};
 use futures::channel::mpsc::Receiver;
-use reth_primitives::{Address, H256, U256};
+use reth_primitives::{Address, TxHash, H256, U256};
 use std::{fmt, hash::Hash, sync::Arc};
-
-pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::Hash;
 
 /// General purpose abstraction fo a transaction-pool.
 ///
@@ -29,7 +27,7 @@ pub trait TransactionPool: Send + Sync {
         &self,
         block_id: BlockId,
         transaction: Self::Transaction,
-    ) -> PoolResult<HashFor<Self>>;
+    ) -> PoolResult<TxHash>;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -40,12 +38,12 @@ pub trait TransactionPool: Send + Sync {
         &self,
         block_id: BlockId,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<HashFor<Self>>>>;
+    ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
-    fn ready_transactions_listener(&self) -> Receiver<HashFor<Self>>;
+    fn ready_transactions_listener(&self) -> Receiver<TxHash>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -61,7 +59,7 @@ pub trait TransactionPool: Send + Sync {
     /// Consumer: Block production
     fn remove_invalid(
         &self,
-        tx_hashes: &[HashFor<Self>],
+        tx_hashes: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
@@ -99,11 +97,8 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
-    /// Transaction hash type.
-    type Hash: fmt::Debug + Eq + Clone + Copy + Hash + Send + Sync + 'static;
-
     /// Hash of the transaction
-    fn hash(&self) -> &Self::Hash;
+    fn hash(&self) -> &TxHash;
 
     /// The Sender of the transaction.
     fn sender(&self) -> &Address;

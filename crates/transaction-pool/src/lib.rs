@@ -10,7 +10,7 @@
 
 use futures::channel::mpsc::Receiver;
 use parking_lot::Mutex;
-use reth_primitives::{BlockId, U256, U64};
+use reth_primitives::{BlockId, TxHash, U256, U64};
 use std::sync::Arc;
 
 mod client;
@@ -30,7 +30,7 @@ pub use crate::{
     traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
-use crate::{error::PoolResult, traits::HashFor, validate::ValidPoolTransaction};
+use crate::{error::PoolResult, validate::ValidPoolTransaction};
 
 /// A generic, customizable `TransactionPool` implementation.
 pub struct Pool<P: PoolClient, T: TransactionOrdering> {
@@ -74,7 +74,7 @@ where
         &self,
         block_id: BlockId,
         transaction: Self::Transaction,
-    ) -> PoolResult<HashFor<Self>> {
+    ) -> PoolResult<TxHash> {
         self.pool.clone().add_transaction(&block_id, transaction).await
     }
 
@@ -82,11 +82,11 @@ where
         &self,
         block_id: BlockId,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<HashFor<Self>>>> {
+    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         self.pool.clone().add_transactions(&block_id, transactions).await
     }
 
-    fn ready_transactions_listener(&self) -> Receiver<HashFor<Self>> {
+    fn ready_transactions_listener(&self) -> Receiver<TxHash> {
         self.pool.ready_transactions_listener()
     }
 
@@ -98,7 +98,7 @@ where
 
     fn remove_invalid(
         &self,
-        _tx_hashes: &[HashFor<Self>],
+        _tx_hashes: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         todo!()
     }

@@ -1,7 +1,8 @@
 use crate::{
-    error::PoolResult, identifier::TransactionId, pool::TransactionHashFor,
-    traits::PoolTransaction, validate::ValidPoolTransaction, TransactionOrdering,
+    error::PoolResult, identifier::TransactionId, traits::PoolTransaction,
+    validate::ValidPoolTransaction, TransactionOrdering,
 };
+use reth_primitives::TxHash;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -18,11 +19,11 @@ use std::{
 /// Keeps a set of transactions that are waiting until their dependencies are unlocked.
 pub(crate) struct QueuedTransactions<T: TransactionOrdering> {
     /// Dependencies that aren't yet provided by any transaction.
-    required_dependencies: HashMap<TransactionId, HashSet<TransactionHashFor<T>>>,
+    required_dependencies: HashMap<TransactionId, HashSet<TxHash>>,
     /// Mapping of the dependencies of a transaction to the hash of the transaction,
-    waiting_dependencies: HashMap<TransactionId, TransactionHashFor<T>>,
+    waiting_dependencies: HashMap<TransactionId, TxHash>,
     /// Transactions that are not ready yet are waiting for another tx to finish,
-    waiting_queue: HashMap<TransactionHashFor<T>, QueuedPoolTransaction<T>>,
+    waiting_queue: HashMap<TxHash, QueuedPoolTransaction<T>>,
 }
 
 // == impl QueuedTransactions ==
@@ -70,14 +71,14 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
         // add all missing dependencies
         for dependency in &tx.missing_dependencies {
             self.required_dependencies
-                .entry(dependency.clone())
+                .entry(*dependency)
                 .or_default()
                 .insert(*tx.transaction.hash());
         }
 
         // also track identifying dependencies
         self.waiting_dependencies
-            .insert(tx.transaction.transaction_id.clone(), *tx.transaction.hash());
+            .insert(tx.transaction.transaction_id, *tx.transaction.hash());
 
         // add tx to the queue
         self.waiting_queue.insert(*tx.transaction.hash(), tx);
@@ -86,19 +87,19 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     }
 
     /// Returns true if given transaction is part of the queue
-    pub(crate) fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
+    pub(crate) fn contains(&self, hash: &TxHash) -> bool {
         self.waiting_queue.contains_key(hash)
     }
 
     /// Returns the transaction for the hash if it's waiting
-    pub(crate) fn get(&self, tx_hash: &TransactionHashFor<T>) -> Option<&QueuedPoolTransaction<T>> {
+    pub(crate) fn get(&self, tx_hash: &TxHash) -> Option<&QueuedPoolTransaction<T>> {
         self.waiting_queue.get(tx_hash)
     }
 
     /// Returns the transactions for the given hashes, `None` if no transaction exists
     pub(crate) fn get_all(
         &self,
-        tx_hashes: &[TransactionHashFor<T>],
+        tx_hashes: &[TxHash],
     ) -> Vec<Option<Arc<ValidPoolTransaction<T::Transaction>>>> {
         tx_hashes
             .iter()
@@ -135,7 +136,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// Returns all removed transactions.
     pub(crate) fn remove(
         &mut self,
-        hashes: Vec<TransactionHashFor<T>>,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = vec![];
         for hash in hashes {
@@ -194,7 +195,7 @@ impl<T: TransactionOrdering> QueuedPoolTransaction<T> {
     /// moved to the queue.
     pub(crate) fn new(
         transaction: ValidPoolTransaction<T::Transaction>,
-        provided: &HashMap<TransactionId, TransactionHashFor<T>>,
+        provided: &HashMap<TransactionId, TxHash>,
     ) -> Self {
         let missing_dependencies = transaction
             .depends_on

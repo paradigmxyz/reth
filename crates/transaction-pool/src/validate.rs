@@ -5,7 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::PoolTransaction,
 };
-use reth_primitives::{BlockId, U256};
+use reth_primitives::{BlockId, TxHash, U256};
 use std::fmt;
 
 /// A Result type returned after checking a transaction's validity.
@@ -71,7 +71,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Returns the hash of the transaction
-    pub fn hash(&self) -> &T::Hash {
+    pub fn hash(&self) -> &TxHash {
         self.transaction.hash()
     }
 }

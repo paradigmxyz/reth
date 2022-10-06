@@ -80,7 +80,7 @@ use crate::{
 use fnv::FnvHashMap;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::U64;
+use reth_primitives::{TxHash, U64};
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -100,10 +100,6 @@ use crate::{
 };
 pub use events::TransactionEvent;
 pub use pending::TransactionsIterator;
-
-// Helper type aliases for associated types
-pub(crate) type TransactionHashFor<T> =
-    <<T as TransactionOrdering>::Transaction as PoolTransaction>::Hash;
 
 /// Shareable Transaction pool.
 pub struct BasicPool<P: PoolClient, T: TransactionOrdering> {
@@ -138,7 +134,7 @@ where
         &self,
         block_id: &BlockId,
         transaction: P::Transaction,
-    ) -> PoolResult<TransactionHashFor<T>> {
+    ) -> PoolResult<TxHash> {
         self.add_transactions(block_id, Some(transaction))
             .await?
             .pop()
@@ -150,7 +146,7 @@ where
         &self,
         block_id: &BlockId,
         transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TransactionHashFor<T>>>> {
+    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(block_id, transactions).await?;
         let transactions = self.pool.add_transactions(validated.into_values());
         Ok(transactions)
@@ -162,8 +158,7 @@ where
         &self,
         block_id: &BlockId,
         transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<HashMap<TransactionHashFor<T>, TransactionValidationOutcome<P::Transaction>>>
-    {
+    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
         // get the actual block number which is required to validate the transactions
         let block_number = self.resolve_block_number(block_id)?;
 
@@ -183,7 +178,7 @@ where
         block_id: &BlockId,
         _block_number: U64,
         transaction: P::Transaction,
-    ) -> (TransactionHashFor<T>, TransactionValidationOutcome<P::Transaction>) {
+    ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
         let _hash = *transaction.hash();
         // TODO this is where additional validate checks would go, like banned senders etc...
         let _res = self.pool.client().validate_transaction(block_id, transaction).await;
@@ -194,7 +189,7 @@ where
     }
 
     /// Registers a new transaction listener and returns the receiver stream.
-    pub fn ready_transactions_listener(&self) -> Receiver<TransactionHashFor<T>> {
+    pub fn ready_transactions_listener(&self) -> Receiver<TxHash> {
         self.pool.add_ready_listener()
     }
 }
@@ -214,9 +209,9 @@ pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventListener<TransactionHashFor<T>>>,
+    event_listener: RwLock<PoolEventListener<TxHash>>,
     /// Listeners for new ready transactions.
-    ready_transaction_listener: Mutex<Vec<Sender<TransactionHashFor<T>>>>,
+    ready_transaction_listener: Mutex<Vec<Sender<TxHash>>>,
 }
 
 // === impl PoolInner ===
@@ -249,7 +244,7 @@ where
 
     /// Adds a new transaction listener to the pool that gets notified about every new ready
     /// transaction
-    pub fn add_ready_listener(&self) -> Receiver<TransactionHashFor<T>> {
+    pub fn add_ready_listener(&self) -> Receiver<TxHash> {
         const TX_LISTENER_BUFFER_SIZE: usize = 2048;
         let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
         self.ready_transaction_listener.lock().push(tx);
@@ -257,10 +252,7 @@ where
     }
 
     /// Resubmits transactions back into the pool.
-    pub fn resubmit(
-        &self,
-        _transactions: HashMap<TransactionHashFor<T>, ValidPoolTransaction<T::Transaction>>,
-    ) {
+    pub fn resubmit(&self, _transactions: HashMap<TxHash, ValidPoolTransaction<T::Transaction>>) {
         unimplemented!()
     }
 
@@ -268,7 +260,7 @@ where
     fn add_transaction(
         &self,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> PoolResult<TransactionHashFor<T>> {
+    ) -> PoolResult<TxHash> {
         match tx {
             TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
                 // TODO create `ValidPoolTransaction`
@@ -296,14 +288,14 @@ where
     pub fn add_transactions(
         &self,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
-    ) -> Vec<PoolResult<TransactionHashFor<T>>> {
+    ) -> Vec<PoolResult<TxHash>> {
         // TODO check pool limits
 
         transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>()
     }
 
     /// Notify all listeners about the new transaction.
-    fn on_new_ready_transaction(&self, ready: &TransactionHashFor<T>) {
+    fn on_new_ready_transaction(&self, ready: &TxHash) {
         let mut transaction_listeners = self.ready_transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| match listener.try_send(*ready) {
             Ok(()) => true,
@@ -382,7 +374,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
     }
 
     /// Returns if the transaction for the given hash is already included in this pool
-    pub(crate) fn contains(&self, tx_hash: &TransactionHashFor<T>) -> bool {
+    pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.queued.contains(tx_hash) || self.pending.contains(tx_hash)
     }
 
@@ -504,7 +496,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
             // mark as satisfied and store the transactions that got unlocked
             imports.extend(self.queued.satisfy_and_unlock(&dependency));
             // prune transactions
-            pruned.extend(self.pending.remove_mined(dependency.clone()));
+            pruned.extend(self.pending.remove_mined(dependency));
         }
 
         let mut promoted = vec![];
@@ -526,7 +518,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
     /// Remove the given transactions from the pool.
     pub fn remove_invalid(
         &mut self,
-        tx_hashes: Vec<TransactionHashFor<T>>,
+        tx_hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         // early exit in case there is no invalid transactions.
         if tx_hashes.is_empty() {
@@ -561,7 +553,7 @@ pub struct PruneResult<T: PoolTransaction> {
     /// a list of added transactions that a pruned marker satisfied
     pub promoted: Vec<AddedTransaction<T>>,
     /// all transactions that  failed to be promoted and now are discarded
-    pub failed: Vec<T::Hash>,
+    pub failed: Vec<TxHash>,
     /// all transactions that were pruned from the ready pool
     pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
 }
@@ -589,18 +581,18 @@ impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// the hash of the submitted transaction
-    hash: T::Hash,
+    hash: TxHash,
     /// transactions promoted to the ready queue
-    promoted: Vec<T::Hash>,
+    promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
-    discarded: Vec<T::Hash>,
+    discarded: Vec<TxHash>,
     /// Transactions removed from the Ready pool
     removed: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Create a new, empty transaction.
-    fn new(hash: T::Hash) -> Self {
+    fn new(hash: TxHash) -> Self {
         Self {
             hash,
             promoted: Default::default(),
@@ -639,13 +631,13 @@ pub enum AddedTransaction<T: PoolTransaction> {
     /// queued pool instead.
     Queued {
         /// the hash of the submitted transaction
-        hash: T::Hash,
+        hash: TxHash,
     },
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns the hash of the transaction if it's ready
-    pub fn as_ready(&self) -> Option<&T::Hash> {
+    pub fn as_ready(&self) -> Option<&TxHash> {
         if let AddedTransaction::Pending(tx) = self {
             Some(&tx.hash)
         } else {
@@ -654,7 +646,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the hash of the transaction
-    pub fn hash(&self) -> &T::Hash {
+    pub fn hash(&self) -> &TxHash {
         match self {
             AddedTransaction::Pending(tx) => &tx.hash,
             AddedTransaction::Queued { hash } => hash,

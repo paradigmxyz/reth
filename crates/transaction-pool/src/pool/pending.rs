@@ -1,13 +1,9 @@
 use crate::{
-    error::PoolResult,
-    identifier::TransactionId,
-    pool::{queued::QueuedPoolTransaction, TransactionHashFor},
-    traits::BestTransactions,
-    validate::ValidPoolTransaction,
-    TransactionOrdering,
+    error::PoolResult, identifier::TransactionId, pool::queued::QueuedPoolTransaction,
+    traits::BestTransactions, validate::ValidPoolTransaction, TransactionOrdering,
 };
 use parking_lot::RwLock;
-use reth_primitives::U256;
+use reth_primitives::{TxHash, U256};
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
@@ -16,10 +12,8 @@ use std::{
 use tracing::debug;
 
 /// Type alias for replaced transactions
-pub(crate) type ReplacedTransactions<T> = (
-    Vec<Arc<ValidPoolTransaction<<T as TransactionOrdering>::Transaction>>>,
-    Vec<TransactionHashFor<T>>,
-);
+pub(crate) type ReplacedTransactions<T> =
+    (Vec<Arc<ValidPoolTransaction<<T as TransactionOrdering>::Transaction>>>, Vec<TxHash>);
 
 /// A pool of validated transactions that are ready on the current state and are waiting to be
 /// included in a block.
@@ -37,7 +31,7 @@ pub(crate) struct PendingTransactions<T: TransactionOrdering> {
     /// Base fee of the next block.
     pending_base_fee: U256,
     /// Dependencies that are provided by `PendingTransaction`s
-    provided_dependencies: HashMap<TransactionId, TransactionHashFor<T>>,
+    provided_dependencies: HashMap<TransactionId, TxHash>,
     /// Pending transactions that are currently on hold until the `baseFee` of the pending block
     /// changes in favor of the parked transactions: the `pendingBlock.baseFee` must decrease
     /// before they can be moved to the ready pool and are ready to be executed.
@@ -46,7 +40,7 @@ pub(crate) struct PendingTransactions<T: TransactionOrdering> {
     ///
     /// Meaning, there are no nonce gaps in these transactions and all of them satisfy the
     /// `baseFee` condition: transaction `maxFeePerGas >= pendingBlock.baseFee`
-    ready_transactions: Arc<RwLock<HashMap<TransactionHashFor<T>, PendingTransaction<T>>>>,
+    ready_transactions: Arc<RwLock<HashMap<TxHash, PendingTransaction<T>>>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
@@ -102,16 +96,16 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     }
 
     /// Returns true if the transaction is part of the queue.
-    pub(crate) fn contains(&self, hash: &TransactionHashFor<T>) -> bool {
+    pub(crate) fn contains(&self, hash: &TxHash) -> bool {
         self.ready_transactions.read().contains_key(hash)
     }
 
     /// Returns the transaction for the hash if it's in the ready pool but not yet mined
-    pub(crate) fn get(&self, hash: &TransactionHashFor<T>) -> Option<PendingTransaction<T>> {
+    pub(crate) fn get(&self, hash: &TxHash) -> Option<PendingTransaction<T>> {
         self.ready_transactions.read().get(hash).cloned()
     }
 
-    pub(crate) fn provided_dependencies(&self) -> &HashMap<TransactionId, TransactionHashFor<T>> {
+    pub(crate) fn provided_dependencies(&self) -> &HashMap<TransactionId, TxHash> {
         &self.provided_dependencies
     }
 
@@ -163,7 +157,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
         }
 
         // update dependencies
-        self.provided_dependencies.insert(tx.transaction.transaction_id.clone(), hash);
+        self.provided_dependencies.insert(tx.transaction.transaction_id, hash);
 
         let priority = self.ordering.priority(&tx.transaction.transaction);
 
@@ -230,7 +224,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
 
         let remove_hashes = remove_hashes.into_iter().copied().collect::<Vec<_>>();
 
-        let new_provides = HashSet::from([tx.transaction_id.clone()]);
+        let new_provides = HashSet::from([tx.transaction_id]);
         let removed_tx = self.remove_with_dependencies(remove_hashes, Some(new_provides));
 
         Ok((removed_tx, unlocked_tx))
@@ -240,7 +234,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     /// This will also remove all transactions that depend on those.
     pub(crate) fn clear_transactions(
         &mut self,
-        tx_hashes: &[TransactionHashFor<T>],
+        tx_hashes: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.remove_with_dependencies(tx_hashes.to_vec(), None)
     }
@@ -282,7 +276,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
                             tx2.unlocks.swap_remove(idx);
                         }
                         if tx2.unlocks.is_empty() {
-                            Some(vec![tx2.transaction.transaction.transaction_id.clone()])
+                            Some(vec![tx2.transaction.transaction.transaction_id])
                         } else {
                             None
                         }
@@ -325,7 +319,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     /// the given filter set.
     pub(crate) fn remove_with_dependencies(
         &mut self,
-        mut tx_hashes: Vec<TransactionHashFor<T>>,
+        mut tx_hashes: Vec<TxHash>,
         dependency_filter: Option<HashSet<TransactionId>>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
@@ -381,7 +375,7 @@ pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
     transaction: PoolTransactionRef<T>,
     /// Tracks the transactions that get unlocked by this transaction.
-    unlocks: Vec<TransactionHashFor<T>>,
+    unlocks: Vec<TxHash>,
     /// Amount of required dependencies that are inherently provided.
     requires_offset: usize,
 }
@@ -458,7 +452,7 @@ struct ParkedTransactions<T: TransactionOrdering> {
     /// This way we can determine when transactions where submitted to the pool.
     id: u64,
     /// All transactions that are currently parked due to their fee.
-    parked_transactions: HashMap<TransactionHashFor<T>, ParkedTransaction<T>>,
+    parked_transactions: HashMap<TxHash, ParkedTransaction<T>>,
     /// Same transactions but sorted by their fee and priority
     sorted_transactions: BTreeSet<ParkedTransactionRef<T>>,
 }
@@ -479,7 +473,7 @@ pub(crate) struct ParkedTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
     transaction: PoolTransactionRef<T>,
     /// Tracks the transactions that get unlocked by this transaction.
-    unlocks: Vec<TransactionHashFor<T>>,
+    unlocks: Vec<TxHash>,
     /// Amount of required dependencies that are inherently provided
     requires_offset: usize,
 }
@@ -522,10 +516,10 @@ impl<T: TransactionOrdering> Ord for ParkedTransactionRef<T> {
 
 /// An iterator that returns transactions that can be executed on the current state.
 pub struct TransactionsIterator<T: TransactionOrdering> {
-    all: HashMap<TransactionHashFor<T>, PendingTransaction<T>>,
-    awaiting: HashMap<TransactionHashFor<T>, (usize, PoolTransactionRef<T>)>,
+    all: HashMap<TxHash, PendingTransaction<T>>,
+    awaiting: HashMap<TxHash, (usize, PoolTransactionRef<T>)>,
     independent: BTreeSet<PoolTransactionRef<T>>,
-    invalid: HashSet<TransactionHashFor<T>>,
+    invalid: HashSet<TxHash>,
 }
 
 // == impl TransactionsIterator ==
