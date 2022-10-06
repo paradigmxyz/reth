@@ -8,6 +8,7 @@
 //! Commonly used types in reth.
 
 mod block;
+mod chain;
 mod header;
 mod log;
 mod receipt;
