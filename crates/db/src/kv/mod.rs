@@ -83,11 +83,39 @@ impl<E: EnvironmentKind> Env<E> {
 
 impl<E: EnvironmentKind> Env<E> {
     pub fn begin_tx(&self) -> eyre::Result<Tx<'_, RO, E>> {
-        Ok(Tx { inner: self.inner.begin_ro_txn()? })
+        Ok(Tx::new(self.inner.begin_ro_txn()?))
     }
 
     pub fn begin_mut_tx(&self) -> eyre::Result<Tx<'_, RW, E>> {
-        Ok(Tx { inner: self.inner.begin_rw_txn()? })
+        Ok(Tx::new(self.inner.begin_rw_txn()?))
+    }
+
+    /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
+    /// end of the execution.
+    pub fn view<T, F>(&self, f: F) -> eyre::Result<T>
+    where
+        F: Fn(&Tx<'_, RO, E>) -> T,
+    {
+        let tx = self.begin_tx()?;
+
+        let res = f(&tx);
+        tx.commit()?;
+
+        Ok(res)
+    }
+
+    /// Takes a function and passes a write-read transaction into it, making sure it's committed in
+    /// the end of the execution.
+    pub fn update<T, F>(&self, f: F) -> eyre::Result<T>
+    where
+        F: Fn(&Tx<'_, RW, E>) -> T,
+    {
+        let tx = self.begin_mut_tx()?;
+
+        let res = f(&tx);
+        tx.commit()?;
+
+        Ok(res)
     }
 }
 
@@ -102,7 +130,7 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 #[cfg(test)]
 mod tests {
     use super::{tables::Account, Env, EnvKind};
-    use libmdbx::NoWriteMap;
+    use libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::Address;
     use std::str::FromStr;
     use tempfile::TempDir;
@@ -113,20 +141,40 @@ mod tests {
     }
 
     #[test]
-    fn db_put_get() {
+    fn db_manual_put_get() {
         let env =
             Env::<NoWriteMap>::open(&TempDir::new().unwrap().into_path(), EnvKind::RW).unwrap();
 
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
         let value = vec![1, 3, 3, 7];
 
+        // PUT
         let tx = env.begin_mut_tx().unwrap();
-        tx.put(Account, key, value.clone()).unwrap();
+        tx.put(Account, key, value).unwrap();
         tx.commit().unwrap();
 
+        // GET
         let tx = env.begin_tx().unwrap();
-        let result = tx.get(Account, key).unwrap();
+        let _result = tx.get(Account, key).unwrap();
         tx.commit().unwrap();
+    }
+
+    #[test]
+    fn db_closure_put_get() {
+        let env = Env::<WriteMap>::open(&TempDir::new().unwrap().into_path(), EnvKind::RW).unwrap();
+
+        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+        let value = vec![1, 3, 3, 7];
+
+        // PUT
+        let result = env.update(|tx| {
+            tx.put(Account, key, value.clone()).unwrap();
+            200
+        });
+        assert!(result.unwrap() == 200);
+
+        // GET
+        let result = env.view(|tx| tx.get(Account, key).unwrap()).unwrap();
 
         assert!(result == Some(value))
     }
