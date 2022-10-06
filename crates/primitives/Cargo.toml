@@ -9,3 +9,4 @@ description = "Commonly used types in reth."
 
 [dependencies]
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+bytes = "1.2"
