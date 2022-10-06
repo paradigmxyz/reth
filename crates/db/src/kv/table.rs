@@ -1,21 +1,25 @@
 use bytes::Bytes;
-use reth_primitives::Address;
+use reth_primitives::{Address, U256};
 use std::fmt::Debug;
 
+/// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized {
     type Encoded: AsRef<[u8]> + Send + Sync;
 
     fn encode(self) -> Self::Encoded;
 }
 
+/// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized {
-    fn decode(b: &[u8]) -> eyre::Result<Self>;
+    fn decode(value: &[u8]) -> eyre::Result<Self>;
 }
 
+/// Generic trait that enforces the database value to implement [`Encode`] and [`Decode`].
 pub trait Object: Encode + Decode {}
 
 impl<T> Object for T where T: Encode + Decode {}
 
+/// Generic trait that a database table should follow.
 pub trait Table: Send + Sync + Debug + 'static {
     type Key: Encode;
     type Value: Object;
@@ -24,6 +28,8 @@ pub trait Table: Send + Sync + Debug + 'static {
     fn db_name(&self) -> &'static str; //string::String<Bytes>; TODO
 }
 
+/// DupSort allows for keys not to be repeated in the database,
+/// for more check: https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
 pub trait DupSort: Table {
     type SubKey: Object;
 }
@@ -37,8 +43,8 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode(b: &[u8]) -> eyre::Result<Self> {
-        Ok(b.to_vec())
+    fn decode(value: &[u8]) -> eyre::Result<Self> {
+        Ok(value.to_vec())
     }
 }
 
@@ -51,8 +57,8 @@ impl Encode for Bytes {
 }
 
 impl Decode for Bytes {
-    fn decode(b: &[u8]) -> eyre::Result<Self> {
-        Ok(b.to_vec().into())
+    fn decode(value: &[u8]) -> eyre::Result<Self> {
+        Ok(value.to_vec().into())
     }
 }
 
@@ -65,7 +71,53 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
-    fn decode(b: &[u8]) -> eyre::Result<Self> {
-        Ok(Address::from_slice(b))
+    fn decode(value: &[u8]) -> eyre::Result<Self> {
+        Ok(Address::from_slice(value))
+    }
+}
+
+impl Encode for u16 {
+    type Encoded = [u8; 2];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_be_bytes()
+    }
+}
+
+impl Decode for u16 {
+    fn decode(value: &[u8]) -> eyre::Result<Self> {
+        unsafe { Ok(u16::from_be_bytes(*(value.as_ptr() as *const [_; 2]))) }
+    }
+}
+
+impl Encode for u64 {
+    type Encoded = [u8; 8];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_be_bytes()
+    }
+}
+
+impl Decode for u64 {
+    fn decode(value: &[u8]) -> eyre::Result<Self> {
+        unsafe { Ok(u64::from_be_bytes(*(value.as_ptr() as *const [_; 8]))) }
+    }
+}
+
+impl Encode for U256 {
+    type Encoded = [u8; 32];
+
+    fn encode(self) -> Self::Encoded {
+        let mut result = [0; 32];
+        self.to_big_endian(&mut result);
+        result
+    }
+}
+
+impl Decode for U256 {
+    fn decode(value: &[u8]) -> eyre::Result<Self> {
+        let mut result = [0; 32];
+        result.copy_from_slice(value);
+        Ok(Self::from_big_endian(&result))
     }
 }

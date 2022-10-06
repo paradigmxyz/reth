@@ -1,4 +1,4 @@
-use crate::utils::default_page_size;
+use crate::utils::{default_page_size, TableType};
 use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Error, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
@@ -9,7 +9,7 @@ pub mod table;
 use table::{Decode, DupSort, Encode, Table};
 
 pub mod tables;
-use tables::Account;
+use tables::TABLES;
 
 pub mod cursor;
 
@@ -21,11 +21,15 @@ pub enum EnvKind {
     RW,
 }
 
+/// Wrapper for the libmdbx environment.
 pub struct Env<E: EnvironmentKind> {
     pub inner: Environment<E>,
 }
 
 impl<E: EnvironmentKind> Env<E> {
+    /// Opens the database at the specified path with the given `EnvKind`.
+    ///
+    /// It does not create the tables, for that call [`create_tables`].
     pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, Error> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
@@ -34,7 +38,7 @@ impl<E: EnvironmentKind> Env<E> {
 
         let env = Env {
             inner: Environment::new()
-                .set_max_dbs(10)
+                .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
                     size: Some(0..0x100000),     // TODO
                     growth_step: Some(0x100000), // TODO
@@ -50,42 +54,36 @@ impl<E: EnvironmentKind> Env<E> {
                 .open(path)?,
         };
 
-        if let EnvKind::RW = kind {
-            env.maybe_create_tables()?;
-        }
-
         Ok(env)
     }
 
-    fn maybe_create_tables(&self) -> Result<(), Error> {
+    /// Creates all the defined tables, if necessary.
+    pub fn create_tables(&self) -> Result<(), Error> {
         let tx = self.inner.begin_rw_txn()?;
-        // TODO: loop & create dup_sort flag
-        tx.create_db(Some(Account::name()), DatabaseFlags::default())?;
-        // tx.create_db(Some(Storage::name()), DatabaseFlags::default())?;
+
+        for (table_type, table) in TABLES {
+            let flags = match table_type {
+                TableType::Table => DatabaseFlags::default(),
+                TableType::DupSort => DatabaseFlags::DUP_SORT,
+            };
+
+            tx.create_db(Some(table), flags)?;
+        }
 
         tx.commit()?;
 
-        //         let tx = s.inner.begin_rw_txn()?;
-        // for (table, info) in chart {
-        //     tx.create_db(
-        //         Some(table),
-        //         if info.dup_sort {
-        //             DatabaseFlags::DUP_SORT
-        //         } else {
-        //             DatabaseFlags::default()
-        //         },
-        //     )?;
-        // }
-        // tx.commit()?;
         Ok(())
     }
 }
 
 impl<E: EnvironmentKind> Env<E> {
+    /// Initiates a read-only transaction. It should be committed or rolled back in the end, so it
+    /// frees up pages.
     pub fn begin_tx(&self) -> eyre::Result<Tx<'_, RO, E>> {
         Ok(Tx::new(self.inner.begin_ro_txn()?))
     }
 
+    /// Initiates a read-write transaction. It should be committed or rolled back in the end.
     pub fn begin_mut_tx(&self) -> eyre::Result<Tx<'_, RW, E>> {
         Ok(Tx::new(self.inner.begin_rw_txn()?))
     }
@@ -129,7 +127,7 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tables::Account, Env, EnvKind};
+    use super::{tables::PlainState, Env, EnvKind};
     use libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::Address;
     use std::str::FromStr;
@@ -144,18 +142,19 @@ mod tests {
     fn db_manual_put_get() {
         let env =
             Env::<NoWriteMap>::open(&TempDir::new().unwrap().into_path(), EnvKind::RW).unwrap();
+        env.create_tables().unwrap();
 
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
         let value = vec![1, 3, 3, 7];
 
         // PUT
         let tx = env.begin_mut_tx().unwrap();
-        tx.put(Account, key, value).unwrap();
+        tx.put(PlainState, key, value).unwrap();
         tx.commit().unwrap();
 
         // GET
         let tx = env.begin_tx().unwrap();
-        let _result = tx.get(Account, key).unwrap();
+        let _result = tx.get(PlainState, key).unwrap();
         tx.commit().unwrap();
     }
 
@@ -168,10 +167,11 @@ mod tests {
 
         {
             let env = Env::<WriteMap>::open(&path, EnvKind::RW).unwrap();
+            env.create_tables().unwrap();
 
             // PUT
             let result = env.update(|tx| {
-                tx.put(Account, key, value.clone()).unwrap();
+                tx.put(PlainState, key, value.clone()).unwrap();
                 200
             });
             assert!(result.unwrap() == 200);
@@ -180,7 +180,7 @@ mod tests {
         let env = Env::<WriteMap>::open(&path, EnvKind::RO).unwrap();
 
         // GET
-        let result = env.view(|tx| tx.get(Account, key).unwrap()).unwrap();
+        let result = env.view(|tx| tx.get(PlainState, key).unwrap()).unwrap();
 
         assert!(result == Some(value))
     }
