@@ -7,3 +7,9 @@ repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 
 [dependencies]
+revm = "2.1"
+reth-primitives = { path = "../primitives" }
+reth-interfaces = { path = "../interfaces" }
+async-trait = "0.1.57"
+thiserror = "1.0.37"
+anyhow = "1.0"

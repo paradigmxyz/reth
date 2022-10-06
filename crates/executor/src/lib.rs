@@ -6,3 +6,9 @@
 ))]
 
 //! Reth executor executes transaction in block of data.
+
+mod cfg;
+/// Executor
+pub mod executor;
+
+pub use cfg::Config;
