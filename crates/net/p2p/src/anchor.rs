@@ -2,8 +2,7 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Write},
-    path::Path,
+    io::{Read, Write}, path::Path,
 };
 
 use enr::{secp256k1::SecretKey, Enr};
@@ -86,7 +85,7 @@ pub struct PersistentAnchor {
 impl PersistentAnchor {
     /// This will attempt to load the [`Anchor`] from a file, and if the file doesn't exist it will
     /// attempt to initialize it with an empty peer list.
-    pub fn new_from_file<P: AsRef<Path>>(path: P) -> Result<Self, AnchorError> {
+    pub fn new_from_file(path: &Path) -> Result<Self, AnchorError> {
         let file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
 
         // if the file does not exist then we should create it
