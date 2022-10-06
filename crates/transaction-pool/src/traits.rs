@@ -1,6 +1,6 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockId};
 use futures::channel::mpsc::Receiver;
-use reth_primitives::{H256, U256};
+use reth_primitives::{Address, H256, U256};
 use std::{fmt, hash::Hash, sync::Arc};
 
 pub type HashFor<T> = <<T as TransactionPool>::Transaction as PoolTransaction>::Hash;
@@ -110,14 +110,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// Unique identifier for this transaction.
     type Id: fmt::Debug + fmt::LowerHex + Eq + Clone + Hash + AsRef<Self::Id> + Send + Sync;
 
-    /// Transaction sender type.
-    type Sender: fmt::Debug + Eq + Clone + Hash + Send + Sync;
-
     /// Hash of the transaction
     fn hash(&self) -> &Self::Hash;
 
-    /// The Sender of the transaction
-    fn sender(&self) -> &Self::Sender;
+    /// The Sender of the transaction.
+    fn sender(&self) -> &Address;
 
     /// Creates the unique identifier for this transaction.
     // TODO change this to nonce
