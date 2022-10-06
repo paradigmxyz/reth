@@ -44,12 +44,10 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     ///
     /// This lists all unique transactions that need to be mined before this transaction can be
     /// considered `pending` and itself be included.
+    // TODO change this to previous nonce
     pub depends_on: Vec<T::Id>,
-    /// Ids that this transaction provides
-    ///
-    /// This contains the inverse of `depends_on` which provides the dependencies this transaction
-    /// unlocks once it's mined.
-    pub provides: Vec<T::Id>,
+    /// The identifier for this transaction.
+    pub transaction_id: T::Id,
     /// Whether to propagate the transaction.
     pub propagate: bool,
     // TODO add a block timestamp that marks validity
@@ -68,7 +66,7 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(fmt, "Transaction {{ ")?;
         write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
-        write!(fmt, "provides: {:?}, ", &self.provides)?;
+        write!(fmt, "provides: {:?}, ", &self.transaction_id)?;
         write!(fmt, "depends_on: {:?}, ", &self.depends_on)?;
         write!(fmt, "raw tx: {:?}", &self.transaction)?;
         write!(fmt, "}}")?;

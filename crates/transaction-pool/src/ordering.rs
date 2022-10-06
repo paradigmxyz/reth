@@ -6,6 +6,8 @@ use std::fmt;
 /// Decides how transactions should be ordered within the pool.
 ///
 /// The returned priority must reflect natural `Ordering`.
+// TODO: for custom, more advanced scoring it would be ideal to determine the priority in the
+// context of the entire pool instead of standalone by alone looking at a single transaction
 pub trait TransactionOrdering: Send + Sync + 'static {
     /// Priority of a transaction.
     type Priority: Ord + Clone + Default + fmt::Debug + Send + Sync;

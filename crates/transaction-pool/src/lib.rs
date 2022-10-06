@@ -15,6 +15,7 @@ use std::sync::Arc;
 mod client;
 mod config;
 pub mod error;
+mod identifier;
 mod ordering;
 pub mod pool;
 mod traits;

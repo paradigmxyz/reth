@@ -34,7 +34,7 @@ pub(crate) struct PendingTransactions<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<T>,
     /// Base fee of the next block.
-    next_base_fee: U256,
+    pending_base_fee: U256,
     /// Dependencies that are provided by `PendingTransaction`s
     provided_dependencies: HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
     /// Pending transactions that are currently on hold until the `baseFee` of the pending block
@@ -65,7 +65,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
             ready_transactions: Arc::new(Default::default()),
             ordering,
             independent_transactions: Default::default(),
-            next_base_fee: Default::default(),
+            pending_base_fee: Default::default(),
         }
     }
     /// Returns an iterator over all transactions that are _currently_ ready.
@@ -82,7 +82,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     /// time in pool (were added earlier) are returned first.
     ///
     /// NOTE: while this iterator returns transaction that pool considers valid at this point, they
-    /// could potentially be become invalid at point of execution. Therefore this iterator
+    /// could potentially be become invalid at point of execution. Therefore, this iterator
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
@@ -97,7 +97,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
 
     /// Sets the given base fee and returns the old one.
     pub(crate) fn set_next_base_fee(&mut self, base_fee: U256) -> U256 {
-        std::mem::replace(&mut self.next_base_fee, base_fee)
+        std::mem::replace(&mut self.pending_base_fee, base_fee)
     }
 
     /// Returns true if the transaction is part of the queue.
@@ -164,9 +164,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
         }
 
         // update dependencies
-        for mark in tx.transaction.provides.iter().cloned() {
-            self.provided_dependencies.insert(mark, hash);
-        }
+        self.provided_dependencies.insert(tx.transaction.transaction_id.clone(), hash);
 
         let priority = self.ordering.priority(&tx.transaction.transaction);
 
@@ -193,7 +191,11 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
     ) -> PoolResult<ReplacedTransactions<T>> {
         // check if we are replacing transactions
         let remove_hashes: HashSet<_> =
-            tx.provides.iter().filter_map(|mark| self.provided_dependencies.get(mark)).collect();
+            if let Some(hash) = self.provided_dependencies.get(&tx.transaction_id) {
+                HashSet::from([hash])
+            } else {
+                return Ok((Vec::new(), Vec::new()))
+            };
 
         // early exit if we are not replacing anything.
         if remove_hashes.is_empty() {
@@ -210,7 +212,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
             for to_remove in remove_hashes.iter().filter_map(|hash| ready.get(hash)) {
                 // if we're attempting to replace a transaction that provides the exact same
                 // dependencies (addr + nonce) then we check for gas price
-                if to_remove.provides() == tx.provides {
+                if to_remove.id().eq(&tx.transaction_id) {
                     // check if underpriced
                     // TODO check if underpriced
                     // if tx.pending_transaction.transaction.gas_price() <= to_remove.gas_price() {
@@ -229,7 +231,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
 
         let remove_hashes = remove_hashes.into_iter().copied().collect::<Vec<_>>();
 
-        let new_provides = tx.provides.iter().cloned().collect::<HashSet<_>>();
+        let new_provides = HashSet::from([tx.transaction_id.clone()]);
         let removed_tx = self.remove_with_dependencies(remove_hashes, Some(new_provides));
 
         Ok((removed_tx, unlocked_tx))
@@ -244,11 +246,11 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
         self.remove_with_dependencies(tx_hashes.to_vec(), None)
     }
 
-    /// Removes the transactions that provide the dependency id.
+    /// Removes the transactions that was mined.
     ///
     /// This will also remove all transactions that lead to the transaction that provides the
     /// id.
-    pub(crate) fn prune_dependencies(
+    pub(crate) fn remove_mined(
         &mut self,
         id: TransactionIdFor<T>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -281,7 +283,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
                             tx2.unlocks.swap_remove(idx);
                         }
                         if tx2.unlocks.is_empty() {
-                            Some(tx2.transaction.transaction.provides.clone())
+                            Some(vec![tx2.transaction.transaction.transaction_id.clone()])
                         } else {
                             None
                         }
@@ -306,15 +308,13 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
                 }
                 // finally, remove the dependencies that this transaction provides
                 let current_dependency = &dependency;
-                for dependency in &tx.provides {
-                    let removed = self.provided_dependencies.remove(dependency);
-                    assert_eq!(
+                let removed = self.provided_dependencies.remove(&tx.transaction_id);
+                assert_eq!(
                         removed.as_ref(),
-                        if current_dependency == dependency { None } else { Some(tx.hash()) },
+                        if current_dependency.eq(&tx.transaction_id) { None } else { Some(tx.hash()) },
                         "The pool contains exactly one transaction providing given tag; the removed transaction
 						claims to provide that tag, so it has to be mapped to it's hash; qed"
                     );
-                }
                 removed_tx.push(tx);
             }
         }
@@ -334,23 +334,23 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
 
         while let Some(hash) = tx_hashes.pop() {
             if let Some(mut tx) = ready.remove(&hash) {
-                let invalidated = tx.transaction.transaction.provides.iter().filter(|mark| {
-                    dependency_filter
-                        .as_ref()
-                        .map(|filter| !filter.contains(&**mark))
-                        .unwrap_or(true)
-                });
+                let id = &tx.transaction.transaction.transaction_id;
 
-                let mut removed_some_marks = false;
-                // remove entries from provided_dependencies
-                for mark in invalidated {
-                    removed_some_marks = true;
-                    self.provided_dependencies.remove(mark);
-                }
+                // remove the transactions
+                let removed_transaction = if dependency_filter
+                    .as_ref()
+                    .map(|filter| !filter.contains(id))
+                    .unwrap_or(true)
+                {
+                    self.provided_dependencies.remove(id);
+                    true
+                } else {
+                    false
+                };
 
                 // remove from unlocks
-                for mark in &tx.transaction.transaction.depends_on {
-                    if let Some(hash) = self.provided_dependencies.get(mark) {
+                for dependency in &tx.transaction.transaction.depends_on {
+                    if let Some(hash) = self.provided_dependencies.get(dependency) {
                         if let Some(tx) = ready.get_mut(hash) {
                             if let Some(idx) = tx.unlocks.iter().position(|i| i == hash) {
                                 tx.unlocks.swap_remove(idx);
@@ -362,7 +362,7 @@ impl<T: TransactionOrdering> PendingTransactions<T> {
                 // remove from the independent set
                 self.independent_transactions.remove(&tx.transaction);
 
-                if removed_some_marks {
+                if removed_transaction {
                     // remove all transactions that the current one unlocks
                     tx_hashes.append(&mut tx.unlocks);
                 }
@@ -391,8 +391,8 @@ pub(crate) struct PendingTransaction<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
     /// Returns all ids this transaction satisfies.
-    pub(crate) fn provides(&self) -> &[TransactionIdFor<T>] {
-        &self.transaction.transaction.provides
+    pub(crate) fn id(&self) -> &TransactionIdFor<T> {
+        &self.transaction.transaction.transaction_id
     }
 }
 

@@ -75,7 +75,7 @@ pub enum ChainEvent {
         /// EIP-1559 Base fee of the _next_ (pending) block
         ///
         /// The base fee of a block depends on the utilization of the last block and its base fee.
-        next_base_fee: U256,
+        pending_block_base_fee: U256,
     },
     /// An existing block has been finalized.
     Finalized {
@@ -120,6 +120,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     fn sender(&self) -> &Self::Sender;
 
     /// Creates the unique identifier for this transaction.
+    // TODO change this to nonce
     fn id(&self) -> Self::Id;
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.

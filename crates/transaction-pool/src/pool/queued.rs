@@ -23,7 +23,7 @@ pub(crate) struct QueuedTransactions<T: TransactionOrdering> {
     /// Dependencies that aren't yet provided by any transaction.
     required_dependencies: HashMap<TransactionIdFor<T>, HashSet<TransactionHashFor<T>>>,
     /// Mapping of the dependencies of a transaction to the hash of the transaction,
-    waiting_dependencies: HashMap<Vec<TransactionIdFor<T>>, TransactionHashFor<T>>,
+    waiting_dependencies: HashMap<TransactionIdFor<T>, TransactionHashFor<T>>,
     /// Transactions that are not ready yet are waiting for another tx to finish,
     waiting_queue: HashMap<TransactionHashFor<T>, QueuedPoolTransaction<T>>,
 }
@@ -59,7 +59,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
 
         if let Some(_replace) = self
             .waiting_dependencies
-            .get(&tx.transaction.provides)
+            .get(&tx.transaction.transaction_id)
             .and_then(|hash| self.waiting_queue.get(hash))
         {
             // TODO handle transaction underpriced
@@ -79,7 +79,8 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
         }
 
         // also track identifying dependencies
-        self.waiting_dependencies.insert(tx.transaction.provides.clone(), *tx.transaction.hash());
+        self.waiting_dependencies
+            .insert(tx.transaction.transaction_id.clone(), *tx.transaction.hash());
 
         // add tx to the queue
         self.waiting_queue.insert(*tx.transaction.hash(), tx);
@@ -114,22 +115,17 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
     /// moved to the ready queue.
     pub(crate) fn satisfy_and_unlock(
         &mut self,
-        dependencies: impl IntoIterator<Item = impl AsRef<TransactionIdFor<T>>>,
+        id: &TransactionIdFor<T>,
     ) -> Vec<QueuedPoolTransaction<T>> {
         let mut unlocked_ready = Vec::new();
-        for dependency in dependencies {
-            let mark = dependency.as_ref();
-            if let Some(tx_hashes) = self.required_dependencies.remove(mark) {
-                for hash in tx_hashes {
-                    let tx = self.waiting_queue.get_mut(&hash).expect("tx is included;");
-                    tx.satisfy(mark);
-
-                    if tx.is_satisfied() {
-                        let tx = self.waiting_queue.remove(&hash).expect("tx is included;");
-                        self.waiting_dependencies.remove(&tx.transaction.provides);
-
-                        unlocked_ready.push(tx);
-                    }
+        if let Some(tx_hashes) = self.required_dependencies.remove(id) {
+            for hash in tx_hashes {
+                let tx = self.waiting_queue.get_mut(&hash).expect("tx is included;");
+                tx.satisfy(id);
+                if tx.is_satisfied() {
+                    let tx = self.waiting_queue.remove(&hash).expect("tx is included;");
+                    self.waiting_dependencies.remove(&tx.transaction.transaction_id);
+                    unlocked_ready.push(tx);
                 }
             }
         }
@@ -147,7 +143,7 @@ impl<T: TransactionOrdering> QueuedTransactions<T> {
         let mut removed = vec![];
         for hash in hashes {
             if let Some(waiting_tx) = self.waiting_queue.remove(&hash) {
-                self.waiting_dependencies.remove(&waiting_tx.transaction.provides);
+                self.waiting_dependencies.remove(&waiting_tx.transaction.transaction_id);
                 for dependency in waiting_tx.missing_dependencies {
                     let remove =
                         if let Some(required) = self.required_dependencies.get_mut(&dependency) {
@@ -177,6 +173,7 @@ pub(crate) struct QueuedPoolTransaction<T: TransactionOrdering> {
     ///
     /// This will be an empty list if there are no nonce gaps across multiple transactions of the
     /// same sender in the pool. If there are gaps, this will include the missing transactions.
+    // TODO rename to nonce
     pub(crate) missing_dependencies: HashSet<TransactionIdFor<T>>,
     /// Timestamp when the tx was added.
     pub(crate) added_at: Instant,

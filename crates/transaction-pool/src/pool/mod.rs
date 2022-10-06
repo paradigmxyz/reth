@@ -446,7 +446,7 @@ impl<T: TransactionOrdering> GraphPool<T> {
         while let Some(current_tx) = pending_transactions.pop_front() {
             // also add the transaction that the current transaction unlocks
             pending_transactions
-                .extend(self.queued.satisfy_and_unlock(&current_tx.transaction.provides));
+                .extend(self.queued.satisfy_and_unlock(&current_tx.transaction.transaction_id));
 
             let current_hash = *current_tx.transaction.hash();
 
@@ -497,9 +497,9 @@ impl<T: TransactionOrdering> GraphPool<T> {
 
         for dependency in dependencies {
             // mark as satisfied and store the transactions that got unlocked
-            imports.extend(self.queued.satisfy_and_unlock(Some(&dependency)));
+            imports.extend(self.queued.satisfy_and_unlock(&dependency));
             // prune transactions
-            pruned.extend(self.pending.prune_dependencies(dependency.clone()));
+            pruned.extend(self.pending.remove_mined(dependency.clone()));
         }
 
         let mut promoted = vec![];
