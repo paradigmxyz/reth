@@ -1,3 +1,4 @@
+use crate::U256;
 use fnv::FnvHashMap;
 use reth_primitives::Address;
 use std::collections::HashMap;
@@ -62,4 +63,33 @@ pub struct TransactionId {
     pub sender: SenderId,
     /// Nonce of this transaction
     pub nonce: u64,
+}
+
+// === impl TransactionId ===
+
+impl TransactionId {
+    /// Create a new identifier pair
+    pub fn new(sender: SenderId, nonce: u64) -> Self {
+        Self { sender, nonce }
+    }
+
+    /// Returns the id a transactions depends on
+    ///
+    /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
+    /// `on_chain_none`
+    pub fn dependency(
+        transaction_nonce: u64,
+        on_chain_nonce: u64,
+        sender: SenderId,
+    ) -> Option<TransactionId> {
+        if transaction_nonce == on_chain_nonce {
+            return None
+        }
+        let prev_nonce = transaction_nonce.saturating_sub(1);
+        if on_chain_nonce <= prev_nonce {
+            Some(Self::new(sender, prev_nonce))
+        } else {
+            None
+        }
+    }
 }
