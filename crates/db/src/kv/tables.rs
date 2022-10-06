@@ -1,30 +1,34 @@
+//! Declaration of all MDBX tables.
+
 use crate::utils::TableType;
 use reth_primitives::{Address, U256};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 17] = [
-    (TableType::Table, CanonicalHeaders::name()),
-    (TableType::Table, HeaderTD::name()),
-    (TableType::Table, HeaderNumbers::name()),
-    (TableType::Table, Headers::name()),
-    (TableType::Table, BlockBodies::name()),
-    (TableType::Table, CumulativeTxCount::name()),
-    (TableType::Table, NonCanonicalTransactions::name()),
-    (TableType::Table, Transactions::name()),
-    (TableType::Table, Receipts::name()),
-    (TableType::Table, Logs::name()),
-    (TableType::Table, PlainState::name()),
-    (TableType::Table, AccountHistory::name()),
-    (TableType::Table, StorageHistory::name()),
-    (TableType::DupSort, AccountChangeSet::name()),
-    (TableType::DupSort, StorageChangeSet::name()),
-    (TableType::Table, TxSenders::name()),
-    (TableType::Table, Config::name()),
+    (TableType::Table, CanonicalHeaders::const_name()),
+    (TableType::Table, HeaderTD::const_name()),
+    (TableType::Table, HeaderNumbers::const_name()),
+    (TableType::Table, Headers::const_name()),
+    (TableType::Table, BlockBodies::const_name()),
+    (TableType::Table, CumulativeTxCount::const_name()),
+    (TableType::Table, NonCanonicalTransactions::const_name()),
+    (TableType::Table, Transactions::const_name()),
+    (TableType::Table, Receipts::const_name()),
+    (TableType::Table, Logs::const_name()),
+    (TableType::Table, PlainState::const_name()),
+    (TableType::Table, AccountHistory::const_name()),
+    (TableType::Table, StorageHistory::const_name()),
+    (TableType::DupSort, AccountChangeSet::const_name()),
+    (TableType::DupSort, StorageChangeSet::const_name()),
+    (TableType::Table, TxSenders::const_name()),
+    (TableType::Table, Config::const_name()),
 ];
 
 #[macro_export]
+/// Macro to declare all necessary tables.
 macro_rules! table {
     ($name:ident => $key:ty => $value:ty => $seek:ty) => {
+        /// $name MDBX table.
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $name;
 
@@ -33,13 +37,15 @@ macro_rules! table {
             type Value = $value;
             type SeekKey = $seek;
 
-            fn db_name(&self) -> &'static str  {
-               stringify!($name)
+            /// Return $name as it is present inside the database.
+            fn name(&self) -> &'static str {
+                $name::const_name()
             }
         }
 
         impl $name {
-            pub const  fn name() -> &'static str {
+            /// Return $name as it is present inside the database.
+            pub const fn const_name() -> &'static str {
                 stringify!($name)
             }
         }
@@ -72,7 +78,7 @@ table!(Transactions => TxId => RlpTxBody); // Canonical only
 table!(Receipts => TxId => Receipt); // Canonical only
 table!(Logs => TxId => Receipt); // Canonical only
 
-table!(PlainState => Address => Vec<u8>);
+table!(PlainState => PlainStateKey => Vec<u8>);
 
 table!(AccountHistory => Address => TxIdList);
 table!(StorageHistory => Address_StorageKey => TxIdList);
@@ -102,7 +108,6 @@ type BNum = u64; // TODO check size
 type TxId = u64; // TODO check size
 type HeaderHash = U256;
 type PlainStateKey = Address; // TODO new type will have to account for address_incarna_skey as well
-type AccountHistoryValue = Vec<u8>;
 type TxIdList = Vec<u8>;
 #[allow(non_camel_case_types)]
 type Address_StorageKey = Vec<u8>;

@@ -1,14 +1,17 @@
+//! Utils crate for `db`.
+
 use crate::kv::table::{Decode, Table};
 use std::borrow::Cow;
 
 /// Enum for the type of table present in libmdbx.
+#[derive(Debug)]
 pub enum TableType {
     Table,
     DupSort,
 }
 
 /// Returns the default page size that can be used in this OS.
-pub fn default_page_size() -> usize {
+pub(crate) fn default_page_size() -> usize {
     let os_page_size = page_size::get();
     let libmdbx_max_page_size = 0x10000;
 
@@ -23,7 +26,7 @@ pub fn default_page_size() -> usize {
 }
 
 /// Helper function to decode a `(key, value)` pair.
-pub fn decoder<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> eyre::Result<(T::Key, T::Value)>
+pub(crate) fn decoder<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> eyre::Result<(T::Key, T::Value)>
 where
     T: Table,
     T::Key: Decode,
@@ -32,7 +35,7 @@ where
 }
 
 /// Helper function to decode only a value from a `(key, value)` pair.
-pub fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> eyre::Result<T::Value>
+pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> eyre::Result<T::Value>
 where
     T: Table,
 {
@@ -40,7 +43,7 @@ where
 }
 
 /// Helper function to decode a value. It can be a key or subkey.
-pub fn decode_one<'a, T>(value: Cow<'a, [u8]>) -> eyre::Result<T::Value>
+pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> eyre::Result<T::Value>
 where
     T: Table,
 {

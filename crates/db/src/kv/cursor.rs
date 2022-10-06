@@ -1,18 +1,23 @@
+//! Cursor wrapper for libmdbx-sys.
+
 use crate::{
     kv::{Decode, DupSort, Encode, Table},
     utils::*,
 };
 use libmdbx::{self, TransactionKind};
 
-// Cursor wrapper to access KV items.
+/// Cursor wrapper to access KV items.
+#[derive(Debug)]
 pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
     pub inner: libmdbx::Cursor<'tx, K>,
-    /// Table name.
+    /// Table name as is inside the database.
     pub table: String, // TODO
+    /// Phantom data to enforce encoding/decoding.
     pub _dbi: std::marker::PhantomData<T>,
 }
 
+/// Takes `(key, value)` from the database and decodes it appropriately.
 #[macro_export]
 macro_rules! decode {
     ($v:expr) => {
@@ -134,8 +139,11 @@ where
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.
+#[derive(Debug)]
 pub struct Walker<'a, K: TransactionKind, T: Table> {
+    /// Cursor to be used to walk through the table.
     pub cursor: Cursor<'a, K, T>,
+    /// `(key, value)` where to start the walk.
     pub start: Option<eyre::Result<(T::Key, T::Value)>>,
 }
 
@@ -155,8 +163,11 @@ where
 }
 
 /// Provides an iterator to `Cursor` when handling a `DupSort` table.
+#[derive(Debug)]
 pub struct DupWalker<'a, K: TransactionKind, T: DupSort> {
+    /// Cursor to be used to walk through the table.
     pub cursor: Cursor<'a, K, T>,
+    /// Value where to start the walk.
     pub start: Option<eyre::Result<T::Value>>,
 }
 

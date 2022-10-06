@@ -1,3 +1,6 @@
+//! Table traits.
+#![allow(missing_docs)]
+
 use bytes::Bytes;
 use reth_primitives::{Address, U256};
 use std::fmt::Debug;
@@ -21,11 +24,15 @@ impl<T> Object for T where T: Encode + Decode {}
 
 /// Generic trait that a database table should follow.
 pub trait Table: Send + Sync + Debug + 'static {
+    /// Key element of `Table`.
     type Key: Encode;
+    /// Value element of `Table`.
     type Value: Object;
+    /// Seek Key element of `Table`.
     type SeekKey: Encode;
 
-    fn db_name(&self) -> &'static str; //string::String<Bytes>; TODO
+    /// Return name as it is present inside the MDBX.
+    fn name(&self) -> &'static str;
 }
 
 /// DupSort allows for keys not to be repeated in the database,

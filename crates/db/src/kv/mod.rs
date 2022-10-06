@@ -1,3 +1,5 @@
+//! Module that interacts with MDBX.
+
 use crate::utils::{default_page_size, TableType};
 use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Error, Geometry, Mode, PageSize,
@@ -16,13 +18,19 @@ pub mod cursor;
 pub mod tx;
 use tx::Tx;
 
+/// Environment used when opening a MDBX environment. RO/RW.
+#[derive(Debug)]
 pub enum EnvKind {
+    /// Read-only MDBX environment.
     RO,
+    /// Read-write MDBX environment.
     RW,
 }
 
 /// Wrapper for the libmdbx environment.
+#[derive(Debug)]
 pub struct Env<E: EnvironmentKind> {
+    /// Libmdbx-sys environment.
     pub inner: Environment<E>,
 }
 
