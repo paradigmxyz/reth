@@ -7,7 +7,7 @@ pub use request::TransactionRequest;
 pub use typed::*;
 
 use reth_primitives::{
-    transaction::eip2930::AccessListItem, Address, Bytes, H256, H512, U256, U64,
+    rpc::transaction::eip2930::AccessListItem, Address, Bytes, H256, H512, U256, U64,
 };
 use serde::Serialize;
 

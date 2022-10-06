@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bloom, Log, H256, U256, U64};
+use reth_primitives::{rpc::Log, Address, Bloom, H256, U256, U64};
 use serde::Serialize;
 
 /// Transaction receipt

@@ -3,8 +3,8 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 use reth_primitives::{
-    transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumber, Bytes, H256, H64,
-    U256, U64,
+    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
+    Address, BlockNumber, Bytes, H256, H64, U256, U64,
 };
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,

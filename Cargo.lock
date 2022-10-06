@@ -1275,6 +1275,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-executor"
+version = "0.1.0"
+
+[[package]]
+name = "reth-interfaces"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reth-primitives",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-p2p"
 version = "0.1.0"
 
@@ -1282,6 +1295,7 @@ version = "0.1.0"
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "ethers-core",
 ]
 

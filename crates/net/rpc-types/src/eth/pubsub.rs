@@ -1,7 +1,7 @@
 //! Ethereum types for pub-sub
 
-use crate::{Filter, Log, RichHeader};
-use reth_primitives::H256;
+use crate::{Log, RichHeader};
+use reth_primitives::{rpc::Filter, H256};
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Subscription result.
