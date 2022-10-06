@@ -1,6 +1,9 @@
-use crate::kv::{
-    cursor::{decode_one, Cursor},
-    table::{Encode, Table},
+use crate::{
+    kv::{
+        cursor::Cursor,
+        table::{Encode, Table},
+    },
+    utils::decode_one,
 };
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use std::marker::PhantomData;

@@ -1,9 +1,14 @@
-use crate::kv::{Decode, DupSort, Encode, Table};
+use crate::{
+    kv::{Decode, DupSort, Encode, Table},
+    utils::*,
+};
 use libmdbx::{self, TransactionKind};
-use std::borrow::Cow;
 
+// Cursor wrapper to access KV items.
 pub struct Cursor<'tx, K: TransactionKind, T: Table> {
+    /// Inner `libmdbx` cursor.
     pub inner: libmdbx::Cursor<'tx, K>,
+    /// Table name.
     pub table: String, // TODO
     pub _dbi: std::marker::PhantomData<T>,
 }
@@ -16,6 +21,7 @@ macro_rules! decode {
 }
 
 impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
+    /// Returns the first `(key, value)` pair.
     pub fn first(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -23,6 +29,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.first())
     }
 
+    /// Seeks for a `(key, value)` pair greater or equal than `key`.
     pub fn seek(&mut self, key: T::SeekKey) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -30,6 +37,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.set_range(key.encode().as_ref()))
     }
 
+    /// Seeks for the exact `(key, value)` pair with `key`.
     pub fn seek_exact(&mut self, key: T::Key) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -37,6 +45,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.set_key(key.encode().as_ref()))
     }
 
+    /// Returns the next `(key, value)` pair.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
@@ -45,6 +54,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.next())
     }
 
+    /// Returns the previous `(key, value)` pair.
     pub fn prev(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -52,6 +62,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.prev())
     }
 
+    /// Returns the last `(key, value)` pair.
     pub fn last(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -59,6 +70,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.last())
     }
 
+    /// Returns the current `(key, value)` pair of the cursor.
     pub fn current(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -66,6 +78,7 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.get_current())
     }
 
+    /// Returns an iterator starting at a key greater or equal than `start_key`.
     pub fn walk(
         mut self,
         start_key: T::Key,
@@ -84,6 +97,7 @@ where
     K: TransactionKind,
     T: DupSort,
 {
+    /// Returns the next `(key, value)` pair of a DUPSORT table.
     pub fn next_dup(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -91,6 +105,7 @@ where
         decode!(self.inner.next_dup())
     }
 
+    /// Returns the next `(key, value)` pair skipping the duplicates.
     pub fn next_no_dup(&mut self) -> eyre::Result<Option<(T::Key, T::Value)>>
     where
         T::Key: Decode,
@@ -98,10 +113,12 @@ where
         decode!(self.inner.next_nodup())
     }
 
+    /// Returns the next `value` of a duplicate `key`.
     pub fn next_dup_val(&mut self) -> eyre::Result<Option<T::Value>> {
         self.inner.next_dup()?.map(decode_value::<T>).transpose()
     }
 
+    /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
     pub fn walk_dup(
         mut self,
         key: T::Key,
@@ -116,28 +133,7 @@ where
     }
 }
 
-pub fn decoder<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> eyre::Result<(T::Key, T::Value)>
-where
-    T: Table,
-    T::Key: Decode,
-{
-    Ok((Decode::decode(&kv.0)?, Decode::decode(&kv.1)?))
-}
-
-pub fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> eyre::Result<T::Value>
-where
-    T: Table,
-{
-    Decode::decode(&kv.1)
-}
-
-pub fn decode_one<'a, T>(value: Cow<'a, [u8]>) -> eyre::Result<T::Value>
-where
-    T: Table,
-{
-    Decode::decode(&value)
-}
-
+/// Provides an iterator to `Cursor` when handling `Table`.
 pub struct Walker<'a, K: TransactionKind, T: Table> {
     pub cursor: Cursor<'a, K, T>,
     pub start: Option<eyre::Result<(T::Key, T::Value)>>,
@@ -158,6 +154,7 @@ where
     }
 }
 
+/// Provides an iterator to `Cursor` when handling a `DupSort` table.
 pub struct DupWalker<'a, K: TransactionKind, T: DupSort> {
     pub cursor: Cursor<'a, K, T>,
     pub start: Option<eyre::Result<T::Value>>,
