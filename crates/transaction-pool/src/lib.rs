@@ -1,4 +1,5 @@
 #![warn(missing_docs)] // unreachable_pub, missing_debug_implementations
+#![allow(unused)] // TODO(mattsse) remove after progress was made
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
