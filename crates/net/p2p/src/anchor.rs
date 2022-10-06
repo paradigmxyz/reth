@@ -40,13 +40,11 @@ impl Anchor {
     /// Adds peers to the discovered peer list
     pub fn add_discovered(&mut self, new_peers: Vec<Enr<SecretKey>>) {
         self.discovered_peers.extend(new_peers);
-        self.discovered_peers.dedup();
     }
 
     /// Adds peers to the static peer list.
     pub fn add_static(&mut self, new_peers: Vec<Enr<SecretKey>>) {
         self.static_peers.extend(new_peers);
-        self.static_peers.dedup();
     }
 
     /// Returns true if both peer lists are empty
