@@ -10,7 +10,7 @@
 
 use async_trait::async_trait;
 use reth_db::mdbx;
-use reth_primitives::U64;
+use reth_primitives::BlockNumber;
 use std::fmt::Display;
 use thiserror::Error;
 
@@ -21,27 +21,27 @@ pub use pipeline::*;
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
     /// The stage that was run before the current stage and the block number it reached.
-    pub previous_stage: Option<(StageId, U64)>,
+    pub previous_stage: Option<(StageId, BlockNumber)>,
     /// The progress of this stage the last time it was executed.
-    pub stage_progress: Option<U64>,
+    pub stage_progress: Option<BlockNumber>,
 }
 
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
     /// The current highest block of the stage.
-    pub stage_progress: U64,
+    pub stage_progress: BlockNumber,
     /// The block to unwind to.
-    pub unwind_to: U64,
+    pub unwind_to: BlockNumber,
     /// The bad block that caused the unwind, if any.
-    pub bad_block: Option<U64>,
+    pub bad_block: Option<BlockNumber>,
 }
 
 /// The output of a stage execution.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ExecOutput {
     /// How far the stage got.
-    pub stage_progress: U64,
+    pub stage_progress: BlockNumber,
     /// Whether or not the stage is done.
     pub done: bool,
     /// Whether or not the stage reached the tip of the chain.
@@ -52,7 +52,7 @@ pub struct ExecOutput {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwindOutput {
     /// The block at which the stage has unwound to.
-    pub stage_progress: U64,
+    pub stage_progress: BlockNumber,
 }
 
 /// A stage execution error.
@@ -64,7 +64,7 @@ pub enum StageError {
     #[error("Stage encountered a validation error in block {block}.")]
     Validation {
         /// The block that failed validation.
-        block: U64,
+        block: BlockNumber,
     },
     /// The stage encountered an internal error.
     #[error(transparent)]
@@ -126,7 +126,7 @@ impl StageId {
     pub fn get_progress<'db, K, E>(
         &self,
         tx: &mdbx::Transaction<'db, K, E>,
-    ) -> Result<Option<U64>, mdbx::Error>
+    ) -> Result<Option<BlockNumber>, mdbx::Error>
     where
         K: mdbx::TransactionKind,
         E: mdbx::EnvironmentKind,
@@ -134,14 +134,14 @@ impl StageId {
         // TODO: Clean up when we get better database abstractions
         let bytes: Option<Vec<u8>> = tx.get(&tx.open_db(Some("SyncStage"))?, self.0.as_ref())?;
 
-        Ok(bytes.map(|b| U64::from_big_endian(b.as_ref())))
+        Ok(bytes.map(|b| BlockNumber::from_be_bytes(b.try_into().expect("Database corrupt"))))
     }
 
     /// Save the progress of this stage.
     pub fn save_progress<'db, E>(
         &self,
         tx: &mdbx::Transaction<'db, mdbx::RW, E>,
-        block: U64,
+        block: BlockNumber,
     ) -> Result<(), mdbx::Error>
     where
         E: mdbx::EnvironmentKind,
@@ -150,7 +150,7 @@ impl StageId {
         tx.put(
             &tx.open_db(Some("SyncStage"))?,
             self.0,
-            block.0[0].to_be_bytes(),
+            block.to_be_bytes(),
             mdbx::WriteFlags::UPSERT,
         )
     }
