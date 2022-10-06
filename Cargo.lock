@@ -1472,6 +1472,7 @@ name = "reth-transaction-pool"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bitflags",
  "fnv",
  "futures",
  "linked-hash-map",

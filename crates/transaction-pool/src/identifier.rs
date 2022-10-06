@@ -1,7 +1,10 @@
 use crate::U256;
 use fnv::FnvHashMap;
 use reth_primitives::Address;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    ops::{Bound, RangeBounds, RangeFrom},
+};
 
 /// An internal mapping of addresses.
 ///
@@ -53,6 +56,21 @@ impl SenderIdentifiers {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SenderId(u64);
 
+// === impl SenderId ===
+
+impl SenderId {
+    /// Returns a `Bound` for `TransactionId` starting with nonce `0`
+    pub(crate) fn start_bound(self) -> Bound<TransactionId> {
+        Bound::Included(TransactionId::new(self, 0))
+    }
+}
+
+impl From<u64> for SenderId {
+    fn from(value: u64) -> Self {
+        SenderId(value)
+    }
+}
+
 /// A unique identifier of a transaction of a Sender.
 ///
 /// This serves as an identifier for dependencies of a transaction:
@@ -91,5 +109,39 @@ impl TransactionId {
         } else {
             None
         }
+    }
+}
+
+// impl RangeBounds<TransactionId> for RangeFrom<Bound<TransactionId>> {
+//     fn start_bound(&self) -> Bound<&TransactionId> {
+//         self.start.as_ref()
+//     }
+//
+//     fn end_bound(&self) -> Bound<&TransactionId> {
+//         self.
+//     }
+// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn test_transaction_id_ord_eq_sender() {
+        let tx1 = TransactionId::new(100u64.into(), 0u64);
+        let tx2 = TransactionId::new(100u64.into(), 1u64);
+        assert!(tx2 > tx1);
+        let set = BTreeSet::from([tx1, tx2]);
+        assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
+    }
+
+    #[test]
+    fn test_transaction_id_ord() {
+        let tx1 = TransactionId::new(99u64.into(), 0u64);
+        let tx2 = TransactionId::new(100u64.into(), 1u64);
+        assert!(tx2 > tx1);
+        let set = BTreeSet::from([tx1, tx2]);
+        assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
     }
 }
