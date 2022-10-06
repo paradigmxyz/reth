@@ -1,4 +1,4 @@
-use crate::utils::{default_page_size, TEMP_PLACEHOLDER_NUM_TABLES};
+use crate::utils::default_page_size;
 use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Error, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
@@ -34,7 +34,7 @@ impl<E: EnvironmentKind> Env<E> {
 
         let env = Env {
             inner: Environment::new()
-                .set_max_dbs(TEMP_PLACEHOLDER_NUM_TABLES)
+                .set_max_dbs(10)
                 .set_geometry(Geometry {
                     size: Some(0..0x100000),     // TODO
                     growth_step: Some(0x100000), // TODO
@@ -161,17 +161,23 @@ mod tests {
 
     #[test]
     fn db_closure_put_get() {
-        let env = Env::<WriteMap>::open(&TempDir::new().unwrap().into_path(), EnvKind::RW).unwrap();
+        let path = TempDir::new().unwrap().into_path();
 
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
         let value = vec![1, 3, 3, 7];
 
-        // PUT
-        let result = env.update(|tx| {
-            tx.put(Account, key, value.clone()).unwrap();
-            200
-        });
-        assert!(result.unwrap() == 200);
+        {
+            let env = Env::<WriteMap>::open(&path, EnvKind::RW).unwrap();
+
+            // PUT
+            let result = env.update(|tx| {
+                tx.put(Account, key, value.clone()).unwrap();
+                200
+            });
+            assert!(result.unwrap() == 200);
+        }
+
+        let env = Env::<WriteMap>::open(&path, EnvKind::RO).unwrap();
 
         // GET
         let result = env.view(|tx| tx.get(Account, key).unwrap()).unwrap();
