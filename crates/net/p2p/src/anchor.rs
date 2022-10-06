@@ -2,7 +2,8 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Write}, path::Path,
+    io::{Read, Write},
+    path::Path,
 };
 
 use enr::{secp256k1::SecretKey, Enr};
