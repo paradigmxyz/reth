@@ -3,10 +3,10 @@ mod signature;
 mod tx_type;
 
 use crate::{Address, Bytes, TxHash, U256};
+pub use access_list::{AccessList, AccessListItem};
 use signature::Signature;
 use std::ops::Deref;
 pub use tx_type::TxType;
-pub use access_list::{AccessList,AccessListItem};
 
 /// Raw Transaction.
 /// Transaction type is introduced in EIP-2718: https://eips.ethereum.org/EIPS/eip-2718
@@ -28,16 +28,16 @@ pub enum Transaction {
         /// computation is done and may not be increased
         /// later; formally Tg.
         gas_limit: u64,
-        /// The 160-bit address of the message call’s recipient or, for a contract creation transaction, ∅, used
-        /// here to denote the only member of B0 ; formally Tt.
+        /// The 160-bit address of the message call’s recipient or, for a contract creation
+        /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
         to: Option<Address>,
         /// A scalar value equal to the number of Wei to
         /// be transferred to the message call’s recipient or,
         /// in the case of contract creation, as an endowment
         /// to the newly created account; formally Tv.
         value: U256,
-        /// Input has two uses depending if transaction is Create or Call (if `to` field is None or Some).
-        /// init: An unlimited size byte array specifying the
+        /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
+        /// Some). init: An unlimited size byte array specifying the
         /// EVM-code for the account initialisation procedure CREATE,
         /// data: An unlimited size byte array specifying the
         /// input data of the message call, formally Td.
@@ -59,16 +59,16 @@ pub enum Transaction {
         /// computation is done and may not be increased
         /// later; formally Tg.
         gas_limit: u64,
-        /// The 160-bit address of the message call’s recipient or, for a contract creation transaction, ∅, used
-        /// here to denote the only member of B0 ; formally Tt.
+        /// The 160-bit address of the message call’s recipient or, for a contract creation
+        /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
         to: Option<Address>,
         /// A scalar value equal to the number of Wei to
         /// be transferred to the message call’s recipient or,
         /// in the case of contract creation, as an endowment
         /// to the newly created account; formally Tv.
         value: U256,
-        /// Input has two uses depending if transaction is Create or Call (if `to` field is None or Some).
-        /// init: An unlimited size byte array specifying the
+        /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
+        /// Some). init: An unlimited size byte array specifying the
         /// EVM-code for the account initialisation procedure CREATE,
         /// data: An unlimited size byte array specifying the
         /// input data of the message call, formally Td.
@@ -100,16 +100,16 @@ pub enum Transaction {
         max_fee_per_gas: u64,
         /// Max Priority fee that transaction is paying
         max_priority_fee_per_gas: u64,
-        /// The 160-bit address of the message call’s recipient or, for a contract creation transaction, ∅, used
-        /// here to denote the only member of B0 ; formally Tt.
+        /// The 160-bit address of the message call’s recipient or, for a contract creation
+        /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
         to: Option<Address>,
         /// A scalar value equal to the number of Wei to
         /// be transferred to the message call’s recipient or,
         /// in the case of contract creation, as an endowment
         /// to the newly created account; formally Tv.
         value: U256,
-        /// Input has two uses depending if transaction is Create or Call (if `to` field is None or Some).
-        /// init: An unlimited size byte array specifying the
+        /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
+        /// Some). init: An unlimited size byte array specifying the
         /// EVM-code for the account initialisation procedure CREATE,
         /// data: An unlimited size byte array specifying the
         /// input data of the message call, formally Td.

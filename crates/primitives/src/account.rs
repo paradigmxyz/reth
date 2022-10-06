@@ -1,6 +1,4 @@
-use crate::{H256,U256};
-
-
+use crate::{H256, U256};
 
 /// Account saved in database
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
