@@ -1,6 +1,12 @@
 use crate::{
     identifier::{SenderId, TransactionId},
-    pool::{pending::PendingTransactions, queued::QueuedTransactions, state::TxState, SenderInfo},
+    pool::{
+        pending::PendingTransactions,
+        queued::QueuedTransactions,
+        queued2::QueuedPool,
+        state::{SubPool, TxState},
+        SenderInfo,
+    },
     PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
@@ -24,6 +30,8 @@ pub struct TxPool<T: TransactionOrdering> {
     ordering: Arc<T>,
     /// Contains the currently known info
     sender_info: FnvHashMap<SenderId, SenderInfo>,
+    /// queued subpool
+    queued: QueuedPool<T>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
 }
@@ -57,10 +65,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
-    pub(crate) fn txs_iter<'a>(
-        &'a self,
+    pub(crate) fn txs_iter(
+        &self,
         sender: SenderId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item=(&TransactionId, &PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
@@ -68,10 +76,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns a mutable iterator over all transactions for the given sender, starting with the
     /// lowest nonce
-    pub(crate) fn txs_iter_mut<'a>(
-        &'a mut self,
+    pub(crate) fn txs_iter_mut(
+        &mut self,
         sender: SenderId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item=(&TransactionId, &mut PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range_mut((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
@@ -83,7 +91,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn ancestor_txs<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range((Unbounded, Included(id)))
             .rev()
@@ -96,7 +104,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn ancestor_txs_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range_mut((Unbounded, Included(id)))
             .rev()
@@ -109,7 +117,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn ancestor_txs_exclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
         self.txs.range(..id).rev().take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -119,7 +127,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
         self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
     }
     /// Returns all transactions that _follow_ after the given id but have the same sender.
@@ -128,7 +136,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_exclusive_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range_mut((Excluded(id), Unbounded))
             .take_while(|(other, _)| id.sender == other.sender)
@@ -141,7 +149,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
         self.txs.range(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -152,13 +160,25 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
+    /// Removes the transaction from the pool.
+    ///
+    /// This may trigger
+    pub(crate) fn remove_tx(&mut self, id: &TransactionId) {}
+
     /// Inserts a new transaction into the pool.
     ///
+    /// If the transaction already exists, it will be replaced if not underpriced.
     /// Returns info to which sub-pool the transaction should be moved.
+    /// Also returns a set of pool updates triggered by this insert, that need to be handled by the
+    /// caller.
+    ///
+    /// These can include:
+    ///      - closing nonce gaps of descendant transactions
+    ///      - enough balance updates
     pub(crate) fn insert_tx(
         &mut self,
         transaction: Arc<ValidPoolTransaction<T>>,
@@ -166,7 +186,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_nonce: u64,
     ) -> InsertionResult<T> {
         let tx_id = *transaction.id();
-
+        let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
 
         let predecessor = TransactionId::predecessor(
@@ -176,10 +196,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         );
 
         if predecessor.is_none() {
-            transaction.state.set_bit(TxState::NO_NONCE_GAPS);
+            state &= TxState::NO_NONCE_GAPS;
         }
 
-        let mut replaced_tx_hash = None;
+        let mut replaced_tx = None;
 
         // traverse all ancestor transactions
         {
@@ -190,9 +210,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     // found replacement transaction
                     // TODO check if underpriced
 
-                    // TODO can insert here directly by replacing
-
-                    replaced_tx_hash = Some(*ancestor_tx.transaction.hash());
+                    replaced_tx = Some(ancestor_tx.transaction.clone());
                     ancestors.next();
                 }
             }
@@ -201,44 +219,64 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // any nonce gaps.
             if let Some((ancestor_id, ancestor_tx)) = ancestors.next() {
                 if Some(ancestor_id) == predecessor.as_ref() {
-                    transaction.state.set_bit(TxState::NO_NONCE_GAPS);
+                    state &= TxState::NO_NONCE_GAPS;
                     // track cost up to this point
                     cumulative_cost += ancestor_tx.cumulative_cost + ancestor_tx.transaction.cost;
+
+                    // TODO check allowance
                 }
             }
         }
 
-        let is_replacement = replaced_tx_hash.is_some();
         let mut updates = Vec::new();
+        let is_replacement = replaced_tx.is_some();
 
-        // travers in opposite direction to update descendants if there's no nonce gap
-        if predecessor.is_none() {
-            let mut next_nonce = tx_id.next_nonce();
-            let mut next_cumulative_cost = cumulative_cost + transaction.cost;
+        // traverse and update all descendant transactions
+        {
+            // travers in opposite direction to update descendants if there's no nonce gap
+            if predecessor.is_none() {
+                let mut next_nonce = tx_id.next_nonce();
+                let mut next_cumulative_cost = cumulative_cost + transaction.cost;
 
-            for (descendant_id, descendant_tx) in self.descendant_txs_exclusive_mut(&tx_id) {
-                if descendant_id.nonce == next_nonce && !is_replacement {
-                    // update the nonce gap status
-                    descendant_tx.transaction.state.set_bit(TxState::NO_NONCE_GAPS);
+                for (descendant_id, descendant_tx) in self.descendant_txs_exclusive_mut(&tx_id) {
+                    if descendant_id.nonce == next_nonce && !is_replacement {
+                        // update the nonce gap status
+                        descendant_tx.state &= TxState::NO_NONCE_GAPS;
 
-                    // TODO compare against allowance
-                    descendant_tx.cumulative_cost = next_cumulative_cost;
+                        // TODO compare against allowance
+                        descendant_tx.cumulative_cost = next_cumulative_cost;
 
-                    // TODO record state change
-                    updates.push(*descendant_id);
-                } else {
-                    break
+                        // TODO record state change updates
+                    } else {
+                        break
+                    }
+                    // update cumulative gas used
+                    next_nonce = descendant_id.next_nonce();
+                    next_cumulative_cost = descendant_tx.next_cumulative_cost();
                 }
-                // update cumulative gas used
-                next_nonce = descendant_id.next_nonce();
-                next_cumulative_cost = descendant_tx.next_cumulative_cost();
             }
         }
 
-        todo!()
+        // If this wasn't a replacement transaction we need to update the counter.
+        if !is_replacement {
+            self.tx_inc(tx_id.sender);
+        }
+
+        let move_to = state.into();
+        let tx = PoolInternalTransaction {
+            transaction: transaction.clone(),
+            subpool: move_to,
+            state,
+            cumulative_cost,
+        };
+
+        // Insert the transaction in the total set.
+        self.txs.insert(tx_id, tx);
+
+        InsertionResult::Inserted { transaction, move_to, replaced_tx, updates }
     }
 
-    /// Rechecks the transaction of the given sender
+    /// Rechecks the transaction of the given sender and returns a set of updates.
     pub(crate) fn on_mined(&mut self, sender: &SenderId, new_balance: U256, old_balance: U256) {
         todo!()
     }
@@ -269,8 +307,7 @@ pub(crate) enum InsertionResult<T: PoolTransaction> {
     Inserted {
         transaction: Arc<ValidPoolTransaction<T>>,
         move_to: SubPool,
-        state: TxState,
-        replaced: Option<(TxHash, SubPool)>,
+        replaced_tx: Option<Arc<ValidPoolTransaction<T>>>,
         /// Additional updates to transactions affected by this change.
         updates: Vec<MoveTransaction>,
     },
@@ -283,6 +320,11 @@ pub(crate) enum InsertionResult<T: PoolTransaction> {
 pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
     transaction: Arc<ValidPoolTransaction<T>>,
+    /// The `SubPool` that currently contains this transaction.
+    subpool: SubPool,
+    /// Keeps track of the current state of the transaction and therefor in which subpool it should
+    /// reside
+    state: TxState,
     /// The total cost all transactions before this transaction.
     ///
     /// This is the combined `cost` of all transactions from the same sender that currently
@@ -293,83 +335,7 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 // === impl PoolInternalTransaction ===
 
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
-    fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
-        Self { transaction, cumulative_cost: Default::default() }
-    }
-
     fn next_cumulative_cost(&self) -> U256 {
         self.cumulative_cost + self.transaction.cost
-    }
-}
-
-/// Identifier for the used Subpool
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(u8)]
-pub(crate) enum SubPool {
-    Queued = 0,
-    Pending,
-    Parked,
-}
-
-// === impl SubPool ===
-
-impl SubPool {
-    /// Converts a u8 into the corresponding variant.
-    ///
-    /// # Panics
-    ///
-    /// If `val` does not match any variant
-    fn from_u8(val: u8) -> Self {
-        match val {
-            0 => SubPool::Queued,
-            1 => SubPool::Pending,
-            2 => SubPool::Parked,
-            _ => unreachable!("is shielded; qed"),
-        }
-    }
-}
-
-impl From<TxState> for SubPool {
-    fn from(value: TxState) -> Self {
-        if value > TxState::BASE_FEE_POOL_BITS {
-            return SubPool::Pending
-        }
-        if value < TxState::BASE_FEE_POOL_BITS {
-            return SubPool::Queued
-        }
-        SubPool::Parked
-    }
-}
-
-/// Helper type that maintains an atomic bool that maps to `SubPool`
-pub(crate) struct AtomicSubPool(AtomicU8);
-
-// === impl AtomicSubPool ===
-
-impl AtomicSubPool {
-    /// Sets the pool value.
-    #[inline]
-    pub(crate) fn set(&self, pool: SubPool) {
-        self.0.store(pool as u8, Ordering::Relaxed)
-    }
-
-    /// Sets the new value and returns the old.
-    #[inline]
-    pub fn swap(&self, pool: SubPool) -> SubPool {
-        let val = self.0.swap(pool as u8, Ordering::Relaxed);
-        SubPool::from_u8(val)
-    }
-
-    /// Returns the currently held `SubPool` value.
-    #[inline]
-    pub fn get(&self) -> SubPool {
-        let val = self.0.load(Ordering::Relaxed);
-        SubPool::from_u8(val)
-    }
-}
-
-impl fmt::Debug for AtomicSubPool {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.get().fmt(f)
     }
 }
