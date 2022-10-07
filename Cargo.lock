@@ -503,6 +503,7 @@ checksum = "7f21eda599937fba36daeb58a22e8f5cee2d14c4a17b5b7739c7c8e5e3b8230c"
 dependencies = [
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -524,6 +525,17 @@ name = "futures-core"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e5aa3de05362c3fb88de6531e6296e85cde7739cccad4b9dfeeb7f6ebce56bf"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ff63c23854bee61b6e9cd331d523909f238fc7636290b96826e9cfa5faa00ab"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-io"
@@ -974,6 +986,12 @@ dependencies = [
  "parking_lot",
  "thiserror",
 ]
+
+[[package]]
+name = "linked-hash-map"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "lock_api"
@@ -1492,6 +1510,21 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-futures",
+]
+
+[[package]]
+name = "reth-transaction-pool"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "fnv",
+ "futures",
+ "linked-hash-map",
+ "parking_lot",
+ "reth-primitives",
+ "serde",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]

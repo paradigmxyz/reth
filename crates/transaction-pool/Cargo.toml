@@ -1,0 +1,27 @@
+[package]
+name = "reth-transaction-pool"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = """
+Transaction pool implementation
+"""
+
+[dependencies]
+
+# eth
+reth-primitives = { path  = "../primitives" }
+
+# async/futures
+async-trait = "0.1"
+futures = "0.3"
+parking_lot = "0.12"
+
+# misc
+thiserror = "1.0"
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+linked-hash-map = "0.5"
+fnv = "1.0.7"
