@@ -1,9 +1,10 @@
 //! Peer persistence utilities
 
 use std::{
+    collections::HashSet,
     fs::{File, OpenOptions},
     io::{Read, Write},
-    path::Path, collections::HashSet,
+    path::Path,
 };
 
 use enr::{secp256k1::SecretKey, Enr};
