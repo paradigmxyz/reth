@@ -1,4 +1,5 @@
 use crate::{Header, HeaderLocked, Receipt, Transaction, TransactionSigned};
+use std::ops::Deref;
 
 /// Ethereum full block.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -11,7 +12,14 @@ pub struct Block {
     pub receipts: Vec<Receipt>,
 }
 
-/// Sealing Ethereum full block.
+impl Deref for Block {
+    type Target = Header;
+    fn deref(&self) -> &Self::Target {
+        &self.header
+    }
+}
+
+/// Sealed Ethereum full block.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BlockLocked {
     /// Locked block header.
@@ -20,4 +28,11 @@ pub struct BlockLocked {
     pub body: Vec<TransactionSigned>,
     /// Block receipts.
     pub receipts: Vec<Receipt>,
+}
+
+impl Deref for BlockLocked {
+    type Target = Header;
+    fn deref(&self) -> &Self::Target {
+        self.header.as_ref()
+    }
 }

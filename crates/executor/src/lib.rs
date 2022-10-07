@@ -10,7 +10,7 @@
 mod cfg;
 /// Executor
 pub mod executor;
-/// Wrapper around revm database
+/// Wrapper around revm database and types
 pub mod revm_wrap;
 
 pub use cfg::Config;

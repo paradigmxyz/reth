@@ -46,7 +46,7 @@ pub fn fill_block_env(block_env: &mut BlockEnv, block: &BlockLocked) {
     block_env.number = block.header.number.into();
     block_env.coinbase = block.header.beneficiary;
     block_env.timestamp = block.header.timestamp.into();
-    block_env.difficulty = block.header.difficulty.into();
+    block_env.difficulty = block.header.difficulty;
     block_env.basefee = block.header.base_fee_per_gas.unwrap_or_default().into();
     block_env.gas_limit = block.header.gas_limit.into();
 }

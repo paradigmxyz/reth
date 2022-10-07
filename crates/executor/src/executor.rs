@@ -4,19 +4,16 @@ use reth_interfaces::{
     executor::{BlockExecutor, Error, ExecutorDb},
 };
 use reth_primitives::BlockLocked;
-use revm::{
-    db::{CacheDB, EmptyDB},
-    AnalysisKind, Env, SpecId,
-};
+use revm::{db::EmptyDB, AnalysisKind, Env, SpecId};
 
 /// Main block executor
 pub struct Executor {
     /// Configuration, Spec and optional flags.
-    config: Config,
+    pub config: Config,
     /// Database
-    db: Box<dyn ExecutorDb>,
+    pub db: Box<dyn ExecutorDb>,
     /// Consensus
-    consensus: Box<dyn Consensus>,
+    pub consensus: Box<dyn Consensus>,
 }
 
 impl Executor {
