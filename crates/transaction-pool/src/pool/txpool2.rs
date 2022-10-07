@@ -76,7 +76,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             InsertionResult::Inserted { transaction, move_to, replaced_tx, updates } => {
-                self.add_into_subpool(transaction.clone(), replaced_tx, move_to);
+                self.add_into_subpool(transaction, replaced_tx, move_to);
                 let outcome = self.process_updates(updates);
 
                 // TODO get a list of promoted transactions
@@ -84,7 +84,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 unimplemented!()
             }
             InsertionResult::Underpriced { existing, .. } => {
-                return Err(PoolError::AlreadyAdded(Box::new(existing)))
+                Err(PoolError::AlreadyAdded(Box::new(existing)))
             }
         }
     }
@@ -287,11 +287,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
 
-        let predecessor = TransactionId::predecessor(
-            transaction.transaction.nonce(),
-            on_chain_nonce,
-            tx_id.sender,
-        );
+        let predecessor =
+            TransactionId::ancestor(transaction.transaction.nonce(), on_chain_nonce, tx_id.sender);
 
         if predecessor.is_none() {
             state &= TxState::NO_NONCE_GAPS;

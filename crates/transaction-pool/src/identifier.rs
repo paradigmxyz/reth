@@ -91,11 +91,11 @@ impl TransactionId {
         Self { sender, nonce }
     }
 
-    /// Returns the id a transactions depends on
+    /// Returns the `TransactionId` this transaction depends on.
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
     /// `on_chain_none`
-    pub fn predecessor(
+    pub fn ancestor(
         transaction_nonce: u64,
         on_chain_nonce: u64,
         sender: SenderId,
@@ -109,6 +109,20 @@ impl TransactionId {
         } else {
             None
         }
+    }
+
+    /// Returns the `TransactionId` that would come before this transaction.
+    pub(crate) fn unchecked_ancestor(&self) -> Option<TransactionId> {
+        if self.nonce == 0 {
+            None
+        } else {
+            Some(TransactionId::new(self.sender, self.nonce - 1))
+        }
+    }
+
+    /// Returns the `TransactionId` that directly follows this transaction: `self.nonce + 1`
+    pub fn descendant(&self) -> TransactionId {
+        TransactionId::new(self.sender, self.nonce + 1)
     }
 
     /// Returns the nonce the follows directly after this.

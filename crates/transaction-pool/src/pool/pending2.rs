@@ -1,6 +1,10 @@
 use crate::{
-    identifier::TransactionId, pool::pending::PoolTransactionRef, TransactionOrdering,
-    ValidPoolTransaction,
+    identifier::TransactionId,
+    pool::{
+        pending::PoolTransactionRef, queued::QueuedPoolTransaction,
+        txpool2::PoolInternalTransaction, TransactionsIterator,
+    },
+    PoolResult, TransactionOrdering, ValidPoolTransaction,
 };
 use fnv::FnvHashMap;
 use reth_primitives::rpc::TxHash;
@@ -9,6 +13,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
+use tracing::debug;
 
 pub(crate) struct PendingPool<T: TransactionOrdering> {
     /// Keeps track of transactions inserted in the pool.
@@ -47,13 +52,30 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
-    pub(crate) fn get_transactions(&self) -> TransactionsIterator<T> {
-        TransactionsIterator {
-            all: self.by_hash.clone(),
+    pub(crate) fn best(&self) -> BestTransactions<T> {
+        BestTransactions {
+            all: self.by_id.clone(),
             independent: self.independent_transactions.clone(),
-            awaiting: Default::default(),
             invalid: Default::default(),
         }
+    }
+
+    /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
+    ///
+    /// Note: for a transaction with nonce higher than the current on chain nonce this will always
+    /// return an ancestor since all transaction in this pool are gapless.
+    fn ancestor(&self, id: &TransactionId) -> Option<(&Arc<PendingTransaction<T>>)> {
+        self.by_id.get(&id.unchecked_ancestor()?)
+    }
+
+    /// Adds a new transactions to the pending queue.
+    ///
+    /// # Panics
+    ///
+    /// if the pending transaction is not ready
+    /// or the transaction is already included
+    pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
+        todo!()
     }
 
     fn next_id(&mut self) -> u64 {
@@ -72,8 +94,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
 pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
     transaction: PendingTransactionRef<T>,
-    /// Tracks the transaction that gets unlocked by this transaction.
-    unlocks: Option<TransactionId>,
 }
 
 // == impl PendingTransaction ===
@@ -87,7 +107,7 @@ impl<T: TransactionOrdering> PendingTransaction<T> {
 
 impl<T: TransactionOrdering> Clone for PendingTransaction<T> {
     fn clone(&self) -> Self {
-        Self { transaction: self.transaction.clone(), unlocks: self.unlocks.clone() }
+        Self { transaction: self.transaction.clone() }
     }
 }
 
@@ -99,6 +119,13 @@ pub(crate) struct PendingTransactionRef<T: TransactionOrdering> {
     pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// The priority value assigned by the used `Ordering` function.
     pub(crate) priority: T::Priority,
+}
+
+impl<T: TransactionOrdering> PendingTransactionRef<T> {
+    /// The next transaction of the sender: `nonce + 1`
+    fn unlocks(&self) -> TransactionId {
+        self.transaction.transaction_id.descendant()
+    }
 }
 
 impl<T: TransactionOrdering> Clone for PendingTransactionRef<T> {
@@ -137,9 +164,52 @@ impl<T: TransactionOrdering> Ord for PendingTransactionRef<T> {
 }
 
 /// An iterator that returns transactions that can be executed on the current state.
-pub struct TransactionsIterator<T: TransactionOrdering> {
-    all: HashMap<TxHash, Arc<PendingTransaction<T>>>,
+pub struct BestTransactions<T: TransactionOrdering> {
+    all: BTreeMap<TransactionId, Arc<PendingTransaction<T>>>,
     independent: BTreeSet<PendingTransactionRef<T>>,
-    awaiting: HashMap<TxHash, PoolTransactionRef<T>>,
     invalid: HashSet<TxHash>,
+}
+
+// == impl TransactionsIterator ==
+
+impl<T: TransactionOrdering> BestTransactions<T> {
+    /// Mark the transaction and it's descendants as invalid.
+    pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
+        self.invalid.insert(*tx.hash());
+    }
+}
+
+impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
+    fn mark_invalid(&mut self, tx: &Self::Item) {
+        BestTransactions::mark_invalid(self, tx)
+    }
+}
+
+impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
+    type Item = Arc<ValidPoolTransaction<T::Transaction>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let best = self.independent.iter().next_back()?.clone();
+            let best = self.independent.take(&best)?;
+            let hash = best.transaction.hash();
+
+            // skip transactions that were marked as invalid
+            if self.invalid.contains(hash) {
+                debug!(
+                    target: "txpool",
+                    "[{:?}] skipping invalid transaction",
+                    hash
+                );
+                continue
+            }
+
+            // Insert transactions that just got unlocked.
+            if let Some(unlocked) = self.all.get(&best.unlocks()) {
+                self.independent.insert(unlocked.transaction.clone());
+            }
+
+            return Some(best.transaction)
+        }
+    }
 }
