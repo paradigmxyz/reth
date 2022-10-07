@@ -15,7 +15,11 @@ use std::{
 };
 use tracing::debug;
 
+/// A pool of validated and gapless transactions that are ready on the current state and are waiting
+/// to be included in a block.
 pub(crate) struct PendingPool<T: TransactionOrdering> {
+    /// How to order transactions.
+    ordering: Arc<T>,
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions where submitted to the pool.
@@ -72,10 +76,42 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// # Panics
     ///
-    /// if the pending transaction is not ready
-    /// or the transaction is already included
+    /// if the transaction is already included
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
-        todo!()
+        let hash = *tx.hash();
+        assert!(!self.by_hash.contains_key(&hash), "transaction already included");
+
+        let tx_id = *tx.id();
+        let submission_id = self.next_id();
+
+        let priority = self.ordering.priority(&tx.transaction);
+
+        let transaction =
+            PendingTransactionRef { submission_id, transaction: tx.clone(), priority };
+
+        // If there's _no_ ancestor in the pool, then this transaction is independent, this is
+        // guaranteed because this pool is gapless.
+        if self.ancestor(&tx_id).is_none() {
+            self.independent_transactions.insert(transaction.clone());
+        }
+
+        let transaction = Arc::new(PendingTransaction { transaction: transaction.clone() });
+
+        self.by_hash.insert(hash, transaction.clone());
+        self.by_id.insert(tx_id, transaction.clone());
+    }
+
+    /// Removes the transaction from the pool
+    pub(crate) fn remove_mined(&mut self, id: &TransactionId) {
+        if let Some(tx) = self.by_id.remove(id) {
+            self.by_hash.remove(tx.transaction.hash());
+            self.independent_transactions.remove(&tx.transaction);
+
+            // mark the next as independent if it exists
+            if let Some(unlocked) = self.by_id.get(&id.descendant()) {
+                self.independent_transactions.insert(unlocked.transaction.clone());
+            }
+        }
     }
 
     fn next_id(&mut self) -> u64 {
@@ -125,6 +161,11 @@ impl<T: TransactionOrdering> PendingTransactionRef<T> {
     /// The next transaction of the sender: `nonce + 1`
     fn unlocks(&self) -> TransactionId {
         self.transaction.transaction_id.descendant()
+    }
+
+    /// The hash for this transaction
+    fn hash(&self) -> &TxHash {
+        &self.transaction.hash()
     }
 }
 
