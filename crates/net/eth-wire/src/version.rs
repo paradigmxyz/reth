@@ -20,8 +20,7 @@ pub enum EthVersion {
 ///
 /// # Example
 /// ```
-/// use ethp2p::EthVersion;
-/// use std::convert::TryFrom;
+/// use reth_eth_wire::EthVersion;
 ///
 /// let version = EthVersion::try_from("67").unwrap();
 /// assert_eq!(version, EthVersion::Eth67);
@@ -43,8 +42,7 @@ impl TryFrom<&str> for EthVersion {
 ///
 /// # Example
 /// ```
-/// use ethp2p::EthVersion;
-/// use std::convert::TryFrom;
+/// use reth_eth_wire::EthVersion;
 ///
 /// let version = EthVersion::try_from(67).unwrap();
 /// assert_eq!(version, EthVersion::Eth67);

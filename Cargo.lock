@@ -421,33 +421,6 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ebdd63c828f58aa067f40f9adcbea5e114fb1f90144b3a1e2858e0c9b1ff4e8"
-dependencies = [
- "arrayvec",
- "bytes",
- "chrono",
- "elliptic-curve",
- "ethabi",
- "fastrlp 0.1.3",
- "generic-array",
- "hex",
- "k256",
- "rand",
- "rlp",
- "rlp-derive",
- "rust_decimal",
- "serde",
- "serde_json",
- "strum",
- "thiserror",
- "tiny-keccak",
- "unicode-xid",
-]
-
-[[package]]
-name = "ethers-core"
-version = "0.17.0"
 source = "git+https://github.com/gakonst/ethers-rs#f3a5a7aef06db391f8d2c4370bbc2a1b6ae4ea0f"
 dependencies = [
  "arrayvec",
@@ -1524,7 +1497,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "ethereum-forkid",
- "ethers-core 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ethers-core",
  "fastrlp 0.2.0",
  "hex",
  "hex-literal",
@@ -1564,7 +1537,7 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "ethers-core 0.17.0 (git+https://github.com/gakonst/ethers-rs)",
+ "ethers-core",
  "fastrlp 0.2.0",
 ]
 
