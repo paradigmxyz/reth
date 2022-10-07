@@ -2,8 +2,9 @@
 
 use crate::{
     kv::{
-        cursor::Cursor,
+        cursor::{Cursor, ValueOnlyResult},
         table::{Encode, Table},
+        KVError,
     },
     utils::decode_one,
 };
@@ -32,7 +33,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     }
 
     /// Open cursor on `table`.
-    pub fn cursor<'a, T: Table>(&'a self, table: T) -> eyre::Result<Cursor<'a, K, T>>
+    pub fn cursor<'a, T: Table>(&'a self, table: T) -> Result<Cursor<'a, K, T>, KVError>
     where
         'env: 'a,
         T: Table,
@@ -48,7 +49,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
 
     /// Gets value associated with `key` on `table`. If it's a DUPSORT table, then returns the first
     /// entry.
-    pub fn get<T: Table>(&self, table: T, key: T::Key) -> eyre::Result<Option<T::Value>> {
+    pub fn get<T: Table>(&self, table: T, key: T::Key) -> ValueOnlyResult<T> {
         self.inner
             .get(&self.inner.open_db(Some(table.name()))?, key.encode().as_ref())?
             .map(decode_one::<T>)
@@ -56,28 +57,30 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     }
 
     /// Saves all changes and frees up storage memory.
-    pub fn commit(self) -> eyre::Result<bool> {
-        self.inner.commit().map_err(From::from)
+    pub fn commit(self) -> Result<bool, KVError> {
+        self.inner.commit().map_err(KVError::Commit)
     }
 }
 
 impl<'a, E: EnvironmentKind> Tx<'a, RW, E> {
     /// Opens `table` and inserts `(key, value)` pair. If the `key` already exists, it replaces the
     /// value it if the table doesn't support DUPSORT.
-    pub fn put<T>(&self, table: T, k: T::Key, v: T::Value) -> eyre::Result<()>
+    pub fn put<T>(&self, table: T, k: T::Key, v: T::Value) -> Result<(), KVError>
     where
         T: Table,
     {
-        Ok(self.inner.put(
-            &self.inner.open_db(Some(table.name()))?,
-            &k.encode(),
-            &v.encode(),
-            WriteFlags::UPSERT,
-        )?)
+        self.inner
+            .put(
+                &self.inner.open_db(Some(table.name()))?,
+                &k.encode(),
+                &v.encode(),
+                WriteFlags::UPSERT,
+            )
+            .map_err(KVError::Put)
     }
 
     /// Deletes the `(key, value)` entry on `table`.
-    pub fn delete<T>(&self, table: T, key: T::Key, value: Option<T::Value>) -> eyre::Result<bool>
+    pub fn delete<T>(&self, table: T, key: T::Key, value: Option<T::Value>) -> Result<bool, KVError>
     where
         T: Table,
     {
@@ -88,11 +91,13 @@ impl<'a, E: EnvironmentKind> Tx<'a, RW, E> {
             data = Some(value.as_ref());
         };
 
-        Ok(self.inner.del(&self.inner.open_db(Some(table.name()))?, key.encode(), data)?)
+        self.inner
+            .del(&self.inner.open_db(Some(table.name()))?, key.encode(), data)
+            .map_err(KVError::Delete)
     }
 
     /// Empties `table`.
-    pub fn clear<T>(&self, table: T) -> eyre::Result<()>
+    pub fn clear<T>(&self, table: T) -> Result<(), KVError>
     where
         T: Table,
     {

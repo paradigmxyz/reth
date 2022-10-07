@@ -2,7 +2,7 @@
 
 use crate::utils::{default_page_size, TableType};
 use libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Error, Geometry, Mode, PageSize,
+    DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
 use std::{ops::Deref, path::Path};
@@ -17,6 +17,9 @@ pub mod cursor;
 
 pub mod tx;
 use tx::Tx;
+
+mod error;
+pub use error::KVError;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -38,7 +41,7 @@ impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`create_tables`].
-    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, Error> {
+    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, KVError> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
@@ -59,15 +62,16 @@ impl<E: EnvironmentKind> Env<E> {
                     coalesce: true,
                     ..Default::default()
                 })
-                .open(path)?,
+                .open(path)
+                .map_err(KVError::DatabaseLocation)?,
         };
 
         Ok(env)
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), Error> {
-        let tx = self.inner.begin_rw_txn()?;
+    pub fn create_tables(&self) -> Result<(), KVError> {
+        let tx = self.inner.begin_rw_txn().map_err(KVError::InitTransaction)?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -75,7 +79,7 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags)?;
+            tx.create_db(Some(table), flags).map_err(KVError::TableCreation)?;
         }
 
         tx.commit()?;
@@ -87,18 +91,18 @@ impl<E: EnvironmentKind> Env<E> {
 impl<E: EnvironmentKind> Env<E> {
     /// Initiates a read-only transaction. It should be committed or rolled back in the end, so it
     /// frees up pages.
-    pub fn begin_tx(&self) -> eyre::Result<Tx<'_, RO, E>> {
-        Ok(Tx::new(self.inner.begin_ro_txn()?))
+    pub fn begin_tx(&self) -> Result<Tx<'_, RO, E>, KVError> {
+        Ok(Tx::new(self.inner.begin_ro_txn().map_err(KVError::InitTransaction)?))
     }
 
     /// Initiates a read-write transaction. It should be committed or rolled back in the end.
-    pub fn begin_mut_tx(&self) -> eyre::Result<Tx<'_, RW, E>> {
-        Ok(Tx::new(self.inner.begin_rw_txn()?))
+    pub fn begin_mut_tx(&self) -> Result<Tx<'_, RW, E>, KVError> {
+        Ok(Tx::new(self.inner.begin_rw_txn().map_err(KVError::InitTransaction)?))
     }
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
-    pub fn view<T, F>(&self, f: F) -> eyre::Result<T>
+    pub fn view<T, F>(&self, f: F) -> Result<T, KVError>
     where
         F: Fn(&Tx<'_, RO, E>) -> T,
     {
@@ -112,7 +116,7 @@ impl<E: EnvironmentKind> Env<E> {
 
     /// Takes a function and passes a write-read transaction into it, making sure it's committed in
     /// the end of the execution.
-    pub fn update<T, F>(&self, f: F) -> eyre::Result<T>
+    pub fn update<T, F>(&self, f: F) -> Result<T, KVError>
     where
         F: Fn(&Tx<'_, RW, E>) -> T,
     {
@@ -141,54 +145,70 @@ mod tests {
     use std::str::FromStr;
     use tempfile::TempDir;
 
+    const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
+    const ERROR_DB_OPEN: &str = "Not able to open existing mdbx file.";
+    const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+    const ERROR_PUT: &str = "Not able to insert value into table.";
+    const ERROR_GET: &str = "Not able to get value from table.";
+    const ERROR_COMMIT: &str = "Not able to commit transaction.";
+    const ERROR_RETURN_VALUE: &str = "Mismatching result.";
+    const ERROR_INIT_TX: &str = "Failed to create a MDBX transaction.";
+    const ERROR_ETH_ADDRESS: &str = "Invalid address.";
+    const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
+
     #[test]
     fn db_creation() {
-        Env::<NoWriteMap>::open(&TempDir::new().unwrap().into_path(), EnvKind::RW).unwrap();
+        Env::<NoWriteMap>::open(&TempDir::new().expect(ERROR_TEMPDIR).into_path(), EnvKind::RW)
+            .expect(ERROR_DB_CREATION);
     }
 
     #[test]
     fn db_manual_put_get() {
         let env =
-            Env::<NoWriteMap>::open(&TempDir::new().unwrap().into_path(), EnvKind::RW).unwrap();
-        env.create_tables().unwrap();
+            Env::<NoWriteMap>::open(&TempDir::new().expect(ERROR_TEMPDIR).into_path(), EnvKind::RW)
+                .expect(ERROR_DB_CREATION);
+        env.create_tables().expect(ERROR_TABLE_CREATION);
 
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
         let value = vec![1, 3, 3, 7];
+        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+            .expect(ERROR_ETH_ADDRESS);
 
         // PUT
-        let tx = env.begin_mut_tx().unwrap();
-        tx.put(PlainState, key, value).unwrap();
-        tx.commit().unwrap();
+        let tx = env.begin_mut_tx().expect(ERROR_INIT_TX);
+        tx.put(PlainState, key, value.clone()).expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
 
         // GET
-        let tx = env.begin_tx().unwrap();
-        let _result = tx.get(PlainState, key).unwrap();
-        tx.commit().unwrap();
+        let tx = env.begin_tx().expect(ERROR_INIT_TX);
+        let result = tx.get(PlainState, key).expect(ERROR_GET);
+        assert!(result.expect(ERROR_RETURN_VALUE) == value);
+        tx.commit().expect(ERROR_COMMIT);
     }
 
     #[test]
     fn db_closure_put_get() {
-        let path = TempDir::new().unwrap().into_path();
+        let path = TempDir::new().expect(ERROR_TEMPDIR).into_path();
 
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
         let value = vec![1, 3, 3, 7];
+        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+            .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = Env::<WriteMap>::open(&path, EnvKind::RW).unwrap();
-            env.create_tables().unwrap();
+            let env = Env::<WriteMap>::open(&path, EnvKind::RW).expect(ERROR_DB_OPEN);
+            env.create_tables().expect(ERROR_TABLE_CREATION);
 
             // PUT
             let result = env.update(|tx| {
-                tx.put(PlainState, key, value.clone()).unwrap();
+                tx.put(PlainState, key, value.clone()).expect(ERROR_PUT);
                 200
             });
-            assert!(result.unwrap() == 200);
+            assert!(result.expect(ERROR_RETURN_VALUE) == 200);
         }
 
-        let env = Env::<WriteMap>::open(&path, EnvKind::RO).unwrap();
+        let env = Env::<WriteMap>::open(&path, EnvKind::RO).expect(ERROR_DB_CREATION);
 
         // GET
-        let result = env.view(|tx| tx.get(PlainState, key).unwrap()).unwrap();
+        let result = env.view(|tx| tx.get(PlainState, key).expect(ERROR_GET)).expect(ERROR_GET);
 
         assert!(result == Some(value))
     }

@@ -1,20 +1,21 @@
 //! Table traits.
 #![allow(missing_docs)]
 
+use super::KVError;
 use bytes::Bytes;
 use reth_primitives::{Address, U256};
 use std::fmt::Debug;
 
 /// Trait that will transform the data to be saved in the DB.
-pub trait Encode: Send + Sync + Sized {
+pub trait Encode: Send + Sync + Sized + Debug {
     type Encoded: AsRef<[u8]> + Send + Sync;
 
     fn encode(self) -> Self::Encoded;
 }
 
 /// Trait that will transform the data to be read from the DB.
-pub trait Decode: Send + Sync + Sized {
-    fn decode(value: &[u8]) -> eyre::Result<Self>;
+pub trait Decode: Send + Sync + Sized + Debug {
+    fn decode(value: &[u8]) -> Result<Self, KVError>;
 }
 
 /// Generic trait that enforces the database value to implement [`Encode`] and [`Decode`].
@@ -50,7 +51,7 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode(value: &[u8]) -> eyre::Result<Self> {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
         Ok(value.to_vec())
     }
 }
@@ -64,7 +65,7 @@ impl Encode for Bytes {
 }
 
 impl Decode for Bytes {
-    fn decode(value: &[u8]) -> eyre::Result<Self> {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
         Ok(value.to_vec().into())
     }
 }
@@ -78,7 +79,7 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
-    fn decode(value: &[u8]) -> eyre::Result<Self> {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
         Ok(Address::from_slice(value))
     }
 }
@@ -92,7 +93,7 @@ impl Encode for u16 {
 }
 
 impl Decode for u16 {
-    fn decode(value: &[u8]) -> eyre::Result<Self> {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
         unsafe { Ok(u16::from_be_bytes(*(value.as_ptr() as *const [_; 2]))) }
     }
 }
@@ -106,7 +107,7 @@ impl Encode for u64 {
 }
 
 impl Decode for u64 {
-    fn decode(value: &[u8]) -> eyre::Result<Self> {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
         unsafe { Ok(u64::from_be_bytes(*(value.as_ptr() as *const [_; 8]))) }
     }
 }
@@ -122,7 +123,7 @@ impl Encode for U256 {
 }
 
 impl Decode for U256 {
-    fn decode(value: &[u8]) -> eyre::Result<Self> {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
         let mut result = [0; 32];
         result.copy_from_slice(value);
         Ok(Self::from_big_endian(&result))
