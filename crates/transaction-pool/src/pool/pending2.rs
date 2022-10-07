@@ -29,6 +29,33 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 // === impl PendingPool ===
 
 impl<T: TransactionOrdering> PendingPool<T> {
+    /// Returns an iterator over all transactions that are _currently_ ready.
+    ///
+    /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
+    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
+    /// previously. In other words: The nonces of transactions with the same sender will _always_
+    /// increase by exactly 1.
+    ///
+    /// The order of transactions which satisfy (1.) is determent by their computed priority: A
+    /// transaction with a higher priority is returned before a transaction with a lower priority.
+    ///
+    /// If two transactions have the same priority score, then the transactions which spent more
+    /// time in pool (were added earlier) are returned first.
+    ///
+    /// NOTE: while this iterator returns transaction that pool considers valid at this point, they
+    /// could potentially be become invalid at point of execution. Therefore, this iterator
+    /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
+    /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
+    /// Invalid transactions are skipped.
+    pub(crate) fn get_transactions(&self) -> TransactionsIterator<T> {
+        TransactionsIterator {
+            all: self.by_hash.clone(),
+            independent: self.independent_transactions.clone(),
+            awaiting: Default::default(),
+            invalid: Default::default(),
+        }
+    }
+
     fn next_id(&mut self) -> u64 {
         let id = self.id;
         self.id = self.id.wrapping_add(1);
@@ -111,8 +138,8 @@ impl<T: TransactionOrdering> Ord for PendingTransactionRef<T> {
 
 /// An iterator that returns transactions that can be executed on the current state.
 pub struct TransactionsIterator<T: TransactionOrdering> {
-    all: HashMap<TxHash, PendingTransactionRef<T>>,
+    all: HashMap<TxHash, Arc<PendingTransaction<T>>>,
+    independent: BTreeSet<PendingTransactionRef<T>>,
     awaiting: HashMap<TxHash, PoolTransactionRef<T>>,
-    independent: BTreeSet<PoolTransactionRef<T>>,
     invalid: HashSet<TxHash>,
 }
