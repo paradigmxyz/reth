@@ -92,9 +92,9 @@ mod events;
 mod listener;
 mod pending;
 mod queued;
-mod state;
+pub(crate) mod state;
 mod transaction;
-mod txpool2;
+pub mod txpool2;
 
 use crate::{
     identifier::{SenderId, TransactionId},

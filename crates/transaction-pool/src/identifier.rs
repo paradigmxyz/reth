@@ -95,7 +95,7 @@ impl TransactionId {
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
     /// `on_chain_none`
-    pub fn dependency(
+    pub fn predecessor(
         transaction_nonce: u64,
         on_chain_nonce: u64,
         sender: SenderId,
@@ -109,6 +109,12 @@ impl TransactionId {
         } else {
             None
         }
+    }
+
+    /// Returns the nonce the follows directly after this.
+    #[inline]
+    pub(crate) fn next_nonce(&self) -> u64 {
+        self.nonce + 1
     }
 }
 

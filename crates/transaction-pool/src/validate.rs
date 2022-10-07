@@ -3,6 +3,7 @@
 use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
+    pool::{state::AtomicTxState, txpool2::AtomicSubPool},
     traits::PoolTransaction,
 };
 use reth_primitives::{BlockID, TxHash, U256};
@@ -64,6 +65,11 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub sender_id: SenderId,
     /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`
     pub cost: U256,
+    /// The `SubPool` that currently contains this transaction.
+    pub(crate) sub_pool: AtomicSubPool,
+    /// Keeps track of the current state of the transaction and therefor in which subpool it should
+    /// reside
+    pub(crate) state: AtomicTxState,
     // TODO add a block timestamp that marks validity
 }
 
@@ -73,6 +79,10 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Returns the hash of the transaction
     pub fn hash(&self) -> &TxHash {
         self.transaction.hash()
+    }
+
+    pub(crate) fn id(&self) -> &TransactionId {
+        &self.transaction_id
     }
 }
 
