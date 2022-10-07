@@ -110,10 +110,7 @@ mod tests {
             total_difficulty: Uint::from(36206751599115524359527u128),
             blockhash: hex!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
             genesis: hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"),
-            forkid: ForkId {
-                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
-                next: 0,
-            },
+            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
 
         let mut rlp_status = vec![];
@@ -131,10 +128,7 @@ mod tests {
             total_difficulty: Uint::from(36206751599115524359527u128),
             blockhash: hex!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
             genesis: hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"),
-            forkid: ForkId {
-                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
-                next: 0,
-            },
+            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -149,10 +143,7 @@ mod tests {
             total_difficulty: Uint::from(37851386u64),
             blockhash: hex!("f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b"),
             genesis: hex!("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
-            forkid: ForkId {
-                hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]),
-                next: 0,
-            },
+            forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
         };
 
         let mut rlp_status = vec![];
@@ -169,10 +160,7 @@ mod tests {
             total_difficulty: Uint::from(37851386u64),
             blockhash: hex!("f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b"),
             genesis: hex!("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
-            forkid: ForkId {
-                hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]),
-                next: 0,
-            },
+            forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -190,10 +178,7 @@ mod tests {
             .unwrap(),
             blockhash: hex!("523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c"),
             genesis: hex!("6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd"),
-            forkid: ForkId {
-                hash: ForkHash([0x1a, 0x67, 0xcc, 0xd8]),
-                next: 0,
-            },
+            forkid: ForkId { hash: ForkHash([0x1a, 0x67, 0xcc, 0xd8]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
