@@ -3,7 +3,7 @@
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
-    path::Path,
+    path::Path, collections::HashSet,
 };
 
 use enr::{secp256k1::SecretKey, Enr};
@@ -11,7 +11,6 @@ use serde_derive::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::error;
 
-// TODO: impl Hash for Enr<K> upstream and change to HashSet to prevent duplicates
 // TODO: enforce one-to-one mapping between IP and key
 
 /// Contains a list of peers to persist across node restarts.
@@ -31,10 +30,10 @@ use tracing::error;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Anchor {
     /// Peers that have been obtained discovery sources when the node is running
-    pub discovered_peers: Vec<Enr<SecretKey>>,
+    pub discovered_peers: HashSet<Enr<SecretKey>>,
 
     /// Pre-determined peers to reach out to
-    pub static_peers: Vec<Enr<SecretKey>>,
+    pub static_peers: HashSet<Enr<SecretKey>>,
 }
 
 impl Anchor {

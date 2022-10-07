@@ -356,8 +356,7 @@ dependencies = [
 [[package]]
 name = "enr"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26fa0a0be8915790626d5759eb51fe47435a8eac92c2f212bd2da9aa7f30ea56"
+source = "git+https://github.com/sigp/enr#125f8a5f2deede3e47e852ea70fc9b6e1e9c6e50"
 dependencies = [
  "base64",
  "bs58",
