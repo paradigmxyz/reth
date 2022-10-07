@@ -1,20 +1,19 @@
-#![allow(missing_debug_implementations)]
-
-use crate::Config;
+use crate::{revm_wrap, Config};
 use reth_interfaces::{
     consensus::Consensus,
     executor::{BlockExecutor, Error, ExecutorDb},
 };
-use reth_primitives::Block;
+use reth_primitives::BlockLocked;
+use revm::{db::EmptyDB, AnalysisKind, Env, SpecId};
 
 /// Main block executor
 pub struct Executor {
     /// Configuration, Spec and optional flags.
-    config: Config,
+    pub config: Config,
     /// Database
-    db: Box<dyn ExecutorDb>,
+    pub db: Box<dyn ExecutorDb>,
     /// Consensus
-    consensus: Box<dyn Consensus>,
+    pub consensus: Box<dyn Consensus>,
 }
 
 impl Executor {
@@ -23,13 +22,22 @@ impl Executor {
         Self { config, db, consensus }
     }
 
-    /// Verify block (TODO)
-    pub fn verify(&self, block: &Block) -> Result<(), Error> {
-        // TODO example
-        let _ = self.consensus.validate_header(&block.header);
-        if self.config.example {
-            let _block_exist = self.db.get_block(block.header.number);
+    /// Verify block. Execute all transaction and compare results.
+    pub fn verify(&self, block: &BlockLocked) -> Result<(), Error> {
+        let mut env = Env::default();
+        env.cfg.chain_id = 1.into();
+        env.cfg.spec_id = SpecId::LATEST;
+        env.cfg.perf_all_precompiles_have_balance = true;
+        env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
+
+        revm_wrap::fill_block_env(&mut env.block, block);
+
+        let _database = revm_wrap::TempStateDb::new(EmptyDB::default());
+
+        for transaction in block.body.iter() {
+            revm_wrap::fill_tx_env(&mut env.tx, transaction.as_ref());
         }
+
         Err(Error::VerificationFailed)
     }
 }
