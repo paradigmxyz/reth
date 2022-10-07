@@ -19,3 +19,4 @@ reth-primitives = { path = "../../primitives" }
 
 [dev-dependencies]
 hex-literal = "0.3"
+ethers-core = "0.17.0"

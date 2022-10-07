@@ -1,6 +1,6 @@
 use ethereum_forkid::ForkId;
 use fastrlp::{RlpDecodable, RlpEncodable};
-use reth_primitives::chain::Chain;
+use reth_primitives::Chain;
 use ruint::Uint;
 use std::fmt::{Debug, Display};
 
@@ -92,10 +92,10 @@ mod tests {
     use std::str::FromStr;
 
     use ethereum_forkid::{ForkHash, ForkId};
-    use ethers::prelude::Chain as NamedChain;
+    use ethers_core::types::Chain as NamedChain;
     use fastrlp::{Decodable, Encodable};
-    use foundry_config::Chain;
     use hex_literal::hex;
+    use reth_primitives::Chain;
     use ruint::Uint;
 
     use crate::{EthVersion, Status};
