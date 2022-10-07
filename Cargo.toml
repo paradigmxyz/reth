@@ -10,6 +10,7 @@ members = [
     "crates/executor",
     "crates/interfaces",
     "crates/net/p2p",
+    "crates/net/eth-wire",
     "crates/net/rpc",
     "crates/net/rpc-api",
     "crates/net/rpc-types",

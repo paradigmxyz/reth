@@ -161,6 +161,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "build_const"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ae4235e6dac0694637c763029ecea1a2ec9e4e06ec2729bd21ba4d9c863eb7"
+
+[[package]]
 name = "byte-slice-cast"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -242,6 +248,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d997bd5e24a5928dd43e46dc529867e207907fe0b239c3477d924f7f2ca320"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "crc"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d663548de7f5cca343f1e0a48d14dcfb0e9eb4e079ec58883b7251539fa10aeb"
+dependencies = [
+ "build_const",
 ]
 
 [[package]]
@@ -370,10 +385,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11da94e443c60508eb62cf256243a64da87304c2802ac2528847f79d750007ef"
 dependencies = [
  "crunchy",
- "fixed-hash",
+ "fixed-hash 0.7.0",
  "impl-rlp",
  "impl-serde",
  "tiny-keccak",
+]
+
+[[package]]
+name = "ethereum-forkid"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46e61cdc29def2ba89221f2e72c8a31c6413655122d29a8dd69749b8492c80c5"
+dependencies = [
+ "crc",
+ "fastrlp 0.2.0",
+ "maplit",
+ "primitive-types 0.12.0",
+ "thiserror",
 ]
 
 [[package]]
@@ -383,10 +411,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2827b94c556145446fcce834ca86b7abf0c39a805883fe20e72c5bfdb5a0dc6"
 dependencies = [
  "ethbloom",
- "fixed-hash",
+ "fixed-hash 0.7.0",
  "impl-rlp",
  "impl-serde",
- "primitive-types",
+ "primitive-types 0.11.1",
  "uint",
 ]
 
@@ -447,6 +475,7 @@ dependencies = [
  "arrayvec",
  "auto_impl",
  "bytes",
+ "fastrlp-derive",
 ]
 
 [[package]]
@@ -480,6 +509,15 @@ dependencies = [
  "byteorder",
  "rand",
  "rustc-hex",
+ "static_assertions",
+]
+
+[[package]]
+name = "fixed-hash"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
+dependencies = [
  "static_assertions",
 ]
 
@@ -683,6 +721,12 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hex-literal"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ebdb29d2ea9ed0083cd8cece49bbd968021bd99b0849edb4a9a7ee0fdf6a4e0"
 
 [[package]]
 name = "hmac"
@@ -1013,6 +1057,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
 name = "mdbx-sys"
 version = "0.12.1-0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1285,10 +1335,20 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e28720988bff275df1f51b171e1b2a18c30d194c4d2b61defdacecd625a5d94a"
 dependencies = [
- "fixed-hash",
+ "fixed-hash 0.7.0",
  "impl-codec",
  "impl-rlp",
  "impl-serde",
+ "uint",
+]
+
+[[package]]
+name = "primitive-types"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cfd65aea0c5fa0bfcc7c9e7ca828c921ef778f43d325325ec84bda371bfa75a"
+dependencies = [
+ "fixed-hash 0.8.0",
  "uint",
 ]
 
@@ -1432,6 +1492,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-eth-wire"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "ethereum-forkid",
+ "fastrlp 0.2.0",
+ "hex",
+ "hex-literal",
+ "reth-primitives",
+ "ruint",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-executor"
 version = "0.1.0"
 dependencies = [
@@ -1538,7 +1612,7 @@ dependencies = [
  "bytes",
  "hashbrown",
  "num_enum",
- "primitive-types",
+ "primitive-types 0.11.1",
  "revm_precompiles",
  "rlp",
  "sha3",
@@ -1554,7 +1628,7 @@ dependencies = [
  "hashbrown",
  "num",
  "once_cell",
- "primitive-types",
+ "primitive-types 0.11.1",
  "ripemd",
  "secp256k1",
  "sha2",
@@ -1602,6 +1676,25 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "ruint"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea68c70fa2b6ce8f8b656e9d3d64776b7ced5b235bb93bb9fee560bf2381196"
+dependencies = [
+ "fastrlp 0.2.0",
+ "ruint-macro",
+ "rustc_version",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "ruint-macro"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4bb0fa2c9df745e5ebf08fb033655b5fba6511a3e6e82b68f5053963e267755"
 
 [[package]]
 name = "rust_decimal"
