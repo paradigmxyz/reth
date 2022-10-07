@@ -7,6 +7,7 @@
 
 //! Commonly used types in reth.
 
+mod account;
 mod block;
 mod chain;
 mod header;
@@ -14,11 +15,12 @@ mod log;
 mod receipt;
 mod transaction;
 
-pub use block::Block;
+pub use account::Account;
+pub use block::{Block, BlockLocked};
 pub use header::{Header, HeaderLocked};
 pub use log::Log;
 pub use receipt::Receipt;
-pub use transaction::{Transaction, TransactionSigned, TxType};
+pub use transaction::{AccessList, AccessListItem, Transaction, TransactionSigned, TxType};
 
 /// Block Number is height of chain
 pub type BlockNumber = u64;
