@@ -19,14 +19,13 @@ bitflags::bitflags! {
     }
 }
 
-
 /// Identifier for the used Subpool
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub(crate) enum SubPool {
     Queued = 0,
     Pending,
-    Parked,
+    BaseFee,
 }
 
 // === impl SubPool ===
@@ -41,7 +40,7 @@ impl SubPool {
         match val {
             0 => SubPool::Queued,
             1 => SubPool::Pending,
-            2 => SubPool::Parked,
+            2 => SubPool::BaseFee,
             _ => unreachable!("is shielded; qed"),
         }
     }
@@ -55,7 +54,6 @@ impl From<TxState> for SubPool {
         if value < TxState::BASE_FEE_POOL_BITS {
             return SubPool::Queued
         }
-        SubPool::Parked
+        SubPool::BaseFee
     }
 }
-

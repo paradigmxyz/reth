@@ -1,13 +1,14 @@
 use crate::{
+    error::PoolError,
     identifier::{SenderId, TransactionId},
     pool::{
         pending::PendingTransactions,
         queued::QueuedTransactions,
         queued2::QueuedPool,
         state::{SubPool, TxState},
-        SenderInfo,
+        AddedTransaction, SenderInfo, TransactionsIterator,
     },
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{rpc::transaction, TxHash};
@@ -31,9 +32,105 @@ pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known info
     sender_info: FnvHashMap<SenderId, SenderInfo>,
     /// queued subpool
-    queued: QueuedPool<T>,
+    queued_pool: QueuedPool<T>,
+    /// base fee subpool
+    basefee_pool: QueuedPool<T>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
+}
+
+impl<T: TransactionOrdering> TxPool<T> {
+    /// Updates the pool based on the changed base fee.
+    ///
+    /// This enforces the dynamic fee requirement.
+    pub(crate) fn update_base_fee(&mut self, new_base_fee: U256) {
+        // TODO update according to the changed base_fee
+        todo!()
+    }
+
+    /// Returns an iterator that yields transactions that are ready to be included in the block.
+    pub(crate) fn best_transactions(&self) {
+        todo!()
+    }
+
+    /// Adds the transaction into the pool
+    ///
+    /// This pool consists of two sub-pools: `Queued` and `Pending`.
+    ///
+    /// The `Queued` pool contains transaction with gaps in its dependency tree: It requires
+    /// additional transaction that are note yet present in the pool.
+    ///
+    /// The `Pending` pool contains all transactions that have all their dependencies satisfied (no
+    /// nonce gaps). It consists of two parts: `Parked` and `Ready`.
+    ///
+    /// The `Ready` queue contains transactions that are ready to be included in the pending block.
+    /// With EIP-1559, transactions can become executable or not without any changes to the
+    /// sender's balance or nonce and instead their feeCap determines whether the transaction is
+    /// _currently_ (on the current state) ready or needs to be parked until the feeCap satisfies
+    /// the block's baseFee.
+    pub(crate) fn add_transaction(
+        &mut self,
+        tx: ValidPoolTransaction<T::Transaction>,
+        on_chain_balance: U256,
+        on_chain_nonce: u64,
+    ) -> PoolResult<AddedTransaction<T::Transaction>> {
+        match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
+            InsertionResult::Inserted { transaction, move_to, replaced_tx, updates } => {
+                self.add_into_subpool(transaction.clone(), replaced_tx, move_to);
+                let outcome = self.process_updates(updates);
+
+                // TODO get a list of promoted transactions
+
+                unimplemented!()
+            }
+            InsertionResult::Underpriced { existing, .. } => {
+                return Err(PoolError::AlreadyAdded(Box::new(existing)))
+            }
+        }
+    }
+
+    /// Maintenance task to update transaction locations.
+    fn process_updates(
+        &mut self,
+        updates: impl IntoIterator<Item = SubPoolUpdate>,
+    ) -> UpdateOutcome<T::Transaction> {
+        let mut outcome = UpdateOutcome::default();
+        for update in updates {
+            let SubPoolUpdate { id, hash, current, destination } = update;
+            match destination {
+                Destination::Discard => {
+                    outcome.discarded.push(hash);
+                }
+                Destination::Pool(move_to) => {
+                    debug_assert!(current != move_to, "destination must be different");
+                    match (current, move_to) {
+                        (SubPool::Queued, SubPool::Pending) => {}
+                        (SubPool::Queued, SubPool::BaseFee) => {}
+                        (SubPool::BaseFee, SubPool::Queued) => {}
+                        (SubPool::BaseFee, SubPool::Pending) => {}
+                        (SubPool::Pending, SubPool::Queued) => {}
+                        (SubPool::Pending, SubPool::BaseFee) => {}
+                        _ => unreachable!("destination must be different"),
+                    }
+                }
+            }
+        }
+        outcome
+    }
+
+    /// Inserts the transaction into the given subpool
+    fn add_into_subpool(
+        &mut self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+        replaced: Option<Arc<ValidPoolTransaction<T::Transaction>>>,
+        pool: SubPool,
+    ) {
+        match pool {
+            SubPool::Queued => {}
+            SubPool::Pending => {}
+            SubPool::BaseFee => {}
+        }
+    }
 }
 
 /// Container for _all_ transaction in the pool
@@ -68,7 +165,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn txs_iter(
         &self,
         sender: SenderId,
-    ) -> impl Iterator<Item=(&TransactionId, &PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&TransactionId, &PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
@@ -79,7 +176,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn txs_iter_mut(
         &mut self,
         sender: SenderId,
-    ) -> impl Iterator<Item=(&TransactionId, &mut PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&TransactionId, &mut PoolInternalTransaction<T>)> + '_ {
         self.txs
             .range_mut((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
@@ -181,11 +278,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ///      - enough balance updates
     pub(crate) fn insert_tx(
         &mut self,
-        transaction: Arc<ValidPoolTransaction<T>>,
+        transaction: ValidPoolTransaction<T>,
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> InsertionResult<T> {
         let tx_id = *transaction.id();
+        let transaction = Arc::new(transaction);
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
 
@@ -285,14 +383,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
 /// Where to move an existing transaction
 #[derive(Debug)]
 pub(crate) enum Destination {
-    /// Discard the transaction
+    /// Discard the transaction.
     Discard,
     /// Move transaction to pool
     Pool(SubPool),
 }
 
 /// A change of the transaction's location
-pub(crate) struct MoveTransaction {
+///
+/// NOTE: this guarantees that `current` and `destination` differ.
+pub(crate) struct SubPoolUpdate {
     pub(crate) id: TransactionId,
     pub(crate) hash: TxHash,
     /// Where the transaction is currently held.
@@ -309,7 +409,7 @@ pub(crate) enum InsertionResult<T: PoolTransaction> {
         move_to: SubPool,
         replaced_tx: Option<Arc<ValidPoolTransaction<T>>>,
         /// Additional updates to transactions affected by this change.
-        updates: Vec<MoveTransaction>,
+        updates: Vec<SubPoolUpdate>,
     },
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced { transaction: Arc<ValidPoolTransaction<T>>, existing: TxHash },
@@ -337,5 +437,22 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
         self.cumulative_cost + self.transaction.cost
+    }
+}
+
+/// Tracks the result after updating the pool
+#[derive(Debug)]
+pub struct UpdateOutcome<T: PoolTransaction> {
+    /// transactions promoted to the ready queue
+    promoted: Vec<TxHash>,
+    /// transaction that failed and became discarded
+    discarded: Vec<TxHash>,
+    /// Transactions removed from the Ready pool
+    removed: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+impl<T: PoolTransaction> Default for UpdateOutcome<T> {
+    fn default() -> Self {
+        Self { promoted: vec![], discarded: vec![], removed: vec![] }
     }
 }
