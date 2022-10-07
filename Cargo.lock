@@ -1458,6 +1458,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_derive",
+ "tempfile",
  "thiserror",
  "toml",
  "tracing",

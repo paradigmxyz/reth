@@ -15,6 +15,9 @@ thiserror = "1.0.37"
 toml = "0.5.9"
 tracing = "0.1.36"
 
+[dev-dependencies]
+tempfile = "3.3.0"
+
 [dev-dependencies.secp256k1]
 version = "0.24"
 features = ["rand-std"]

@@ -142,6 +142,7 @@ mod tests {
         fs::{remove_file, OpenOptions},
         net::Ipv4Addr,
     };
+    use tempfile::tempdir;
 
     use super::{Anchor, PersistentAnchor};
 
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn create_empty_anchor() {
         let file_name = "temp_anchor.toml";
-        let temp_file_path = std::env::temp_dir().with_file_name(file_name);
+        let temp_file_path = tempdir().unwrap().path().with_file_name(file_name);
 
         // this test's purpose is to make sure new_from_file works if the file doesn't exist
         assert!(!temp_file_path.exists());
@@ -176,7 +177,7 @@ mod tests {
     #[test]
     fn save_temp_anchor() {
         let file_name = "temp_anchor_two.toml";
-        let temp_file_path = std::env::temp_dir().with_file_name(file_name);
+        let temp_file_path = tempdir().unwrap().path().with_file_name(file_name);
         let temp_file =
             OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
 
