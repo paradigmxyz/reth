@@ -8,7 +8,7 @@
 
 This repository contains several Rust crates that implement the different building blocks of an Ethereum node. The high-level structure of the repository is as follows:
 
-- crates/
+- `crates/`
     - [`db/`](crates/db): Strongly typed database bindings to [LibMDBX](https://github.com/vorot93/libmdbx-rs/) containing read/write access to Ethereum state and historical data (transactions, blocks etc.)
     - [`executor/`](crates/executor): Blazing-fast instrumented EVM using [`revm`](https://github.com/bluealloy/revm/). Used during consensus, syncing & during transaction simulation / gas estimation.
     - [`interfaces/`](crates/interfaces): Traits containing common abstractions across the components used in the system. For ease of unit testing, each crate importing the interface is recommended to create mock/in-memory implementations of each trait.
