@@ -51,16 +51,13 @@ pub trait TransactionValidator: Send + Sync {
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,
-    /// Ids required by the transaction.
-    ///
-    /// This lists all unique transactions that need to be mined before this transaction can be
-    /// considered `pending` and itself be included.
-    pub depends_on: Vec<TransactionId>,
     /// The identifier for this transaction.
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
-    /// Internal `Sender` identifier
+    /// Whether the tx is from a local source.
+    pub is_local: bool,
+    /// Internal `Sender` identifier.
     pub sender_id: SenderId,
     /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`
     pub cost: U256,
@@ -70,13 +67,19 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
 // === impl ValidPoolTransaction ===
 
 impl<T: PoolTransaction> ValidPoolTransaction<T> {
-    /// Returns the hash of the transaction
+    /// Returns the hash of the transaction.
     pub fn hash(&self) -> &TxHash {
         self.transaction.hash()
     }
 
+    /// Returns the internal identifier for this transaction.
     pub(crate) fn id(&self) -> &TransactionId {
         &self.transaction_id
+    }
+
+    /// Returns the nonce set for this transaction.
+    pub(crate) fn nonce(&self) -> u64 {
+        self.transaction.nonce()
     }
 }
 
@@ -85,7 +88,6 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
         write!(fmt, "Transaction {{ ")?;
         write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
         write!(fmt, "provides: {:?}, ", &self.transaction_id)?;
-        write!(fmt, "depends_on: {:?}, ", &self.depends_on)?;
         write!(fmt, "raw tx: {:?}", &self.transaction)?;
         write!(fmt, "}}")?;
         Ok(())
