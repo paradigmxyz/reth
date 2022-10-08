@@ -37,6 +37,16 @@ impl<T: TransactionOrdering> QueuedPool<T> {
         todo!()
     }
 
+    /// Removes the transaction from the pool
+    pub(crate) fn remove_transaction(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let tx = self.by_id.remove(id)?;
+        self.best.remove(&tx);
+        Some(tx.transaction.clone())
+    }
+
     fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);

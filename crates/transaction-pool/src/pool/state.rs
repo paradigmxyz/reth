@@ -1,3 +1,4 @@
+use crate::pool::txpool::SubPoolDestination;
 bitflags::bitflags! {
     /// Marker to assign a transaction into a sub-pool:
     #[derive(Default)]
@@ -15,7 +16,7 @@ bitflags::bitflags! {
 }
 
 /// Identifier for the used Sub-pool
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u8)]
 pub(crate) enum SubPool {
     Queued = 0,

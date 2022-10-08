@@ -1,5 +1,4 @@
 use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
-
 use reth_primitives::rpc::TxHash;
 use std::{
     cmp::Ordering,
@@ -100,7 +99,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.insert(tx_id, transaction);
     }
 
-    /// Removes the transaction from the pool
+    /// Removes a _mined_ transaction from the pool.
+    ///
+    /// If the transactions has a descendant transaction it will advance it to the best queue.
     pub(crate) fn remove_mined(&mut self, id: &TransactionId) {
         if let Some(tx) = self.by_id.remove(id) {
             self.independent_transactions.remove(&tx.transaction);
@@ -110,6 +111,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 self.independent_transactions.insert(unlocked.transaction.clone());
             }
         }
+    }
+
+    /// Removes the transaction from the pool.
+    pub(crate) fn remove_transaction(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let tx = self.by_id.remove(id)?;
+        self.independent_transactions.remove(&tx.transaction);
+        Some(tx.transaction.transaction.clone())
     }
 
     fn next_id(&mut self) -> u64 {

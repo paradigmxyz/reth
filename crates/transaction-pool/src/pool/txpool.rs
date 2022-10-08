@@ -6,13 +6,14 @@ use crate::{
         pending::{BestTransactions, PendingPool},
         queued::QueuedPool,
         state::{SubPool, TxState},
-        AddedTransaction,
+        AddedPendingTransaction, AddedTransaction,
     },
     PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
+    cmp::Ordering,
     collections::{hash_map, BTreeMap, HashMap},
     fmt,
     ops::Bound::{Excluded, Included, Unbounded},
@@ -95,14 +96,26 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Update sender info
         self.sender_info.entry(tx.sender_id).or_default().update(on_chain_nonce, on_chain_balance);
 
+        let hash = *tx.hash();
+
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             InsertionResult::Inserted { transaction, move_to, replaced_tx, updates } => {
-                self.add_into_subpool(transaction, replaced_tx, move_to);
-                let _outcome = self.process_updates(updates);
+                self.add_new_transaction(transaction, replaced_tx, move_to);
+                let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
-                // TODO get a list of promoted transactions
+                // This transaction was moved to the pending pool.
+                let res = if move_to.is_pending() {
+                    AddedTransaction::Pending(AddedPendingTransaction {
+                        hash,
+                        promoted,
+                        discarded,
+                        removed,
+                    })
+                } else {
+                    AddedTransaction::Queued { hash }
+                };
 
-                unimplemented!()
+                Ok(res)
             }
             InsertionResult::Underpriced { existing, .. } => {
                 Err(PoolError::AlreadyAdded(Box::new(existing)))
@@ -110,57 +123,81 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Maintenance task to update transaction locations.
+    /// Maintenance task to apply a series of updates.
+    ///
+    /// This will move/discard the given transaction according to the `PoolUpdate`
     fn process_updates(
         &mut self,
-        updates: impl IntoIterator<Item = SubPoolUpdate>,
+        updates: impl IntoIterator<Item = PoolUpdate>,
     ) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
         for update in updates {
-            let SubPoolUpdate { id: _, hash, current, destination } = update;
+            let PoolUpdate { id, hash, current, destination } = update;
             match destination {
                 Destination::Discard => {
                     outcome.discarded.push(hash);
                 }
                 Destination::Pool(move_to) => {
                     debug_assert!(!move_to.eq(&current), "destination must be different");
-                    match (current, move_to) {
-                        (SubPool::Queued, PoolDestination::Pending) => {}
-                        (SubPool::Queued, PoolDestination::BaseFee(_basefee)) => {}
-                        (SubPool::BaseFee, PoolDestination::Queued) => {}
-                        (SubPool::BaseFee, PoolDestination::Pending) => {}
-                        (SubPool::Pending, PoolDestination::Queued) => {}
-                        (SubPool::Pending, PoolDestination::BaseFee(_basefee)) => {}
-                        _ => unreachable!("destination must be different"),
-                    }
+                    self.move_transaction(current, move_to, &id);
                 }
             }
         }
         outcome
     }
 
-    /// Inserts the transaction into the given subpool
-    fn add_into_subpool(
+    /// Moves a transaction from one sub pool to another
+    fn move_transaction(&mut self, from: SubPool, to: SubPoolDestination, id: &TransactionId) {
+        if let Some(tx) = self.remove_transaction(from, id) {
+            self.add_transaction_to_pool(to, tx);
+        }
+    }
+
+    /// Removes the transaction from the given pool
+    fn remove_transaction(
         &mut self,
-        _transaction: Arc<ValidPoolTransaction<T::Transaction>>,
-        replaced: Option<(Arc<ValidPoolTransaction<T::Transaction>>, SubPool)>,
         pool: SubPool,
+        tx: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        match pool {
+            SubPool::Queued => self.queued_pool.remove_transaction(tx),
+            SubPool::Pending => self.pending_pool.remove_transaction(tx),
+            SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+        }
+    }
+
+    /// Removes the transaction from the given pool
+    fn add_transaction_to_pool(
+        &mut self,
+        pool: SubPoolDestination,
+        tx: Arc<ValidPoolTransaction<T::Transaction>>,
     ) {
-        if let Some((_replaced, replaced_pool)) = replaced {
-            // Remove the replaced transaction
-            match replaced_pool {
-                SubPool::Queued => {}
-                SubPool::Pending => {}
-                SubPool::BaseFee => {}
+        match pool {
+            SubPoolDestination::Queued => {
+                self.queued_pool.add_transaction(tx);
+            }
+            SubPoolDestination::Pending => {
+                self.pending_pool.add_transaction(tx);
+            }
+            SubPoolDestination::BaseFee(fee) => {
+                self.basefee_pool.add_transaction(tx, fee);
             }
         }
+    }
 
-        // Insert the transaction into the given pool.
-        match pool {
-            SubPool::Queued => {}
-            SubPool::Pending => {}
-            SubPool::BaseFee => {}
+    /// Inserts the transaction into the given subpool
+    fn add_new_transaction(
+        &mut self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+        replaced: Option<(Arc<ValidPoolTransaction<T::Transaction>>, SubPool)>,
+        pool: SubPoolDestination,
+    ) {
+        if let Some((replaced, replaced_pool)) = replaced {
+            // Remove the replaced transaction
+            self.remove_transaction(replaced_pool, replaced.id());
         }
+
+        self.add_transaction_to_pool(pool, transaction)
     }
 
     /// Returns the current size of the entire pool
@@ -407,10 +444,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.tx_inc(tx_id.sender);
         }
 
-        let move_to = state.into();
         let tx = PoolInternalTransaction {
             transaction: transaction.clone(),
-            subpool: move_to,
+            subpool: state.into(),
             state,
             cumulative_cost,
             nonce_distance,
@@ -418,6 +454,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // Insert the transaction in the total set.
         self.txs.insert(tx_id, tx);
+
+        // TODO determine this based on the state
+        let move_to = SubPoolDestination::Pending;
 
         InsertionResult::Inserted { transaction, move_to, replaced_tx, updates }
     }
@@ -428,30 +467,71 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 }
 
+impl<T: PoolTransaction> Default for AllTransactions<T> {
+    fn default() -> Self {
+        Self {
+            by_hash: Default::default(),
+            txs: Default::default(),
+            tx_counter: Default::default(),
+        }
+    }
+}
+
 /// Where to move an existing transaction.
 #[derive(Debug)]
 pub(crate) enum Destination {
     /// Discard the transaction.
     Discard,
     /// Move transaction to pool
-    Pool(PoolDestination),
+    Pool(SubPoolDestination),
 }
 
 /// The pool to which the transaction should be moved to
-#[derive(Debug)]
-pub(crate) enum PoolDestination {
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum SubPoolDestination {
     Queued,
     Pending,
     BaseFee(U256),
 }
 
-impl PartialEq<SubPool> for PoolDestination {
+// === impl PoolDestination ===
+
+impl SubPoolDestination {
+    /// Whether this transaction is to be moved to the pending sub-pool.
+    fn is_pending(&self) -> bool {
+        matches!(self, SubPoolDestination::Pending)
+    }
+
+    /// Returns whether this is a promotion depending on the current sub-pool location.
+    pub(crate) fn is_promoted(&self, other: SubPool) -> bool {
+        let dest: SubPool = self.into();
+        dest > other
+    }
+}
+
+impl From<SubPoolDestination> for SubPool {
+    fn from(value: SubPoolDestination) -> Self {
+        SubPool::from(&value)
+    }
+}
+
+impl<'a> From<&'a SubPoolDestination> for SubPool {
+    fn from(value: &'a SubPoolDestination) -> Self {
+        match value {
+            SubPoolDestination::Queued => SubPool::Queued,
+            SubPoolDestination::Pending => SubPool::Pending,
+            SubPoolDestination::BaseFee(_) => SubPool::BaseFee,
+        }
+    }
+}
+
+impl PartialEq<SubPool> for SubPoolDestination {
     fn eq(&self, other: &SubPool) -> bool {
         matches!(
             (self, other),
-            (PoolDestination::Queued, SubPool::Queued) |
-                (PoolDestination::Pending, SubPool::Pending) |
-                (PoolDestination::BaseFee(_), SubPool::BaseFee)
+            (SubPoolDestination::Queued, SubPool::Queued) |
+                (SubPoolDestination::Pending, SubPool::Pending) |
+                (SubPoolDestination::BaseFee(_), SubPool::BaseFee)
         )
     }
 }
@@ -459,7 +539,7 @@ impl PartialEq<SubPool> for PoolDestination {
 /// A change of the transaction's location
 ///
 /// NOTE: this guarantees that `current` and `destination` differ.
-pub(crate) struct SubPoolUpdate {
+pub(crate) struct PoolUpdate {
     pub(crate) id: TransactionId,
     pub(crate) hash: TxHash,
     /// Where the transaction is currently held.
@@ -473,10 +553,10 @@ pub(crate) enum InsertionResult<T: PoolTransaction> {
     /// Transaction was successfully inserted into the pool
     Inserted {
         transaction: Arc<ValidPoolTransaction<T>>,
-        move_to: SubPool,
+        move_to: SubPoolDestination,
         replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,
         /// Additional updates to transactions affected by this change.
-        updates: Vec<SubPoolUpdate>,
+        updates: Vec<PoolUpdate>,
     },
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced { transaction: Arc<ValidPoolTransaction<T>>, existing: TxHash },
@@ -528,7 +608,7 @@ impl<T: PoolTransaction> Default for UpdateOutcome<T> {
 
 /// Represents the outcome of a prune
 pub struct PruneResult<T: PoolTransaction> {
-    /// a list of added transactions that a pruned marker satisfied
+    /// A list of added transactions that a pruned marker satisfied
     pub promoted: Vec<AddedTransaction<T>>,
     /// all transactions that  failed to be promoted and now are discarded
     pub failed: Vec<TxHash>,

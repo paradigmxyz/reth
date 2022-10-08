@@ -1,6 +1,6 @@
 use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
 use fnv::FnvHashMap;
-
+use reth_primitives::U256;
 use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
 
 /// A Sub-Pool that currently holds transactions that violate the dynamic fee requirement
@@ -30,7 +30,22 @@ impl<T: TransactionOrdering> BaseFeePool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn add_transaction(&mut self, _tx: Arc<ValidPoolTransaction<T::Transaction>>) {}
+    pub(crate) fn add_transaction(
+        &mut self,
+        _tx: Arc<ValidPoolTransaction<T::Transaction>>,
+        basefee: U256,
+    ) {
+    }
+
+    /// Removes the transaction from the pool
+    pub(crate) fn remove_transaction(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let tx = self.by_id.remove(id)?;
+        self.best.remove(&tx);
+        Some(tx.transaction.clone())
+    }
 
     fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
