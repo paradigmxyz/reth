@@ -1,6 +1,4 @@
-use crate::{
-    identifier::TransactionId, TransactionOrdering, ValidPoolTransaction,
-};
+use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
 
 use reth_primitives::rpc::TxHash;
 use std::{

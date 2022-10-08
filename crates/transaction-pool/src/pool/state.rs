@@ -1,5 +1,3 @@
-
-
 bitflags::bitflags! {
     /// Marker to assign a transaction into a sub-pool:
     #[derive(Default)]

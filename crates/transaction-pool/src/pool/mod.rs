@@ -67,24 +67,16 @@
 //!       transactions are _currently_ waiting for state changes that eventually move them into
 //!       category (2.) and become pending.
 use crate::{
-    error::{PoolResult},
-    pool::{
-        listener::PoolEventListener,
-    },
-    traits::PoolTransaction,
-    validate::ValidPoolTransaction,
-    BlockID, PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
+    error::PoolResult, pool::listener::PoolEventListener, traits::PoolTransaction,
+    validate::ValidPoolTransaction, BlockID, PoolClient, PoolConfig, TransactionOrdering,
+    TransactionValidator, U256,
 };
 
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{TxHash, U64};
-use std::{
-    collections::{HashMap},
-    fmt,
-    sync::Arc,
-};
-use tracing::{warn};
+use std::{collections::HashMap, fmt, sync::Arc};
+use tracing::warn;
 
 mod basefee;
 mod events;
@@ -96,11 +88,10 @@ mod transaction;
 pub mod txpool;
 
 use crate::{
+    pool::{pending::BestTransactions, txpool::TxPool},
     validate::TransactionValidationOutcome,
 };
 pub use events::TransactionEvent;
-use crate::pool::pending::BestTransactions;
-use crate::pool::txpool::TxPool;
 
 /// Shareable Transaction pool.
 pub struct BasicPool<P: PoolClient, T: TransactionOrdering> {
@@ -336,35 +327,6 @@ where
     }
 }
 
-/// Represents the outcome of a prune
-pub struct PruneResult<T: PoolTransaction> {
-    /// a list of added transactions that a pruned marker satisfied
-    pub promoted: Vec<AddedTransaction<T>>,
-    /// all transactions that  failed to be promoted and now are discarded
-    pub failed: Vec<TxHash>,
-    /// all transactions that were pruned from the ready pool
-    pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "PruneResult {{ ")?;
-        write!(
-            fmt,
-            "promoted: {:?}, ",
-            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "failed: {:?}, ", self.failed)?;
-        write!(
-            fmt,
-            "pruned: {:?}, ",
-            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "}}")?;
-        Ok(())
-    }
-}
-
 /// Tracks an added transaction and all graph changes caused by adding it.
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
@@ -387,26 +349,6 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
             discarded: Default::default(),
             removed: Default::default(),
         }
-    }
-}
-
-/// Stores relevant context about a sender.
-#[derive(Debug, Clone)]
-struct SenderInfo {
-    /// current nonce of the sender
-    state_nonce: u64,
-    /// Balance of the sender at the current point.
-    balance: U256,
-    /// How many transactions of this sender are currently in the pool.
-    num_transactions: u64,
-}
-
-// === impl SenderInfo ===
-
-impl SenderInfo {
-    /// Creates a new entry for an incoming, not yet tracked sender.
-    fn new_incoming(state_nonce: u64, balance: U256) -> Self {
-        Self { state_nonce, balance, num_transactions: 1 }
     }
 }
 

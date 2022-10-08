@@ -2,22 +2,22 @@ use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
     pool::{
+        basefee::BaseFeePool,
+        pending::{BestTransactions, PendingPool},
         queued::QueuedPool,
         state::{SubPool, TxState},
-        AddedTransaction, SenderInfo
+        AddedTransaction,
     },
     PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::{TxHash};
+use reth_primitives::TxHash;
 use std::{
-    collections::{hash_map, BTreeMap},
+    collections::{hash_map, BTreeMap, HashMap},
+    fmt,
     ops::Bound::{Excluded, Included, Unbounded},
-    sync::{
-        Arc,
-    },
+    sync::Arc,
 };
-use crate::pool::pending::BestTransactions;
 
 /// A pool that only manages transactions.
 ///
@@ -28,10 +28,12 @@ pub struct TxPool<T: TransactionOrdering> {
     ordering: Arc<T>,
     /// Contains the currently known info
     sender_info: FnvHashMap<SenderId, SenderInfo>,
+    /// pending subpool
+    pending_pool: PendingPool<T>,
     /// queued subpool
     queued_pool: QueuedPool<T>,
     /// base fee subpool
-    basefee_pool: QueuedPool<T>,
+    basefee_pool: BaseFeePool<T>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
 }
@@ -51,7 +53,20 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
-        todo!()
+        self.pending_pool.best()
+    }
+
+    /// Returns if the transaction for the given hash is already included in this pool
+    pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
+        self.all_transactions.by_hash.contains_key(tx_hash)
+    }
+
+    /// Returns the transaction for the given hash.
+    pub(crate) fn get(
+        &self,
+        tx_hash: &TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all_transactions.by_hash.get(tx_hash).cloned()
     }
 
     /// Adds the transaction into the pool.
@@ -77,6 +92,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
+        // Update sender info
+        self.sender_info.entry(tx.sender_id).or_default().update(on_chain_nonce, on_chain_balance);
+
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             InsertionResult::Inserted { transaction, move_to, replaced_tx, updates } => {
                 self.add_into_subpool(transaction, replaced_tx, move_to);
@@ -161,6 +179,8 @@ impl<T: TransactionOrdering> TxPool<T> {
 
 /// Container for _all_ transaction in the pool
 pub struct AllTransactions<T: PoolTransaction> {
+    /// _All_ transactions identified by their hash.
+    by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
@@ -427,7 +447,12 @@ pub(crate) enum PoolDestination {
 
 impl PartialEq<SubPool> for PoolDestination {
     fn eq(&self, other: &SubPool) -> bool {
-        matches!((self, other), (PoolDestination::Queued, SubPool::Queued) | (PoolDestination::Pending, SubPool::Pending) | (PoolDestination::BaseFee(_), SubPool::BaseFee))
+        matches!(
+            (self, other),
+            (PoolDestination::Queued, SubPool::Queued) |
+                (PoolDestination::Pending, SubPool::Pending) |
+                (PoolDestination::BaseFee(_), SubPool::BaseFee)
+        )
     }
 }
 
@@ -498,5 +523,57 @@ pub struct UpdateOutcome<T: PoolTransaction> {
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {
     fn default() -> Self {
         Self { promoted: vec![], discarded: vec![], removed: vec![] }
+    }
+}
+
+/// Represents the outcome of a prune
+pub struct PruneResult<T: PoolTransaction> {
+    /// a list of added transactions that a pruned marker satisfied
+    pub promoted: Vec<AddedTransaction<T>>,
+    /// all transactions that  failed to be promoted and now are discarded
+    pub failed: Vec<TxHash>,
+    /// all transactions that were pruned from the ready pool
+    pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "PruneResult {{ ")?;
+        write!(
+            fmt,
+            "promoted: {:?}, ",
+            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
+        )?;
+        write!(fmt, "failed: {:?}, ", self.failed)?;
+        write!(
+            fmt,
+            "pruned: {:?}, ",
+            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
+        )?;
+        write!(fmt, "}}")?;
+        Ok(())
+    }
+}
+
+/// Stores relevant context about a sender.
+#[derive(Debug, Clone, Default)]
+struct SenderInfo {
+    /// current nonce of the sender.
+    state_nonce: u64,
+    /// Balance of the sender at the current point.
+    balance: U256,
+}
+
+// === impl SenderInfo ===
+
+impl SenderInfo {
+    /// Creates a new entry for an incoming, not yet tracked sender.
+    fn new_incoming(state_nonce: u64, balance: U256) -> Self {
+        Self { state_nonce, balance }
+    }
+
+    /// Updates the info with the new values.
+    fn update(&mut self, state_nonce: u64, balance: U256) {
+        *self = Self { state_nonce, balance };
     }
 }

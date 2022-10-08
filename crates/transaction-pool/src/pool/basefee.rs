@@ -1,14 +1,7 @@
-use crate::{
-    identifier::TransactionId,
-    TransactionOrdering, ValidPoolTransaction,
-};
+use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
 use fnv::FnvHashMap;
 
-use std::{
-    cmp::Ordering,
-    collections::{BTreeSet},
-    sync::Arc,
-};
+use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
 
 /// A Sub-Pool that currently holds transactions that violate the dynamic fee requirement
 pub(crate) struct BaseFeePool<T: TransactionOrdering> {
