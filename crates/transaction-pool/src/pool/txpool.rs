@@ -13,7 +13,6 @@ use crate::{
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
-    cmp::Ordering,
     collections::{hash_map, BTreeMap, HashMap},
     fmt,
     ops::Bound::{Excluded, Included, Unbounded},

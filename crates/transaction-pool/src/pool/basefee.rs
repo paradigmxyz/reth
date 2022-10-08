@@ -33,7 +33,7 @@ impl<T: TransactionOrdering> BaseFeePool<T> {
     pub(crate) fn add_transaction(
         &mut self,
         _tx: Arc<ValidPoolTransaction<T::Transaction>>,
-        basefee: U256,
+        _basefee: U256,
     ) {
     }
 

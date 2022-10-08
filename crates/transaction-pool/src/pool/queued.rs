@@ -1,11 +1,7 @@
 use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
 use fnv::FnvHashMap;
-use reth_primitives::rpc::TxHash;
-use std::{
-    cmp::Ordering,
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-};
+
+use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
 
 pub(crate) struct QueuedPool<T: TransactionOrdering> {
     /// How to order transactions.
@@ -33,7 +29,7 @@ impl<T: TransactionOrdering> QueuedPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
+    pub(crate) fn add_transaction(&mut self, _tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         todo!()
     }
 

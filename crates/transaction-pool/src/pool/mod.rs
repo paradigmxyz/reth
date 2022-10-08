@@ -75,7 +75,7 @@ use crate::{
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{TxHash, U64};
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tracing::warn;
 
 mod basefee;

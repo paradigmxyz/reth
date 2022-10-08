@@ -128,16 +128,6 @@ impl TransactionId {
     }
 }
 
-// impl RangeBounds<TransactionId> for RangeFrom<Bound<TransactionId>> {
-//     fn start_bound(&self) -> Bound<&TransactionId> {
-//         self.start.as_ref()
-//     }
-//
-//     fn end_bound(&self) -> Bound<&TransactionId> {
-//         self.
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
