@@ -1,14 +1,15 @@
 use crate::{
-    util::opt, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    util::opt::{self, OptSenderExt},
+    ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
-use std::{
-    fmt::{Debug, Formatter},
-    sync::mpsc::SendError,
-};
+use std::fmt::{Debug, Formatter};
 use tokio::sync::mpsc::Sender;
 use tracing::*;
+
+mod event;
+pub use event::*;
 
 struct QueuedStage<'db, E>
 where
@@ -138,10 +139,12 @@ where
                 let stage_id = stage.id();
                 let block_reached = loop {
                     let prev_progress = stage_id.get_progress(&tx)?;
-                    if let Some(rx) = &self.events_sender {
-                        rx.send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
-                            .await?
-                    }
+                    self.events_sender
+                        .maybe_send(PipelineEvent::Running {
+                            stage_id,
+                            stage_progress: prev_progress,
+                        })
+                        .await?;
 
                     let reached_virtual_tip = maximum_progress
                         .zip(self.max_block)
@@ -187,10 +190,12 @@ where
                             debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
                             stage_id.save_progress(&tx, stage_progress)?;
 
-                            if let Some(rx) = &self.events_sender {
-                                rx.send(PipelineEvent::Ran { stage_id, result: Some(out.clone()) })
-                                    .await?
-                            }
+                            self.events_sender
+                                .maybe_send(PipelineEvent::Ran {
+                                    stage_id,
+                                    result: Some(out.clone()),
+                                })
+                                .await?;
 
                             // TODO: Make the commit interval configurable
                             tx.commit()?;
@@ -208,9 +213,9 @@ where
                         Err(StageError::Validation { block }) => {
                             debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
 
-                            if let Some(rx) = &self.events_sender {
-                                rx.send(PipelineEvent::Ran { stage_id, result: None }).await?
-                            }
+                            self.events_sender
+                                .maybe_send(PipelineEvent::Ran { stage_id, result: None })
+                                .await?;
 
                             // We unwind because of a validation error. If the unwind itself fails,
                             // we bail entirely, otherwise we restart the execution loop from the
@@ -231,9 +236,9 @@ where
                             }
                         }
                         Err(StageError::Internal(e)) => {
-                            if let Some(rx) = &self.events_sender {
-                                rx.send(PipelineEvent::Ran { stage_id, result: None }).await?
-                            }
+                            self.events_sender
+                                .maybe_send(PipelineEvent::Ran { stage_id, result: None })
+                                .await?;
 
                             return Err(e)
                         }
@@ -287,23 +292,21 @@ where
             let unwind: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
                 if stage_progress < to {
                     debug!(from = %stage_progress, %to, "Unwind point too far for stage");
-                    if let Some(rx) = &self.events_sender {
-                        rx.send(PipelineEvent::Unwound {
+                    self.events_sender
+                        .maybe_send(PipelineEvent::Unwound {
                             stage_id,
                             result: Some(UnwindOutput { stage_progress }),
                         })
-                        .await?
-                    }
-
+                        .await?;
                     return Ok(())
                 }
 
                 debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
                 while stage_progress > to {
                     let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-                    if let Some(rx) = &self.events_sender {
-                        rx.send(PipelineEvent::Unwinding { stage_id, input }).await?
-                    }
+                    self.events_sender
+                        .maybe_send(PipelineEvent::Unwinding { stage_id, input })
+                        .await?;
 
                     let output = stage.unwind(&mut tx, input).await;
                     match output {
@@ -311,19 +314,17 @@ where
                             stage_progress = unwind_output.stage_progress;
                             stage_id.save_progress(&tx, stage_progress)?;
 
-                            if let Some(rx) = &self.events_sender {
-                                rx.send(PipelineEvent::Unwound {
+                            self.events_sender
+                                .maybe_send(PipelineEvent::Unwound {
                                     stage_id,
                                     result: Some(unwind_output),
                                 })
-                                .await?
-                            }
+                                .await?;
                         }
                         Err(err) => {
-                            if let Some(rx) = &self.events_sender {
-                                rx.send(PipelineEvent::Unwound { stage_id, result: None }).await?
-                            }
-
+                            self.events_sender
+                                .maybe_send(PipelineEvent::Unwound { stage_id, result: None })
+                                .await?;
                             return Err(err)
                         }
                     }
@@ -339,47 +340,6 @@ where
         tx.commit()?;
         Ok(())
     }
-}
-
-/// An event emitted by a [Pipeline].
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PipelineEvent {
-    /// Emitted when a stage is about to be run.
-    Running {
-        /// The stage that is about to be run.
-        stage_id: StageId,
-        /// The previous checkpoint of the stage.
-        stage_progress: Option<BlockNumber>,
-    },
-    /// Emitted when a stage has run a single time.
-    ///
-    /// It is possible for multiple of these events to be emitted over the duration of a pipeline's
-    /// execution:
-    /// - If the pipeline loops, the stage will be run again at some point
-    /// - If the stage exits early but has acknowledged that it is not entirely done
-    Ran {
-        /// The stage that was run.
-        stage_id: StageId,
-        /// The result of executing the stage. If it is None then an error was encountered.
-        result: Option<ExecOutput>,
-    },
-    /// Emitted when a stage is about to be unwound.
-    Unwinding {
-        /// The stage that is about to be unwound.
-        stage_id: StageId,
-        /// The unwind parameters.
-        input: UnwindInput,
-    },
-    /// Emitted when a stage has been unwound.
-    ///
-    /// It is possible for multiple of these events to be emitted over the duration of a pipeline's
-    /// execution, since other stages may ask the pipeline to unwind.
-    Unwound {
-        /// The stage that was unwound.
-        stage_id: StageId,
-        /// The result of unwinding the stage. If it is None then an error was encountered.
-        result: Option<UnwindOutput>,
-    },
 }
 
 #[cfg(test)]
