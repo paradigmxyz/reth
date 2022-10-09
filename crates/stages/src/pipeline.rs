@@ -1,6 +1,6 @@
 use crate::{
     util::opt::{self, OptSenderExt},
-    ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
@@ -135,8 +135,8 @@ where
 
         'run: loop {
             let mut tx = db.begin_rw_txn()?;
-            for (_, QueuedStage { stage, require_tip, .. }) in self.stages.iter_mut().enumerate() {
-                let stage_id = stage.id();
+            for (_, queued_stage) in self.stages.iter_mut().enumerate() {
+                let stage_id = queued_stage.stage.id();
                 let block_reached = loop {
                     let prev_progress = stage_id.get_progress(&tx)?;
                     self.events_sender
@@ -146,42 +146,18 @@ where
                         })
                         .await?;
 
-                    let reached_virtual_tip = maximum_progress
+                    let reached_max_block = maximum_progress
                         .zip(self.max_block)
                         .map_or(false, |(progress, target)| progress >= target);
 
                     // Execute stage
-                    let output = async {
-                        if !reached_tip_flag && *require_tip && !reached_virtual_tip {
-                            info!("Tip not reached, skipping.");
-
-                            // Stage requires us to reach the tip of the chain first, but we have
-                            // not.
-                            Ok(ExecOutput {
-                                stage_progress: prev_progress.unwrap_or_default(),
-                                done: true,
-                                reached_tip: false,
-                            })
-                        } else if prev_progress
-                            .zip(self.max_block)
-                            .map_or(false, |(prev_progress, target)| prev_progress >= target)
-                        {
-                            info!("Stage reached maximum block, skipping.");
-                            // We reached the maximum block, so we skip the stage
-                            Ok(ExecOutput {
-                                stage_progress: prev_progress.unwrap_or_default(),
-                                done: true,
-                                reached_tip: true,
-                            })
-                        } else {
-                            stage
-                                .execute(
-                                    &mut tx,
-                                    ExecInput { previous_stage, stage_progress: prev_progress },
-                                )
-                                .await
-                        }
-                    }
+                    let output = Self::execute_stage(
+                        &mut tx,
+                        queued_stage,
+                        previous_stage,
+                        reached_tip_flag,
+                        reached_max_block,
+                    )
                     .instrument(info_span!("Running", stage = %stage_id))
                     .await;
 
@@ -339,6 +315,49 @@ where
 
         tx.commit()?;
         Ok(())
+    }
+}
+
+impl<'db, E> Pipeline<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
+    async fn execute_stage<'tx>(
+        mut tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+        QueuedStage { stage, require_tip, .. }: &mut QueuedStage<'db, E>,
+        previous_stage: Option<(StageId, BlockNumber)>,
+        reached_tip: bool,
+        reached_max_block: bool,
+    ) -> Result<ExecOutput, StageError>
+    where
+        'db: 'tx,
+    {
+        // TODO: Error type
+        let prev_progress =
+            stage.id().get_progress(tx).map_err(|e| StageError::Internal(Box::new(e)))?;
+        if !reached_tip && *require_tip && !reached_max_block {
+            info!("Tip not reached, skipping.");
+
+            // Stage requires us to reach the tip of the chain first, but we have
+            // not.
+            Ok(ExecOutput {
+                stage_progress: prev_progress.unwrap_or_default(),
+                done: true,
+                reached_tip: false,
+            })
+        } else if reached_max_block {
+            info!("Stage reached maximum block, skipping.");
+            // We reached the maximum block, so we skip the stage
+            Ok(ExecOutput {
+                stage_progress: prev_progress.unwrap_or_default(),
+                done: true,
+                reached_tip: true,
+            })
+        } else {
+            stage
+                .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
+                .await
+        }
     }
 }
 
