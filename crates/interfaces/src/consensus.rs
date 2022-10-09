@@ -9,7 +9,7 @@ use tokio::sync::watch::Receiver;
 #[async_trait]
 pub trait Consensus {
     /// Get a receiver for the fork choice state
-    fn fork_choice(&self) -> Receiver<ForkchoiceState>;
+    fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
 
     /// Validate if header is correct and follows consensus specification
     fn validate_header(&self, _header: &Header) -> Result<(), Error> {
