@@ -15,6 +15,9 @@ pub enum StageError {
         /// The block that failed validation.
         block: BlockNumber,
     },
+    /// The stage encountered a database error.
+    #[error("A database error occurred.")]
+    Database(#[from] mdbx::Error),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
@@ -28,7 +31,7 @@ pub enum PipelineError {
     Stage(#[from] StageError),
     /// The pipeline encountered a database error.
     #[error("A database error occurred.")]
-    MDBX(#[from] mdbx::Error),
+    Database(#[from] mdbx::Error),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),
