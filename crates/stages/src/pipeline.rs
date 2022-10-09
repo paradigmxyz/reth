@@ -1,7 +1,7 @@
 use crate::{
     error::*,
     util::opt::{self, OptSenderExt},
-    ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
@@ -159,13 +159,18 @@ where
                     let output = Self::execute_stage(
                         &mut tx,
                         queued_stage,
-                        prev_progress,
-                        previous_stage,
+                        ExecInput { previous_stage, stage_progress: prev_progress },
                         reached_tip_flag || reached_max_block,
                         stage_reached_max_block,
                     )
                     .instrument(info_span!("Running", stage = %stage_id))
                     .await;
+
+                    if output.is_err() {
+                        self.events_sender
+                            .maybe_send(PipelineEvent::Ran { stage_id, result: None })
+                            .await?;
+                    }
 
                     match output {
                         Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
@@ -195,10 +200,6 @@ where
                         Err(StageError::Validation { block }) => {
                             debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
 
-                            self.events_sender
-                                .maybe_send(PipelineEvent::Ran { stage_id, result: None })
-                                .await?;
-
                             // We unwind because of a validation error. If the unwind itself fails,
                             // we bail entirely, otherwise we restart the execution loop from the
                             // beginning.
@@ -217,13 +218,7 @@ where
                                 Err(e) => return Err(e),
                             }
                         }
-                        Err(StageError::Internal(e)) => {
-                            self.events_sender
-                                .maybe_send(PipelineEvent::Ran { stage_id, result: None })
-                                .await?;
-
-                            return Err(PipelineError::Stage(StageError::Internal(e)))
-                        }
+                        Err(e) => return Err(PipelineError::Stage(e)),
                     }
                 };
 
@@ -331,8 +326,7 @@ where
     async fn execute_stage<'tx>(
         tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
         QueuedStage { stage, require_tip, .. }: &mut QueuedStage<'db, E>,
-        previous_progress: Option<BlockNumber>,
-        previous_stage: Option<(StageId, BlockNumber)>,
+        input: ExecInput,
         reached_tip: bool,
         stage_reached_max_block: bool,
     ) -> Result<ExecOutput, StageError>
@@ -345,7 +339,7 @@ where
             // Stage requires us to reach the tip of the chain first, but we have
             // not.
             Ok(ExecOutput {
-                stage_progress: previous_progress.unwrap_or_default(),
+                stage_progress: input.stage_progress.unwrap_or_default(),
                 done: true,
                 reached_tip: false,
             })
@@ -353,12 +347,12 @@ where
             info!("Stage reached maximum block, skipping.");
             // We reached the maximum block, so we skip the stage
             Ok(ExecOutput {
-                stage_progress: previous_progress.unwrap_or_default(),
+                stage_progress: input.stage_progress.unwrap_or_default(),
                 done: true,
                 reached_tip: true,
             })
         } else {
-            stage.execute(tx, ExecInput { previous_stage, stage_progress: previous_progress }).await
+            stage.execute(tx, input).await
         }
     }
 }
