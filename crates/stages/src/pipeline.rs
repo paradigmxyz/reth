@@ -5,7 +5,8 @@ use crate::{
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
-use tokio::sync::mpsc::Sender;
+use thiserror::Error;
+use tokio::sync::mpsc::{error::SendError, Sender};
 use tracing::*;
 
 mod event;
@@ -22,6 +23,23 @@ where
     /// Whether or not this stage can only execute when we reach what we believe to be the tip of
     /// the chain.
     require_tip: bool,
+}
+
+/// A pipeline execution error.
+#[derive(Error, Debug)]
+pub enum PipelineError {
+    /// The pipeline encountered an irrecoverable error in one of the stages.
+    #[error("A stage encountered an irrecoverable error.")]
+    Stage(#[from] StageError),
+    /// The pipeline encountered a database error.
+    #[error("A database error occurred.")]
+    MDBX(#[from] mdbx::Error),
+    /// The pipeline encountered an error while trying to send an event.
+    #[error("The pipeline encountered an error while trying to send an event.")]
+    Channel(#[from] SendError<PipelineEvent>),
+    /// The stage encountered an internal error.
+    #[error(transparent)]
+    Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// A staged sync pipeline.
@@ -124,10 +142,7 @@ where
     }
 
     /// Run the pipeline.
-    pub async fn run(
-        &mut self,
-        db: &'db mdbx::Environment<E>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(&mut self, db: &'db mdbx::Environment<E>) -> Result<(), PipelineError> {
         let mut previous_stage = None;
         let mut minimum_progress: Option<BlockNumber> = None;
         let mut maximum_progress: Option<BlockNumber> = None;
@@ -146,17 +161,25 @@ where
                         })
                         .await?;
 
+                    // Whether any stage has reached the maximum block, which also counts as having
+                    // reached the tip for stages that have reached the tip
                     let reached_max_block = maximum_progress
                         .zip(self.max_block)
                         .map_or(false, |(progress, target)| progress >= target);
+
+                    // Whether this stage reached the max block
+                    let stage_reached_max_block = prev_progress
+                        .zip(self.max_block)
+                        .map_or(false, |(prev_progress, target)| prev_progress >= target);
 
                     // Execute stage
                     let output = Self::execute_stage(
                         &mut tx,
                         queued_stage,
+                        prev_progress,
                         previous_stage,
-                        reached_tip_flag,
-                        reached_max_block,
+                        reached_tip_flag || reached_max_block,
+                        stage_reached_max_block,
                     )
                     .instrument(info_span!("Running", stage = %stage_id))
                     .await;
@@ -216,7 +239,7 @@ where
                                 .maybe_send(PipelineEvent::Ran { stage_id, result: None })
                                 .await?;
 
-                            return Err(e)
+                            return Err(PipelineError::Stage(StageError::Internal(e)))
                         }
                     }
                 };
@@ -244,7 +267,7 @@ where
         db: &'db mdbx::Environment<E>,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), PipelineError> {
         // Sort stages by unwind priority
         let mut unwind_pipeline = {
             let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
@@ -265,7 +288,7 @@ where
             let stage_id = stage.id();
             let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
 
-            let unwind: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
+            let unwind: Result<(), PipelineError> = async {
                 if stage_progress < to {
                     debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                     self.events_sender
@@ -301,7 +324,7 @@ where
                             self.events_sender
                                 .maybe_send(PipelineEvent::Unwound { stage_id, result: None })
                                 .await?;
-                            return Err(err)
+                            return Err(PipelineError::Stage(StageError::Internal(err)))
                         }
                     }
                 }
@@ -323,40 +346,36 @@ where
     E: mdbx::EnvironmentKind,
 {
     async fn execute_stage<'tx>(
-        mut tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
         QueuedStage { stage, require_tip, .. }: &mut QueuedStage<'db, E>,
+        previous_progress: Option<BlockNumber>,
         previous_stage: Option<(StageId, BlockNumber)>,
         reached_tip: bool,
-        reached_max_block: bool,
+        stage_reached_max_block: bool,
     ) -> Result<ExecOutput, StageError>
     where
         'db: 'tx,
     {
-        // TODO: Error type
-        let prev_progress =
-            stage.id().get_progress(tx).map_err(|e| StageError::Internal(Box::new(e)))?;
-        if !reached_tip && *require_tip && !reached_max_block {
+        if !reached_tip && *require_tip {
             info!("Tip not reached, skipping.");
 
             // Stage requires us to reach the tip of the chain first, but we have
             // not.
             Ok(ExecOutput {
-                stage_progress: prev_progress.unwrap_or_default(),
+                stage_progress: previous_progress.unwrap_or_default(),
                 done: true,
                 reached_tip: false,
             })
-        } else if reached_max_block {
+        } else if stage_reached_max_block {
             info!("Stage reached maximum block, skipping.");
             // We reached the maximum block, so we skip the stage
             Ok(ExecOutput {
-                stage_progress: prev_progress.unwrap_or_default(),
+                stage_progress: previous_progress.unwrap_or_default(),
                 done: true,
                 reached_tip: true,
             })
         } else {
-            stage
-                .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
-                .await
+            stage.execute(tx, ExecInput { previous_stage, stage_progress: previous_progress }).await
         }
     }
 }
