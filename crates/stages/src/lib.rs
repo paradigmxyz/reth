@@ -8,11 +8,13 @@
 //!
 //! See [Stage] and [Pipeline].
 
+mod error;
 mod id;
 mod pipeline;
 mod stage;
 mod util;
 
+pub use error::*;
 pub use id::*;
 pub use pipeline::*;
 pub use stage::*;

@@ -1,8 +1,7 @@
-use crate::id::StageId;
+use crate::{error::StageError, id::StageId};
 use async_trait::async_trait;
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
-use thiserror::Error;
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -40,22 +39,6 @@ pub struct ExecOutput {
 pub struct UnwindOutput {
     /// The block at which the stage has unwound to.
     pub stage_progress: BlockNumber,
-}
-
-/// A stage execution error.
-#[derive(Error, Debug)]
-pub enum StageError {
-    /// The stage encountered a state validation error.
-    ///
-    /// TODO: This depends on the consensus engine and should include the validation failure reason
-    #[error("Stage encountered a validation error in block {block}.")]
-    Validation {
-        /// The block that failed validation.
-        block: BlockNumber,
-    },
-    /// The stage encountered an internal error.
-    #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// A stage is a segmented part of the syncing process of the node.

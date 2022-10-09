@@ -1,12 +1,12 @@
 use crate::{
+    error::*,
     util::opt::{self, OptSenderExt},
     ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
-use thiserror::Error;
-use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio::sync::mpsc::Sender;
 use tracing::*;
 
 mod event;
@@ -23,23 +23,6 @@ where
     /// Whether or not this stage can only execute when we reach what we believe to be the tip of
     /// the chain.
     require_tip: bool,
-}
-
-/// A pipeline execution error.
-#[derive(Error, Debug)]
-pub enum PipelineError {
-    /// The pipeline encountered an irrecoverable error in one of the stages.
-    #[error("A stage encountered an irrecoverable error.")]
-    Stage(#[from] StageError),
-    /// The pipeline encountered a database error.
-    #[error("A database error occurred.")]
-    MDBX(#[from] mdbx::Error),
-    /// The pipeline encountered an error while trying to send an event.
-    #[error("The pipeline encountered an error while trying to send an event.")]
-    Channel(#[from] SendError<PipelineEvent>),
-    /// The stage encountered an internal error.
-    #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// A staged sync pipeline.
