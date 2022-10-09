@@ -1,7 +1,12 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{
+    util::opt, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+};
 use reth_db::mdbx;
 use reth_primitives::BlockNumber;
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    sync::mpsc::SendError,
+};
 use tokio::sync::mpsc::Sender;
 use tracing::*;
 
@@ -133,7 +138,6 @@ where
                 let stage_id = stage.id();
                 let block_reached = loop {
                     let prev_progress = stage_id.get_progress(&tx)?;
-
                     if let Some(rx) = &self.events_sender {
                         rx.send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
                             .await?
@@ -192,17 +196,9 @@ where
                             tx.commit()?;
                             tx = db.begin_rw_txn()?;
 
-                            // TODO: Clean up
-                            if let Some(min) = &mut minimum_progress {
-                                *min = std::cmp::min(*min, stage_progress);
-                            } else {
-                                minimum_progress = Some(stage_progress);
-                            }
-                            if let Some(max) = &mut maximum_progress {
-                                *max = std::cmp::max(*max, stage_progress);
-                            } else {
-                                maximum_progress = Some(stage_progress);
-                            }
+                            // Update our minimum and maximum stage progress
+                            minimum_progress = opt::min(minimum_progress, stage_progress);
+                            maximum_progress = opt::max(maximum_progress, stage_progress);
 
                             if done {
                                 reached_tip_flag = reached_tip;
