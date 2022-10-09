@@ -1450,7 +1450,9 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "reth-primitives",
+ "reth-rpc-types",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
