@@ -83,9 +83,24 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.nonce()
     }
 
-    /// Returns true if this transaction is underpriced compared to other.
+    /// Returns true if this transaction is underpriced compared to the other.
     pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
-        todo!()
+        self.transaction.effective_gas_price() <= other.transaction.effective_gas_price()
+    }
+}
+
+#[cfg(test)]
+impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
+    fn clone(&self) -> Self {
+        Self {
+            transaction: self.transaction.clone(),
+            transaction_id: self.transaction_id,
+            propagate: self.propagate,
+            is_local: self.is_local,
+            sender_id: self.sender_id,
+            cost: self.cost,
+            timestamp: self.timestamp,
+        }
     }
 }
 

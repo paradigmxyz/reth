@@ -1,9 +1,23 @@
 //! Internal helpers for testing.
-#![allow(missing_docs)]
+#![allow(missing_docs, unused)]
 
-use crate::{PoolTransaction, TransactionOrdering};
+use crate::{
+    identifier::{SenderIdentifiers, TransactionId},
+    pool::txpool::TxPool,
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+};
 use paste::paste;
 use reth_primitives::{Address, TxHash, H256, U256};
+use std::{sync::Arc, time::Instant};
+
+pub type MockTxPool = TxPool<MockOrdering>;
+
+pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
+
+/// Create an empty `TxPool`
+pub fn mock_tx_pool() -> MockTxPool {
+    MockTxPool::new(Arc::new(Default::default()))
+}
 
 /// Sets the value for the field
 macro_rules! set_value {
@@ -89,7 +103,7 @@ impl MockTransaction {
     }
 
     /// Returns a new legacy transaction with random address and hash and empty values
-    fn legacy() -> Self {
+    pub fn legacy() -> Self {
         MockTransaction::Legacy {
             hash: H256::random(),
             sender: Address::random(),
@@ -101,7 +115,7 @@ impl MockTransaction {
     }
 
     /// Returns a new EIP1559 transaction with random address and hash and empty values
-    fn eip1559() -> Self {
+    pub fn eip1559() -> Self {
         MockTransaction::Eip1559 {
             hash: H256::random(),
             sender: Address::random(),
@@ -196,13 +210,40 @@ impl MockTransaction {
 
     /// Returns a clone with an increased nonce
     pub fn next(&self) -> Self {
-        let mut next = self.clone();
+        let mut next = self.clone().with_hash(H256::random());
         next.with_nonce(self.get_nonce() + 1)
     }
     /// Returns a clone with an increased nonce
     pub fn skip(&self, skip: u64) -> Self {
-        let mut next = self.clone();
+        let mut next = self.clone().with_hash(H256::random());
         next.with_nonce(self.get_nonce() + skip + 1)
+    }
+
+    /// Returns a clone with incremented nonce
+    pub fn inc_nonce(mut self) -> Self {
+        let nonce = self.get_nonce() + 1;
+        self.with_nonce(nonce)
+    }
+
+    /// Returns a new transaction with a higher gas price +1
+    pub fn inc_price(&self) -> Self {
+        let mut next = self.clone();
+        let gas = self.get_gas_price() + 1;
+        next.with_gas_price(gas)
+    }
+
+    /// Returns a new transaction with a higher value
+    pub fn inc_value(&self) -> Self {
+        let mut next = self.clone();
+        let val = self.get_value() + 1;
+        next.with_value(val)
+    }
+
+    /// Returns a new transaction with a higher gas limit
+    pub fn inc_limit(&self) -> Self {
+        let mut next = self.clone();
+        let gas = self.get_gas_limit() + 1;
+        next.with_gas_limit(gas)
     }
 }
 
@@ -239,6 +280,10 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    fn effective_gas_price(&self) -> u64 {
+        self.get_gas_price()
+    }
+
     fn max_fee_per_gas(&self) -> Option<u64> {
         match self {
             MockTransaction::Legacy { .. } => None,
@@ -257,14 +302,58 @@ impl PoolTransaction for MockTransaction {
 }
 
 #[derive(Default)]
+pub struct MockTransactionFactory {
+    ids: SenderIdentifiers,
+}
+
+// === impl MockTransactionFactory ===
+
+impl MockTransactionFactory {
+    pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
+        let sender = self.ids.sender_id_or_create(tx.get_sender());
+        TransactionId::new(sender, tx.get_nonce())
+    }
+
+    /// Converts the transaction into a validated transaction
+    pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
+        let transaction_id = self.tx_id(&transaction);
+        MockValidTx {
+            propagate: false,
+            is_local: false,
+            sender_id: transaction_id.sender,
+            transaction_id,
+            cost: transaction.cost(),
+            transaction,
+            timestamp: Instant::now(),
+        }
+    }
+
+    pub fn create_legacy(&mut self) -> MockValidTx {
+        self.validated(MockTransaction::legacy())
+    }
+
+    pub fn create_eip1559(&mut self) -> MockValidTx {
+        self.validated(MockTransaction::eip1559())
+    }
+}
+
+#[derive(Default)]
 #[non_exhaustive]
-struct MockOrdering;
+pub struct MockOrdering;
 
 impl TransactionOrdering for MockOrdering {
-    type Priority = u64;
+    type Priority = U256;
     type Transaction = MockTransaction;
 
     fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        0
+        transaction.cost()
     }
+}
+
+#[test]
+fn test_mock_priority() {
+    let o = MockOrdering;
+    let lo = MockTransaction::eip1559();
+    let hi = lo.next().inc_value();
+    assert!(o.priority(&hi) > o.priority(&lo));
 }

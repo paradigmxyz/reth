@@ -111,6 +111,9 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
     fn cost(&self) -> U256;
 
+    /// Returns the effective gas price for this transaction.
+    fn effective_gas_price(&self) -> u64;
+
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// This will return `None` for non-EIP1559 transactions

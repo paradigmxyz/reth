@@ -5,7 +5,7 @@ use std::{collections::HashMap, ops::Bound};
 /// An internal mapping of addresses.
 ///
 /// This assigns a _unique_ `SenderId` for a new `Address`.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SenderIdentifiers {
     /// The identifier to use next.
     id: u64,

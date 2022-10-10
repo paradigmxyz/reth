@@ -47,8 +47,15 @@ pub struct TxPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub fn new(_ordering: Arc<T>) -> Self {
-        todo!()
+    pub fn new(ordering: Arc<T>) -> Self {
+        Self {
+            sender_info: Default::default(),
+            pending_pool: PendingPool::new(ordering.clone()),
+            queued_pool: ParkedPool::new(ordering.clone()),
+            basefee_pool: ParkedPool::new(ordering.clone()),
+            all_transactions: Default::default(),
+            ordering,
+        }
     }
     /// Updates the pool based on the changed base fee.
     ///
@@ -65,7 +72,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns if the transaction for the given hash is already included in this pool
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
-        self.all_transactions.by_hash.contains_key(tx_hash)
+        self.all_transactions.contains(tx_hash)
     }
 
     /// Returns the transaction for the given hash.
@@ -105,7 +112,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let hash = *tx.hash();
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
-            InsertionResult::Inserted { transaction, move_to, replaced_tx, updates } => {
+            InsertResult::Inserted { transaction, move_to, replaced_tx, updates } => {
                 self.add_new_transaction(transaction, replaced_tx, move_to);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
@@ -123,7 +130,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                 Ok(res)
             }
-            InsertionResult::Underpriced { existing, .. } => {
+            InsertResult::Underpriced { existing, .. } => {
                 Err(PoolError::AlreadyAdded(Box::new(existing)))
             }
         }
@@ -239,6 +246,11 @@ pub struct AllTransactions<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
+    /// Returns if the transaction for the given hash is already included in this pool
+    pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
+        self.by_hash.contains_key(tx_hash)
+    }
+
     /// Increments the transaction counter for the sender
     pub(crate) fn tx_inc(&mut self, sender: SenderId) {
         let count = self.tx_counter.entry(sender).or_default();
@@ -381,7 +393,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         transaction: ValidPoolTransaction<T>,
         on_chain_balance: U256,
         on_chain_nonce: u64,
-    ) -> InsertionResult<T> {
+    ) -> InsertResult<T> {
         let tx_id = *transaction.id();
         let transaction = Arc::new(transaction);
         let mut state = TxState::default();
@@ -403,20 +415,28 @@ impl<T: PoolTransaction> AllTransactions<T> {
             state,
             cumulative_cost,
         };
+
         // try to insert the transaction
         match self.txs.entry(*transaction.id()) {
             Entry::Vacant(entry) => {
+                // Insert the transaction in both maps
+                self.by_hash.insert(*pool_tx.transaction.hash(), pool_tx.transaction.clone());
                 entry.insert(pool_tx);
             }
             Entry::Occupied(mut entry) => {
+                // Transaction already exists
+
                 // Ensure the new transaction is not underpriced
                 if transaction.is_underpriced(entry.get().transaction.as_ref()) {
-                    return InsertionResult::Underpriced {
+                    return InsertResult::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
                     }
                 }
+                self.by_hash.insert(*pool_tx.transaction.hash(), pool_tx.transaction.clone());
                 let replaced = entry.insert(pool_tx);
+                // also remove the hash
+                self.by_hash.remove(replaced.transaction.hash());
                 replaced_tx = Some((replaced.transaction, replaced.subpool));
             }
         }
@@ -476,7 +496,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.tx_inc(tx_id.sender);
         }
 
-        InsertionResult::Inserted { transaction, move_to: state.into(), replaced_tx, updates }
+        InsertResult::Inserted { transaction, move_to: state.into(), replaced_tx, updates }
     }
 
     /// Rechecks the transaction of the given sender and returns a set of updates.
@@ -508,6 +528,7 @@ pub(crate) enum Destination {
 /// A change of the transaction's location
 ///
 /// NOTE: this guarantees that `current` and `destination` differ.
+#[derive(Debug)]
 pub(crate) struct PoolUpdate {
     pub(crate) id: TransactionId,
     pub(crate) hash: TxHash,
@@ -518,7 +539,8 @@ pub(crate) struct PoolUpdate {
 }
 
 /// The outcome of [TxPool::insert_tx]
-pub(crate) enum InsertionResult<T: PoolTransaction> {
+#[derive(Debug)]
+pub(crate) enum InsertResult<T: PoolTransaction> {
     /// Transaction was successfully inserted into the pool
     Inserted {
         transaction: Arc<ValidPoolTransaction<T>>,
@@ -529,6 +551,15 @@ pub(crate) enum InsertionResult<T: PoolTransaction> {
     },
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced { transaction: Arc<ValidPoolTransaction<T>>, existing: TxHash },
+}
+
+// === impl InsertResult ===
+
+#[allow(missing_docs)]
+impl<T: PoolTransaction> InsertResult<T> {
+    fn is_underpriced(&self) -> bool {
+        matches!(self, InsertResult::Underpriced { .. })
+    }
 }
 
 /// The internal transaction typed used by `AllTransactions` which also additional info used for
@@ -622,5 +653,38 @@ impl SenderInfo {
     /// Updates the info with the new values.
     fn update(&mut self, state_nonce: u64, balance: U256) {
         *self = Self { state_nonce, balance };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{mock_tx_pool, MockTransaction, MockTransactionFactory};
+
+    #[test]
+    fn test_simple_insert() {
+        let on_chain_balance = U256::zero();
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let valid_tx = f.validated(tx);
+        let res = pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce);
+        match res {
+            InsertResult::Inserted { updates, replaced_tx, move_to, .. } => {
+                assert!(updates.is_empty());
+                assert!(replaced_tx.is_none());
+                assert_eq!(move_to, SubPool::Queued);
+            }
+            InsertResult::Underpriced { .. } => {
+                panic!("not underpriced")
+            }
+        };
+
+        assert!(pool.contains(valid_tx.hash()));
+
+        // insert same tx again, considered underpriced
+        let res = pool.insert_tx(valid_tx, on_chain_balance, on_chain_nonce);
+        assert!(res.is_underpriced());
     }
 }
