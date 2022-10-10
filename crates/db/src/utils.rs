@@ -18,14 +18,11 @@ pub(crate) fn default_page_size() -> usize {
     let os_page_size = page_size::get();
     let libmdbx_max_page_size = 0x10000;
 
-    if os_page_size < 4096 {
-        // May lead to errors if it's reduced further because of the potential size of the data.
-        4096
-    } else if os_page_size > libmdbx_max_page_size {
-        libmdbx_max_page_size
-    } else {
-        os_page_size
-    }
+    // May lead to errors if it's reduced further because of the potential size of the
+    // data.
+    let min_page_size = 4096;
+
+    os_page_size.clamp(min_page_size, libmdbx_max_page_size)
 }
 
 /// Helper function to decode a `(key, value)` pair.
