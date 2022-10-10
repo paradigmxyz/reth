@@ -228,6 +228,8 @@ impl<T: TransactionOrdering> TxPool<T> {
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
 pub struct AllTransactions<T: PoolTransaction> {
+    /// Expected base fee for the pending block.
+    pending_basefee: U256,
     /// _All_ transactions identified by their hash.
     by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
@@ -377,13 +379,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn insert_tx(
         &mut self,
         transaction: ValidPoolTransaction<T>,
-        _on_chain_balance: U256,
+        on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> InsertionResult<T> {
         let tx_id = *transaction.id();
         let transaction = Arc::new(transaction);
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
+        let mut updates = Vec::new();
         let nonce_distance = on_chain_nonce - transaction.nonce();
 
         let predecessor =
@@ -395,64 +398,70 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         let mut replaced_tx = None;
 
-        // traverse all ancestor transactions
+        // The next transaction of this sender
+        let on_chain_id = TransactionId::new(transaction.sender_id, on_chain_nonce);
         {
-            let mut ancestors = self.ancestor_txs_mut(&tx_id).peekable();
-            // If the first existing tx has the same id, then this is a replacement
-            if let Some((ancestor_id, ancestor_tx)) = ancestors.peek() {
-                if tx_id.eq(*ancestor_id) {
-                    // found replacement transaction
-                    // TODO check if underpriced
+            let mut next_nonce = tx_id.next_nonce();
 
-                    replaced_tx = Some((ancestor_tx.transaction.clone(), ancestor_tx.subpool));
-                    ancestors.next();
-                }
-            }
+            // Traverse all transactions of the sender and update existing transactions
+            for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
+                let current_state = tx.state;
 
-            // If the next existing tx is the direct predecessor, then the transaction doesn't have
-            // any nonce gaps.
-            if let Some((ancestor_id, ancestor_tx)) = ancestors.next() {
-                if Some(ancestor_id) == predecessor.as_ref() {
-                    state &= TxState::NO_NONCE_GAPS;
-                    // track cost up to this point
-                    cumulative_cost += ancestor_tx.cumulative_cost + ancestor_tx.transaction.cost;
+                if tx_id.eq(id) {
+                    // Found replacement transaction
 
-                    // TODO check allowance
-                }
-            }
-        }
-
-        let updates = Vec::new();
-        let is_replacement = replaced_tx.is_some();
-
-        // traverse and update all descendant transactions
-        {
-            // travers in opposite direction to update descendants if there's no nonce gap
-            if predecessor.is_none() {
-                let mut next_nonce = tx_id.next_nonce();
-                let mut next_cumulative_cost = cumulative_cost + transaction.cost;
-
-                for (descendant_id, descendant_tx) in self.descendant_txs_exclusive_mut(&tx_id) {
-                    if descendant_id.nonce == next_nonce && !is_replacement {
-                        // update the nonce gap status
-                        descendant_tx.state &= TxState::NO_NONCE_GAPS;
-
-                        // TODO compare against allowance
-                        descendant_tx.cumulative_cost = next_cumulative_cost;
-
-                        // TODO record state change updates
-                    } else {
-                        break
+                    // Ensure the new transaction is not underpriced
+                    if transaction.is_underpriced(tx.transaction.as_ref()) {
+                        return InsertionResult::Underpriced {
+                            transaction,
+                            existing: *tx.transaction.hash(),
+                        }
                     }
-                    // update cumulative gas used
-                    next_nonce = descendant_id.next_nonce();
-                    next_cumulative_cost = descendant_tx.next_cumulative_cost();
+
+                    // Record the replacement
+                    // TODO(mattsse): can we replace here instead?
+                    replaced_tx = Some((tx.transaction.clone(), tx.subpool));
                 }
+
+                if next_nonce != id.nonce {
+                    // nothing to update
+                    break
+                }
+
+                // close the nonce gap
+                tx.state.insert(TxState::NO_NONCE_GAPS);
+
+                // set cumulative cost
+                tx.cumulative_cost = cumulative_cost;
+
+                // Update for next transaction
+                cumulative_cost = tx.cumulative_cost + tx.transaction.cost;
+
+                if cumulative_cost > on_chain_balance {
+                    // sender lacks sufficient funds to pay for this transaction
+                    tx.state.remove(TxState::ENOUGH_BALANCE);
+                } else {
+                    tx.state.insert(TxState::ENOUGH_BALANCE);
+                }
+
+                let current_pool: SubPool = current_state.into();
+                let move_to: SubPool = tx.state.into();
+                if current_pool != move_to {
+                    updates.push(PoolUpdate {
+                        id: *id,
+                        hash: *tx.transaction.hash(),
+                        current: current_pool,
+                        destination: Destination::Pool(move_to),
+                    })
+                }
+
+                // increment for next iteration
+                next_nonce = id.next_nonce();
             }
         }
 
         // If this wasn't a replacement transaction we need to update the counter.
-        if !is_replacement {
+        if replaced_tx.is_some() {
             self.tx_inc(tx_id.sender);
         }
 
@@ -482,6 +491,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
+            pending_basefee: Default::default(),
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),

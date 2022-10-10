@@ -61,3 +61,15 @@ impl From<TxState> for SubPool {
         SubPool::BaseFee
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tx_state() {
+        let mut state = TxState::default();
+        state |= TxState::NO_NONCE_GAPS;
+        assert!(state.intersects(TxState::NO_NONCE_GAPS))
+    }
+}

@@ -82,6 +82,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn nonce(&self) -> u64 {
         self.transaction.nonce()
     }
+
+    /// Returns true if this transaction is underpriced compared to other.
+    pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
+        todo!()
+    }
 }
 
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
