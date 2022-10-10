@@ -3,9 +3,9 @@
 //! Incoming transactions are before they enter the pool first. The validation outcome can have 3
 //! states:
 //!
-//!      1. Transaction can _never_ be valid
-//!      2. Transaction is _currently_ valid
-//!      3. Transaction is _currently_ invalid, but could potentially become valid in the future
+//!  1. Transaction can _never_ be valid
+//!  2. Transaction is _currently_ valid
+//!  3. Transaction is _currently_ invalid, but could potentially become valid in the future
 //!
 //! However, (2.) and (3.) of a transaction can only be determined on the basis of the current
 //! state, whereas (1.) holds indefinitely. This means once the state changes (2.) and (3.) the
@@ -17,30 +17,30 @@
 //!
 //! Furthermore, the following characteristics fall under (3.):
 //!
-//!     a) Nonce of a transaction is higher than the expected nonce for the next transaction of its
+//!  a) Nonce of a transaction is higher than the expected nonce for the next transaction of its
 //! sender. A distinction is made here whether multiple transactions from the same sender have
 //! gapless nonce increments.
 //!
-//!         a)(1) If _no_ transaction is missing in a chain of multiple
+//!  a)(1) If _no_ transaction is missing in a chain of multiple
 //! transactions from the same sender (all nonce in row), all of them can in principle be executed
 //! on the current state one after the other.
 //!
-//!          a)(2) If there's a nonce gap, then all
+//!  a)(2) If there's a nonce gap, then all
 //! transactions after the missing transaction are blocked until the missing transaction arrives.
 //!
-//!      b) Transaction does not meet the dynamic fee cap requirement introduced by EIP-1559: The
+//!  b) Transaction does not meet the dynamic fee cap requirement introduced by EIP-1559: The
 //! fee cap of the transaction needs to be no less than the base fee of block.
 //!
 //!
 //! In essence the transaction pool is made of three separate sub-pools:
 //!
-//!      _Pending Pool_: Contains all transactions that are valid on the current state and satisfy
+//!  - Pending Pool: Contains all transactions that are valid on the current state and satisfy
 //! (3. a)(1): _No_ nonce gaps
 //!
-//!      _Queued Pool_: Contains all transactions that are currently blocked by missing
+//!  - Queued Pool: Contains all transactions that are currently blocked by missing
 //! transactions: (3. a)(2): _With_ nonce gaps or due to lack of funds.
 //!
-//!      _Basefee Pool_: To account for the dynamic base fee requirement (3. b) which could render
+//!  - Basefee Pool: To account for the dynamic base fee requirement (3. b) which could render
 //! an EIP-1559 and all subsequent transactions of the sender currently invalid.
 //!
 //! The classification of transactions is always dependent on the current state that is changed as
@@ -57,11 +57,11 @@
 //!
 //! ## Terminology
 //!
-//!     - _Pending_: pending transactions are transactions that fall under (2.). Those transactions
-//!       are _currently_ ready to be executed and are stored in the `pending` sub-pool
-//!     - _Queued_: queued transactions are transactions that fall under category (3.). Those
-//!       transactions are _currently_ waiting for state changes that eventually move them into
-//!       category (2.) and become pending.
+//!  - _Pending_: pending transactions are transactions that fall under (2.). Those transactions are
+//!    _currently_ ready to be executed and are stored in the pending sub-pool
+//!  - _Queued_: queued transactions are transactions that fall under category (3.). Those
+//!    transactions are _currently_ waiting for state changes that eventually move them into
+//!    category (2.) and become pending.
 
 use crate::{
     error::PoolResult, pool::listener::PoolEventListener, traits::PoolTransaction,

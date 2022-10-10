@@ -88,7 +88,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
 
-        // If there's _no_ ancestor in the pool, then this transaction is independent, this is
+        // If there's __no__ ancestor in the pool, then this transaction is independent, this is
         // guaranteed because this pool is gapless.
         if self.ancestor(&tx_id).is_none() {
             self.independent_transactions.insert(transaction.clone());
