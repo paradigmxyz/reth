@@ -1584,6 +1584,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-rpc-testgen"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+ "reth-rpc-api",
+ "reth-rpc-types",
+ "tracing",
+]
+
+[[package]]
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
