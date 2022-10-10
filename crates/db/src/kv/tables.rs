@@ -1,7 +1,10 @@
 //! Declaration of all MDBX tables.
 
-use crate::utils::TableType;
-use reth_primitives::{Address, U256};
+use crate::{
+    kv::blocks::{BlockNumber_BlockHash, HeaderHash, NumTransactions, NumTxesInBlock},
+    utils::TableType,
+};
+use reth_primitives::{Address, BlockNumber};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 17] = [
@@ -65,15 +68,15 @@ macro_rules! table {
 //  TABLE DEFINITIONS
 //
 
-table!(CanonicalHeaders => BNum => HeaderHash);
-table!(HeaderTD => BNum_BHash => RlpTotalDifficulty);
-table!(HeaderNumbers => BNum_BHash => BNum);
-table!(Headers => BNum_BHash => RlpHeader);
+table!(CanonicalHeaders => BlockNumber => HeaderHash);
+table!(HeaderTD => BlockNumber_BlockHash => RlpTotalDifficulty);
+table!(HeaderNumbers => BlockNumber_BlockHash => BlockNumber);
+table!(Headers => BlockNumber_BlockHash => RlpHeader);
 
-table!(BlockBodies => BNum_BHash => NumTxesInBlock);
-table!(CumulativeTxCount => BNum_BHash => u64); // TODO U256?
+table!(BlockBodies => BlockNumber_BlockHash => NumTxesInBlock);
+table!(CumulativeTxCount => BlockNumber_BlockHash => NumTransactions); // TODO U256?
 
-table!(NonCanonicalTransactions => BNum_BHash_TxId => RlpTxBody);
+table!(NonCanonicalTransactions => BlockNumber_BlockHash_TxId => RlpTxBody);
 table!(Transactions => TxId => RlpTxBody); // Canonical only
 table!(Receipts => TxId => Receipt); // Canonical only
 table!(Logs => TxId => Receipt); // Canonical only
@@ -96,17 +99,12 @@ table!(Config => ConfigKey => ConfigValue);
 type ConfigKey = Vec<u8>;
 type ConfigValue = Vec<u8>;
 #[allow(non_camel_case_types)]
-type BNum_BHash = Vec<u8>;
-#[allow(non_camel_case_types)]
-type BNum_BHash_TxId = Vec<u8>;
+type BlockNumber_BlockHash_TxId = Vec<u8>;
 type RlpHeader = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
 type Receipt = Vec<u8>;
-type NumTxesInBlock = u16; // TODO can it be u16
-type BNum = u64; // TODO check size
 type TxId = u64; // TODO check size
-type HeaderHash = U256;
 type PlainStateKey = Address; // TODO new type will have to account for address_incarna_skey as well
 type TxIdList = Vec<u8>;
 #[allow(non_camel_case_types)]

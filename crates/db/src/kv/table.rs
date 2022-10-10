@@ -2,7 +2,7 @@
 
 use super::KVError;
 use bytes::Bytes;
-use reth_primitives::{Address, U256};
+use reth_primitives::{Address, H256, U256};
 use std::fmt::Debug;
 
 /// Trait that will transform the data to be saved in the DB.
@@ -130,5 +130,21 @@ impl Decode for U256 {
         let mut result = [0; 32];
         result.copy_from_slice(value);
         Ok(Self::from_big_endian(&result))
+    }
+}
+
+impl Encode for H256 {
+    type Encoded = [u8; 32];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_fixed_bytes()
+    }
+}
+
+impl Decode for H256 {
+    fn decode(value: &[u8]) -> Result<Self, KVError> {
+        let mut result = [0; 32];
+        result.copy_from_slice(value);
+        Ok(Self::from_slice(&result))
     }
 }

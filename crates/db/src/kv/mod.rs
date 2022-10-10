@@ -21,6 +21,9 @@ use tx::Tx;
 mod error;
 pub use error::KVError;
 
+pub mod models;
+pub use models::*;
+
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
 pub enum EnvKind {
