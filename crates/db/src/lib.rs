@@ -12,5 +12,6 @@ pub mod mdbx {
     pub use libmdbx::*;
 }
 
+pub mod api;
 pub mod kv;
 mod utils;

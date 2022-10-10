@@ -148,3 +148,17 @@ impl Decode for H256 {
         Ok(Self::from_slice(&result))
     }
 }
+
+impl Encode for Vec<U256> {
+    type Encoded = Vec<u8>;
+
+    fn encode(self) -> Self::Encoded {
+        todo!();
+    }
+}
+
+impl Decode for Vec<U256> {
+    fn decode(_value: &[u8]) -> Result<Self, KVError> {
+        todo!();
+    }
+}
