@@ -1,9 +1,9 @@
 //! `trace_filter` types and support
 use reth_primitives::{Address, BlockNumber};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Trace filter.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceFilter {
