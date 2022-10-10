@@ -6,6 +6,7 @@ use reth_rpc_types::engine::{
 };
 
 #[rpc(server)]
+#[cfg_attr(feature = "client", rpc(client,))]
 pub trait EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     #[method(name = "engine_newPayloadV1")]

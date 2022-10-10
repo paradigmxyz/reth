@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 /// Ethereum trace API
 #[rpc(server)]
+#[cfg_attr(feature = "client", rpc(client,))]
 pub trait TraceApi {
     /// Executes the given call and returns a number of possible traces for it.
     #[method(name = "trace_call")]

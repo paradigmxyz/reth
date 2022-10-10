@@ -4,6 +4,7 @@ use reth_rpc_types::{FilterChanges, Index, Log};
 
 /// Rpc Interface for poll-based ethereum filter API.
 #[rpc(server)]
+#[cfg_attr(feature = "client", rpc(client,))]
 pub trait EthFilterApi {
     /// Creates anew filter and returns its id.
     #[method(name = "eth_newFilter")]

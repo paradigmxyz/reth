@@ -13,6 +13,7 @@ use reth_rpc_types::{
 
 /// Eth rpc interface.
 #[rpc(server)]
+#[cfg_attr(feature = "client", rpc(client,))]
 #[async_trait]
 pub trait EthApi {
     /// Returns protocol version encoded as a string (quotes are necessary).

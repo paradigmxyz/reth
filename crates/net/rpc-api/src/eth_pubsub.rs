@@ -3,6 +3,7 @@ use reth_rpc_types::pubsub::{Kind, Params};
 
 /// Ethereum pub-sub rpc interface.
 #[rpc(server)]
+#[cfg_attr(feature = "client", rpc(client,))]
 pub trait EthPubSubApi {
     /// Create an ethereum subscription.
     #[subscription(

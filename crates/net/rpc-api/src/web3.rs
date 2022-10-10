@@ -3,6 +3,7 @@ use reth_primitives::{Bytes, H256};
 
 /// Web3 rpc interface.
 #[rpc(server)]
+#[cfg_attr(feature = "client", rpc(client,))]
 pub trait Web3Api {
     /// Returns current client version.
     #[method(name = "web3_clientVersion")]
