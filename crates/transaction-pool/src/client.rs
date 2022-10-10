@@ -19,6 +19,6 @@ pub trait PoolClient: Send + Sync + TransactionValidator {
     /// was found
     fn ensure_block_number(&self, block_id: &BlockID) -> PoolResult<U64> {
         self.convert_block_id(block_id)
-            .and_then(|number| number.ok_or(PoolError::BlockNumberNotFound(*block_id)))
+            .and_then(|number| number.ok_or_else(|| PoolError::BlockNumberNotFound(*block_id)))
     }
 }
