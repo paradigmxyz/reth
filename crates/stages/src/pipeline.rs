@@ -116,7 +116,8 @@ where
         self
     }
 
-    /// Run the pipeline.
+    /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
+    /// a `max_block` in the pipeline.
     pub async fn run(&mut self, db: &'db mdbx::Environment<E>) -> Result<(), PipelineError> {
         let mut state = PipelineState {
             events_sender: self.events_sender.clone(),
@@ -146,9 +147,12 @@ where
         }
     }
 
-    /// Run a single stage loop.
+    /// Performs one pass of the pipeline across all stages. After successful
+    /// execution of each stage, it proceeds to commit it to the database.
     ///
-    /// A stage loop will run each stage serially.
+    /// If any stage is unsuccessful at execution, we proceed to:
+    /// 1. Unwind: undo the progress across the entire pipeline up to the block that caused the
+    /// error. 2.
     async fn run_loop<'tx>(
         &mut self,
         state: &mut PipelineState,
