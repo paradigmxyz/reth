@@ -5,6 +5,7 @@ edition = "2021"
 
 [workspace]
 members = [
+    "bin/reth-test",
     "crate-template",
     "crates/db",
     "crates/executor",
