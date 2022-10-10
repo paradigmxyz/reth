@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashSet,
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{Read, Write},
     path::Path,
 };
@@ -73,58 +73,55 @@ pub enum AnchorError {
 /// A version of [`Anchor`] that is loaded from a TOML file and saves its contents when it is
 /// dropped.
 #[derive(Debug)]
-pub struct PersistentAnchor {
+pub struct PersistentAnchor<'a> {
     /// The list of addresses to persist
     anchor: Anchor,
 
-    /// The File handle for the anchor
-    file: File,
+    /// The Path to store the anchor file
+    path: &'a Path,
 }
 
-impl PersistentAnchor {
+impl<'a> PersistentAnchor<'a> {
     /// This will attempt to load the [`Anchor`] from a file, and if the file doesn't exist it will
     /// attempt to initialize it with an empty peer list.
-    pub fn new_from_file(path: &Path) -> Result<Self, AnchorError> {
-        let file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+    pub fn new_from_file(path: &'a Path) -> Result<Self, AnchorError> {
+        let mut binding = OpenOptions::new();
+        let rw_opts = binding.read(true).write(true);
 
-        // if the file does not exist then we should create it
-        if file.metadata()?.len() == 0 {
-            let mut anchor = Self { anchor: Anchor::default(), file };
-            anchor.save_toml()?;
-            return Ok(anchor)
-        }
+        let mut file = if path.try_exists()? {
+            rw_opts.open(path)?
+        } else {
+            rw_opts.create(true).open(path)?
+        };
 
-        Self::from_toml(file)
-    }
-
-    /// Load the [`Anchor`] from the given TOML file.
-    pub fn from_toml(mut file: File) -> Result<Self, AnchorError> {
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
-        // if the file exists but is empty then we should initialize the file format and return an
-        // empty [`Anchor`]
+        // if the file exists but is empty then we should initialize the file format and return
+        // an empty [`Anchor`]
         if contents.is_empty() {
-            let mut anchor = Self { anchor: Anchor::default(), file };
+            let mut anchor = Self { anchor: Anchor::default(), path };
             anchor.save_toml()?;
             return Ok(anchor)
         }
 
         let anchor: Anchor = toml::from_str(&contents)?;
-        Ok(Self { anchor, file })
+        Ok(Self { anchor, path })
     }
 
     /// Save the contents of the [`Anchor`] into the associated file as TOML.
     pub fn save_toml(&mut self) -> Result<(), AnchorError> {
+        let mut file = OpenOptions::new().read(true).write(true).create(true).open(self.path)?;
+
         if !self.anchor.is_empty() {
             let anchor_contents = toml::to_string_pretty(&self.anchor)?;
-            self.file.write_all(anchor_contents.as_bytes())?;
+            file.write_all(anchor_contents.as_bytes())?;
         }
         Ok(())
     }
 }
 
-impl Drop for PersistentAnchor {
+impl Drop for PersistentAnchor<'_> {
     fn drop(&mut self) {
         if let Err(save_error) = self.save_toml() {
             error!("Could not save anchor to file: {}", save_error)
@@ -138,10 +135,7 @@ mod tests {
         secp256k1::{rand::thread_rng, SecretKey},
         EnrBuilder,
     };
-    use std::{
-        fs::{remove_file, OpenOptions},
-        net::Ipv4Addr,
-    };
+    use std::{fs::remove_file, net::Ipv4Addr};
     use tempfile::tempdir;
 
     use super::{Anchor, PersistentAnchor};
@@ -170,18 +164,19 @@ mod tests {
         let persistent_anchor = PersistentAnchor::new_from_file(&temp_file_path);
 
         // make sure to clean up
-        remove_file(temp_file_path).unwrap();
-        persistent_anchor.unwrap();
+        let anchor = persistent_anchor.unwrap();
+
+        // need to drop the PersistentAnchor explicitly before cleanup or it will be saved
+        drop(anchor);
+        remove_file(&temp_file_path).unwrap();
     }
 
     #[test]
     fn save_temp_anchor() {
         let file_name = "temp_anchor_two.toml";
         let temp_file_path = tempdir().unwrap().path().with_file_name(file_name);
-        let temp_file =
-            OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
 
-        let mut persistent_anchor = PersistentAnchor::from_toml(temp_file).unwrap();
+        let mut persistent_anchor = PersistentAnchor::new_from_file(&temp_file_path).unwrap();
 
         // add some ENRs to both lists
         let mut rng = thread_rng();
@@ -201,11 +196,12 @@ mod tests {
         drop(persistent_anchor);
 
         // finally check file contents
-        let prev_file =
-            OpenOptions::new().read(true).write(true).create(true).open(&temp_file_path).unwrap();
-        let new_anchor = PersistentAnchor::from_toml(prev_file).unwrap();
+        let new_persistent = PersistentAnchor::new_from_file(&temp_file_path).unwrap();
+        let new_anchor = new_persistent.anchor.clone();
 
-        remove_file(temp_file_path).unwrap();
-        assert_eq!(new_anchor.anchor, prev_anchor);
+        // need to drop the PersistentAnchor explicitly before cleanup or it will be saved
+        drop(new_persistent);
+        remove_file(&temp_file_path).unwrap();
+        assert_eq!(new_anchor, prev_anchor);
     }
 }
