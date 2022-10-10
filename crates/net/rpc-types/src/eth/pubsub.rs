@@ -5,7 +5,8 @@ use reth_primitives::{rpc::Filter, H256};
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Subscription result.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
 pub enum SubscriptionResult {
     /// New block header.
     Header(Box<RichHeader>),
