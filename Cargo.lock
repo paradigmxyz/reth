@@ -1502,7 +1502,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "reth-primitives",
- "ruint",
  "thiserror",
 ]
 
@@ -1677,25 +1676,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "ruint"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fea68c70fa2b6ce8f8b656e9d3d64776b7ced5b235bb93bb9fee560bf2381196"
-dependencies = [
- "fastrlp 0.2.0",
- "ruint-macro",
- "rustc_version",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "ruint-macro"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4bb0fa2c9df745e5ebf08fb033655b5fba6511a3e6e82b68f5053963e267755"
 
 [[package]]
 name = "rust_decimal"
