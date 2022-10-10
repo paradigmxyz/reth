@@ -3,9 +3,8 @@ use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
     pool::{
-        basefee::BaseFeePool,
+        parked::ParkedPool,
         pending::{BestTransactions, PendingPool},
-        queued::QueuedPool,
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
@@ -20,10 +19,9 @@ use std::{
     sync::Arc,
 };
 
-/// A pool that only manages transactions.
+/// A pool that manages transactions.
 ///
-/// This pool maintains a dependency graph of transactions and provides the currently ready
-/// transactions.
+/// This pool maintains the state of all transactions and stores them accordingly.
 pub struct TxPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<T>,
@@ -32,9 +30,17 @@ pub struct TxPool<T: TransactionOrdering> {
     /// pending subpool
     pending_pool: PendingPool<T>,
     /// queued subpool
-    queued_pool: QueuedPool<T>,
+    ///
+    /// Holds all parked transactions that depend on external changes from the sender:
+    ///
+    ///    - blocked by missing ancestor transaction (has nonce gaps)
+    ///    - sender lacks funds to pay for this transaction.
+    queued_pool: ParkedPool<T>,
     /// base fee subpool
-    basefee_pool: BaseFeePool<T>,
+    ///
+    /// Holds all parked transactions that currently violate the dynamic fee requirement but could
+    /// be moved to pending if the base fee changes in their favor (decreases) in future blocks.
+    basefee_pool: ParkedPool<T>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
 }
@@ -72,7 +78,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Adds the transaction into the pool.
     ///
-    /// This pool consists of two three-pools: `Queued`, `Pending` and `BaseFee`
+    /// This pool consists of two three-pools: `Queued`, `Pending` and `BaseFee`.
     ///
     /// The `Queued` pool contains transactions with gaps in its dependency tree: It requires
     /// additional transaction that are note yet present in the pool. And transactions that the
@@ -150,7 +156,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This will remove the given transaction from one sub-pool and insert it in the other
     /// sub-pool.
-    fn move_transaction(&mut self, from: SubPool, to: SubPoolDestination, id: &TransactionId) {
+    fn move_transaction(&mut self, from: SubPool, to: SubPool, id: &TransactionId) {
         if let Some(tx) = self.remove_transaction(from, id) {
             self.add_transaction_to_pool(to, tx);
         }
@@ -172,18 +178,18 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Removes the transaction from the given pool
     fn add_transaction_to_pool(
         &mut self,
-        pool: SubPoolDestination,
+        pool: SubPool,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
     ) {
         match pool {
-            SubPoolDestination::Queued => {
+            SubPool::Queued => {
                 self.queued_pool.add_transaction(tx);
             }
-            SubPoolDestination::Pending => {
+            SubPool::Pending => {
                 self.pending_pool.add_transaction(tx);
             }
-            SubPoolDestination::BaseFee(fee) => {
-                self.basefee_pool.add_transaction(tx, fee);
+            SubPool::BaseFee => {
+                self.basefee_pool.add_transaction(tx);
             }
         }
     }
@@ -193,7 +199,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         transaction: Arc<ValidPoolTransaction<T::Transaction>>,
         replaced: Option<(Arc<ValidPoolTransaction<T::Transaction>>, SubPool)>,
-        pool: SubPoolDestination,
+        pool: SubPool,
     ) {
         if let Some((replaced, replaced_pool)) = replaced {
             // Remove the replaced transaction
@@ -462,7 +468,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.txs.insert(tx_id, tx);
 
         // TODO determine this based on the state
-        let move_to = SubPoolDestination::Pending;
+        let move_to = SubPool::Pending;
 
         InsertionResult::Inserted { transaction, move_to, replaced_tx, updates }
     }
@@ -489,57 +495,7 @@ pub(crate) enum Destination {
     /// Discard the transaction.
     Discard,
     /// Move transaction to pool
-    Pool(SubPoolDestination),
-}
-
-/// The pool to which the transaction should be moved to
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum SubPoolDestination {
-    Queued,
-    Pending,
-    BaseFee(U256),
-}
-
-// === impl PoolDestination ===
-
-impl SubPoolDestination {
-    /// Whether this transaction is to be moved to the pending sub-pool.
-    fn is_pending(&self) -> bool {
-        matches!(self, SubPoolDestination::Pending)
-    }
-
-    /// Returns whether this is a promotion depending on the current sub-pool location.
-    pub(crate) fn is_promoted(&self, other: SubPool) -> bool {
-        let dest: SubPool = self.into();
-        dest > other
-    }
-}
-
-impl From<SubPoolDestination> for SubPool {
-    fn from(value: SubPoolDestination) -> Self {
-        SubPool::from(&value)
-    }
-}
-
-impl<'a> From<&'a SubPoolDestination> for SubPool {
-    fn from(value: &'a SubPoolDestination) -> Self {
-        match value {
-            SubPoolDestination::Queued => SubPool::Queued,
-            SubPoolDestination::Pending => SubPool::Pending,
-            SubPoolDestination::BaseFee(_) => SubPool::BaseFee,
-        }
-    }
-}
-
-impl PartialEq<SubPool> for SubPoolDestination {
-    fn eq(&self, other: &SubPool) -> bool {
-        matches!(
-            (self, other),
-            (SubPoolDestination::Queued, SubPool::Queued) |
-                (SubPoolDestination::Pending, SubPool::Pending) |
-                (SubPoolDestination::BaseFee(_), SubPool::BaseFee)
-        )
-    }
+    Pool(SubPool),
 }
 
 /// A change of the transaction's location
@@ -559,7 +515,7 @@ pub(crate) enum InsertionResult<T: PoolTransaction> {
     /// Transaction was successfully inserted into the pool
     Inserted {
         transaction: Arc<ValidPoolTransaction<T>>,
-        move_to: SubPoolDestination,
+        move_to: SubPool,
         replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,
         /// Additional updates to transactions affected by this change.
         updates: Vec<PoolUpdate>,

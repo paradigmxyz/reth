@@ -75,11 +75,10 @@ use reth_primitives::{TxHash, U64};
 use std::{collections::HashMap, sync::Arc};
 use tracing::warn;
 
-mod basefee;
 mod events;
 mod listener;
+mod parked;
 mod pending;
-mod queued;
 pub(crate) mod state;
 mod transaction;
 pub mod txpool;

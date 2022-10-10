@@ -6,7 +6,7 @@ use crate::{
     traits::PoolTransaction,
 };
 use reth_primitives::{BlockID, TxHash, U256};
-use std::fmt;
+use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 pub enum TransactionValidationOutcome<T: PoolTransaction> {
@@ -59,9 +59,10 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub is_local: bool,
     /// Internal `Sender` identifier.
     pub sender_id: SenderId,
-    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`
+    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`.
     pub cost: U256,
-    // TODO add a block timestamp that marks validity
+    /// Timestamp when this was added to the pool.
+    pub timestamp: Instant,
 }
 
 // === impl ValidPoolTransaction ===

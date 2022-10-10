@@ -36,6 +36,20 @@ pub(crate) enum SubPool {
     BaseFee,
 }
 
+// === impl PoolDestination ===
+
+impl SubPool {
+    /// Whether this transaction is to be moved to the pending sub-pool.
+    pub(crate) fn is_pending(&self) -> bool {
+        matches!(self, SubPool::Pending)
+    }
+
+    /// Returns whether this is a promotion depending on the current sub-pool location.
+    pub(crate) fn is_promoted(&self, other: SubPool) -> bool {
+        self > &other
+    }
+}
+
 impl From<TxState> for SubPool {
     fn from(value: TxState) -> Self {
         if value > TxState::BASE_FEE_POOL_BITS {
