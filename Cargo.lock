@@ -152,6 +152,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bs58"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "771fe0050b883fcc3ea2359b1a96bcfbc090b7116eae7c3c512c7a083fdf23d3"
+
+[[package]]
 name = "bstr"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -355,9 +361,29 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "pkcs8",
  "rand_core",
  "sec1",
  "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "enr"
+version = "0.6.2"
+source = "git+https://github.com/sigp/enr#125f8a5f2deede3e47e852ea70fc9b6e1e9c6e50"
+dependencies = [
+ "base64",
+ "bs58",
+ "bytes",
+ "hex",
+ "k256",
+ "log",
+ "rand",
+ "rlp",
+ "secp256k1",
+ "serde",
+ "sha3",
  "zeroize",
 ]
 
@@ -1501,6 +1527,16 @@ dependencies = [
 [[package]]
 name = "reth-p2p"
 version = "0.1.0"
+dependencies = [
+ "enr",
+ "secp256k1",
+ "serde",
+ "serde_derive",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
+]
 
 [[package]]
 name = "reth-primitives"
@@ -1718,6 +1754,7 @@ version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7649a0b3ffb32636e60c7ce0d70511eda9c52c658cd0634e194d5a19943aeff"
 dependencies = [
+ "rand",
  "secp256k1-sys",
 ]
 
