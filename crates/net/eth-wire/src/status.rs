@@ -1,6 +1,6 @@
 use ethereum_forkid::ForkId;
 use fastrlp::{RlpDecodable, RlpEncodable};
-use reth_primitives::{U256, Chain, H256};
+use reth_primitives::{Chain, H256, U256};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
@@ -92,7 +92,7 @@ mod tests {
     use ethers_core::types::Chain as NamedChain;
     use fastrlp::{Decodable, Encodable};
     use hex_literal::hex;
-    use reth_primitives::{Chain, U256, H256};
+    use reth_primitives::{Chain, H256, U256};
 
     use crate::{EthVersion, Status};
 
@@ -103,8 +103,14 @@ mod tests {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
-            blockhash: H256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d").unwrap(),
-            genesis: H256::from_str("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3").unwrap(),
+            blockhash: H256::from_str(
+                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+            )
+            .unwrap(),
+            genesis: H256::from_str(
+                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+            )
+            .unwrap(),
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
 
@@ -120,8 +126,14 @@ mod tests {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
-            blockhash: H256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d").unwrap(),
-            genesis: H256::from_str("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3").unwrap(),
+            blockhash: H256::from_str(
+                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+            )
+            .unwrap(),
+            genesis: H256::from_str(
+                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+            )
+            .unwrap(),
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
@@ -135,8 +147,14 @@ mod tests {
             version: EthVersion::Eth66 as u8,
             chain: Chain::Named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
-            blockhash: H256::from_str("f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b").unwrap(),
-            genesis: H256::from_str("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b").unwrap(),
+            blockhash: H256::from_str(
+                "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
+            )
+            .unwrap(),
+            genesis: H256::from_str(
+                "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
+            )
+            .unwrap(),
             forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
         };
 
@@ -152,8 +170,14 @@ mod tests {
             version: EthVersion::Eth66 as u8,
             chain: Chain::Named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
-            blockhash: H256::from_str("f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b").unwrap(),
-            genesis: H256::from_str("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b").unwrap(),
+            blockhash: H256::from_str(
+                "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
+            )
+            .unwrap(),
+            genesis: H256::from_str(
+                "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
+            )
+            .unwrap(),
             forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
@@ -170,8 +194,14 @@ mod tests {
                 "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",
             )
             .unwrap(),
-            blockhash: H256::from_str("523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c").unwrap(),
-            genesis: H256::from_str("6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd").unwrap(),
+            blockhash: H256::from_str(
+                "523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c",
+            )
+            .unwrap(),
+            genesis: H256::from_str(
+                "6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd",
+            )
+            .unwrap(),
             forkid: ForkId { hash: ForkHash([0x1a, 0x67, 0xcc, 0xd8]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
