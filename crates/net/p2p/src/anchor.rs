@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     fs::OpenOptions,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use enr::{secp256k1::SecretKey, Enr};
@@ -73,18 +73,18 @@ pub enum AnchorError {
 /// A version of [`Anchor`] that is loaded from a TOML file and saves its contents when it is
 /// dropped.
 #[derive(Debug)]
-pub struct PersistentAnchor<'a> {
+pub struct PersistentAnchor {
     /// The list of addresses to persist
     anchor: Anchor,
 
     /// The Path to store the anchor file
-    path: &'a Path,
+    path: PathBuf,
 }
 
-impl<'a> PersistentAnchor<'a> {
+impl PersistentAnchor {
     /// This will attempt to load the [`Anchor`] from a file, and if the file doesn't exist it will
     /// attempt to initialize it with an empty peer list.
-    pub fn new_from_file(path: &'a Path) -> Result<Self, AnchorError> {
+    pub fn new_from_file(path: &Path) -> Result<Self, AnchorError> {
         let mut binding = OpenOptions::new();
         let rw_opts = binding.read(true).write(true);
 
@@ -100,18 +100,18 @@ impl<'a> PersistentAnchor<'a> {
         // if the file exists but is empty then we should initialize the file format and return
         // an empty [`Anchor`]
         if contents.is_empty() {
-            let mut anchor = Self { anchor: Anchor::default(), path };
+            let mut anchor = Self { anchor: Anchor::default(), path: path.to_path_buf() };
             anchor.save_toml()?;
             return Ok(anchor)
         }
 
         let anchor: Anchor = toml::from_str(&contents)?;
-        Ok(Self { anchor, path })
+        Ok(Self { anchor, path: path.to_path_buf() })
     }
 
     /// Save the contents of the [`Anchor`] into the associated file as TOML.
     pub fn save_toml(&mut self) -> Result<(), AnchorError> {
-        let mut file = OpenOptions::new().read(true).write(true).create(true).open(self.path)?;
+        let mut file = OpenOptions::new().read(true).write(true).create(true).open(&self.path)?;
 
         if !self.anchor.is_empty() {
             let anchor_contents = toml::to_string_pretty(&self.anchor)?;
@@ -121,7 +121,7 @@ impl<'a> PersistentAnchor<'a> {
     }
 }
 
-impl Drop for PersistentAnchor<'_> {
+impl Drop for PersistentAnchor {
     fn drop(&mut self) {
         if let Err(save_error) = self.save_toml() {
             error!("Could not save anchor to file: {}", save_error)
