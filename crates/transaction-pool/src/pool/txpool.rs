@@ -112,7 +112,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let hash = *tx.hash();
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
-            InsertResult::Inserted { transaction, move_to, replaced_tx, updates } => {
+            InsertResult::Inserted { transaction, move_to, replaced_tx, updates, .. } => {
                 self.add_new_transaction(transaction, replaced_tx, move_to);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
@@ -496,7 +496,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.tx_inc(tx_id.sender);
         }
 
-        InsertResult::Inserted { transaction, move_to: state.into(), replaced_tx, updates }
+        InsertResult::Inserted { transaction, move_to: state.into(), state, replaced_tx, updates }
     }
 
     /// Rechecks the transaction of the given sender and returns a set of updates.
@@ -545,6 +545,7 @@ pub(crate) enum InsertResult<T: PoolTransaction> {
     Inserted {
         transaction: Arc<ValidPoolTransaction<T>>,
         move_to: SubPool,
+        state: TxState,
         replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,
         /// Additional updates to transactions affected by this change.
         updates: Vec<PoolUpdate>,
@@ -671,9 +672,11 @@ mod tests {
         let valid_tx = f.validated(tx);
         let res = pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce);
         match res {
-            InsertResult::Inserted { updates, replaced_tx, move_to, .. } => {
+            InsertResult::Inserted { updates, replaced_tx, move_to, state, .. } => {
                 assert!(updates.is_empty());
                 assert!(replaced_tx.is_none());
+                assert!(state.contains(TxState::NO_NONCE_GAPS));
+                assert!(!state.contains(TxState::ENOUGH_BALANCE));
                 assert_eq!(move_to, SubPool::Queued);
             }
             InsertResult::Underpriced { .. } => {
