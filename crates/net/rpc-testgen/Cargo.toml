@@ -17,3 +17,8 @@ reth-rpc-api = { path = "../rpc-api" }
 
 # misc
 tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+insta = { version = "1.21", features = ["json"] }
