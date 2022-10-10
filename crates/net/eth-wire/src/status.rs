@@ -105,7 +105,6 @@ mod tests {
         let expected = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let status = Status {
             version: EthVersion::Eth67 as u8,
-            // ethers versions arent the same due to patches, so using Id here
             chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: Uint::from(36206751599115524359527u128),
             blockhash: hex!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
@@ -123,7 +122,6 @@ mod tests {
         let data = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let expected = Status {
             version: EthVersion::Eth67 as u8,
-            // ethers versions arent the same due to patches, so using Id here
             chain: Chain::Named(NamedChain::Mainnet),
             total_difficulty: Uint::from(36206751599115524359527u128),
             blockhash: hex!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
