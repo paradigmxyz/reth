@@ -13,7 +13,7 @@ use crate::{
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
-    collections::{hash_map, BTreeMap, HashMap},
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
     fmt,
     ops::Bound::{Excluded, Included, Unbounded},
     sync::Arc,
@@ -387,41 +387,48 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
         let mut updates = Vec::new();
-        let nonce_distance = on_chain_nonce - transaction.nonce();
 
         let predecessor =
             TransactionId::ancestor(transaction.transaction.nonce(), on_chain_nonce, tx_id.sender);
 
         if predecessor.is_none() {
-            state &= TxState::NO_NONCE_GAPS;
+            state.insert(TxState::NO_NONCE_GAPS);
         }
 
         let mut replaced_tx = None;
 
+        let pool_tx = PoolInternalTransaction {
+            transaction: transaction.clone(),
+            subpool: SubPool::Queued,
+            state,
+            cumulative_cost,
+        };
+        // try to insert the transaction
+        match self.txs.entry(*transaction.id()) {
+            Entry::Vacant(entry) => {
+                entry.insert(pool_tx);
+            }
+            Entry::Occupied(mut entry) => {
+                // Ensure the new transaction is not underpriced
+                if transaction.is_underpriced(entry.get().transaction.as_ref()) {
+                    return InsertionResult::Underpriced {
+                        transaction: pool_tx.transaction,
+                        existing: *entry.get().transaction.hash(),
+                    }
+                }
+                let replaced = entry.insert(pool_tx);
+                replaced_tx = Some((replaced.transaction, replaced.subpool));
+            }
+        }
+
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id, on_chain_nonce);
         {
-            let mut next_nonce = tx_id.next_nonce();
+            let mut next_nonce = on_chain_id.next_nonce();
 
             // Traverse all transactions of the sender and update existing transactions
             for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
-                let current_state = tx.state;
-
-                if tx_id.eq(id) {
-                    // Found replacement transaction
-
-                    // Ensure the new transaction is not underpriced
-                    if transaction.is_underpriced(tx.transaction.as_ref()) {
-                        return InsertionResult::Underpriced {
-                            transaction,
-                            existing: *tx.transaction.hash(),
-                        }
-                    }
-
-                    // Record the replacement
-                    // TODO(mattsse): can we replace here instead?
-                    replaced_tx = Some((tx.transaction.clone(), tx.subpool));
-                }
+                let current_pool = tx.subpool;
 
                 if next_nonce != id.nonce {
                     // nothing to update
@@ -444,15 +451,19 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::ENOUGH_BALANCE);
                 }
 
-                let current_pool: SubPool = current_state.into();
-                let move_to: SubPool = tx.state.into();
-                if current_pool != move_to {
-                    updates.push(PoolUpdate {
-                        id: *id,
-                        hash: *tx.transaction.hash(),
-                        current: current_pool,
-                        destination: Destination::Pool(move_to),
-                    })
+                if tx_id.eq(id) {
+                    // if it is the new transaction, track the state
+                    state = tx.state;
+                } else {
+                    tx.subpool = tx.state.into();
+                    if current_pool != tx.subpool {
+                        updates.push(PoolUpdate {
+                            id: *id,
+                            hash: *tx.transaction.hash(),
+                            current: current_pool,
+                            destination: Destination::Pool(tx.subpool),
+                        })
+                    }
                 }
 
                 // increment for next iteration
@@ -461,25 +472,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
 
         // If this wasn't a replacement transaction we need to update the counter.
-        if replaced_tx.is_some() {
+        if replaced_tx.is_none() {
             self.tx_inc(tx_id.sender);
         }
 
-        let tx = PoolInternalTransaction {
-            transaction: transaction.clone(),
-            subpool: state.into(),
-            state,
-            cumulative_cost,
-            nonce_distance,
-        };
-
-        // Insert the transaction in the total set.
-        self.txs.insert(tx_id, tx);
-
-        // TODO determine this based on the state
-        let move_to = SubPool::Pending;
-
-        InsertionResult::Inserted { transaction, move_to, replaced_tx, updates }
+        InsertionResult::Inserted { transaction, move_to: state.into(), replaced_tx, updates }
     }
 
     /// Rechecks the transaction of the given sender and returns a set of updates.
@@ -549,8 +546,6 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// This is the combined `cost` of all transactions from the same sender that currently
     /// come before this transaction.
     cumulative_cost: U256,
-    /// Difference between the current state nonce and the nonce of this transaction.
-    nonce_distance: u64,
 }
 
 // === impl PoolInternalTransaction ===
