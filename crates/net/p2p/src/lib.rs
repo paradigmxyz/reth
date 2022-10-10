@@ -15,15 +15,17 @@ mod tests {
     use async_trait::async_trait;
     use bytes::Bytes;
     use devp2p_rs::{
-        rlpx::Swarm, CapabilityName, CapabilityServer, CapabilityVersion, InboundEvent,
-        ListenOptions, Message, OutboundEvent, PeerId, StaticNodes, Discovery,
+        rlpx::Swarm, CapabilityName, CapabilityServer, CapabilityVersion, Discovery, InboundEvent,
+        ListenOptions, Message, OutboundEvent, PeerId, StaticNodes,
     };
     use secp256k1::{rand::thread_rng, SecretKey};
     use std::{
         collections::{BTreeMap, HashMap},
+        net::SocketAddr,
         num::NonZeroUsize,
         str::FromStr,
-        sync::{atomic::AtomicBool, Arc}, net::SocketAddr, time::Duration,
+        sync::{atomic::AtomicBool, Arc},
+        time::Duration,
     };
     use tokio_stream::StreamMap;
 
@@ -69,7 +71,6 @@ mod tests {
             .with_client_version(format!("reth/v{}", env!("CARGO_PKG_VERSION")))
             .build(BTreeMap::new(), alice_capability_server, alice_key);
 
-
         // devp2p-rs requires the user specify a H512 PeerId per node
         let mut bob_static_nodes = HashMap::new();
         let alice_socket_addr: SocketAddr = alice_listen_addr.parse().unwrap();
@@ -77,7 +78,7 @@ mod tests {
 
         // there are no methods to "dial once" in devp2p-rs currently, you must create tasks and
         // instantiate the `Swarm` with those tasks.
-        let mut discovery_tasks: StreamMap<String, Discovery>  = StreamMap::new();
+        let mut discovery_tasks: StreamMap<String, Discovery> = StreamMap::new();
         let connect_to_alice = StaticNodes::new(bob_static_nodes, Duration::new(5, 0));
         discovery_tasks.insert("dial alice".to_string(), Box::pin(connect_to_alice));
         let bob = Swarm::builder()
@@ -92,13 +93,9 @@ mod tests {
             .with_client_version(format!("reth/v{}", env!("CARGO_PKG_VERSION")))
             .build(BTreeMap::new(), bob_capability_server, bob_key);
 
-        tokio::spawn(async move {
-            alice.await
-        });
+        tokio::spawn(async move { alice.await });
 
-        tokio::spawn(async move {
-            bob.await
-        });
+        tokio::spawn(async move { bob.await });
 
         // is it possible to confirm the dial succeeded without sending a message?
         // TODO: send message from alice to bob
