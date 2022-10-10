@@ -14,9 +14,9 @@ pub(crate) struct ParkedPool<T: TransactionOrdering> {
     /// This way we can determine when transactions where submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: FnvHashMap<TransactionId, Arc<QueuedPoolTransaction<T>>>,
+    by_id: FnvHashMap<TransactionId, Arc<ParkedPoolTransaction<T>>>,
     /// All transactions sorted by their priority function.
-    best: BTreeSet<Arc<QueuedPoolTransaction<T>>>,
+    best: BTreeSet<Arc<ParkedPoolTransaction<T>>>,
 }
 
 // === impl QueuedPool ===
@@ -54,7 +54,7 @@ impl<T: TransactionOrdering> ParkedPool<T> {
 }
 
 /// A reference to a transaction in the pool
-struct QueuedPoolTransaction<T: TransactionOrdering> {
+struct ParkedPoolTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
     submission_id: u64,
     /// Actual transaction.
@@ -63,21 +63,21 @@ struct QueuedPoolTransaction<T: TransactionOrdering> {
     priority: T::Priority,
 }
 
-impl<T: TransactionOrdering> Eq for QueuedPoolTransaction<T> {}
+impl<T: TransactionOrdering> Eq for ParkedPoolTransaction<T> {}
 
-impl<T: TransactionOrdering> PartialEq<Self> for QueuedPoolTransaction<T> {
+impl<T: TransactionOrdering> PartialEq<Self> for ParkedPoolTransaction<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: TransactionOrdering> PartialOrd<Self> for QueuedPoolTransaction<T> {
+impl<T: TransactionOrdering> PartialOrd<Self> for ParkedPoolTransaction<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: TransactionOrdering> Ord for QueuedPoolTransaction<T> {
+impl<T: TransactionOrdering> Ord for ParkedPoolTransaction<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // This compares by `priority` and only if two tx have the exact same priority this compares
         // the unique `transaction_id`.
