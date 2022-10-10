@@ -2,9 +2,10 @@
 #![allow(missing_docs)]
 
 use crate::{PoolTransaction, TransactionOrdering};
+use paste::paste;
 use reth_primitives::{Address, TxHash, H256, U256};
 
-/// Sets the value fo the field
+/// Sets the value for the field
 macro_rules! set_value {
     ($this:ident => $field:ident) => {
         let new_value = $field;
@@ -29,6 +30,31 @@ macro_rules! get_value {
     };
 }
 
+// Generates all setters and getters
+macro_rules! make_setters_getters {
+    ($($name:ident => $t:ty);*) => {
+  paste! {
+        $(
+            pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
+                set_value!(self => $name);
+                self
+            }
+
+            pub fn [<with_$name>](mut self, $name: $t) -> Self {
+                set_value!(self => $name);
+                self
+            }
+
+            pub fn [<get_$name>](&self) -> $t {
+                get_value!(self => $name).clone()
+            }
+
+        )*
+
+    }
+    };
+}
+
 /// A Bare transaction type used for testing.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MockTransaction {
@@ -46,7 +72,7 @@ pub enum MockTransaction {
         nonce: u64,
         max_fee_per_gas: u64,
         max_priority_fee_per_gas: u64,
-        gas_limit: U256,
+        gas_limit: u64,
         value: U256,
     },
 }
@@ -54,24 +80,129 @@ pub enum MockTransaction {
 // === impl MockTransaction ===
 
 impl MockTransaction {
-    pub fn set_nonce(&mut self, nonce: u64) -> &mut Self {
-        set_value!(self => nonce);
+    make_setters_getters! {
+        nonce => u64;
+        hash => H256;
+        sender => Address;
+        gas_limit => u64;
+        value => U256
+    }
+
+    /// Returns a new legacy transaction with random address and hash and empty values
+    fn legacy() -> Self {
+        MockTransaction::Legacy {
+            hash: H256::random(),
+            sender: Address::random(),
+            nonce: 0,
+            gas_price: 0,
+            gas_limit: 0,
+            value: Default::default(),
+        }
+    }
+
+    /// Returns a new EIP1559 transaction with random address and hash and empty values
+    fn eip1559() -> Self {
+        MockTransaction::Eip1559 {
+            hash: H256::random(),
+            sender: Address::random(),
+            nonce: 0,
+            max_fee_per_gas: 0,
+            max_priority_fee_per_gas: 0,
+            gas_limit: 0,
+            value: Default::default(),
+        }
+    }
+
+    pub fn set_priority_fee(&mut self, val: u64) -> &mut Self {
+        if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } = self {
+            *max_priority_fee_per_gas = val;
+        }
         self
     }
 
-    pub fn with_nonce(mut self, nonce: u64) -> Self {
-        set_value!(self => nonce);
+    pub fn with_priority_fee(mut self, val: u64) -> Self {
+        if let MockTransaction::Eip1559 { ref mut max_priority_fee_per_gas, .. } = self {
+            *max_priority_fee_per_gas = val;
+        }
         self
     }
 
-    pub fn get_nonce(&self) -> u64 {
-        *get_value!(self => nonce)
+    pub fn get_priority_fee(&self) -> Option<u64> {
+        if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } = self {
+            Some(*max_priority_fee_per_gas)
+        } else {
+            None
+        }
+    }
+
+    pub fn set_max_fee(&mut self, val: u64) -> &mut Self {
+        if let MockTransaction::Eip1559 { max_fee_per_gas, .. } = self {
+            *max_fee_per_gas = val;
+        }
+        self
+    }
+
+    pub fn with_max_fee(mut self, val: u64) -> Self {
+        if let MockTransaction::Eip1559 { ref mut max_fee_per_gas, .. } = self {
+            *max_fee_per_gas = val;
+        }
+        self
+    }
+
+    pub fn get_max_fee(&self) -> Option<u64> {
+        if let MockTransaction::Eip1559 { max_fee_per_gas, .. } = self {
+            Some(*max_fee_per_gas)
+        } else {
+            None
+        }
+    }
+
+    pub fn set_gas_price(&mut self, val: u64) -> &mut Self {
+        match self {
+            MockTransaction::Legacy { gas_price, .. } => {
+                *gas_price = val;
+            }
+            MockTransaction::Eip1559 { max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+                *max_fee_per_gas = val;
+                *max_priority_fee_per_gas = val;
+            }
+        }
+        self
+    }
+
+    pub fn with_gas_price(mut self, val: u64) -> Self {
+        match self {
+            MockTransaction::Legacy { ref mut gas_price, .. } => {
+                *gas_price = val;
+            }
+            MockTransaction::Eip1559 {
+                ref mut max_fee_per_gas,
+                ref mut max_priority_fee_per_gas,
+                ..
+            } => {
+                *max_fee_per_gas = val;
+                *max_priority_fee_per_gas = val;
+            }
+        }
+        self
+    }
+
+    pub fn get_gas_price(&self) -> u64 {
+        match self {
+            MockTransaction::Legacy { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
+        }
     }
 
     /// Returns a clone with an increased nonce
     pub fn next(&self) -> Self {
         let mut next = self.clone();
-        next.with_nonce(self.get_nonce())
+        next.with_nonce(self.get_nonce() + 1)
+    }
+    /// Returns a clone with an increased nonce
+    pub fn skip(&self, skip: u64) -> Self {
+        let mut next = self.clone();
+        next.with_nonce(self.get_nonce() + skip + 1)
     }
 }
 
