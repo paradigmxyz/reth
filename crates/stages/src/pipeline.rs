@@ -129,20 +129,17 @@ where
 
         loop {
             let mut tx = TxContainer::new(db)?;
-            match self.run_loop(&mut state, &mut tx).await? {
-                ControlFlow::Continue => {
-                    tx.commit()?;
+            let next_action = self.run_loop(&mut state, &mut tx).await?;
 
-                    // Check if we've reached our desired target block
-                    if state
-                        .minimum_progress
-                        .zip(self.max_block)
-                        .map_or(false, |(progress, target)| progress >= target)
-                    {
-                        return Ok(())
-                    }
-                }
-                ControlFlow::Unwind { .. } => (),
+            // Terminate the loop early if it's reached the maximum user
+            // configured block.
+            if matches!(next_action, ControlFlow::Continue) &&
+                state
+                    .minimum_progress
+                    .zip(self.max_block)
+                    .map_or(false, |(progress, target)| progress >= target)
+            {
+                return Ok(())
             }
         }
     }
@@ -164,14 +161,16 @@ where
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
-            match queued_stage
+            let next = queued_stage
                 .execute(state, previous_stage, tx)
                 .instrument(info_span!("Running", stage = %stage_id))
-                .await?
-            {
+                .await?;
+
+            match next {
                 ControlFlow::Continue => {
                     previous_stage =
                         Some((stage_id, stage_id.get_progress(tx.get())?.unwrap_or_default()));
+                    tx.commit()?;
                 }
                 ControlFlow::Unwind { target, bad_block } => {
                     // TODO: Note on close
