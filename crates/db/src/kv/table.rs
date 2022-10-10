@@ -1,5 +1,4 @@
 //! Table traits.
-#![allow(missing_docs)]
 
 use super::KVError;
 use bytes::Bytes;
@@ -8,13 +7,16 @@ use std::fmt::Debug;
 
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
+    /// Encoded type.
     type Encoded: AsRef<[u8]> + Send + Sync;
 
+    /// Decodes data going into the database.
     fn encode(self) -> Self::Encoded;
 }
 
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
+    /// Decodes data coming from the database.
     fn decode(value: &[u8]) -> Result<Self, KVError>;
 }
 
@@ -39,6 +41,7 @@ pub trait Table: Send + Sync + Debug + 'static {
 /// DupSort allows for keys not to be repeated in the database,
 /// for more check: https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
 pub trait DupSort: Table {
+    /// Subkey type. For more check https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
     type SubKey: Object;
 }
 
