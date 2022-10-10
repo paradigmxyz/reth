@@ -51,14 +51,14 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..0x100000),     // TODO
-                    growth_step: Some(0x100000), // TODO
+                    size: Some(0..0x100000),     // TODO: reevaluate
+                    growth_step: Some(0x100000), // TODO: reevaluate
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })
                 .set_flags(EnvironmentFlags {
                     mode,
-                    no_rdahead: true,
+                    no_rdahead: true, // TODO: reevaluate
                     coalesce: true,
                     ..Default::default()
                 })

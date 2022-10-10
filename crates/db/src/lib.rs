@@ -6,7 +6,6 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-//! DB primitives for reth.
 
 /// Rust bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
 pub mod mdbx {

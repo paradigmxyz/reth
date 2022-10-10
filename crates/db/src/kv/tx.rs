@@ -79,7 +79,8 @@ impl<'a, E: EnvironmentKind> Tx<'a, RW, E> {
             .map_err(KVError::Put)
     }
 
-    /// Deletes the `(key, value)` entry on `table`.
+    /// Deletes the `(key, value)` entry on `table`. When `value` is `None`, all entries with `key`
+    /// are to be deleted. Otherwise, only the item matching that data shall be.
     pub fn delete<T>(&self, table: T, key: T::Key, value: Option<T::Value>) -> Result<bool, KVError>
     where
         T: Table,
