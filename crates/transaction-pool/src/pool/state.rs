@@ -1,11 +1,24 @@
 bitflags::bitflags! {
-    /// Marker to assign a transaction into a sub-pool:
+    /// Marker to represents the current state of a transaction in the pool and from which the corresponding sub-pool is derived, depending on what bits are set.
+    ///
+    /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
     #[derive(Default)]
     pub(crate) struct TxState: u8 {
+        /// Set to `1` if the `feeCap` of the transaction meets the chain's minimum `feeCap` requirement.
+        ///
+        /// This is different from `ENOUGH_FEE_CAP_BLOCK` which tracks on a per-block basis.
         const ENOUGH_FEE_CAP_PROTOCOL = 0b100000;
+        /// Set to `1` of the transaction is either the next transaction of the sender (on chain nonce == tx.nonce) or all prior transactions are also present in the pool.
         const NO_NONCE_GAPS = 0b010000;
+        /// Bit derived from the sender's balance.
+        ///
+        /// Set to `1` if the sender's balance can cover the maximum cost for this transaction (`feeCap * gasLimit + value`).
+        /// This includes cumulative costs of prior transactions, which ensures that the sender has enough funds for all max cost of prior transactions.
         const ENOUGH_BALANCE = 0b001000;
         const NOT_TOO_MUCH_GAS = 0b000100;
+        /// Covers the Dynamic fee requirement.
+        ///
+        /// Set to 1 if `feeCap` of the transaction meets the requirement of the pending block.
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
         const IS_LOCAL = 0b000001;
 

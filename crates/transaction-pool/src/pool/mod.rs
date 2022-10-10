@@ -1,55 +1,51 @@
 //! Transaction Pool internals.
 //!
-//! Incoming transactions are validated first. The validation outcome can have 3 states:
+//! Incoming transactions are before they enter the pool first. The validation outcome can have 3
+//! states:
 //!
 //!      1. Transaction can _never_ be valid
 //!      2. Transaction is _currently_ valid
 //!      3. Transaction is _currently_ invalid, but could potentially become valid in the future
 //!
 //! However, (2.) and (3.) of a transaction can only be determined on the basis of the current
-//! state, whereas (1.) holds indefinitely. This means once the state changes (2.) and (3.) need to
-//! be reevaluated again.
+//! state, whereas (1.) holds indefinitely. This means once the state changes (2.) and (3.) the
+//! state of a transaction needs to be reevaluated again.
 //!
 //! The transaction pool is responsible for storing new, valid transactions and providing the next
 //! best transactions sorted by their priority. Where priority is determined by the transaction's
-//! score.
-//!
-//! However, the score is also only valid for the current state.
+//! score ([`TransactionOrdering`]).
 //!
 //! Furthermore, the following characteristics fall under (3.):
 //!
 //!     a) Nonce of a transaction is higher than the expected nonce for the next transaction of its
 //! sender. A distinction is made here whether multiple transactions from the same sender have
-//! gapless nonce increments.         a)(1) If _no_ transaction is missing in a chain of multiple
+//! gapless nonce increments.
+//!
+//!         a)(1) If _no_ transaction is missing in a chain of multiple
 //! transactions from the same sender (all nonce in row), all of them can in principle be executed
-//! on the current state one after the other.         a)(2) If there's a nonce gap, then all
+//! on the current state one after the other.
+//!
+//!          a)(2) If there's a nonce gap, then all
 //! transactions after the missing transaction are blocked until the missing transaction arrives.
-//!     b) Transaction does not meet the dynamic fee cap requirement introduced by EIP-1559: The fee
-//! cap of the transaction needs to be no less than the base fee of block.
+//!
+//!      b) Transaction does not meet the dynamic fee cap requirement introduced by EIP-1559: The
+//! fee cap of the transaction needs to be no less than the base fee of block.
 //!
 //!
-//! In essence the transaction pool is made of two separate sub-pools:
+//! In essence the transaction pool is made of three separate sub-pools:
 //!
 //!      _Pending Pool_: Contains all transactions that are valid on the current state and satisfy
-//! (3. a)(1): _No_ nonce gaps      _Queued Pool_: Contains all transactions that are currently
-//! blocked by missing transactions: (3. a)(2): _With_ nonce gaps
+//! (3. a)(1): _No_ nonce gaps
 //!
-//! To account for the dynamic base fee requirement (3. b) which could render an EIP-1559 and all
-//! subsequent transactions of the sender currently invalid, the pending pool itself consists of two
-//! queues:
+//!      _Queued Pool_: Contains all transactions that are currently blocked by missing
+//! transactions: (3. a)(2): _With_ nonce gaps or due to lack of funds.
 //!
-//!      _Ready Queue_: Contains all transactions that can be executed on the current state
-//!      _Parked Queue_: Contains all transactions that either do not currently meet the dynamic
-//! base fee requirement or are blocked by a previous transaction that violates it.
+//!      _Basefee Pool_: To account for the dynamic base fee requirement (3. b) which could render
+//! an EIP-1559 and all subsequent transactions of the sender currently invalid.
 //!
-//! The classification of transaction in which queue it belongs depends on the current base fee and
-//! must be updated after changes:
-//!
-//!      - Base Fee increases: recheck the _Ready Queue_ and evict transactions that don't satisfy
-//!        the new base fee, or depend on a transaction that no longer satisfies it, and move them
-//!        to the _Parked Queue_.
-//!      - Base Fee decreases: recheck the _Parked Queue_ and move all transactions that now satisfy
-//!        the new base fee to the _Ready Queue_.
+//! The classification of transactions is always dependent on the current state that is changed as
+//! soon as a new block is mined. Once a new block is mined, the account changeset must be applied
+//! to the transaction pool.
 //!
 //!
 //! Depending on the use case, consumers of the [`TransactionPool`](crate::traits::TransactionPool)
@@ -66,6 +62,7 @@
 //!     - _Queued_: queued transactions are transactions that fall under category (3.). Those
 //!       transactions are _currently_ waiting for state changes that eventually move them into
 //!       category (2.) and become pending.
+
 use crate::{
     error::PoolResult, pool::listener::PoolEventListener, traits::PoolTransaction,
     validate::ValidPoolTransaction, BlockID, PoolClient, PoolConfig, TransactionOrdering,

@@ -1,3 +1,4 @@
+//! The internal transaction pool implementation.
 use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
@@ -46,7 +47,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the pool based on the changed base fee.
     ///
     /// This enforces the dynamic fee requirement.
-    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
+    pub(crate) fn update_base_fee(&mut self, new_base_fee: U256) {
         // TODO update according to the changed base_fee
         todo!()
     }
@@ -145,7 +146,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         outcome
     }
 
-    /// Moves a transaction from one sub pool to another
+    /// Moves a transaction from one sub pool to another.
+    ///
+    /// This will remove the given transaction from one sub-pool and insert it in the other
+    /// sub-pool.
     fn move_transaction(&mut self, from: SubPool, to: SubPoolDestination, id: &TransactionId) {
         if let Some(tx) = self.remove_transaction(from, id) {
             self.add_transaction_to_pool(to, tx);
@@ -184,7 +188,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Inserts the transaction into the given subpool
+    /// Inserts the transaction into the given sub-pool
     fn add_new_transaction(
         &mut self,
         transaction: Arc<ValidPoolTransaction<T::Transaction>>,
@@ -213,7 +217,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 }
 
-/// Container for _all_ transaction in the pool
+/// Container for _all_ transaction in the pool.
+///
+/// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
+/// derived from this set. Updates returned from this type must be applied to the sub-pools.
 pub struct AllTransactions<T: PoolTransaction> {
     /// _All_ transactions identified by their hash.
     by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,

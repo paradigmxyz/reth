@@ -1,8 +1,13 @@
 use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
 use fnv::FnvHashMap;
-
 use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
 
+/// Holds all transactions that are currently on hold and depend on external changes:
+///
+///    - blocked by missing ancestor transaction (has nonce gaps)
+///    - sender lacks funds to pay for this transaction.
+///
+/// This pool is a bijection: at all times each set contains the same transactions.
 pub(crate) struct QueuedPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<T>,
