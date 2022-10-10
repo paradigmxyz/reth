@@ -212,52 +212,44 @@ where
         let mut tx = db.begin_rw_txn()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
+            let span = info_span!("Unwinding", stage = %stage_id);
+            let _enter = span.enter();
+
             let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
+            if stage_progress < to {
+                debug!(from = %stage_progress, %to, "Unwind point too far for stage");
+                self.events_sender
+                    .send(PipelineEvent::Unwound {
+                        stage_id,
+                        result: Some(UnwindOutput { stage_progress }),
+                    })
+                    .await?;
+                return Ok(())
+            }
 
-            let unwind: Result<(), PipelineError> = async {
-                if stage_progress < to {
-                    debug!(from = %stage_progress, %to, "Unwind point too far for stage");
-                    self.events_sender
-                        .send(PipelineEvent::Unwound {
-                            stage_id,
-                            result: Some(UnwindOutput { stage_progress }),
-                        })
-                        .await?;
-                    return Ok(())
-                }
+            debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
+            while stage_progress > to {
+                let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
+                self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
-                while stage_progress > to {
-                    let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-                    self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
+                let output = stage.unwind(&mut tx, input).await;
+                match output {
+                    Ok(unwind_output) => {
+                        stage_progress = unwind_output.stage_progress;
+                        stage_id.save_progress(&tx, stage_progress)?;
 
-                    let output = stage.unwind(&mut tx, input).await;
-                    match output {
-                        Ok(unwind_output) => {
-                            stage_progress = unwind_output.stage_progress;
-                            stage_id.save_progress(&tx, stage_progress)?;
-
-                            self.events_sender
-                                .send(PipelineEvent::Unwound {
-                                    stage_id,
-                                    result: Some(unwind_output),
-                                })
-                                .await?;
-                        }
-                        Err(err) => {
-                            self.events_sender
-                                .send(PipelineEvent::Unwound { stage_id, result: None })
-                                .await?;
-                            return Err(PipelineError::Stage(StageError::Internal(err)))
-                        }
+                        self.events_sender
+                            .send(PipelineEvent::Unwound { stage_id, result: Some(unwind_output) })
+                            .await?;
+                    }
+                    Err(err) => {
+                        self.events_sender
+                            .send(PipelineEvent::Unwound { stage_id, result: None })
+                            .await?;
+                        return Err(PipelineError::Stage(StageError::Internal(err)))
                     }
                 }
-
-                Ok(())
             }
-            .instrument(info_span!("Unwinding", stage = %stage_id))
-            .await;
-            unwind?
         }
 
         tx.commit()?;
