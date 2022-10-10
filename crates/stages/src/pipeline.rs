@@ -1,6 +1,6 @@
 use crate::{
     error::*,
-    util::opt::{self, OptSenderExt},
+    util::opt::{self, MaybeSender},
     ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use reth_db::mdbx;
@@ -49,7 +49,7 @@ where
 {
     stages: Vec<QueuedStage<'db, E>>,
     max_block: Option<BlockNumber>,
-    events_sender: Option<Sender<PipelineEvent>>,
+    events_sender: MaybeSender<PipelineEvent>,
 }
 
 impl<'db, E> Default for Pipeline<'db, E>
@@ -57,7 +57,7 @@ where
     E: mdbx::EnvironmentKind,
 {
     fn default() -> Self {
-        Self { stages: Vec::new(), max_block: None, events_sender: None }
+        Self { stages: Vec::new(), max_block: None, events_sender: MaybeSender::new(None) }
     }
 }
 
@@ -120,7 +120,7 @@ where
 
     /// Set a channel the pipeline will transmit events over (see [PipelineEvent]).
     pub fn set_channel(mut self, sender: Sender<PipelineEvent>) -> Self {
-        self.events_sender = Some(sender);
+        self.events_sender.set(Some(sender));
         self
     }
 
@@ -138,10 +138,7 @@ where
                 let block_reached = loop {
                     let prev_progress = stage_id.get_progress(&tx)?;
                     self.events_sender
-                        .maybe_send(PipelineEvent::Running {
-                            stage_id,
-                            stage_progress: prev_progress,
-                        })
+                        .send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
                         .await?;
 
                     // Whether any stage has reached the maximum block, which also counts as having
@@ -168,7 +165,7 @@ where
 
                     if output.is_err() {
                         self.events_sender
-                            .maybe_send(PipelineEvent::Ran { stage_id, result: None })
+                            .send(PipelineEvent::Ran { stage_id, result: None })
                             .await?;
                     }
 
@@ -178,10 +175,7 @@ where
                             stage_id.save_progress(&tx, stage_progress)?;
 
                             self.events_sender
-                                .maybe_send(PipelineEvent::Ran {
-                                    stage_id,
-                                    result: Some(out.clone()),
-                                })
+                                .send(PipelineEvent::Ran { stage_id, result: Some(out.clone()) })
                                 .await?;
 
                             // TODO: Make the commit interval configurable
@@ -270,7 +264,7 @@ where
                 if stage_progress < to {
                     debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                     self.events_sender
-                        .maybe_send(PipelineEvent::Unwound {
+                        .send(PipelineEvent::Unwound {
                             stage_id,
                             result: Some(UnwindOutput { stage_progress }),
                         })
@@ -281,9 +275,7 @@ where
                 debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
                 while stage_progress > to {
                     let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-                    self.events_sender
-                        .maybe_send(PipelineEvent::Unwinding { stage_id, input })
-                        .await?;
+                    self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
                     let output = stage.unwind(&mut tx, input).await;
                     match output {
@@ -292,7 +284,7 @@ where
                             stage_id.save_progress(&tx, stage_progress)?;
 
                             self.events_sender
-                                .maybe_send(PipelineEvent::Unwound {
+                                .send(PipelineEvent::Unwound {
                                     stage_id,
                                     result: Some(unwind_output),
                                 })
@@ -300,7 +292,7 @@ where
                         }
                         Err(err) => {
                             self.events_sender
-                                .maybe_send(PipelineEvent::Unwound { stage_id, result: None })
+                                .send(PipelineEvent::Unwound { stage_id, result: None })
                                 .await?;
                             return Err(PipelineError::Stage(StageError::Internal(err)))
                         }

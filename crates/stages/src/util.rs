@@ -1,5 +1,4 @@
 pub(crate) mod opt {
-    use async_trait::async_trait;
     use tokio::sync::mpsc::{error::SendError, Sender};
 
     /// Get an [Option] with the maximum value, compared between the passed in value and the inner
@@ -16,24 +15,30 @@ pub(crate) mod opt {
         a.map_or(Some(b), |v| Some(std::cmp::min(v, b)))
     }
 
-    /// An extension trait for `Option<tokio::sync::mpsc::Sender<T>>`.
-    #[async_trait]
-    pub(crate) trait OptSenderExt<T> {
-        /// Send the given message if the `Option` contains a [Sender].
-        async fn maybe_send(&self, msg: T) -> Result<(), SendError<T>>;
+    /// The producing side of a [tokio::mpsc] channel that may or may not be set.
+    #[derive(Default)]
+    pub(crate) struct MaybeSender<T> {
+        inner: Option<Sender<T>>,
     }
 
-    #[async_trait]
-    impl<T> OptSenderExt<T> for Option<Sender<T>>
-    where
-        T: Send,
-    {
-        async fn maybe_send(&self, msg: T) -> Result<(), SendError<T>> {
-            if let Some(rx) = &self {
-                rx.send(msg).await?;
-            }
+    impl<T> MaybeSender<T> {
+        /// Create a new [MaybeSender]
+        pub(crate) fn new(sender: Option<Sender<T>>) -> Self {
+            Self { inner: sender }
+        }
 
-            Ok(())
+        /// Send a value over the channel if an internal sender has been set.
+        pub(crate) async fn send(&self, value: T) -> Result<(), SendError<T>> {
+            if let Some(rx) = &self.inner {
+                rx.send(value).await
+            } else {
+                Ok(())
+            }
+        }
+
+        /// Set or unset the internal sender.
+        pub(crate) fn set(&mut self, sender: Option<Sender<T>>) {
+            self.inner = sender;
         }
     }
 
