@@ -1,3 +1,8 @@
+/// Wrapper around primitive U256 type to handle json parsing
+pub mod jsonu256;
+
+pub use jsonu256::JsonU256;
+
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 

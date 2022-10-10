@@ -11,7 +11,7 @@
 pub mod cli;
 
 /// Utility functions.
-mod util;
+pub mod util;
 
 /// Command for executing ethereum blockchain tests
 pub mod ethereum_blockchain;
