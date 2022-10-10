@@ -175,12 +175,12 @@ mod tests {
 
         // PUT
         let tx = env.begin_mut_tx().expect(ERROR_INIT_TX);
-        tx.put(PlainState, key, value.clone()).expect(ERROR_PUT);
+        tx.put::<PlainState>(key, value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // GET
         let tx = env.begin_tx().expect(ERROR_INIT_TX);
-        let result = tx.get(PlainState, key).expect(ERROR_GET);
+        let result = tx.get::<PlainState>(key).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -199,7 +199,7 @@ mod tests {
 
             // PUT
             let result = env.update(|tx| {
-                tx.put(PlainState, key, value.clone()).expect(ERROR_PUT);
+                tx.put::<PlainState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
@@ -208,7 +208,7 @@ mod tests {
         let env = Env::<WriteMap>::open(&path, EnvKind::RO).expect(ERROR_DB_CREATION);
 
         // GET
-        let result = env.view(|tx| tx.get(PlainState, key).expect(ERROR_GET)).expect(ERROR_GET);
+        let result = env.view(|tx| tx.get::<PlainState>(key).expect(ERROR_GET)).expect(ERROR_GET);
 
         assert!(result == Some(value))
     }

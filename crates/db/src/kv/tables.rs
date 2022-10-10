@@ -33,14 +33,11 @@ macro_rules! table {
         pub struct $name;
 
         impl $crate::kv::table::Table for $name {
+            const NAME: &'static str = $name::const_name();
             type Key = $key;
             type Value = $value;
             type SeekKey = $seek;
 
-            /// Return $name as it is present inside the database.
-            fn name(&self) -> &'static str {
-                $name::const_name()
-            }
         }
 
         impl $name {
