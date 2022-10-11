@@ -10,4 +10,4 @@ There are 7 label categories in the repository:
 - **Meta labels**: These start with `M-` and convey meaning to the core contributors, usually about the release process.
 - **Platform labels**: These describe the platform an issue is present on. They start with `O-`.
 - **Priority labels**: These are reserved for issues that require more immediate attention (high priority and critical priority) and they start with `P-`.
-- **Status labels**: These labels convey meaning to contributors about an issue or PR's status, e.g. whether they are blocked or need triage.
+- **Status labels**: These labels convey meaning to contributors about an issue or PR's status, e.g. whether they are blocked or need triage. They start with `S-`.
