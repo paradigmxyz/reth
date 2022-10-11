@@ -63,7 +63,10 @@ pub(crate) mod opt {
 }
 
 pub(crate) mod db {
-    use reth_db::mdbx;
+    use reth_db::{
+        kv::{tx::Tx, Env, KVError},
+        mdbx,
+    };
 
     /// A container for a MDBX transaction that will open a new inner transaction when the current
     /// one is committed.
@@ -76,8 +79,8 @@ pub(crate) mod db {
         E: mdbx::EnvironmentKind,
     {
         /// A handle to the MDBX database.
-        pub(crate) db: &'db mdbx::Environment<E>,
-        tx: Option<mdbx::Transaction<'tx, mdbx::RW, E>>,
+        pub(crate) db: &'db Env<E>,
+        tx: Option<Tx<'tx, mdbx::RW, E>>,
     }
 
     impl<'db, 'tx, E> TxContainer<'db, 'tx, E>
@@ -88,8 +91,8 @@ pub(crate) mod db {
         /// Create a new container with the given database handle.
         ///
         /// A new inner transaction will be opened.
-        pub(crate) fn new(db: &'db mdbx::Environment<E>) -> Result<Self, mdbx::Error> {
-            Ok(Self { db, tx: Some(db.begin_rw_txn()?) })
+        pub(crate) fn new(db: &'db Env<E>) -> Result<Self, KVError> {
+            Ok(Self { db, tx: Some(Tx::new(db.begin_rw_txn()?)) })
         }
 
         /// Commit the current inner transaction and open a new one.
@@ -98,10 +101,10 @@ pub(crate) mod db {
         ///
         /// Panics if an inner transaction does not exist. This should never be the case unless
         /// [TxContainer::close] was called without following up with a call to [TxContainer::open].
-        pub(crate) fn commit(&mut self) -> Result<bool, mdbx::Error> {
+        pub(crate) fn commit(&mut self) -> Result<bool, KVError> {
             let success =
                 self.tx.take().expect("Tried committing a non-existent transaction").commit()?;
-            self.tx = Some(self.db.begin_rw_txn()?);
+            self.tx = Some(Tx::new(self.db.begin_rw_txn()?));
             Ok(success)
         }
 
@@ -111,7 +114,7 @@ pub(crate) mod db {
         ///
         /// Panics if an inner transaction does not exist. This should never be the case unless
         /// [TxContainer::close] was called without following up with a call to [TxContainer::open].
-        pub(crate) fn get(&self) -> &mdbx::Transaction<'tx, mdbx::RW, E> {
+        pub(crate) fn get(&self) -> &Tx<'tx, mdbx::RW, E> {
             self.tx.as_ref().expect("Tried getting a reference to a non-existent transaction")
         }
 
@@ -121,15 +124,15 @@ pub(crate) mod db {
         ///
         /// Panics if an inner transaction does not exist. This should never be the case unless
         /// [TxContainer::close] was called without following up with a call to [TxContainer::open].
-        pub(crate) fn get_mut(&mut self) -> &mut mdbx::Transaction<'tx, mdbx::RW, E> {
+        pub(crate) fn get_mut(&mut self) -> &mut Tx<'tx, mdbx::RW, E> {
             self.tx
                 .as_mut()
                 .expect("Tried getting a mutable reference to a non-existent transaction")
         }
 
         /// Open a new inner transaction.
-        pub(crate) fn open(&mut self) -> Result<(), mdbx::Error> {
-            self.tx = Some(self.db.begin_rw_txn()?);
+        pub(crate) fn open(&mut self) -> Result<(), KVError> {
+            self.tx = Some(Tx::new(self.db.begin_rw_txn()?));
             Ok(())
         }
 

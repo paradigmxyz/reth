@@ -3,7 +3,7 @@ use crate::{
     util::{db::TxContainer, opt::MaybeSender},
     ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_db::mdbx;
+use reth_db::{kv::Env, mdbx};
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::mpsc::Sender;
@@ -118,7 +118,7 @@ where
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self, db: &'db mdbx::Environment<E>) -> Result<(), PipelineError> {
+    pub async fn run(&mut self, db: &'db Env<E>) -> Result<(), PipelineError> {
         let mut state = PipelineState {
             events_sender: self.events_sender.clone(),
             max_block: self.max_block,
@@ -189,7 +189,7 @@ where
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
-        db: &'db mdbx::Environment<E>,
+        db: &'db Env<E>,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
@@ -202,7 +202,7 @@ where
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut tx = db.begin_rw_txn()?;
+        let mut tx = db.begin_mut_tx()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
@@ -355,8 +355,11 @@ where
 mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
-    use reth_db::mdbx;
-    use tempfile::tempdir;
+    use reth_db::{
+        kv::{tx::Tx, EnvKind},
+        mdbx,
+    };
+    use tempfile::TempDir;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
@@ -652,34 +655,15 @@ mod tests {
     mod utils {
         use super::*;
         use async_trait::async_trait;
+        use reth_db::kv::KVError;
         use std::{collections::VecDeque, error::Error};
 
-        // TODO: This is... not great.
-        pub(crate) fn test_db() -> Result<mdbx::Environment<mdbx::WriteMap>, mdbx::Error> {
-            const DB_TABLES: usize = 10;
-
-            // Build environment
-            let mut builder = mdbx::Environment::<mdbx::WriteMap>::new();
-            builder.set_max_dbs(DB_TABLES);
-            builder.set_geometry(mdbx::Geometry {
-                size: Some(0..usize::MAX),
-                growth_step: None,
-                shrink_threshold: None,
-                page_size: None,
-            });
-            builder.set_rp_augment_limit(16 * 256 * 1024);
-
-            // Open
-            let tempdir = tempdir().unwrap();
-            let path = tempdir.path();
-            std::fs::DirBuilder::new().recursive(true).create(path).unwrap();
-            let db = builder.open(path)?;
-
-            // Create tables
-            let tx = db.begin_rw_txn()?;
-            tx.create_db(Some("SyncStage"), mdbx::DatabaseFlags::default())?;
-            tx.commit()?;
-
+        pub(crate) fn test_db() -> Result<Env<mdbx::WriteMap>, KVError> {
+            let path =
+                TempDir::new().expect("Not able to create a temporary directory.").into_path();
+            let db = Env::<mdbx::WriteMap>::open(&path, EnvKind::RW)
+                .expect("Not able to open existing mdbx file.");
+            db.create_tables()?;
             Ok(db)
         }
 
@@ -719,7 +703,7 @@ mod tests {
 
             async fn execute<'tx>(
                 &mut self,
-                _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+                _: &mut Tx<'tx, mdbx::RW, E>,
                 _: ExecInput,
             ) -> Result<ExecOutput, StageError>
             where
@@ -732,7 +716,7 @@ mod tests {
 
             async fn unwind<'tx>(
                 &mut self,
-                _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+                _: &mut Tx<'tx, mdbx::RW, E>,
                 _: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
             where
