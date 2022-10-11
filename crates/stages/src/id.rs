@@ -27,7 +27,7 @@ impl StageId {
         K: mdbx::TransactionKind,
         E: mdbx::EnvironmentKind,
     {
-        Ok(tx.get::<SyncStage>(self.0.as_bytes().to_vec())?)
+        tx.get::<SyncStage>(self.0.as_bytes().to_vec())
     }
 
     /// Save the progress of this stage.
