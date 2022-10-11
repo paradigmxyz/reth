@@ -41,3 +41,55 @@ impl PipelineState {
         self.reached_tip = flag;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reached_tip() {
+        let mut state = PipelineState {
+            events_sender: MaybeSender::new(None),
+            max_block: None,
+            maximum_progress: None,
+            minimum_progress: None,
+            reached_tip: false,
+        };
+
+        // default
+        assert!(!state.reached_tip());
+
+        // reached tip
+        state.set_reached_tip(true);
+        assert!(state.reached_tip());
+
+        // reached max block
+        state.set_reached_tip(false);
+        state.max_block = Some(1);
+        state.minimum_progress = Some(1);
+        assert!(state.reached_tip());
+    }
+
+    #[test]
+    fn record_progress_outliers() {
+        let mut state = PipelineState {
+            events_sender: MaybeSender::new(None),
+            max_block: None,
+            maximum_progress: None,
+            minimum_progress: None,
+            reached_tip: false,
+        };
+
+        state.record_progress_outliers(10);
+        assert_eq!(state.minimum_progress, Some(10));
+        assert_eq!(state.maximum_progress, Some(10));
+
+        state.record_progress_outliers(20);
+        assert_eq!(state.minimum_progress, Some(10));
+        assert_eq!(state.maximum_progress, Some(20));
+
+        state.record_progress_outliers(1);
+        assert_eq!(state.minimum_progress, Some(1));
+        assert_eq!(state.maximum_progress, Some(20));
+    }
+}
