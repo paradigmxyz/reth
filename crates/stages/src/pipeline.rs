@@ -147,9 +147,9 @@ where
     /// Performs one pass of the pipeline across all stages. After successful
     /// execution of each stage, it proceeds to commit it to the database.
     ///
-    /// If any stage is unsuccessful at execution, we proceed to:
-    /// 1. Unwind: undo the progress across the entire pipeline up to the block that caused the
-    /// error. 2.
+    /// If any stage is unsuccessful at execution, we proceed to
+    /// unwind. This will undo the progress across the entire pipeline
+    /// up to the block that caused the error.
     async fn run_loop<'tx>(
         &mut self,
         state: &mut PipelineState,
@@ -170,7 +170,6 @@ where
                 ControlFlow::Continue => {
                     previous_stage =
                         Some((stage_id, stage_id.get_progress(tx.get())?.unwrap_or_default()));
-                    tx.commit()?;
                 }
                 ControlFlow::Unwind { target, bad_block } => {
                     // TODO: Note on close
