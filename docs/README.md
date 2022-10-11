@@ -1,3 +1,6 @@
 ## reth Contributor Documentation
 
-This directory contains documentation for contributors on how the [repository](./repo) is structured, as well as high level [design documents](./design).
+This directory contains documentation for contributors.
+
+- [Repository and project structure](./repo)
+- [Design documents](./design)
