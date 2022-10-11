@@ -1,4 +1,7 @@
-use crate::{identifier::TransactionId, TransactionOrdering, ValidPoolTransaction};
+use crate::{
+    identifier::TransactionId, pool::best::BestTransactions, TransactionOrdering,
+    ValidPoolTransaction,
+};
 use reth_primitives::rpc::TxHash;
 use std::{
     cmp::Ordering,
@@ -138,7 +141,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 /// A transaction that is ready to be included in a block.
 pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
-    transaction: PendingTransactionRef<T>,
+    pub(crate) transaction: PendingTransactionRef<T>,
 }
 
 // == impl PendingTransaction ===
@@ -168,12 +171,12 @@ pub(crate) struct PendingTransactionRef<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingTransactionRef<T> {
     /// The next transaction of the sender: `nonce + 1`
-    fn unlocks(&self) -> TransactionId {
+    pub(crate) fn unlocks(&self) -> TransactionId {
         self.transaction.transaction_id.descendant()
     }
 
     /// The hash for this transaction
-    fn hash(&self) -> &TxHash {
+    pub(crate) fn hash(&self) -> &TxHash {
         self.transaction.hash()
     }
 }
@@ -210,56 +213,5 @@ impl<T: TransactionOrdering> Ord for PendingTransactionRef<T> {
         self.priority
             .cmp(&other.priority)
             .then_with(|| other.submission_id.cmp(&self.submission_id))
-    }
-}
-
-/// An iterator that returns transactions that can be executed on the current state.
-pub struct BestTransactions<T: TransactionOrdering> {
-    all: BTreeMap<TransactionId, Arc<PendingTransaction<T>>>,
-    independent: BTreeSet<PendingTransactionRef<T>>,
-    invalid: HashSet<TxHash>,
-}
-
-// == impl TransactionsIterator ==
-
-impl<T: TransactionOrdering> BestTransactions<T> {
-    /// Mark the transaction and it's descendants as invalid.
-    pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
-        self.invalid.insert(*tx.hash());
-    }
-}
-
-impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item) {
-        BestTransactions::mark_invalid(self, tx)
-    }
-}
-
-impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
-    type Item = Arc<ValidPoolTransaction<T::Transaction>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let best = self.independent.iter().next_back()?.clone();
-            let best = self.independent.take(&best)?;
-            let hash = best.transaction.hash();
-
-            // skip transactions that were marked as invalid
-            if self.invalid.contains(hash) {
-                debug!(
-                    target: "txpool",
-                    "[{:?}] skipping invalid transaction",
-                    hash
-                );
-                continue
-            }
-
-            // Insert transactions that just got unlocked.
-            if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.transaction.clone());
-            }
-
-            return Some(best.transaction)
-        }
     }
 }

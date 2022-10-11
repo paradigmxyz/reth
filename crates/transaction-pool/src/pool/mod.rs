@@ -69,12 +69,14 @@ use crate::{
     TransactionValidator, U256,
 };
 
+use best::BestTransactions;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{TxHash, U64};
 use std::{collections::HashMap, sync::Arc};
 use tracing::warn;
 
+mod best;
 mod events;
 mod listener;
 mod parked;
@@ -83,10 +85,7 @@ pub(crate) mod state;
 mod transaction;
 pub mod txpool;
 
-use crate::{
-    pool::{pending::BestTransactions, txpool::TxPool},
-    validate::TransactionValidationOutcome,
-};
+use crate::{pool::txpool::TxPool, validate::TransactionValidationOutcome};
 pub use events::TransactionEvent;
 
 /// Shareable Transaction pool.

@@ -3,8 +3,9 @@ use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
     pool::{
+        best::BestTransactions,
         parked::ParkedPool,
-        pending::{BestTransactions, PendingPool},
+        pending::PendingPool,
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
