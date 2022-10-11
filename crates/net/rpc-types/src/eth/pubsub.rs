@@ -5,7 +5,8 @@ use reth_primitives::{rpc::Filter, H256};
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Subscription result.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
 pub enum SubscriptionResult {
     /// New block header.
     Header(Box<RichHeader>),
@@ -18,7 +19,7 @@ pub enum SubscriptionResult {
 }
 
 /// Response type for a SyncStatus subscription
-#[derive(Debug, Serialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PubSubSyncStatus {
     /// If not currently syncing, this should always be `false`
@@ -28,7 +29,7 @@ pub enum PubSubSyncStatus {
 }
 
 /// Sync status infos
-#[derive(Debug, Serialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct SyncStatusMetadata {
@@ -54,7 +55,7 @@ impl Serialize for SubscriptionResult {
 }
 
 /// Subscription kind.
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
@@ -76,6 +77,18 @@ pub enum Params {
     None,
     /// Log parameters.
     Logs(Box<Filter>),
+}
+
+impl Serialize for Params {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Params::None => (&[] as &[serde_json::Value]).serialize(serializer),
+            Params::Logs(logs) => logs.serialize(serializer),
+        }
+    }
 }
 
 impl<'a> Deserialize<'a> for Params {
