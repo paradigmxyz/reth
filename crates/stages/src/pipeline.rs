@@ -116,7 +116,8 @@ where
         self
     }
 
-    /// Run the pipeline.
+    /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
+    /// a `max_block` in the pipeline.
     pub async fn run(&mut self, db: &'db mdbx::Environment<E>) -> Result<(), PipelineError> {
         let mut state = PipelineState {
             events_sender: self.events_sender.clone(),
@@ -128,27 +129,27 @@ where
 
         loop {
             let mut tx = TxContainer::new(db)?;
-            match self.run_loop(&mut state, &mut tx).await? {
-                ControlFlow::Continue => {
-                    tx.commit()?;
+            let next_action = self.run_loop(&mut state, &mut tx).await?;
 
-                    // Check if we've reached our desired target block
-                    if state
-                        .minimum_progress
-                        .zip(self.max_block)
-                        .map_or(false, |(progress, target)| progress >= target)
-                    {
-                        return Ok(())
-                    }
-                }
-                ControlFlow::Unwind { .. } => (),
+            // Terminate the loop early if it's reached the maximum user
+            // configured block.
+            if matches!(next_action, ControlFlow::Continue) &&
+                state
+                    .minimum_progress
+                    .zip(self.max_block)
+                    .map_or(false, |(progress, target)| progress >= target)
+            {
+                return Ok(())
             }
         }
     }
 
-    /// Run a single stage loop.
+    /// Performs one pass of the pipeline across all stages. After successful
+    /// execution of each stage, it proceeds to commit it to the database.
     ///
-    /// A stage loop will run each stage serially.
+    /// If any stage is unsuccessful at execution, we proceed to
+    /// unwind. This will undo the progress across the entire pipeline
+    /// up to the block that caused the error.
     async fn run_loop<'tx>(
         &mut self,
         state: &mut PipelineState,
@@ -160,11 +161,12 @@ where
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
-            match queued_stage
+            let next = queued_stage
                 .execute(state, previous_stage, tx)
                 .instrument(info_span!("Running", stage = %stage_id))
-                .await?
-            {
+                .await?;
+
+            match next {
                 ControlFlow::Continue => {
                     previous_stage =
                         Some((stage_id, stage_id.get_progress(tx.get())?.unwrap_or_default()));
@@ -209,52 +211,44 @@ where
         let mut tx = db.begin_rw_txn()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
+            let span = info_span!("Unwinding", stage = %stage_id);
+            let _enter = span.enter();
+
             let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
+            if stage_progress < to {
+                debug!(from = %stage_progress, %to, "Unwind point too far for stage");
+                self.events_sender
+                    .send(PipelineEvent::Unwound {
+                        stage_id,
+                        result: Some(UnwindOutput { stage_progress }),
+                    })
+                    .await?;
+                return Ok(())
+            }
 
-            let unwind: Result<(), PipelineError> = async {
-                if stage_progress < to {
-                    debug!(from = %stage_progress, %to, "Unwind point too far for stage");
-                    self.events_sender
-                        .send(PipelineEvent::Unwound {
-                            stage_id,
-                            result: Some(UnwindOutput { stage_progress }),
-                        })
-                        .await?;
-                    return Ok(())
-                }
+            debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
+            while stage_progress > to {
+                let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
+                self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
-                while stage_progress > to {
-                    let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-                    self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
+                let output = stage.unwind(&mut tx, input).await;
+                match output {
+                    Ok(unwind_output) => {
+                        stage_progress = unwind_output.stage_progress;
+                        stage_id.save_progress(&tx, stage_progress)?;
 
-                    let output = stage.unwind(&mut tx, input).await;
-                    match output {
-                        Ok(unwind_output) => {
-                            stage_progress = unwind_output.stage_progress;
-                            stage_id.save_progress(&tx, stage_progress)?;
-
-                            self.events_sender
-                                .send(PipelineEvent::Unwound {
-                                    stage_id,
-                                    result: Some(unwind_output),
-                                })
-                                .await?;
-                        }
-                        Err(err) => {
-                            self.events_sender
-                                .send(PipelineEvent::Unwound { stage_id, result: None })
-                                .await?;
-                            return Err(PipelineError::Stage(StageError::Internal(err)))
-                        }
+                        self.events_sender
+                            .send(PipelineEvent::Unwound { stage_id, result: Some(unwind_output) })
+                            .await?;
+                    }
+                    Err(err) => {
+                        self.events_sender
+                            .send(PipelineEvent::Unwound { stage_id, result: None })
+                            .await?;
+                        return Err(PipelineError::Stage(StageError::Internal(err)))
                     }
                 }
-
-                Ok(())
             }
-            .instrument(info_span!("Unwinding", stage = %stage_id))
-            .await;
-            unwind?
         }
 
         tx.commit()?;
