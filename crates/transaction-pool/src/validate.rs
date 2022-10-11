@@ -83,6 +83,16 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.nonce()
     }
 
+    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    pub(crate) fn max_fee_per_gas(&self) -> Option<U256> {
+        self.transaction.max_fee_per_gas()
+    }
+
+    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
+    pub(crate) fn gas_limit(&self) -> u64 {
+        self.transaction.gas_limit()
+    }
+
     /// Returns true if this transaction is underpriced compared to the other.
     pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
         self.transaction.effective_gas_price() <= other.transaction.effective_gas_price()

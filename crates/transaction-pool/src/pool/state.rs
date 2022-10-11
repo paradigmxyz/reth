@@ -15,6 +15,7 @@ bitflags::bitflags! {
         /// Set to `1` if the sender's balance can cover the maximum cost for this transaction (`feeCap * gasLimit + value`).
         /// This includes cumulative costs of prior transactions, which ensures that the sender has enough funds for all max cost of prior transactions.
         const ENOUGH_BALANCE = 0b001000;
+        /// Bit set to true if the transaction has a lower gas limit than the block's gas limit
         const NOT_TOO_MUCH_GAS = 0b000100;
         /// Covers the Dynamic fee requirement.
         ///
@@ -22,7 +23,8 @@ bitflags::bitflags! {
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
         const IS_LOCAL = 0b000001;
 
-        const BASE_FEE_POOL_BITS = Self::ENOUGH_FEE_CAP_PROTOCOL.bits + Self::NO_NONCE_GAPS.bits + Self::ENOUGH_BALANCE.bits + Self::NOT_TOO_MUCH_GAS.bits;
+        const BASE_FEE_POOL_BITS = Self::ENOUGH_FEE_CAP_PROTOCOL.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits;
+
         const QUEUED_POOL_BITS  = Self::ENOUGH_FEE_CAP_PROTOCOL.bits;
     }
 }
@@ -55,7 +57,7 @@ impl From<TxState> for SubPool {
         if value > TxState::BASE_FEE_POOL_BITS {
             return SubPool::Pending
         }
-        if value < TxState::BASE_FEE_POOL_BITS {
+        if value < TxState::QUEUED_POOL_BITS {
             return SubPool::Queued
         }
         SubPool::BaseFee

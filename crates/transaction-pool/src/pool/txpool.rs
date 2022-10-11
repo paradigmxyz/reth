@@ -238,6 +238,12 @@ impl<T: TransactionOrdering> TxPool<T> {
 pub struct AllTransactions<T: PoolTransaction> {
     /// Expected base fee for the pending block.
     pending_basefee: U256,
+    /// Minimum base fee required by the protol.
+    ///
+    /// Transactions with a lower base fee will never be included by the chain
+    minimal_protocol_basefee: U256,
+    /// The max gas limit of the block
+    block_gas_limit: u64,
     /// _All_ transactions identified by their hash.
     by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
@@ -250,6 +256,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns if the transaction for the given hash is already included in this pool
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.by_hash.contains_key(tx_hash)
+    }
+
+    /// Returns the internal transaction with additional metadata
+    pub(crate) fn get(&self, id: &TransactionId) -> Option<&PoolInternalTransaction<T>> {
+        self.txs.get(id)
     }
 
     /// Increments the transaction counter for the sender
@@ -395,6 +406,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> InsertResult<T> {
+        assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
+
         let tx_id = *transaction.id();
         let transaction = Arc::new(transaction);
         let mut state = TxState::default();
@@ -404,8 +417,28 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let predecessor =
             TransactionId::ancestor(transaction.transaction.nonce(), on_chain_nonce, tx_id.sender);
 
+        // If there's no predecessor then this is the next transaction
         if predecessor.is_none() {
             state.insert(TxState::NO_NONCE_GAPS);
+        }
+
+        // Check dynamic fee
+        if let Some(fee) = transaction.max_fee_per_gas() {
+            if fee >= self.pending_basefee {
+                state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+            }
+            if fee > self.minimal_protocol_basefee {
+                state.insert(TxState::ENOUGH_FEE_CAP_PROTOCOL);
+            }
+        } else {
+            // legacy transactions always satisfy the condition
+            state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+            state.insert(TxState::ENOUGH_FEE_CAP_PROTOCOL);
+        }
+
+        // Ensure tx does not exceed block gas limit
+        if transaction.gas_limit() < self.block_gas_limit {
+            state.insert(TxState::NOT_TOO_MUCH_GAS);
         }
 
         let mut replaced_tx = None;
@@ -426,7 +459,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
             Entry::Occupied(mut entry) => {
                 // Transaction already exists
-
                 // Ensure the new transaction is not underpriced
                 if transaction.is_underpriced(entry.get().transaction.as_ref()) {
                     return InsertResult::Underpriced {
@@ -434,10 +466,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         existing: *entry.get().transaction.hash(),
                     }
                 }
-                self.by_hash.insert(*pool_tx.transaction.hash(), pool_tx.transaction.clone());
+                let new_hash = *pool_tx.transaction.hash();
+                let new_transaction = pool_tx.transaction.clone();
                 let replaced = entry.insert(pool_tx);
-                // also remove the hash
                 self.by_hash.remove(replaced.transaction.hash());
+                self.by_hash.insert(new_hash, new_transaction);
+                // also remove the hash
                 replaced_tx = Some((replaced.transaction, replaced.subpool));
             }
         }
@@ -445,12 +479,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id, on_chain_nonce);
         {
-            let mut next_nonce = on_chain_id.next_nonce();
+            // Tracks the next nonce we expect if the transactions are gapless
+            let mut next_nonce = on_chain_id.nonce;
 
             // Traverse all transactions of the sender and update existing transactions
             for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
                 let current_pool = tx.subpool;
-
                 if next_nonce != id.nonce {
                     // nothing to update
                     break
@@ -504,12 +538,25 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn on_mined(&mut self, _sender: &SenderId, _new_balance: U256, _old_balance: U256) {
         todo!()
     }
+
+    /// Number of transactions in the entire pool
+    pub(crate) fn len(&self) -> usize {
+        self.txs.len()
+    }
+
+    /// Whether the pool is empty
+    pub(crate) fn is_empty(&self) -> bool {
+        self.txs.is_empty()
+    }
 }
 
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
             pending_basefee: Default::default(),
+            // TODO(mattsse): document
+            minimal_protocol_basefee: 7u64.into(),
+            block_gas_limit: 30_000_000,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
@@ -670,7 +717,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
-        let valid_tx = f.validated(tx);
+        let valid_tx = f.validated(tx.clone());
         let res = pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce);
         match res {
             InsertResult::Inserted { updates, replaced_tx, move_to, state, .. } => {
@@ -684,11 +731,134 @@ mod tests {
                 panic!("not underpriced")
             }
         };
-
+        assert_eq!(pool.len(), 1);
         assert!(pool.contains(valid_tx.hash()));
+        let expected_state = TxState::ENOUGH_FEE_CAP_BLOCK | TxState::NO_NONCE_GAPS;
+        let inserted = pool.get(valid_tx.id()).unwrap();
+        assert!(inserted.state.intersects(expected_state));
 
-        // insert same tx again, considered underpriced
+        // insert the same tx again
         let res = pool.insert_tx(valid_tx, on_chain_balance, on_chain_nonce);
         assert!(res.is_underpriced());
+        assert_eq!(pool.len(), 1);
+
+        let valid_tx = f.validated(tx.next());
+        let res = pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce);
+        match res {
+            InsertResult::Inserted { updates, replaced_tx, move_to, state, .. } => {
+                assert!(updates.is_empty());
+                assert!(replaced_tx.is_none());
+                assert!(state.contains(TxState::NO_NONCE_GAPS));
+                assert!(!state.contains(TxState::ENOUGH_BALANCE));
+                assert_eq!(move_to, SubPool::Queued);
+            }
+            InsertResult::Underpriced { .. } => {
+                panic!("not underpriced")
+            }
+        };
+        assert!(pool.contains(valid_tx.hash()));
+        assert_eq!(pool.len(), 2);
+        let inserted = pool.get(valid_tx.id()).unwrap();
+        assert!(inserted.state.intersects(expected_state));
+    }
+
+    #[test]
+    fn insert_replace() {
+        let on_chain_balance = U256::zero();
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        let res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let replacement = f.validated(tx.rng_hash().inc_price());
+        let res = pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce);
+        match res {
+            InsertResult::Inserted { updates, replaced_tx, .. } => {
+                assert!(updates.is_empty());
+                let replaced = replaced_tx.unwrap();
+                assert_eq!(replaced.0.hash(), first.hash());
+            }
+            InsertResult::Underpriced { .. } => {
+                panic!("not underpriced")
+            }
+        };
+        assert!(!pool.contains(first.hash()));
+        assert!(pool.contains(replacement.hash()));
+        assert_eq!(pool.len(), 1);
+    }
+
+    // insert nonce then nonce - 1
+    #[test]
+    fn insert_previous() {
+        let on_chain_balance = U256::zero();
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_nonce().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        let res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+
+        let first_in_pool = pool.get(first.id()).unwrap();
+        // has nonce gap
+        assert!(!first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+
+        let prev = f.validated(tx.prev());
+        let res = pool.insert_tx(prev, on_chain_balance, on_chain_nonce);
+
+        match res {
+            InsertResult::Inserted { updates, replaced_tx, state, move_to, .. } => {
+                // no updates since still in queued pool
+                assert!(updates.is_empty());
+                assert!(replaced_tx.is_none());
+                assert!(state.contains(TxState::NO_NONCE_GAPS));
+                assert_eq!(move_to, SubPool::Queued);
+            }
+            InsertResult::Underpriced { .. } => {
+                panic!("not underpriced")
+            }
+        };
+
+        let first_in_pool = pool.get(first.id()).unwrap();
+        // has non nonce gap
+        assert!(first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+    }
+
+    // insert nonce then nonce - 1
+    #[test]
+    fn insert_with_updates() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_nonce().set_gas_price(100u64.into()).inc_limit();
+        let first = f.validated(tx.clone());
+        let res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+
+        let first_in_pool = pool.get(first.id()).unwrap();
+        // has nonce gap
+        assert!(!first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+        assert_eq!(SubPool::Queued, first_in_pool.subpool);
+
+        let prev = f.validated(tx.prev());
+        let res = pool.insert_tx(prev, on_chain_balance, on_chain_nonce);
+
+        match res {
+            InsertResult::Inserted { updates, replaced_tx, state, move_to, .. } => {
+                // updated previous tx
+                assert_eq!(updates.len(), 1);
+                assert!(replaced_tx.is_none());
+                assert!(state.contains(TxState::NO_NONCE_GAPS));
+                assert_eq!(move_to, SubPool::Pending);
+            }
+            InsertResult::Underpriced { .. } => {
+                panic!("not underpriced")
+            }
+        };
+
+        let first_in_pool = pool.get(first.id()).unwrap();
+        // has non nonce gap
+        assert!(first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+        assert_eq!(SubPool::Pending, first_in_pool.subpool);
     }
 }

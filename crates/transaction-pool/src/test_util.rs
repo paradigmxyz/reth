@@ -76,7 +76,7 @@ pub enum MockTransaction {
         hash: H256,
         sender: Address,
         nonce: u64,
-        gas_price: u64,
+        gas_price: U256,
         gas_limit: u64,
         value: U256,
     },
@@ -84,8 +84,8 @@ pub enum MockTransaction {
         hash: H256,
         sender: Address,
         nonce: u64,
-        max_fee_per_gas: u64,
-        max_priority_fee_per_gas: u64,
+        max_fee_per_gas: U256,
+        max_priority_fee_per_gas: U256,
         gas_limit: u64,
         value: U256,
     },
@@ -108,7 +108,7 @@ impl MockTransaction {
             hash: H256::random(),
             sender: Address::random(),
             nonce: 0,
-            gas_price: 0,
+            gas_price: U256::zero(),
             gas_limit: 0,
             value: Default::default(),
         }
@@ -120,28 +120,28 @@ impl MockTransaction {
             hash: H256::random(),
             sender: Address::random(),
             nonce: 0,
-            max_fee_per_gas: 0,
-            max_priority_fee_per_gas: 0,
+            max_fee_per_gas: U256::zero(),
+            max_priority_fee_per_gas: U256::zero(),
             gas_limit: 0,
             value: Default::default(),
         }
     }
 
-    pub fn set_priority_fee(&mut self, val: u64) -> &mut Self {
+    pub fn set_priority_fee(&mut self, val: U256) -> &mut Self {
         if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } = self {
             *max_priority_fee_per_gas = val;
         }
         self
     }
 
-    pub fn with_priority_fee(mut self, val: u64) -> Self {
+    pub fn with_priority_fee(mut self, val: U256) -> Self {
         if let MockTransaction::Eip1559 { ref mut max_priority_fee_per_gas, .. } = self {
             *max_priority_fee_per_gas = val;
         }
         self
     }
 
-    pub fn get_priority_fee(&self) -> Option<u64> {
+    pub fn get_priority_fee(&self) -> Option<U256> {
         if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } = self {
             Some(*max_priority_fee_per_gas)
         } else {
@@ -149,21 +149,21 @@ impl MockTransaction {
         }
     }
 
-    pub fn set_max_fee(&mut self, val: u64) -> &mut Self {
+    pub fn set_max_fee(&mut self, val: U256) -> &mut Self {
         if let MockTransaction::Eip1559 { max_fee_per_gas, .. } = self {
             *max_fee_per_gas = val;
         }
         self
     }
 
-    pub fn with_max_fee(mut self, val: u64) -> Self {
+    pub fn with_max_fee(mut self, val: U256) -> Self {
         if let MockTransaction::Eip1559 { ref mut max_fee_per_gas, .. } = self {
             *max_fee_per_gas = val;
         }
         self
     }
 
-    pub fn get_max_fee(&self) -> Option<u64> {
+    pub fn get_max_fee(&self) -> Option<U256> {
         if let MockTransaction::Eip1559 { max_fee_per_gas, .. } = self {
             Some(*max_fee_per_gas)
         } else {
@@ -171,7 +171,7 @@ impl MockTransaction {
         }
     }
 
-    pub fn set_gas_price(&mut self, val: u64) -> &mut Self {
+    pub fn set_gas_price(&mut self, val: U256) -> &mut Self {
         match self {
             MockTransaction::Legacy { gas_price, .. } => {
                 *gas_price = val;
@@ -184,7 +184,7 @@ impl MockTransaction {
         self
     }
 
-    pub fn with_gas_price(mut self, val: u64) -> Self {
+    pub fn with_gas_price(mut self, val: U256) -> Self {
         match self {
             MockTransaction::Legacy { ref mut gas_price, .. } => {
                 *gas_price = val;
@@ -201,11 +201,17 @@ impl MockTransaction {
         self
     }
 
-    pub fn get_gas_price(&self) -> u64 {
+    pub fn get_gas_price(&self) -> U256 {
         match self {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
+    }
+
+    /// Returns a clone with a decreased nonce
+    pub fn prev(&self) -> Self {
+        let mut next = self.clone().with_hash(H256::random());
+        next.with_nonce(self.get_nonce() - 1)
     }
 
     /// Returns a clone with an increased nonce
@@ -213,6 +219,7 @@ impl MockTransaction {
         let mut next = self.clone().with_hash(H256::random());
         next.with_nonce(self.get_nonce() + 1)
     }
+
     /// Returns a clone with an increased nonce
     pub fn skip(&self, skip: u64) -> Self {
         let mut next = self.clone().with_hash(H256::random());
@@ -223,6 +230,11 @@ impl MockTransaction {
     pub fn inc_nonce(mut self) -> Self {
         let nonce = self.get_nonce() + 1;
         self.with_nonce(nonce)
+    }
+
+    /// Sets a new random hash
+    pub fn rng_hash(mut self) -> Self {
+        self.with_hash(H256::random())
     }
 
     /// Returns a new transaction with a higher gas price +1
@@ -280,18 +292,22 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn effective_gas_price(&self) -> u64 {
+    fn effective_gas_price(&self) -> U256 {
         self.get_gas_price()
     }
 
-    fn max_fee_per_gas(&self) -> Option<u64> {
+    fn gas_limit(&self) -> u64 {
+        self.get_gas_limit()
+    }
+
+    fn max_fee_per_gas(&self) -> Option<U256> {
         match self {
             MockTransaction::Legacy { .. } => None,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
         }
     }
 
-    fn max_priority_fee_per_gas(&self) -> Option<u64> {
+    fn max_priority_fee_per_gas(&self) -> Option<U256> {
         match self {
             MockTransaction::Legacy { .. } => None,
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => {

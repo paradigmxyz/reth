@@ -24,13 +24,13 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ///
     /// # Panics
     ///
-    /// if the transaction is already included.
+    /// If the transaction is already included.
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
         assert!(!self.by_id.contains_key(&id), "transaction already included");
         let submission_id = self.next_id();
 
-        let transaction = ParkedPoolTransaction {submission_id, transaction: tx.into()};
+        let transaction = ParkedPoolTransaction { submission_id, transaction: tx.into() };
 
         self.by_id.insert(id, transaction.clone());
         self.best.insert(transaction);
@@ -67,12 +67,9 @@ struct ParkedPoolTransaction<T: ParkedOrd> {
     transaction: T,
 }
 
-impl<T:ParkedOrd>  Clone for ParkedPoolTransaction<T> {
+impl<T: ParkedOrd> Clone for ParkedPoolTransaction<T> {
     fn clone(&self) -> Self {
-        Self {
-            submission_id: self.submission_id,
-            transaction: self.transaction.clone()
-        }
+        Self { submission_id: self.submission_id, transaction: self.transaction.clone() }
     }
 }
 
@@ -191,11 +188,7 @@ impl_ord_wrapper!(QueuedOrd);
 
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        todo!()
+        // TODO ideally compare by distance here.
+        Ordering::Equal
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }
