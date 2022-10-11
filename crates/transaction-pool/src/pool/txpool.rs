@@ -23,6 +23,37 @@ use std::{
 /// A pool that manages transactions.
 ///
 /// This pool maintains the state of all transactions and stores them accordingly.
+
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ```mermaid
+/// graph TB
+///   subgraph TxPool
+///     direction TB
+///     pool[(All Transactions)]
+///     subgraph Subpools
+///         direction TB
+///         B3[(Queued)]
+///         B1[(Pending)]
+///         B2[(Basefee)]
+///     end
+///   end
+///   discard([discard])
+///   production([Block Production])
+///   new([New Block])
+///   A[Incoming Tx] --> B[Validation] -->|insert| pool
+///   pool --> |if ready| B1
+///   pool --> |if ready + basfee too low| B2
+///   pool --> |nonce gap or lack of funds| B3
+///   pool --> |update| pool
+///   B1 --> |best| production
+///   B2 --> |worst| discard
+///   B3 --> |worst| discard
+///   B1 --> |increased fee| B2
+///   B2 --> |decreased fee| B1
+///   B3 --> |promote| B1
+///   B3 -->  |promote| B2
+///   new -->  |apply state changes| pool
+/// ```
 pub struct TxPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<T>,
