@@ -20,6 +20,11 @@ use std::{
     sync::Arc,
 };
 
+/// The minimal value the basefee can decrease to
+///
+/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` (https://eips.ethereum.org/EIPS/eip-1559) is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
+const MIN_PROTOCOL_BASE_FEE: U256 = U256([7, 0, 0, 0]);
+
 /// A pool that manages transactions.
 ///
 /// This pool maintains the state of all transactions and stores them accordingly.
@@ -585,8 +590,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
             pending_basefee: Default::default(),
-            // TODO(mattsse): document
-            minimal_protocol_basefee: 7u64.into(),
+            minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: 30_000_000,
             by_hash: Default::default(),
             txs: Default::default(),
