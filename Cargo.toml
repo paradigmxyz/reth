@@ -1,8 +1,3 @@
-[package]
-name = "reth"
-version = "0.1.0"
-edition = "2021"
-
 [workspace]
 members = [
     "bin/reth",
@@ -11,6 +6,7 @@ members = [
     "crates/executor",
     "crates/interfaces",
     "crates/net/p2p",
+    "crates/net/eth-wire",
     "crates/net/rpc",
     "crates/net/rpc-api",
     "crates/net/rpc-types",

@@ -8,6 +8,6 @@ readme = "README.md"
 description = "Commonly used types in reth."
 
 [dependencies]
-fastrlp = { version = "0.2.0" }
+fastrlp = { version = "0.1.3" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 bytes = "1.2"

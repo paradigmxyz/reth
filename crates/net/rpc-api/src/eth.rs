@@ -12,14 +12,15 @@ use reth_rpc_types::{
 };
 
 /// Eth rpc interface.
-#[rpc(server)]
+#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(feature = "client", rpc(server, client))]
 #[async_trait]
 pub trait EthApi {
     /// Returns protocol version encoded as a string (quotes are necessary).
     #[method(name = "eth_protocolVersion")]
     fn protocol_version(&self) -> Result<u64>;
 
-    /// Returns an object with data about the sync status or false. (wtf?)
+    /// Returns an object with data about the sync status or false.
     #[method(name = "eth_syncing")]
     fn syncing(&self) -> Result<SyncStatus>;
 

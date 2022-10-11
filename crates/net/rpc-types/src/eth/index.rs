@@ -1,6 +1,6 @@
 use serde::{
     de::{Error, Visitor},
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt;
 
@@ -11,6 +11,15 @@ pub struct Index(usize);
 impl From<Index> for usize {
     fn from(idx: Index) -> Self {
         idx.0
+    }
+}
+
+impl Serialize for Index {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{:x}", self.0))
     }
 }
 

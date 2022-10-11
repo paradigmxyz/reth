@@ -1,10 +1,10 @@
 use crate::Transaction;
 use reth_primitives::{rpc::H64, Address, Bloom, Bytes, H256, U256};
-use serde::{ser::Error, Serialize, Serializer};
+use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
 
 /// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum BlockTransactions {
     /// Only hashes
@@ -14,7 +14,7 @@ pub enum BlockTransactions {
 }
 
 /// Block representation
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Header of the block
@@ -34,7 +34,7 @@ pub struct Block {
 }
 
 /// Block header representation.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Hash of the block
@@ -81,11 +81,12 @@ pub type RichBlock = Rich<Block>;
 pub type RichHeader = Rich<Header>;
 
 /// Value representation with additional info
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Rich<T> {
     /// Standard value.
     pub inner: T,
     /// Additional fields that should be serialized into the `Block` object
+    #[serde(flatten)]
     pub extra_info: BTreeMap<String, serde_json::Value>,
 }
 
