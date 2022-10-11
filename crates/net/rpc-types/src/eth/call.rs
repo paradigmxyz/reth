@@ -1,8 +1,8 @@
 use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U256};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Call request
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct CallRequest {
     /// From
