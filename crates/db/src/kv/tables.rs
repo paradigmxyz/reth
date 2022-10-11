@@ -87,7 +87,7 @@ table!(StorageChangeSet => TxId => StorageKeyBeforeTx);
 table!(TxSenders => TxId => Address); // Is it necessary?
 table!(Config => ConfigKey => ConfigValue);
 
-table!(SyncStage => Vec<u8> => BNum_BHash);
+table!(SyncStage => Vec<u8> => BNum);
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait

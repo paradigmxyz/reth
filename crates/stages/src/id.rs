@@ -27,8 +27,7 @@ impl StageId {
         K: mdbx::TransactionKind,
         E: mdbx::EnvironmentKind,
     {
-        let bytes = tx.get::<SyncStage>(self.0.as_bytes().to_vec())?;
-        Ok(bytes.map(|b| BlockNumber::from_be_bytes(b.try_into().expect("Database corrupt"))))
+        Ok(tx.get::<SyncStage>(self.0.as_bytes().to_vec())?)
     }
 
     /// Save the progress of this stage.
@@ -40,6 +39,6 @@ impl StageId {
     where
         E: mdbx::EnvironmentKind,
     {
-        tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block.to_be_bytes().to_vec())
+        tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
     }
 }
