@@ -1,7 +1,7 @@
 //! Declaration of all MDBX tables.
 
 use crate::utils::TableType;
-use reth_primitives::{Address, U256};
+use reth_primitives::{Address, BlockNumber, U256};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [
@@ -87,7 +87,7 @@ table!(StorageChangeSet => TxId => StorageKeyBeforeTx);
 table!(TxSenders => TxId => Address); // Is it necessary?
 table!(Config => ConfigKey => ConfigValue);
 
-table!(SyncStage => Vec<u8> => BNum);
+table!(SyncStage => Vec<u8> => BlockNumber);
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
