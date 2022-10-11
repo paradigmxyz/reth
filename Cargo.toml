@@ -5,7 +5,7 @@ edition = "2021"
 
 [workspace]
 members = [
-    "bin/reth-test",
+    "bin/reth",
     "crate-template",
     "crates/db",
     "crates/executor",
@@ -19,9 +19,4 @@ members = [
     "crates/transaction-pool",
     "crates/db"
 ]
-
-[dependencies]
-
-[[bin]]
-path = "bin/reth.rs"
-name = "reth"
+default-members = ["bin/reth"]

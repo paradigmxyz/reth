@@ -1,4 +1,3 @@
-
 use reth_primitives::U256;
 use serde::{
     de::{Error, Visitor},

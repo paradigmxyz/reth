@@ -5,7 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! <reth crate template>
+//! Rust Ethereum (reth) binary executable.
 
 /// cli that handles input
 pub mod cli;
@@ -14,4 +14,4 @@ pub mod cli;
 pub mod util;
 
 /// Command for executing ethereum blockchain tests
-pub mod ethereum_blockchain;
+pub mod test_eth_chain;

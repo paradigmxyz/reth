@@ -2,16 +2,15 @@ use crate::util;
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-/// Runs eth blockhain tests
-pub mod runner;
 /// models for parsing json blockchain test.
 pub mod models;
+/// Runs eth blockhain tests
+pub mod runner;
 
 /// Execute ethereum blockchain tests by specifying path to json files
 #[derive(Debug, Parser)]
 pub struct Command {
     /// Path to json files
-    #[structopt(required = true, short = 'p', long)]
     path: Vec<PathBuf>,
 }
 
@@ -38,13 +37,13 @@ impl Command {
         let mut num_of_passed = 0;
         for tasks in task_group {
             for (join, file) in tasks.into_iter() {
-                match join.await {
+                match join.await.unwrap() {
                     Ok(_) => {
                         num_of_passed += 1;
                     }
                     Err(error) => {
                         num_of_failed += 1;
-                        println!("Test {:?} error: {error}", file);
+                        println!("Test {:?} failed:\n {error}\n", file);
                     }
                 }
             }

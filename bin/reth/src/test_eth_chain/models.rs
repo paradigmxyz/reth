@@ -1,12 +1,12 @@
 use reth_primitives::{Address, Bloom, Bytes, H160, H256, H64};
 use serde::{self, Deserialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::util::JsonU256;
 
 /// Blockchain test deserializer.
 #[derive(Debug, PartialEq, Deserialize)]
-pub struct Test(HashMap<String, BlockchainTestData>);
+pub struct Test(pub BTreeMap<String, BlockchainTestData>);
 
 /// Ethereum blockchain test data
 #[derive(Debug, PartialEq, Deserialize)]
@@ -98,7 +98,7 @@ pub enum RootOrState {
     /// If state is too big, only state root is present
     Root(H256),
     /// Staet
-    State(HashMap<Address, Account>),
+    State(BTreeMap<Address, Account>),
 }
 
 /// Spec account.
@@ -115,7 +115,7 @@ pub struct Account {
     /// Code.
     pub code: Option<Bytes>,
     /// Storage.
-    pub storage: Option<HashMap<JsonU256, JsonU256>>,
+    pub storage: Option<BTreeMap<JsonU256, JsonU256>>,
     /// Constructor.
     pub constructor: Option<Bytes>,
 }
@@ -123,7 +123,42 @@ pub struct Account {
 /// Ethereum blockchain test data State.
 #[derive(Debug, PartialEq, Deserialize)]
 pub enum ForkSpec {
-    Berlin
+    /// Fork EIP150.
+    EIP150,
+    /// Fork EIP158.
+    EIP158,
+    /// Fork Frontier.
+    Frontier,
+    /// Fork Homestead.
+    Homestead,
+    /// Fork Byzantium.
+    Byzantium,
+    /// Fork Constantinople.
+    Constantinople,
+    /// Fork ConstantinopleFix.
+    ConstantinopleFix,
+    /// Fork Istanbul.
+    Istanbul,
+    /// Fork EIP158ToByzantiumAt5.
+    EIP158ToByzantiumAt5,
+    /// Fork FrontierToHomesteadAt5.
+    FrontierToHomesteadAt5,
+    /// Fork HomesteadToDaoAt5.
+    HomesteadToDaoAt5,
+    /// Fork HomesteadToEIP150At5.
+    HomesteadToEIP150At5,
+    /// Fork ByzantiumToConstantinopleAt5.
+    ByzantiumToConstantinopleAt5,
+    /// Fork ByzantiumToConstantinopleFixAt5.
+    ByzantiumToConstantinopleFixAt5,
+    /// Fork Berlin.
+    Berlin,
+    /// Fork London.
+    London,
+    /// Fork BerlinToLondonAt5.
+    BerlinToLondonAt5,
+    /// Fork Merge,
+    Merge,
 }
 
 /// Json Block test possible engine kind.
