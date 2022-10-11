@@ -17,6 +17,7 @@ mod transaction;
 
 pub use account::Account;
 pub use block::{Block, BlockLocked};
+pub use chain::Chain;
 pub use header::{Header, HeaderLocked};
 pub use log::Log;
 pub use receipt::Receipt;

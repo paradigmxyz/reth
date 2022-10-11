@@ -9,10 +9,10 @@ pub use typed::*;
 use reth_primitives::{
     rpc::transaction::eip2930::AccessListItem, Address, Bytes, H256, H512, U256, U64,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Transaction object
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
     /// Hash

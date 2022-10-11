@@ -22,6 +22,9 @@ pub mod pool;
 mod traits;
 mod validate;
 
+#[cfg(test)]
+mod test_util;
+
 pub use crate::{
     client::PoolClient,
     config::PoolConfig,

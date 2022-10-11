@@ -1,9 +1,9 @@
 use reth_primitives::{H512, U256, U64};
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 
 /// Syncing info
-#[derive(Debug, Clone, Default, Serialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncInfo {
     /// Starting block
@@ -32,7 +32,7 @@ pub struct Peers {
 }
 
 /// Number of peers connected to.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PeerCount {
     /// Peer count as integer
@@ -104,6 +104,29 @@ pub enum SyncStatus {
     Info(SyncInfo),
     /// Not syncing
     None,
+}
+
+impl<'de> Deserialize<'de> for SyncStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Syncing {
+            /// When client is synced to the highest block, eth_syncing with return "false"
+            None(bool),
+            IsSyncing(SyncInfo),
+        }
+
+        match Syncing::deserialize(deserializer)? {
+            Syncing::None(false) => Ok(SyncStatus::None),
+            Syncing::None(true) => Err(serde::de::Error::custom(
+                "eth_syncing returned `true` that is undefined value.",
+            )),
+            Syncing::IsSyncing(sync) => Ok(SyncStatus::Info(sync)),
+        }
+    }
 }
 
 impl Serialize for SyncStatus {
