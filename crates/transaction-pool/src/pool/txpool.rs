@@ -4,7 +4,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     pool::{
         best::BestTransactions,
-        parked::ParkedPool,
+        parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
@@ -36,12 +36,12 @@ pub struct TxPool<T: TransactionOrdering> {
     ///
     ///    - blocked by missing ancestor transaction (has nonce gaps)
     ///    - sender lacks funds to pay for this transaction.
-    queued_pool: ParkedPool<T>,
+    queued_pool: ParkedPool<QueuedOrd<T::Transaction>>,
     /// base fee subpool
     ///
     /// Holds all parked transactions that currently violate the dynamic fee requirement but could
     /// be moved to pending if the base fee changes in their favor (decreases) in future blocks.
-    basefee_pool: ParkedPool<T>,
+    basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
 }
@@ -52,8 +52,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering.clone()),
-            queued_pool: ParkedPool::new(ordering.clone()),
-            basefee_pool: ParkedPool::new(ordering.clone()),
+            queued_pool: Default::default(),
+            basefee_pool: Default::default(),
             all_transactions: Default::default(),
             ordering,
         }

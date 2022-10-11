@@ -81,7 +81,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// if the transaction is already included
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
-        let _hash = *tx.hash();
         assert!(!self.by_id.contains_key(tx.id()), "transaction already included");
 
         let tx_id = *tx.id();

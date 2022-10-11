@@ -96,7 +96,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
+pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
     /// Hash of the transaction
     fn hash(&self) -> &TxHash;
 
