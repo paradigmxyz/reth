@@ -23,7 +23,7 @@ impl Command {
             .iter()
             .map(|item| {
                 let mut test = Vec::new();
-                let files = util::find_all_json_tests(&item);
+                let files = util::find_all_json_tests(item);
                 for file in files {
                     let tfile = file.clone();
                     let join = tokio::spawn(async move { runner::run_test(&tfile).await });

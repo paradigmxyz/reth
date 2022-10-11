@@ -5,11 +5,11 @@ use std::collections::BTreeMap;
 use crate::util::JsonU256;
 
 /// Blockchain test deserializer.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
 pub struct Test(pub BTreeMap<String, BlockchainTestData>);
 
 /// Ethereum blockchain test data
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockchainTestData {
     /// Genesis block header.
@@ -33,7 +33,7 @@ pub struct BlockchainTestData {
 }
 
 /// Ethereum blockchain test data Header.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Bloom filter.
@@ -73,7 +73,8 @@ pub struct Header {
 }
 
 /// Ethereum blockchain test data Block.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Block header.
@@ -87,12 +88,12 @@ pub struct Block {
 }
 
 /// Ethereum blockchain test data State.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State(pub RootOrState);
 
 /// Merkle root hash or storage accounts.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum RootOrState {
     /// If state is too big, only state root is present
@@ -101,27 +102,22 @@ pub enum RootOrState {
     State(BTreeMap<Address, Account>),
 }
 
-/// Spec account.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-//#[serde(deny_unknown_fields)]
-#[serde(rename_all = "camelCase")]
+/// Spec account
+#[derive(Debug, PartialEq, Eq, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Account {
-    /// Builtin.
-    //TODO pub builtin: Option<BuiltinCompat>,
     /// Balance.
-    pub balance: Option<JsonU256>,
-    /// Nonce.
-    pub nonce: Option<JsonU256>,
+    pub balance: JsonU256,
     /// Code.
-    pub code: Option<Bytes>,
+    pub code: Bytes,
+    /// Nonce.
+    pub nonce: JsonU256,
     /// Storage.
-    pub storage: Option<BTreeMap<JsonU256, JsonU256>>,
-    /// Constructor.
-    pub constructor: Option<Bytes>,
+    pub storage: BTreeMap<JsonU256, JsonU256>,
 }
 
 /// Ethereum blockchain test data State.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
 pub enum ForkSpec {
     /// Fork EIP150.
     EIP150,
@@ -162,7 +158,7 @@ pub enum ForkSpec {
 }
 
 /// Json Block test possible engine kind.
-#[derive(Debug, PartialEq, Default, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SealEngine {
     /// No consensus checks.
@@ -171,7 +167,7 @@ pub enum SealEngine {
 }
 
 /// Ehereum blockchain test Transaction data.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
     /// Transaction type
@@ -206,7 +202,7 @@ pub struct Transaction {
 }
 
 /// Access list item
-#[derive(Debug, PartialEq, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account address
@@ -220,27 +216,8 @@ pub type AccessList = Vec<AccessListItem>;
 
 #[cfg(test)]
 mod test {
-    use crate::util::JsonU256;
-    use reth_primitives::U256;
-    use serde_json;
-
     use super::*;
-
-    #[test]
-    fn jsonu256_deserialize() {
-        let deserialized: Vec<JsonU256> =
-            serde_json::from_str("['', '0', 0, '0x', '0x0']").unwrap();
-        assert_eq!(
-            deserialized,
-            vec![
-                JsonU256(U256::from(10)),
-                JsonU256(U256::from(10)),
-                JsonU256(U256::from(0)),
-                JsonU256(U256::from(0)),
-                JsonU256(U256::from(0))
-            ]
-        );
-    }
+    use serde_json;
 
     #[test]
     fn blockchain_test_deserialize() {

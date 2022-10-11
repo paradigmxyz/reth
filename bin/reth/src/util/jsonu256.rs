@@ -68,3 +68,27 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
         self.visit_str(value.as_ref())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::util::JsonU256;
+    use reth_primitives::U256;
+    use serde_json;
+
+    #[test]
+    fn jsonu256_deserialize() {
+        let deserialized: Vec<JsonU256> =
+            serde_json::from_str(r#"["","0", "0x","10",10,"0x10"]"#).unwrap();
+        assert_eq!(
+            deserialized,
+            vec![
+                JsonU256(U256::from(0)),
+                JsonU256(U256::from(0)),
+                JsonU256(U256::from(0)),
+                JsonU256(U256::from(10)),
+                JsonU256(U256::from(10)),
+                JsonU256(U256::from(16)),
+            ]
+        );
+    }
+}
