@@ -1,16 +1,16 @@
 #![allow(missing_docs)]
 use reth_primitives::{Address, Bytes, H256, H512, U256, U64};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Account information.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AccountInfo {
     /// Account name
     pub name: String,
 }
 
 /// Data structure with proof for one single storage-entry
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageProof {
     /// Storage key.
@@ -22,7 +22,7 @@ pub struct StorageProof {
 }
 
 /// Response for EIP-1186 account proof `eth_getProof`
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EIP1186AccountProofResponse {
     pub address: Address,
@@ -35,7 +35,7 @@ pub struct EIP1186AccountProofResponse {
 }
 
 /// Extended account information (used by `parity_allAccountInfo`).
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExtAccountInfo {
     /// Account name
     pub name: String,
@@ -49,7 +49,7 @@ pub struct ExtAccountInfo {
 /// account derived from a signature
 /// as well as information that tells if it is valid for
 /// the current chain
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveredAccount {
     /// address of the recovered account
