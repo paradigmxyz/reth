@@ -5,7 +5,7 @@ use crate::{
     kv::{Decode, DupSort, Encode, Table},
     utils::*,
 };
-use libmdbx::{self, TransactionKind};
+use libmdbx::{self, TransactionKind, RO, RW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, KVError>;
@@ -13,6 +13,11 @@ pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>
 pub type IterPairResult<T> = Option<Result<(<T as Table>::Key, <T as Table>::Value), KVError>>;
 /// Alias type for a value result coming from a cursor without its key.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, KVError>;
+
+/// Read only Cursor.
+pub type CursorRO<'tx,T> = Cursor<'tx,RO,T>;
+/// Read write cursor.
+pub type CursorRW<'tx,T> = Cursor<'tx,RW,T>;
 
 /// Cursor wrapper to access KV items.
 #[derive(Debug)]

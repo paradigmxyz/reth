@@ -1496,6 +1496,7 @@ dependencies = [
  "bytes",
  "libmdbx",
  "page_size",
+ "reth-interfaces",
  "reth-primitives",
  "tempfile",
  "thiserror",

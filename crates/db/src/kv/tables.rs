@@ -2,6 +2,7 @@
 
 use crate::utils::TableType;
 use reth_primitives::{Address, U256};
+use reth_interfaces::db::Table;
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 17] = [
@@ -32,7 +33,7 @@ macro_rules! table {
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $name;
 
-        impl $crate::kv::table::Table for $name {
+        impl Table for $name {
             const NAME: &'static str = $name::const_name();
             type Key = $key;
             type Value = $value;

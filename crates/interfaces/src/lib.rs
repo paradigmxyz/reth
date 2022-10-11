@@ -12,3 +12,6 @@ pub mod executor;
 
 /// Consensus traits.
 pub mod consensus;
+
+/// Database traits.
+pub mod db;

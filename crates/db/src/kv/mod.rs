@@ -5,10 +5,8 @@ use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
+use reth_interfaces::db::{Database, DbTx, DbTxMut, Decode, DupSort, Encode, Table};
 use std::{ops::Deref, path::Path};
-
-pub mod table;
-use table::{Decode, DupSort, Encode, Table};
 
 pub mod tables;
 use tables::TABLES;
@@ -35,6 +33,16 @@ pub enum EnvKind {
 pub struct Env<E: EnvironmentKind> {
     /// Libmdbx-sys environment.
     pub inner: Environment<E>,
+}
+
+impl<E: EnvironmentKind, T: Table> Database<T> for Env<E> {
+    fn tx<'a>(&'a self) -> Box<dyn DbTx<'a, T> + 'a> {
+        Box::new(Tx::new(self.inner.begin_ro_txn().unwrap()))
+    }
+
+    fn tx_mut<'a>(&'a self) -> Box<dyn DbTxMut<'a, T> + 'a> {
+        Box::new(Tx::new(self.inner.begin_rw_txn().unwrap()))
+    }
 }
 
 impl<E: EnvironmentKind> Env<E> {

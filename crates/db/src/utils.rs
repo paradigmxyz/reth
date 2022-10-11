@@ -1,9 +1,7 @@
 //! Utils crate for `db`.
 
-use crate::kv::{
-    table::{Decode, Table},
-    KVError,
-};
+//suse crate::kv::KVError;
+use reth_interfaces::db::{Decode,Table,KVError};
 use std::borrow::Cow;
 
 /// Enum for the type of table present in libmdbx.

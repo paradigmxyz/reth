@@ -3,12 +3,11 @@
 use crate::{
     kv::{
         cursor::{Cursor, ValueOnlyResult},
-        table::{Encode, Table},
         KVError,
     },
-    utils::decode_one,
 };
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
+use reth_interfaces::db::{DbTx, DbTxMut,Encode, Table};
 use std::marker::PhantomData;
 
 /// Wrapper for the libmdbx transaction.
@@ -16,6 +15,30 @@ use std::marker::PhantomData;
 pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<'a, K, E>,
+}
+
+impl<'env, K: TransactionKind, E: EnvironmentKind, T: Table> DbTx<'env, T> for Tx<'env, K, E> {
+    fn commit(self) {
+        todo!()
+    }
+
+    fn get(&self) -> Option<<T as Table>::Value> {
+        todo!()
+    }
+}
+
+impl<'env, K: TransactionKind, E: EnvironmentKind, T: Table> DbTxMut<'env, T> for Tx<'env, K, E> {
+    fn put(&self) {
+        todo!()
+    }
+
+    fn delete(&self) {
+        todo!()
+    }
+
+    // fn cursor_mut(&self) -> Cursor<'env, RW, T> {
+    //     todo!()
+    // }
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
@@ -48,10 +71,12 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     /// Gets value associated with `key` on `table`. If it's a DUPSORT table, then returns the first
     /// entry.
     pub fn get<T: Table>(&self, key: T::Key) -> ValueOnlyResult<T> {
-        self.inner
-            .get(&self.inner.open_db(Some(T::NAME))?, key.encode().as_ref())?
-            .map(decode_one::<T>)
-            .transpose()
+        // self.inner
+        //     .get(&self.inner.open_db(Some(T::NAME))?, key.encode().as_ref())?
+        //     .map(decode_one::<T>)
+        //     .transpose()
+        // TODO cause of error
+        todo!()
     }
 
     /// Saves all changes and frees up storage memory.
