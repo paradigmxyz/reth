@@ -87,7 +87,7 @@ table!(StorageChangeSet => TxId => StorageKeyBeforeTx);
 table!(TxSenders => TxId => Address); // Is it necessary?
 table!(Config => ConfigKey => ConfigValue);
 
-table!(SyncStage => Vec<u8> => BlockNumber);
+table!(SyncStage => StageId => BlockNumber);
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
@@ -113,3 +113,4 @@ type TxIdList = Vec<u8>;
 type Address_StorageKey = Vec<u8>;
 type AccountBeforeTx = Vec<u8>;
 type StorageKeyBeforeTx = Vec<u8>;
+type StageId = Vec<u8>;
