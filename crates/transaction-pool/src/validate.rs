@@ -6,7 +6,7 @@ use crate::{
     traits::PoolTransaction,
 };
 use reth_primitives::{BlockID, TxHash, U256};
-use std::fmt;
+use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 pub enum TransactionValidationOutcome<T: PoolTransaction> {
@@ -51,28 +51,66 @@ pub trait TransactionValidator: Send + Sync {
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,
-    /// Ids required by the transaction.
-    ///
-    /// This lists all unique transactions that need to be mined before this transaction can be
-    /// considered `pending` and itself be included.
-    pub depends_on: Vec<TransactionId>,
     /// The identifier for this transaction.
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
-    /// Internal `Sender` identifier
+    /// Whether the tx is from a local source.
+    pub is_local: bool,
+    /// Internal `Sender` identifier.
     pub sender_id: SenderId,
-    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`
+    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`.
     pub cost: U256,
-    // TODO add a block timestamp that marks validity
+    /// Timestamp when this was added to the pool.
+    pub timestamp: Instant,
 }
 
 // === impl ValidPoolTransaction ===
 
 impl<T: PoolTransaction> ValidPoolTransaction<T> {
-    /// Returns the hash of the transaction
+    /// Returns the hash of the transaction.
     pub fn hash(&self) -> &TxHash {
         self.transaction.hash()
+    }
+
+    /// Returns the internal identifier for this transaction.
+    pub(crate) fn id(&self) -> &TransactionId {
+        &self.transaction_id
+    }
+
+    /// Returns the nonce set for this transaction.
+    pub(crate) fn nonce(&self) -> u64 {
+        self.transaction.nonce()
+    }
+
+    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    pub(crate) fn max_fee_per_gas(&self) -> Option<U256> {
+        self.transaction.max_fee_per_gas()
+    }
+
+    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
+    pub(crate) fn gas_limit(&self) -> u64 {
+        self.transaction.gas_limit()
+    }
+
+    /// Returns true if this transaction is underpriced compared to the other.
+    pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
+        self.transaction.effective_gas_price() <= other.transaction.effective_gas_price()
+    }
+}
+
+#[cfg(test)]
+impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
+    fn clone(&self) -> Self {
+        Self {
+            transaction: self.transaction.clone(),
+            transaction_id: self.transaction_id,
+            propagate: self.propagate,
+            is_local: self.is_local,
+            sender_id: self.sender_id,
+            cost: self.cost,
+            timestamp: self.timestamp,
+        }
     }
 }
 
@@ -81,7 +119,6 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
         write!(fmt, "Transaction {{ ")?;
         write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
         write!(fmt, "provides: {:?}, ", &self.transaction_id)?;
-        write!(fmt, "depends_on: {:?}, ", &self.depends_on)?;
         write!(fmt, "raw tx: {:?}", &self.transaction)?;
         write!(fmt, "}}")?;
         Ok(())

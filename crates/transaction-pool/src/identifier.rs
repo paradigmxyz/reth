@@ -1,12 +1,11 @@
-use crate::U256;
 use fnv::FnvHashMap;
 use reth_primitives::Address;
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Bound};
 
 /// An internal mapping of addresses.
 ///
 /// This assigns a _unique_ `SenderId` for a new `Address`.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SenderIdentifiers {
     /// The identifier to use next.
     id: u64,
@@ -53,6 +52,21 @@ impl SenderIdentifiers {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SenderId(u64);
 
+// === impl SenderId ===
+
+impl SenderId {
+    /// Returns a `Bound` for `TransactionId` starting with nonce `0`
+    pub(crate) fn start_bound(self) -> Bound<TransactionId> {
+        Bound::Included(TransactionId::new(self, 0))
+    }
+}
+
+impl From<u64> for SenderId {
+    fn from(value: u64) -> Self {
+        SenderId(value)
+    }
+}
+
 /// A unique identifier of a transaction of a Sender.
 ///
 /// This serves as an identifier for dependencies of a transaction:
@@ -73,11 +87,11 @@ impl TransactionId {
         Self { sender, nonce }
     }
 
-    /// Returns the id a transactions depends on
+    /// Returns the `TransactionId` this transaction depends on.
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
     /// `on_chain_none`
-    pub fn dependency(
+    pub fn ancestor(
         transaction_nonce: u64,
         on_chain_nonce: u64,
         sender: SenderId,
@@ -91,5 +105,49 @@ impl TransactionId {
         } else {
             None
         }
+    }
+
+    /// Returns the `TransactionId` that would come before this transaction.
+    pub(crate) fn unchecked_ancestor(&self) -> Option<TransactionId> {
+        if self.nonce == 0 {
+            None
+        } else {
+            Some(TransactionId::new(self.sender, self.nonce - 1))
+        }
+    }
+
+    /// Returns the `TransactionId` that directly follows this transaction: `self.nonce + 1`
+    pub fn descendant(&self) -> TransactionId {
+        TransactionId::new(self.sender, self.nonce + 1)
+    }
+
+    /// Returns the nonce the follows directly after this.
+    #[inline]
+    pub(crate) fn next_nonce(&self) -> u64 {
+        self.nonce + 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn test_transaction_id_ord_eq_sender() {
+        let tx1 = TransactionId::new(100u64.into(), 0u64);
+        let tx2 = TransactionId::new(100u64.into(), 1u64);
+        assert!(tx2 > tx1);
+        let set = BTreeSet::from([tx1, tx2]);
+        assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
+    }
+
+    #[test]
+    fn test_transaction_id_ord() {
+        let tx1 = TransactionId::new(99u64.into(), 0u64);
+        let tx2 = TransactionId::new(100u64.into(), 1u64);
+        assert!(tx2 > tx1);
+        let set = BTreeSet::from([tx1, tx2]);
+        assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
     }
 }

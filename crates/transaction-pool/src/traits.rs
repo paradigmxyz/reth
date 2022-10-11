@@ -96,7 +96,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
+pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
     /// Hash of the transaction
     fn hash(&self) -> &TxHash;
 
@@ -111,13 +111,19 @@ pub trait PoolTransaction: fmt::Debug + Send + Send + 'static {
     /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
     fn cost(&self) -> U256;
 
+    /// Returns the effective gas price for this transaction.
+    fn effective_gas_price(&self) -> U256;
+
+    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
+    fn gas_limit(&self) -> u64;
+
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<&U256>;
+    fn max_fee_per_gas(&self) -> Option<U256>;
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
-    fn max_priority_fee_per_gas(&self) -> Option<&U256>;
+    fn max_priority_fee_per_gas(&self) -> Option<U256>;
 }
