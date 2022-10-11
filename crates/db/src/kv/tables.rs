@@ -1,10 +1,10 @@
 //! Declaration of all MDBX tables.
 
 use crate::utils::TableType;
-use reth_primitives::{Address, U256};
+use reth_primitives::{Address, BlockNumber, U256};
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 17] = [
+pub const TABLES: [(TableType, &str); 18] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -22,6 +22,7 @@ pub const TABLES: [(TableType, &str); 17] = [
     (TableType::DupSort, StorageChangeSet::const_name()),
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, Config::const_name()),
+    (TableType::Table, SyncStage::const_name()),
 ];
 
 #[macro_export]
@@ -86,6 +87,8 @@ table!(StorageChangeSet => TxId => StorageKeyBeforeTx);
 table!(TxSenders => TxId => Address); // Is it necessary?
 table!(Config => ConfigKey => ConfigValue);
 
+table!(SyncStage => StageId => BlockNumber);
+
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
@@ -110,3 +113,4 @@ type TxIdList = Vec<u8>;
 type Address_StorageKey = Vec<u8>;
 type AccountBeforeTx = Vec<u8>;
 type StorageKeyBeforeTx = Vec<u8>;
+type StageId = Vec<u8>;

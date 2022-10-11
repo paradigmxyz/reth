@@ -1,4 +1,7 @@
-use reth_db::mdbx;
+use reth_db::{
+    kv::{tables::SyncStage, tx::Tx, KVError},
+    mdbx,
+};
 use reth_primitives::BlockNumber;
 use std::fmt::Display;
 
@@ -18,33 +21,24 @@ impl StageId {
     /// Get the last committed progress of this stage.
     pub fn get_progress<'db, K, E>(
         &self,
-        tx: &mdbx::Transaction<'db, K, E>,
-    ) -> Result<Option<BlockNumber>, mdbx::Error>
+        tx: &Tx<'db, K, E>,
+    ) -> Result<Option<BlockNumber>, KVError>
     where
         K: mdbx::TransactionKind,
         E: mdbx::EnvironmentKind,
     {
-        // TODO: Clean up when we get better database abstractions
-        let bytes: Option<Vec<u8>> = tx.get(&tx.open_db(Some("SyncStage"))?, self.0.as_ref())?;
-
-        Ok(bytes.map(|b| BlockNumber::from_be_bytes(b.try_into().expect("Database corrupt"))))
+        tx.get::<SyncStage>(self.0.as_bytes().to_vec())
     }
 
     /// Save the progress of this stage.
     pub fn save_progress<'db, E>(
         &self,
-        tx: &mdbx::Transaction<'db, mdbx::RW, E>,
+        tx: &Tx<'db, mdbx::RW, E>,
         block: BlockNumber,
-    ) -> Result<(), mdbx::Error>
+    ) -> Result<(), KVError>
     where
         E: mdbx::EnvironmentKind,
     {
-        // TODO: Clean up when we get better database abstractions
-        tx.put(
-            &tx.open_db(Some("SyncStage"))?,
-            self.0,
-            block.to_be_bytes(),
-            mdbx::WriteFlags::UPSERT,
-        )
+        tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
     }
 }
