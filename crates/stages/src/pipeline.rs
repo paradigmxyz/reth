@@ -356,10 +356,9 @@ mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
     use reth_db::{
-        kv::{tx::Tx, EnvKind},
+        kv::{test_utils, tx::Tx, EnvKind},
         mdbx,
     };
-    use tempfile::TempDir;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
@@ -368,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn run_pipeline() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -416,7 +415,7 @@ mod tests {
     #[tokio::test]
     async fn unwind_pipeline() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -489,7 +488,7 @@ mod tests {
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -573,7 +572,7 @@ mod tests {
     #[tokio::test]
     async fn unwind_priority() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -655,17 +654,7 @@ mod tests {
     mod utils {
         use super::*;
         use async_trait::async_trait;
-        use reth_db::kv::KVError;
         use std::{collections::VecDeque, error::Error};
-
-        pub(crate) fn test_db() -> Result<Env<mdbx::WriteMap>, KVError> {
-            let path =
-                TempDir::new().expect("Not able to create a temporary directory.").into_path();
-            let db = Env::<mdbx::WriteMap>::open(&path, EnvKind::RW)
-                .expect("Not able to open existing mdbx file.");
-            db.create_tables()?;
-            Ok(db)
-        }
 
         pub(crate) struct TestStage {
             id: StageId,
