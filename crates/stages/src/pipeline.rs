@@ -1,29 +1,21 @@
 use crate::{
     error::*,
-    util::opt::{self, MaybeSender},
-    ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    util::{db::TxContainer, opt::MaybeSender},
+    ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_db::mdbx;
+use reth_db::{kv::Env, mdbx};
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::mpsc::Sender;
 use tracing::*;
 
+mod ctrl;
 mod event;
-pub use event::*;
+mod state;
 
-struct QueuedStage<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
-    /// The actual stage to execute.
-    stage: Box<dyn Stage<'db, E>>,
-    /// The unwind priority of the stage.
-    unwind_priority: usize,
-    /// Whether or not this stage can only execute when we reach what we believe to be the tip of
-    /// the chain.
-    require_tip: bool,
-}
+use ctrl::*;
+pub use event::*;
+use state::*;
 
 /// A staged sync pipeline.
 ///
@@ -124,111 +116,72 @@ where
         self
     }
 
-    /// Run the pipeline.
-    pub async fn run(&mut self, db: &'db mdbx::Environment<E>) -> Result<(), PipelineError> {
-        let mut previous_stage = None;
-        let mut minimum_progress: Option<BlockNumber> = None;
-        let mut maximum_progress: Option<BlockNumber> = None;
-        let mut reached_tip_flag = true;
+    /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
+    /// a `max_block` in the pipeline.
+    pub async fn run(&mut self, db: &'db Env<E>) -> Result<(), PipelineError> {
+        let mut state = PipelineState {
+            events_sender: self.events_sender.clone(),
+            max_block: self.max_block,
+            maximum_progress: None,
+            minimum_progress: None,
+            reached_tip: true,
+        };
 
-        'run: loop {
-            let mut tx = db.begin_rw_txn()?;
-            for (_, queued_stage) in self.stages.iter_mut().enumerate() {
-                let stage_id = queued_stage.stage.id();
-                let block_reached = loop {
-                    let prev_progress = stage_id.get_progress(&tx)?;
-                    self.events_sender
-                        .send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
-                        .await?;
+        loop {
+            let mut tx = TxContainer::new(db)?;
+            let next_action = self.run_loop(&mut state, &mut tx).await?;
 
-                    // Whether any stage has reached the maximum block, which also counts as having
-                    // reached the tip for stages that have reached the tip
-                    let reached_max_block = maximum_progress
-                        .zip(self.max_block)
-                        .map_or(false, |(progress, target)| progress >= target);
-
-                    // Whether this stage reached the max block
-                    let stage_reached_max_block = prev_progress
-                        .zip(self.max_block)
-                        .map_or(false, |(prev_progress, target)| prev_progress >= target);
-
-                    // Execute stage
-                    let output = Self::execute_stage(
-                        &mut tx,
-                        queued_stage,
-                        ExecInput { previous_stage, stage_progress: prev_progress },
-                        reached_tip_flag || reached_max_block,
-                        stage_reached_max_block,
-                    )
-                    .instrument(info_span!("Running", stage = %stage_id))
-                    .await;
-
-                    if output.is_err() {
-                        self.events_sender
-                            .send(PipelineEvent::Ran { stage_id, result: None })
-                            .await?;
-                    }
-
-                    match output {
-                        Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
-                            debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
-                            stage_id.save_progress(&tx, stage_progress)?;
-
-                            self.events_sender
-                                .send(PipelineEvent::Ran { stage_id, result: Some(out.clone()) })
-                                .await?;
-
-                            // TODO: Make the commit interval configurable
-                            tx.commit()?;
-                            tx = db.begin_rw_txn()?;
-
-                            // Update our minimum and maximum stage progress
-                            minimum_progress = opt::min(minimum_progress, stage_progress);
-                            maximum_progress = opt::max(maximum_progress, stage_progress);
-
-                            if done {
-                                reached_tip_flag = reached_tip;
-                                break stage_progress
-                            }
-                        }
-                        Err(StageError::Validation { block }) => {
-                            debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
-
-                            // We unwind because of a validation error. If the unwind itself fails,
-                            // we bail entirely, otherwise we restart the execution loop from the
-                            // beginning.
-                            //
-                            // Note on the drop: The transaction needs to be dropped in order for
-                            // unwind to create a new one. Dropping the
-                            // transaction will abort it; there is no
-                            // other way currently to abort the transaction. It will be re-created
-                            // if the loop restarts.
-                            drop(tx);
-                            match self
-                                .unwind(db, prev_progress.unwrap_or_default(), Some(block))
-                                .await
-                            {
-                                Ok(()) => continue 'run,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        Err(e) => return Err(PipelineError::Stage(e)),
-                    }
-                };
-
-                // Set previous stage and continue on to next stage.
-                previous_stage = Some((stage_id, block_reached));
-            }
-            tx.commit()?;
-
-            // Check if we've reached our desired target block
-            if minimum_progress
-                .zip(self.max_block)
-                .map_or(false, |(progress, target)| progress >= target)
+            // Terminate the loop early if it's reached the maximum user
+            // configured block.
+            if matches!(next_action, ControlFlow::Continue) &&
+                state
+                    .minimum_progress
+                    .zip(self.max_block)
+                    .map_or(false, |(progress, target)| progress >= target)
             {
                 return Ok(())
             }
         }
+    }
+
+    /// Performs one pass of the pipeline across all stages. After successful
+    /// execution of each stage, it proceeds to commit it to the database.
+    ///
+    /// If any stage is unsuccessful at execution, we proceed to
+    /// unwind. This will undo the progress across the entire pipeline
+    /// up to the block that caused the error.
+    async fn run_loop<'tx>(
+        &mut self,
+        state: &mut PipelineState,
+        tx: &mut TxContainer<'db, 'tx, E>,
+    ) -> Result<ControlFlow, PipelineError>
+    where
+        'db: 'tx,
+    {
+        let mut previous_stage = None;
+        for (_, queued_stage) in self.stages.iter_mut().enumerate() {
+            let stage_id = queued_stage.stage.id();
+            let next = queued_stage
+                .execute(state, previous_stage, tx)
+                .instrument(info_span!("Running", stage = %stage_id))
+                .await?;
+
+            match next {
+                ControlFlow::Continue => {
+                    previous_stage =
+                        Some((stage_id, stage_id.get_progress(tx.get())?.unwrap_or_default()));
+                }
+                ControlFlow::Unwind { target, bad_block } => {
+                    // TODO: Note on close
+                    tx.close();
+                    self.unwind(tx.db, target, bad_block).await?;
+                    tx.open()?;
+                    return Ok(ControlFlow::Unwind { target, bad_block })
+                }
+            }
+        }
+
+        Ok(ControlFlow::Continue)
     }
 
     /// Unwind the stages to the target block.
@@ -236,74 +189,60 @@ where
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
-        db: &'db mdbx::Environment<E>,
+        db: &'db Env<E>,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
         // Sort stages by unwind priority
         let mut unwind_pipeline = {
             let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
-            stages.sort_by_key(|(id, stage)| {
-                if stage.unwind_priority > 0 {
-                    (id - stage.unwind_priority, 0)
-                } else {
-                    (*id, 1)
-                }
-            });
+            stages.sort_by(|a, b| a.1.unwind_priority.cmp(&b.1.unwind_priority));
             stages.reverse();
             stages
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut tx = db.begin_rw_txn()?;
+        let mut tx = db.begin_mut_tx()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
+            let span = info_span!("Unwinding", stage = %stage_id);
+            let _enter = span.enter();
+
             let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
+            if stage_progress < to {
+                debug!(from = %stage_progress, %to, "Unwind point too far for stage");
+                self.events_sender
+                    .send(PipelineEvent::Unwound {
+                        stage_id,
+                        result: Some(UnwindOutput { stage_progress }),
+                    })
+                    .await?;
+                return Ok(())
+            }
 
-            let unwind: Result<(), PipelineError> = async {
-                if stage_progress < to {
-                    debug!(from = %stage_progress, %to, "Unwind point too far for stage");
-                    self.events_sender
-                        .send(PipelineEvent::Unwound {
-                            stage_id,
-                            result: Some(UnwindOutput { stage_progress }),
-                        })
-                        .await?;
-                    return Ok(())
-                }
+            debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
+            while stage_progress > to {
+                let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
+                self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
-                while stage_progress > to {
-                    let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-                    self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
+                let output = stage.unwind(&mut tx, input).await;
+                match output {
+                    Ok(unwind_output) => {
+                        stage_progress = unwind_output.stage_progress;
+                        stage_id.save_progress(&tx, stage_progress)?;
 
-                    let output = stage.unwind(&mut tx, input).await;
-                    match output {
-                        Ok(unwind_output) => {
-                            stage_progress = unwind_output.stage_progress;
-                            stage_id.save_progress(&tx, stage_progress)?;
-
-                            self.events_sender
-                                .send(PipelineEvent::Unwound {
-                                    stage_id,
-                                    result: Some(unwind_output),
-                                })
-                                .await?;
-                        }
-                        Err(err) => {
-                            self.events_sender
-                                .send(PipelineEvent::Unwound { stage_id, result: None })
-                                .await?;
-                            return Err(PipelineError::Stage(StageError::Internal(err)))
-                        }
+                        self.events_sender
+                            .send(PipelineEvent::Unwound { stage_id, result: Some(unwind_output) })
+                            .await?;
+                    }
+                    Err(err) => {
+                        self.events_sender
+                            .send(PipelineEvent::Unwound { stage_id, result: None })
+                            .await?;
+                        return Err(PipelineError::Stage(StageError::Internal(err)))
                     }
                 }
-
-                Ok(())
             }
-            .instrument(info_span!("Unwinding", stage = %stage_id))
-            .await;
-            unwind?
         }
 
         tx.commit()?;
@@ -311,40 +250,103 @@ where
     }
 }
 
-impl<'db, E> Pipeline<'db, E>
+/// A container for a queued stage.
+struct QueuedStage<'db, E>
 where
     E: mdbx::EnvironmentKind,
 {
-    async fn execute_stage<'tx>(
-        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
-        QueuedStage { stage, require_tip, .. }: &mut QueuedStage<'db, E>,
-        input: ExecInput,
-        reached_tip: bool,
-        stage_reached_max_block: bool,
-    ) -> Result<ExecOutput, StageError>
+    /// The actual stage to execute.
+    stage: Box<dyn Stage<'db, E>>,
+    /// The unwind priority of the stage.
+    unwind_priority: usize,
+    /// Whether or not this stage can only execute when we reach what we believe to be the tip of
+    /// the chain.
+    require_tip: bool,
+}
+
+impl<'db, E> QueuedStage<'db, E>
+where
+    E: mdbx::EnvironmentKind,
+{
+    /// Execute the stage.
+    async fn execute<'tx>(
+        &mut self,
+        state: &mut PipelineState,
+        previous_stage: Option<(StageId, BlockNumber)>,
+        tx: &mut TxContainer<'db, 'tx, E>,
+    ) -> Result<ControlFlow, PipelineError>
     where
         'db: 'tx,
     {
-        if !reached_tip && *require_tip {
+        let stage_id = self.stage.id();
+        if self.require_tip && !state.reached_tip() {
             info!("Tip not reached, skipping.");
 
             // Stage requires us to reach the tip of the chain first, but we have
             // not.
-            Ok(ExecOutput {
-                stage_progress: input.stage_progress.unwrap_or_default(),
-                done: true,
-                reached_tip: false,
-            })
-        } else if stage_reached_max_block {
-            info!("Stage reached maximum block, skipping.");
-            // We reached the maximum block, so we skip the stage
-            Ok(ExecOutput {
-                stage_progress: input.stage_progress.unwrap_or_default(),
-                done: true,
-                reached_tip: true,
-            })
-        } else {
-            stage.execute(tx, input).await
+            return Ok(ControlFlow::Continue)
+        }
+
+        loop {
+            let prev_progress = stage_id.get_progress(tx.get())?;
+            state
+                .events_sender
+                .send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
+                .await?;
+
+            let stage_reached_max_block = prev_progress
+                .zip(state.max_block)
+                .map_or(false, |(prev_progress, target)| prev_progress >= target);
+            if stage_reached_max_block {
+                info!("Stage reached maximum block, skipping.");
+
+                // We reached the maximum block, so we skip the stage
+                state.set_reached_tip(true);
+                return Ok(ControlFlow::Continue)
+            }
+
+            match self
+                .stage
+                .execute(tx.get_mut(), ExecInput { previous_stage, stage_progress: prev_progress })
+                .await
+            {
+                Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
+                    debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
+                    stage_id.save_progress(tx.get_mut(), stage_progress)?;
+
+                    state
+                        .events_sender
+                        .send(PipelineEvent::Ran { stage_id, result: Some(out.clone()) })
+                        .await?;
+
+                    // TODO: Make the commit interval configurable
+                    tx.commit()?;
+
+                    state.record_progress_outliers(stage_progress);
+                    state.set_reached_tip(reached_tip);
+
+                    if done {
+                        return Ok(ControlFlow::Continue)
+                    }
+                }
+                Err(err) => {
+                    state.events_sender.send(PipelineEvent::Ran { stage_id, result: None }).await?;
+
+                    return if let StageError::Validation { block } = err {
+                        debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
+
+                        // We unwind because of a validation error. If the unwind itself fails,
+                        // we bail entirely, otherwise we restart the execution loop from the
+                        // beginning.
+                        Ok(ControlFlow::Unwind {
+                            target: prev_progress.unwrap_or_default(),
+                            bad_block: Some(block),
+                        })
+                    } else {
+                        Err(err.into())
+                    }
+                }
+            }
         }
     }
 }
@@ -353,8 +355,10 @@ where
 mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
-    use reth_db::mdbx;
-    use tempfile::tempdir;
+    use reth_db::{
+        kv::{test_utils, tx::Tx, EnvKind},
+        mdbx,
+    };
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
@@ -363,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn run_pipeline() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -411,7 +415,7 @@ mod tests {
     #[tokio::test]
     async fn unwind_pipeline() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -484,7 +488,7 @@ mod tests {
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
         let (tx, rx) = channel(2);
-        let db = utils::test_db().expect("Could not open test database");
+        let db = test_utils::create_test_db(EnvKind::RW);
 
         // Run pipeline
         tokio::spawn(async move {
@@ -555,39 +559,102 @@ mod tests {
         );
     }
 
+    /// Unwinds a pipeline with unwind priorities specified.
+    ///
+    /// The stages are inserted in the order A, B, C.
+    ///
+    /// By default, the pipeline is unwound in reverse insert order, i.e. C, B, A.
+    /// In this test we reorder it to be B, C, A by setting these unwind priorities:
+    ///
+    /// - Stage A: 1
+    /// - Stage B: 10 (higher is more priority)
+    /// - Stage C: 5
+    #[tokio::test]
+    async fn unwind_priority() {
+        let (tx, rx) = channel(2);
+        let db = test_utils::create_test_db(EnvKind::RW);
+
+        // Run pipeline
+        tokio::spawn(async move {
+            let mut pipeline = Pipeline::<mdbx::WriteMap>::new()
+                .push_with_unwind_priority(
+                    TestStage::new(StageId("A"))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10,
+                            done: true,
+                            reached_tip: true,
+                        }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                    false,
+                    1,
+                )
+                .push_with_unwind_priority(
+                    TestStage::new(StageId("B"))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10,
+                            done: true,
+                            reached_tip: true,
+                        }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                    false,
+                    10,
+                )
+                .push_with_unwind_priority(
+                    TestStage::new(StageId("C"))
+                        .add_exec(Ok(ExecOutput {
+                            stage_progress: 10,
+                            done: true,
+                            reached_tip: true,
+                        }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                    false,
+                    5,
+                )
+                .set_max_block(Some(10));
+
+            // Sync first
+            pipeline.run(&db).await.expect("Could not run pipeline");
+
+            // Unwind
+            pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
+        });
+
+        // Check that the stages were unwound in reverse order
+        assert_eq!(
+            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            vec![
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("B"),
+                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("B"),
+                    result: Some(UnwindOutput { stage_progress: 1 }),
+                },
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("C"),
+                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("C"),
+                    result: Some(UnwindOutput { stage_progress: 1 }),
+                },
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("A"),
+                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("A"),
+                    result: Some(UnwindOutput { stage_progress: 1 }),
+                },
+            ]
+        );
+    }
+
     mod utils {
         use super::*;
         use async_trait::async_trait;
         use std::{collections::VecDeque, error::Error};
-
-        // TODO: This is... not great.
-        pub(crate) fn test_db() -> Result<mdbx::Environment<mdbx::WriteMap>, mdbx::Error> {
-            const DB_TABLES: usize = 10;
-
-            // Build environment
-            let mut builder = mdbx::Environment::<mdbx::WriteMap>::new();
-            builder.set_max_dbs(DB_TABLES);
-            builder.set_geometry(mdbx::Geometry {
-                size: Some(0..usize::MAX),
-                growth_step: None,
-                shrink_threshold: None,
-                page_size: None,
-            });
-            builder.set_rp_augment_limit(16 * 256 * 1024);
-
-            // Open
-            let tempdir = tempdir().unwrap();
-            let path = tempdir.path();
-            std::fs::DirBuilder::new().recursive(true).create(path).unwrap();
-            let db = builder.open(path)?;
-
-            // Create tables
-            let tx = db.begin_rw_txn()?;
-            tx.create_db(Some("SyncStage"), mdbx::DatabaseFlags::default())?;
-            tx.commit()?;
-
-            Ok(db)
-        }
 
         pub(crate) struct TestStage {
             id: StageId,
@@ -625,7 +692,7 @@ mod tests {
 
             async fn execute<'tx>(
                 &mut self,
-                _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+                _: &mut Tx<'tx, mdbx::RW, E>,
                 _: ExecInput,
             ) -> Result<ExecOutput, StageError>
             where
@@ -638,7 +705,7 @@ mod tests {
 
             async fn unwind<'tx>(
                 &mut self,
-                _: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+                _: &mut Tx<'tx, mdbx::RW, E>,
                 _: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
             where

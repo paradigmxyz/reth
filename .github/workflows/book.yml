@@ -1,0 +1,29 @@
+name: book
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'book/**'
+      - 'book.toml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'book/**'
+      - 'book.toml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: test
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install mdbook
+        run: |
+          mkdir mdbook
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.14/mdbook-v0.4.14-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook
+          echo `pwd`/mdbook >> $GITHUB_PATH
+
+      - name: Run tests
+        run: mdbook test

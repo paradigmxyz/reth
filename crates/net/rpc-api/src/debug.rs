@@ -6,7 +6,8 @@ use reth_primitives::{
 use reth_rpc_types::RichBlock;
 
 /// Debug rpc interface.
-#[rpc(server)]
+#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(feature = "client", rpc(server, client))]
 pub trait DebugApi {
     /// Returns an RLP-encoded header.
     #[method(name = "debug_getRawHeader")]

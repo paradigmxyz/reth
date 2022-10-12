@@ -1,6 +1,6 @@
 use crate::{error::StageError, id::StageId};
 use async_trait::async_trait;
-use reth_db::mdbx;
+use reth_db::{kv::tx::Tx, mdbx};
 use reth_primitives::BlockNumber;
 
 /// Stage execution input, see [Stage::execute].
@@ -63,7 +63,7 @@ where
     /// Execute the stage.
     async fn execute<'tx>(
         &mut self,
-        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+        tx: &mut Tx<'tx, mdbx::RW, E>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>
     where
@@ -72,7 +72,7 @@ where
     /// Unwind the stage.
     async fn unwind<'tx>(
         &mut self,
-        tx: &mut mdbx::Transaction<'tx, mdbx::RW, E>,
+        tx: &mut Tx<'tx, mdbx::RW, E>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>
     where

@@ -7,7 +7,6 @@ use std::{
     fmt::Debug,
     marker::{Send, Sync},
 };
-
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
@@ -30,15 +29,14 @@ impl<T> Object for T where T: Encode + Decode {}
 
 /// Generic trait that a database table should follow.
 pub trait Table: Send + Sync + Debug + 'static {
+    /// Return table name as it is present inside the MDBX.
+    const NAME: &'static str;
     /// Key element of `Table`.
     type Key: Encode;
     /// Value element of `Table`.
     type Value: Object;
     /// Seek Key element of `Table`.
     type SeekKey: Encode;
-
-    /// Return name as it is present inside the MDBX.
-    fn name(&self) -> &'static str;
 }
 
 /// DupSort allows for keys not to be repeated in the database,

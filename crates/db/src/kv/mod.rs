@@ -15,14 +15,14 @@ use tables::TABLES;
 
 pub mod cursor;
 
+pub mod models;
+pub use models::*;
+
 pub mod tx;
 use tx::Tx;
 
 mod error;
 pub use error::KVError;
-
-pub mod models;
-pub use models::*;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -140,11 +140,36 @@ impl<E: EnvironmentKind> Deref for Env<E> {
     }
 }
 
+/// Collection of database test utilities
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
+    use super::{Env, EnvKind, EnvironmentKind, Path};
+
+    /// Error during database creation
+    pub const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
+    /// Error during table creation
+    pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+    /// Error during tempdir creation
+    pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
+
+    /// Create database for testing
+    pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Env<E> {
+        create_test_db_with_path(kind, &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path())
+    }
+
+    /// Create database for testing with specified path
+    pub fn create_test_db_with_path<E: EnvironmentKind>(kind: EnvKind, path: &Path) -> Env<E> {
+        let env = Env::<E>::open(path, kind).expect(ERROR_DB_CREATION);
+        env.create_tables().expect(ERROR_TABLE_CREATION);
+        env
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         tables::{Headers, PlainState},
-        Env, EnvKind,
+        test_utils, Env, EnvKind,
     };
     use libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Address, Header, H256};
@@ -152,59 +177,51 @@ mod tests {
     use tempfile::TempDir;
 
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
-    const ERROR_DB_OPEN: &str = "Not able to open existing mdbx file.";
-    const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
     const ERROR_PUT: &str = "Not able to insert value into table.";
     const ERROR_GET: &str = "Not able to get value from table.";
     const ERROR_COMMIT: &str = "Not able to commit transaction.";
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
     const ERROR_INIT_TX: &str = "Failed to create a MDBX transaction.";
     const ERROR_ETH_ADDRESS: &str = "Invalid address.";
-    const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
     #[test]
     fn db_creation() {
-        Env::<NoWriteMap>::open(&TempDir::new().expect(ERROR_TEMPDIR).into_path(), EnvKind::RW)
-            .expect(ERROR_DB_CREATION);
+        test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
     }
 
     #[test]
     fn db_manual_put_get() {
-        let env =
-            Env::<NoWriteMap>::open(&TempDir::new().expect(ERROR_TEMPDIR).into_path(), EnvKind::RW)
-                .expect(ERROR_DB_CREATION);
-        env.create_tables().expect(ERROR_TABLE_CREATION);
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
 
         let value = Header::default();
         let key = (1u64, H256::zero());
 
         // PUT
         let tx = env.begin_mut_tx().expect(ERROR_INIT_TX);
-        tx.put(Headers, key.into(), value.clone()).expect(ERROR_PUT);
+        tx.put::<Headers>(key.into(), value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // GET
         let tx = env.begin_tx().expect(ERROR_INIT_TX);
-        let result = tx.get(Headers, key.into()).expect(ERROR_GET);
+        let result = tx.get::<Headers>(key.into()).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);
     }
 
     #[test]
     fn db_closure_put_get() {
-        let path = TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = TempDir::new().expect(test_utils::ERROR_TEMPDIR).into_path();
 
         let value = vec![1, 3, 3, 7];
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = Env::<WriteMap>::open(&path, EnvKind::RW).expect(ERROR_DB_OPEN);
-            env.create_tables().expect(ERROR_TABLE_CREATION);
+            let env = test_utils::create_test_db_with_path::<WriteMap>(EnvKind::RW, &path);
 
             // PUT
             let result = env.update(|tx| {
-                tx.put(PlainState, key, value.clone()).expect(ERROR_PUT);
+                tx.put::<PlainState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
@@ -213,7 +230,7 @@ mod tests {
         let env = Env::<WriteMap>::open(&path, EnvKind::RO).expect(ERROR_DB_CREATION);
 
         // GET
-        let result = env.view(|tx| tx.get(PlainState, key).expect(ERROR_GET)).expect(ERROR_GET);
+        let result = env.view(|tx| tx.get::<PlainState>(key).expect(ERROR_GET)).expect(ERROR_GET);
 
         assert!(result == Some(value))
     }

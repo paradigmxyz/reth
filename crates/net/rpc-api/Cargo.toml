@@ -16,3 +16,6 @@ reth-rpc-types = { path = "../rpc-types" }
 
 # misc
 jsonrpsee = { version = "0.15", features = ["server", "macros"] }
+
+[features]
+client = ["jsonrpsee/client", "jsonrpsee/async-client"]
