@@ -88,7 +88,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
         let nonces = senders.iter().copied().map(|a| (a, 0)).collect();
         let balances = senders.iter().copied().map(|a| (a, config.balance)).collect();
         Self {
-            base_fee: Default::default(),
+            base_fee: config.base_fee,
             balances,
             nonces,
             senders,
@@ -220,7 +220,7 @@ fn test_on_chain_nonce_scenario() {
         num_senders: 10,
         balance: 200_000u64.into(),
         scenarios: vec![ScenarioType::OnchainNonce],
-        base_fee: 100u64.into(),
+        base_fee: 10u64.into(),
         tx_generator: MockTransactionDistribution::new(30, 10..100),
     };
     let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
