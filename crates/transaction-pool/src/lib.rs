@@ -84,7 +84,6 @@ pub use crate::{
 };
 use crate::{error::PoolResult, pool::PoolInner, validate::ValidPoolTransaction};
 use futures::channel::mpsc::Receiver;
-
 use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::{collections::HashMap, sync::Arc};
 
@@ -123,27 +122,17 @@ where
         &self.pool
     }
 
-    /// Returns the actual block number for the block id
-    fn resolve_block_number(&self, block_id: &BlockID) -> PoolResult<U64> {
-        self.pool.client().ensure_block_number(block_id)
-    }
-
     /// Returns future that validates all transaction in the given iterator at the block the
     /// `block_id` points to.
     async fn validate_all(
         &self,
-        block_id: &BlockID,
         transactions: impl IntoIterator<Item = P::Transaction>,
     ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
-        // get the actual block number which is required to validate the transactions
-        let block_number = self.resolve_block_number(block_id)?;
-
-        let outcome = futures::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(block_id, block_number, tx)),
-        )
-        .await
-        .into_iter()
-        .collect::<HashMap<_, _>>();
+        let outcome =
+            futures::future::join_all(transactions.into_iter().map(|tx| self.validate(tx)))
+                .await
+                .into_iter()
+                .collect::<HashMap<_, _>>();
 
         Ok(outcome)
     }
@@ -151,13 +140,11 @@ where
     /// Validates the given transaction at the given block
     async fn validate(
         &self,
-        block_id: &BlockID,
-        _block_number: U64,
         transaction: P::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
         let _hash = *transaction.hash();
         // TODO this is where additional validate checks would go, like banned senders etc...
-        let _res = self.pool.client().validate_transaction(block_id, transaction).await;
+        let _res = self.pool.client().validate_transaction(transaction).await;
 
         // TODO blockstamp the transaction
 
@@ -189,23 +176,16 @@ where
         todo!()
     }
 
-    async fn add_transaction(
-        &self,
-        block_id: BlockID,
-        transaction: Self::Transaction,
-    ) -> PoolResult<TxHash> {
-        self.add_transactions(block_id, vec![transaction])
-            .await?
-            .pop()
-            .expect("transaction exists; qed")
+    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
+        let (_, tx) = self.validate(transaction).await;
+        self.pool.add_transactions(std::iter::once(tx)).pop().expect("exists; qed")
     }
 
     async fn add_transactions(
         &self,
-        block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        let validated = self.validate_all(&block_id, transactions).await?;
+        let validated = self.validate_all(transactions).await?;
         let transactions = self.pool.add_transactions(validated.into_values());
         Ok(transactions)
     }
