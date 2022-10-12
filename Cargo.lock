@@ -1905,10 +1905,12 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_bencode",
+ "serde_bytes",
  "sha1",
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
  "url",
 ]
 

@@ -18,6 +18,7 @@ pub mod bitfield;
 pub mod bittorrent;
 pub mod disk;
 pub mod error;
+pub mod info;
 pub mod peer;
 pub mod piece;
 pub mod proto;

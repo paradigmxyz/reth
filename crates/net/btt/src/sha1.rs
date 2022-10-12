@@ -26,7 +26,7 @@ pub struct ShaHash {
 impl ShaHash {
     /// Create a ShaHash by hashing the given bytes.
     #[inline]
-    pub fn from_bytes(bytes: &[u8]) -> Self {
+    pub fn digest(bytes: &[u8]) -> Self {
         Self { hash: Sha1::digest(bytes).as_slice().try_into().unwrap() }
     }
 
