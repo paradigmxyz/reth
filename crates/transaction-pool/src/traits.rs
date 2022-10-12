@@ -23,11 +23,7 @@ pub trait TransactionPool: Send + Sync {
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(
-        &self,
-        block_id: BlockID,
-        transaction: Self::Transaction,
-    ) -> PoolResult<TxHash>;
+    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash>;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -36,7 +32,6 @@ pub trait TransactionPool: Send + Sync {
     /// Consumer: RPC
     async fn add_transactions(
         &self,
-        block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
