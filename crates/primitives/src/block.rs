@@ -1,4 +1,4 @@
-use crate::{Header, HeaderLocked, Receipt, Transaction, TransactionSigned};
+use crate::{Header, HeaderLocked, Receipt, Transaction, TransactionSigned, H256};
 use std::ops::Deref;
 
 /// Ethereum full block.
@@ -28,6 +28,13 @@ pub struct BlockLocked {
     pub body: Vec<TransactionSigned>,
     /// Block receipts.
     pub receipts: Vec<Receipt>,
+}
+
+impl BlockLocked {
+    /// Header hash.
+    pub fn hash(&self) -> H256 {
+        self.header.hash()
+    }
 }
 
 impl Deref for BlockLocked {

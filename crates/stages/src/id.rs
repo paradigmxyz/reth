@@ -42,3 +42,14 @@ impl StageId {
         tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stage_id_display() {
+        assert_eq!(StageId("foo").to_string(), "foo");
+        assert_eq!(StageId("bar").to_string(), "bar");
+    }
+}
