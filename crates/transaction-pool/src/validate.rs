@@ -29,7 +29,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
 #[async_trait::async_trait]
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
-    type Transaction: PoolTransaction + Send + Sync + 'static;
+    type Transaction: PoolTransaction;
 
     /// Validates the transaction and returns a validated outcome
     ///

@@ -6,12 +6,86 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Reth's transaction pool implementation
+//! Reth's transaction pool implementation.
+//!
+//! This crate provides a generic transaction pool implementation.
+//!
+//! ## Functionality
+//!
+//! The transaction pool is responsible for
+//!
+//!      - recording incoming transactions
+//!      - providing existing transactions
+//!      - ordering and providing the best transactions for block production
+//!      - monitoring memory footprint and enforce pool size limits
+//!
+//! ## Assumptions
+//!
+//! ### Transaction type
+//!
+//! The pool expects certain ethereum related information from the generic transaction type of the
+//! pool ([`PoolTransaction`]), this includes gas price, base fee (EIP-1559 transactions), nonce
+//! etc. It makes no assumptions about the encoding format, but the transaction type must report its
+//! size so pool size limits (memory) can be enforced.
+//!
+//! ### Transaction ordering
+//!
+//! The pending pool contains transactions that can be mined on the current state.
+//! The order in which they're returned are determined by a `Priority` value returned by the
+//! `TransactionOrdering` type this pool is configured with.
+//!
+//! This is only used in the _pending_ pool to yield the best transactions for block production. The
+//! _base pool_ is ordered by base fee, and the _queued pool_ by current distance.
+//!
+//! ### Validation
+//!
+//! The pool itself does not validate incoming transactions, instead this should be provided by
+//! implementing `TransactionsValidator`. Only transactions that the validator returns as valid are
+//! included in the pool. It is assumed that transaction that are in the pool are either valid on
+//! the current state or could become valid after certain state changes. transaction that can never
+//! become valid (e.g. nonce lower than current on chain nonce) will never be added to the pool and
+//! instead are discarded right away.
+//!
+//! ### State Changes
+//!
+//! Once a new block is mined, the pool needs to be updated with a changeset in order to:
+//!
+//!     - remove mined transactions
+//!     - update using account changes: balance changes
+//!     - base fee updates
+//!
+//! ## Implementation details
+//!
+//! The `TransactionPool` trait exposes all externally used functionality of the pool, such as
+//! inserting, querying specific transactions by hash or retrieving the best transactions.
+//! Additionally, it allows to register event listeners for new ready transactions or state changes.
+//! Events are communicated via channels.
+//!
+//! ### Architecture
+//!
+//! The final `TransactionPool` is made up of two layers:
+//!
+//! The lowest layer is the actual pool implementations that manages (validated) transactions:
+//! [`TxPool`](crate::pool::TxPool). This is contained in a higher level pool type that guards the
+//! low level pool and handles additional listeners or metrics:
+//! [`PoolInner`](crate::pool::PoolInner)
+//!
+//! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
+//! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
+//! that provides the `TransactionPool` interface.
 
+pub use crate::{
+    client::PoolClient,
+    config::PoolConfig,
+    ordering::TransactionOrdering,
+    traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
+    validate::{TransactionValidationOutcome, TransactionValidator},
+};
+use crate::{error::PoolResult, pool::PoolInner, validate::ValidPoolTransaction};
 use futures::channel::mpsc::Receiver;
 use parking_lot::Mutex;
 use reth_primitives::{BlockID, TxHash, U256, U64};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 mod client;
 mod config;
@@ -25,24 +99,10 @@ mod validate;
 #[cfg(test)]
 mod test_util;
 
-pub use crate::{
-    client::PoolClient,
-    config::PoolConfig,
-    ordering::TransactionOrdering,
-    pool::BasicPool,
-    traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
-    validate::{TransactionValidationOutcome, TransactionValidator},
-};
-use crate::{error::PoolResult, validate::ValidPoolTransaction};
-
-/// A generic, customizable `TransactionPool` implementation.
+/// A shareable, generic, customizable `TransactionPool` implementation.
 pub struct Pool<P: PoolClient, T: TransactionOrdering> {
-    /// The actual transaction pool where transactions and subscriptions are handled.
-    pool: BasicPool<P, T>,
-    /// Tracks status updates linked to chain events.
-    update_status: Arc<Mutex<UpdateStatus>>,
-    /// Chain/Storage access.
-    client: Arc<P>,
+    /// Arc'ed instance of the pool internals
+    pool: Arc<PoolInner<P, T>>,
 }
 
 // === impl Pool ===
@@ -52,10 +112,55 @@ where
     P: PoolClient,
     T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
 {
-    /// Creates a new `Pool` with the given config and client and ordering.
+    /// Create a new transaction pool instance.
     pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
-        let pool = BasicPool::new(Arc::clone(&client), ordering, config);
-        Self { pool, update_status: Arc::new(Default::default()), client }
+        Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
+    }
+
+    /// Returns the wrapped pool
+    pub(crate) fn inner(&self) -> &PoolInner<P, T> {
+        &self.pool
+    }
+
+    /// Returns the actual block number for the block id
+    fn resolve_block_number(&self, block_id: &BlockID) -> PoolResult<U64> {
+        self.pool.client().ensure_block_number(block_id)
+    }
+
+    /// Returns future that validates all transaction in the given iterator at the block the
+    /// `block_id` points to.
+    async fn validate_all(
+        &self,
+        block_id: &BlockID,
+        transactions: impl IntoIterator<Item = P::Transaction>,
+    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
+        // get the actual block number which is required to validate the transactions
+        let block_number = self.resolve_block_number(block_id)?;
+
+        let outcome = futures::future::join_all(
+            transactions.into_iter().map(|tx| self.validate(block_id, block_number, tx)),
+        )
+        .await
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+        Ok(outcome)
+    }
+
+    /// Validates the given transaction at the given block
+    async fn validate(
+        &self,
+        block_id: &BlockID,
+        _block_number: U64,
+        transaction: P::Transaction,
+    ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
+        let _hash = *transaction.hash();
+        // TODO this is where additional validate checks would go, like banned senders etc...
+        let _res = self.pool.client().validate_transaction(block_id, transaction).await;
+
+        // TODO blockstamp the transaction
+
+        todo!()
     }
 }
 
@@ -78,7 +183,10 @@ where
         block_id: BlockID,
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
-        self.pool.clone().add_transaction(&block_id, transaction).await
+        self.add_transactions(block_id, vec![transaction])
+            .await?
+            .pop()
+            .expect("transaction exists; qed")
     }
 
     async fn add_transactions(
@@ -86,17 +194,19 @@ where
         block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        self.pool.clone().add_transactions(&block_id, transactions).await
+        let validated = self.validate_all(&block_id, transactions).await?;
+        let transactions = self.pool.add_transactions(validated.into_values());
+        Ok(transactions)
     }
 
     fn ready_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pool.ready_transactions_listener()
+        self.pool.add_ready_listener()
     }
 
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        Box::new(self.pool.inner().ready_transactions())
+        Box::new(self.pool.ready_transactions())
     }
 
     fn remove_invalid(
@@ -114,4 +224,10 @@ struct UpdateStatus {
     updated_at: U64,
     /// Current base fee that needs to be enforced
     base_fee: U256,
+}
+
+impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {
+    fn clone(&self) -> Self {
+        Self { pool: Arc::clone(&self.pool) }
+    }
 }

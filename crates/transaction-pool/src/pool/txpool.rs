@@ -162,7 +162,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         removed,
                     })
                 } else {
-                    AddedTransaction::Queued { hash }
+                    AddedTransaction::Parked { hash }
                 };
 
                 Ok(res)

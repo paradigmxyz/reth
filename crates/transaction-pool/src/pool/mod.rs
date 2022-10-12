@@ -88,110 +88,11 @@ pub mod txpool;
 use crate::{pool::txpool::TxPool, validate::TransactionValidationOutcome};
 pub use events::TransactionEvent;
 
-/// Shareable Transaction pool.
-pub struct BasicPool<P: PoolClient, T: TransactionOrdering> {
-    /// Arc'ed instance of the pool internals
-    pool: Arc<PoolInner<P, T>>,
-}
-
-// === impl Pool ===
-
-impl<P: PoolClient, T: TransactionOrdering> BasicPool<P, T>
-where
-    P: PoolClient,
-    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
-{
-    /// Create a new transaction pool instance.
-    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
-        Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
-    }
-
-    /// Returns the wrapped pool
-    pub(crate) fn inner(&self) -> &PoolInner<P, T> {
-        &self.pool
-    }
-
-    /// Returns the actual block number for the block id
-    fn resolve_block_number(&self, block_id: &BlockID) -> PoolResult<U64> {
-        self.pool.client().ensure_block_number(block_id)
-    }
-
-    /// Add a single _unverified_ transaction into the pool.
-    pub async fn add_transaction(
-        &self,
-        block_id: &BlockID,
-        transaction: P::Transaction,
-    ) -> PoolResult<TxHash> {
-        self.add_transactions(block_id, Some(transaction))
-            .await?
-            .pop()
-            .expect("transaction exists; qed")
-    }
-
-    /// Adds all given transactions into the pool
-    pub async fn add_transactions(
-        &self,
-        block_id: &BlockID,
-        transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        let validated = self.validate_all(block_id, transactions).await?;
-        let transactions = self.pool.add_transactions(validated.into_values());
-        Ok(transactions)
-    }
-
-    /// Returns future that validates all transaction in the given iterator at the block the
-    /// `block_id` points to.
-    async fn validate_all(
-        &self,
-        block_id: &BlockID,
-        transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
-        // get the actual block number which is required to validate the transactions
-        let block_number = self.resolve_block_number(block_id)?;
-
-        let outcome = futures::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(block_id, block_number, tx)),
-        )
-        .await
-        .into_iter()
-        .collect::<HashMap<_, _>>();
-
-        Ok(outcome)
-    }
-
-    /// Validates the given transaction at the given block
-    async fn validate(
-        &self,
-        block_id: &BlockID,
-        _block_number: U64,
-        transaction: P::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
-        let _hash = *transaction.hash();
-        // TODO this is where additional validate checks would go, like banned senders etc...
-        let _res = self.pool.client().validate_transaction(block_id, transaction).await;
-
-        // TODO blockstamp the transaction
-
-        todo!()
-    }
-
-    /// Registers a new transaction listener and returns the receiver stream.
-    pub fn ready_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pool.add_ready_listener()
-    }
-}
-
-impl<P: PoolClient, O: TransactionOrdering> Clone for BasicPool<P, O> {
-    fn clone(&self) -> Self {
-        Self { pool: Arc::clone(&self.pool) }
-    }
-}
-
 /// Transaction pool internals.
 pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     /// Chain/Storage access.
     client: Arc<P>,
-    /// The internal pool that manages
+    /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
     config: PoolConfig,
@@ -310,7 +211,7 @@ where
                 listener.ready(&tx.hash, None);
                 // TODO  more listeners for discarded, removed etc...
             }
-            AddedTransaction::Queued { hash } => {
+            AddedTransaction::Parked { hash } => {
                 listener.queued(hash);
             }
         }
@@ -352,17 +253,17 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
 pub enum AddedTransaction<T: PoolTransaction> {
     /// Transaction was successfully added and moved to the pending pool.
     Pending(AddedPendingTransaction<T>),
-    /// Transaction was successfully added but not yet queued for processing and moved to the
-    /// queued pool instead.
-    Queued {
-        /// the hash of the submitted transaction
+    /// Transaction was successfully added but not yet ready for processing and moved to a
+    /// parked pool instead.
+    Parked {
+        /// Hash of the submitted transaction that is currently parked.
         hash: TxHash,
     },
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
-    /// Returns the hash of the transaction if it's ready
-    pub fn as_ready(&self) -> Option<&TxHash> {
+    /// Returns the hash of the transaction if it's pending
+    pub fn as_pending(&self) -> Option<&TxHash> {
         if let AddedTransaction::Pending(tx) = self {
             Some(&tx.hash)
         } else {
@@ -374,7 +275,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     pub fn hash(&self) -> &TxHash {
         match self {
             AddedTransaction::Pending(tx) => &tx.hash,
-            AddedTransaction::Queued { hash } => hash,
+            AddedTransaction::Parked { hash } => hash,
         }
     }
 }
