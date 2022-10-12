@@ -189,7 +189,7 @@ pub struct Transaction {
     pub v: JsonU256,
     /// Transaction value.
     pub value: JsonU256,
-    /// Chain id.
+    /// Chain ID.
     pub chain_id: Option<JsonU256>,
     /// Access list.
     pub access_list: Option<AccessList>,
