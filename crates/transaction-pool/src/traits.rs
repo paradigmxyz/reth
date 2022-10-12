@@ -11,7 +11,7 @@ use std::{fmt, hash::Hash, sync::Arc};
 #[async_trait::async_trait]
 pub trait TransactionPool: Send + Sync {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction + Send + Sync + 'static;
+    type Transaction: PoolTransaction;
 
     /// Event listener for when a new block was mined.
     ///
