@@ -21,21 +21,18 @@ impl Command {
             .path
             .iter()
             .map(|item| {
-                let mut test = Vec::new();
-                let files = util::find_all_json_tests(item);
-                for file in files {
+                util::find_all_json_tests(item).into_iter().map(|file| {
                     let tfile = file.clone();
-                    let join = tokio::spawn(async move { runner::run_test(&tfile).await });
-                    test.push((join, file));
-                }
-                test
+                    let join = tokio::spawn(async move { runner::run_test(tfile.as_path()).await });
+                    (join, file)
+                })
             })
             .collect();
-        // await the tasks for resolve's to complete and give back our items
+        // await the tasks for resolve's to complete and give back our test results
         let mut num_of_failed = 0;
         let mut num_of_passed = 0;
         for tasks in task_group {
-            for (join, file) in tasks.into_iter() {
+            for (join, file) in tasks {
                 match join.await.unwrap() {
                     Ok(_) => {
                         num_of_passed += 1;

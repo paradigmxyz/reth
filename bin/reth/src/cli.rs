@@ -14,7 +14,7 @@ pub async fn run() -> eyre::Result<()> {
 /// Commands to be executed
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Runs ethereum blockchain tests
+    /// Runs Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
 }
