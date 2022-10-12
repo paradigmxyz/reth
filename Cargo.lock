@@ -1776,6 +1776,8 @@ name = "reth-p2p"
 version = "0.1.0"
 dependencies = [
  "enr",
+ "futures",
+ "reth-primitives",
  "secp256k1",
  "serde",
  "serde_derive",
