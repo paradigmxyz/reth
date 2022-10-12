@@ -16,7 +16,7 @@ use reth_primitives::TxHash;
 use std::{
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
     fmt,
-    ops::Bound::{Excluded, Included, Unbounded},
+    ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
 
@@ -97,7 +97,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the pool based on the changed base fee.
     ///
     /// This enforces the dynamic fee requirement.
-    pub(crate) fn update_base_fee(&mut self, new_base_fee: U256) {
+    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
         // TODO update according to the changed base_fee
         todo!()
     }
@@ -144,7 +144,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         // Update sender info
-        self.sender_info.entry(tx.sender_id).or_default().update(on_chain_nonce, on_chain_balance);
+        self.sender_info
+            .entry(tx.sender_id())
+            .or_default()
+            .update(on_chain_nonce, on_chain_balance);
 
         let hash = *tx.hash();
 
@@ -265,6 +268,16 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn enforce_size_limits(&mut self) {
         unimplemented!()
     }
+
+    /// Number of transactions in the entire pool
+    pub(crate) fn len(&self) -> usize {
+        self.all_transactions.len()
+    }
+
+    /// Whether the pool is empty
+    pub(crate) fn is_empty(&self) -> bool {
+        self.all_transactions.is_empty()
+    }
 }
 
 /// Container for _all_ transaction in the pool.
@@ -339,51 +352,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             .take_while(move |(other, _)| sender == other.sender)
     }
 
-    /// Returns all transactions that predates the given transaction.
-    ///
-    /// NOTE: The range is _inclusive_
-    pub(crate) fn ancestor_txs<'a, 'b: 'a>(
-        &'a self,
-        id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
-        self.txs
-            .range((Unbounded, Included(id)))
-            .rev()
-            .take_while(|(other, _)| id.sender == other.sender)
-    }
-
-    /// Returns all mutable transactions that predates the given transaction.
-    ///
-    /// NOTE: The range is _inclusive_
-    pub(crate) fn ancestor_txs_mut<'a, 'b: 'a>(
-        &'a mut self,
-        id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
-        self.txs
-            .range_mut((Unbounded, Included(id)))
-            .rev()
-            .take_while(|(other, _)| id.sender == other.sender)
-    }
-
-    /// Returns all transactions that predates the given transaction.
-    ///
-    /// NOTE: The range is _exclusive_: This does not return the transaction itself
-    pub(crate) fn ancestor_txs_exclusive<'a, 'b: 'a>(
-        &'a self,
-        id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
-        self.txs.range(..id).rev().take_while(|(other, _)| id.sender == other.sender)
-    }
-
-    /// Returns all transactions that _follow_ after the given id but have the same sender.
-    ///
-    /// NOTE: The range is _exclusive_
-    pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
-        &'a self,
-        id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
-        self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
-    }
     /// Returns all transactions that _follow_ after the given id but have the same sender.
     ///
     /// NOTE: The range is _exclusive_
@@ -420,10 +388,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Removes a transaction from the pool after it was mined.
     ///
-    /// This will not trigger additional updates since, because descendants without nonce gaps are
-    /// already in the pending pool.
-    pub(crate) fn remove_mined_tx(&mut self, _id: &TransactionId) {
-        // TODO decrease nonce gap
+    /// This will _not_ trigger additional updates, because descendants without nonce gaps are
+    /// already in the pending pool, and this transaction will be the first transaction of the
+    /// sender in this pool.
+    pub(crate) fn remove_mined_tx(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T>>> {
+        let tx = self.txs.remove(id)?;
+        self.by_hash.remove(tx.transaction.hash())
     }
 
     /// Inserts a new transaction into the pool.
@@ -513,7 +486,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
 
         // The next transaction of this sender
-        let on_chain_id = TransactionId::new(transaction.sender_id, on_chain_nonce);
+        let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
         {
             // Tracks the next nonce we expect if the transactions are gapless
             let mut next_nonce = on_chain_id.nonce;
@@ -572,7 +545,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Rechecks the transaction of the given sender and returns a set of updates.
     pub(crate) fn on_mined(&mut self, _sender: &SenderId, _new_balance: U256, _old_balance: U256) {
-        todo!()
+        todo!("ideally we want to process updates in bulk")
     }
 
     /// Number of transactions in the entire pool
@@ -639,9 +612,13 @@ pub(crate) enum InsertResult<T: PoolTransaction> {
 
 // === impl InsertResult ===
 
+// Some test helpers
 #[allow(missing_docs)]
+#[cfg(test)]
 impl<T: PoolTransaction> InsertResult<T> {
-    fn is_underpriced(&self) -> bool {
+    /// Returns true if the result is underpriced variant
+
+    pub(crate) fn is_underpriced(&self) -> bool {
         matches!(self, InsertResult::Underpriced { .. })
     }
 }
@@ -743,7 +720,7 @@ impl SenderInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{mock_tx_pool, MockTransaction, MockTransactionFactory};
+    use crate::test_util::{MockTransaction, MockTransactionFactory};
 
     #[test]
     fn test_simple_insert() {
@@ -805,7 +782,7 @@ mod tests {
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
-        let res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
         let replacement = f.validated(tx.rng_hash().inc_price());
         let res = pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce);
         match res {
@@ -832,7 +809,7 @@ mod tests {
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_nonce().inc_price().inc_limit();
         let first = f.validated(tx.clone());
-        let res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
 
         let first_in_pool = pool.get(first.id()).unwrap();
         // has nonce gap
@@ -868,7 +845,7 @@ mod tests {
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_nonce().set_gas_price(100u64.into()).inc_limit();
         let first = f.validated(tx.clone());
-        let res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
 
         let first_in_pool = pool.get(first.id()).unwrap();
         // has nonce gap

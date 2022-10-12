@@ -336,7 +336,6 @@ impl MockTransactionFactory {
         MockValidTx {
             propagate: false,
             is_local: false,
-            sender_id: transaction_id.sender,
             transaction_id,
             cost: transaction.cost(),
             transaction,
