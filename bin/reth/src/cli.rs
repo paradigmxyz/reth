@@ -3,7 +3,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use crate::test_eth_chain;
 
 /// main function that parses cli and runs command
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
     match opt.command {

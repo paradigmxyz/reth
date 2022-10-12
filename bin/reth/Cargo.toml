@@ -7,7 +7,7 @@ repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 
 [dependencies]
-anyhow = "1.0"
+eyre = "0.6.8"
 clap = { version = "4.0", features = ["derive"] }
 thiserror = "1.0"
 tracing = "0.1"

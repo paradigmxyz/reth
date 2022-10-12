@@ -1,5 +1,4 @@
 use crate::util;
-use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 /// Models for parsing JSON blockchain tests
@@ -16,7 +15,7 @@ pub struct Command {
 
 impl Command {
     /// Execute the command
-    pub async fn execute(self) -> Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // note the use of `into_iter()` to consume `items`
         let task_group: Vec<_> = self
             .path
@@ -49,7 +48,7 @@ impl Command {
             }
         }
 
-        println!("PASSED {num_of_passed}/{} tests", num_of_passed + num_of_failed);
+        println!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
 
         Ok(())
     }
