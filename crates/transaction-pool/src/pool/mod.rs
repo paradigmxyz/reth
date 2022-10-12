@@ -191,7 +191,7 @@ impl<P: PoolClient, O: TransactionOrdering> Clone for BasicPool<P, O> {
 pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     /// Chain/Storage access.
     client: Arc<P>,
-    /// The internal pool that manages
+    /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
     config: PoolConfig,
@@ -310,7 +310,7 @@ where
                 listener.ready(&tx.hash, None);
                 // TODO  more listeners for discarded, removed etc...
             }
-            AddedTransaction::Queued { hash } => {
+            AddedTransaction::Parked { hash } => {
                 listener.queued(hash);
             }
         }
@@ -352,17 +352,17 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
 pub enum AddedTransaction<T: PoolTransaction> {
     /// Transaction was successfully added and moved to the pending pool.
     Pending(AddedPendingTransaction<T>),
-    /// Transaction was successfully added but not yet queued for processing and moved to the
-    /// queued pool instead.
-    Queued {
-        /// the hash of the submitted transaction
+    /// Transaction was successfully added but not yet ready for processing and moved to a
+    /// parked pool instead.
+    Parked {
+        /// Hash of the submitted transaction that is currently parked.
         hash: TxHash,
     },
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
-    /// Returns the hash of the transaction if it's ready
-    pub fn as_ready(&self) -> Option<&TxHash> {
+    /// Returns the hash of the transaction if it's pending
+    pub fn as_pending(&self) -> Option<&TxHash> {
         if let AddedTransaction::Pending(tx) = self {
             Some(&tx.hash)
         } else {
@@ -374,7 +374,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     pub fn hash(&self) -> &TxHash {
         match self {
             AddedTransaction::Pending(tx) => &tx.hash,
-            AddedTransaction::Queued { hash } => hash,
+            AddedTransaction::Parked { hash } => hash,
         }
     }
 }

@@ -8,6 +8,15 @@
 
 //! Reth's transaction pool implementation
 
+pub use crate::{
+    client::PoolClient,
+    config::PoolConfig,
+    ordering::TransactionOrdering,
+    pool::BasicPool,
+    traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
+    validate::{TransactionValidationOutcome, TransactionValidator},
+};
+use crate::{error::PoolResult, validate::ValidPoolTransaction};
 use futures::channel::mpsc::Receiver;
 use parking_lot::Mutex;
 use reth_primitives::{BlockID, TxHash, U256, U64};
@@ -24,16 +33,6 @@ mod validate;
 
 #[cfg(test)]
 mod test_util;
-
-pub use crate::{
-    client::PoolClient,
-    config::PoolConfig,
-    ordering::TransactionOrdering,
-    pool::BasicPool,
-    traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
-    validate::{TransactionValidationOutcome, TransactionValidator},
-};
-use crate::{error::PoolResult, validate::ValidPoolTransaction};
 
 /// A generic, customizable `TransactionPool` implementation.
 pub struct Pool<P: PoolClient, T: TransactionOrdering> {
