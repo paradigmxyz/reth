@@ -65,15 +65,15 @@
 
 use crate::{
     error::PoolResult, pool::listener::PoolEventListener, traits::PoolTransaction,
-    validate::ValidPoolTransaction, BlockID, PoolClient, PoolConfig, TransactionOrdering,
+    validate::ValidPoolTransaction, PoolClient, PoolConfig, TransactionOrdering,
     TransactionValidator, U256,
 };
 
 use best::BestTransactions;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{TxHash, U64};
-use std::{collections::HashMap, sync::Arc};
+use reth_primitives::{Address, TxHash};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::warn;
 
 mod best;
@@ -85,11 +85,17 @@ pub(crate) mod state;
 mod transaction;
 pub mod txpool;
 
-use crate::{pool::txpool::TxPool, validate::TransactionValidationOutcome};
+use crate::{
+    identifier::{SenderId, SenderIdentifiers, TransactionId},
+    pool::txpool::TxPool,
+    validate::TransactionValidationOutcome,
+};
 pub use events::TransactionEvent;
 
 /// Transaction pool internals.
 pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
+    /// Internal mapping of addresses to plain ints.
+    identifiers: RwLock<SenderIdentifiers>,
     /// Chain/Storage access.
     client: Arc<P>,
     /// The internal pool that manages all transactions.
@@ -112,12 +118,18 @@ where
     /// Create a new transaction pool instance.
     pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
+            identifiers: Default::default(),
             client,
             config,
             event_listener: Default::default(),
             pool: RwLock::new(TxPool::new(ordering)),
             ready_transaction_listener: Default::default(),
         }
+    }
+
+    /// Returns the internal `SenderId` for this address
+    pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
+        self.identifiers.write().sender_id_or_create(addr)
     }
 
     /// Updates the pool
@@ -150,20 +162,28 @@ where
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
-            TransactionValidationOutcome::Valid { balance: _, state_nonce: _, transaction: _ } => {
-                // TODO create `ValidPoolTransaction`
+            TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
+                let sender_id = self.get_sender_id(*transaction.sender());
+                let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
-                // let added = self.pool.write().add_transaction(tx)?;
-                //
-                // if let Some(ready) = added.as_ready() {
-                //     self.on_new_ready_transaction(ready);
-                // }
-                //
-                // self.notify_event_listeners(&added);
-                //
-                // Ok(*added.hash())
+                let tx = ValidPoolTransaction {
+                    cost: transaction.cost(),
+                    transaction,
+                    transaction_id,
+                    propagate: false,
+                    is_local: false,
+                    timestamp: Instant::now(),
+                };
 
-                todo!()
+                let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;
+
+                if let Some(pending_hash) = added.as_pending() {
+                    self.on_new_pending_transaction(pending_hash);
+                }
+
+                self.notify_event_listeners(&added);
+
+                Ok(*added.hash())
             }
             TransactionValidationOutcome::Invalid(_tx, err) => {
                 // TODO notify listeners about invalid
@@ -183,7 +203,7 @@ where
     }
 
     /// Notify all listeners about the new transaction.
-    fn on_new_ready_transaction(&self, ready: &TxHash) {
+    fn on_new_pending_transaction(&self, ready: &TxHash) {
         let mut transaction_listeners = self.ready_transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| match listener.try_send(*ready) {
             Ok(()) => true,
@@ -220,6 +240,24 @@ where
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn ready_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
+    }
+
+    /// Returns the transaction by hash.
+    pub(crate) fn get(
+        &self,
+        tx_hash: &TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().get(tx_hash)
+    }
+
+    /// Number of transactions in the entire pool
+    pub(crate) fn len(&self) -> usize {
+        self.pool.read().len()
+    }
+
+    /// Whether the pool is empty
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pool.read().is_empty()
     }
 }
 

@@ -1,5 +1,4 @@
-//! Internal helpers for testing.
-#![allow(missing_docs, unused)]
+//! Mock Types
 
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
@@ -336,7 +335,6 @@ impl MockTransactionFactory {
         MockValidTx {
             propagate: false,
             is_local: false,
-            sender_id: transaction_id.sender,
             transaction_id,
             cost: transaction.cost(),
             transaction,
