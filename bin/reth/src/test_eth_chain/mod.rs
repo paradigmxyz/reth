@@ -10,7 +10,7 @@ pub mod runner;
 /// Execute Ethereum blockchain tests by specifying path to json files
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Path to json files
+    /// Path to Ethereum JSON test files
     path: Vec<PathBuf>,
 }
 
