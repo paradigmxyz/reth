@@ -2,7 +2,6 @@
 
 use super::KVError;
 use bytes::Bytes;
-use parity_scale_codec::decode_from_bytes;
 use std::{
     fmt::Debug,
     marker::{Send, Sync},
@@ -44,25 +43,4 @@ pub trait Table: Send + Sync + Debug + 'static {
 pub trait DupSort: Table {
     /// Subkey type. For more check https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
     type SubKey: Object;
-}
-
-impl<T> Encode for T
-where
-    T: parity_scale_codec::Encode + Sync + Send + std::fmt::Debug,
-{
-    type Encoded = Vec<u8>;
-
-    fn encode(self) -> Self::Encoded {
-        parity_scale_codec::Encode::encode(&self)
-    }
-}
-
-impl<T> Decode for T
-where
-    T: parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
-{
-    fn decode(value: Bytes) -> Result<T, KVError> {
-        decode_from_bytes(value)
-            .map_err(|_| KVError::InvalidValue(Some("Error decoding value.".into())))
-    }
 }

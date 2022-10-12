@@ -24,6 +24,8 @@ use tx::Tx;
 mod error;
 pub use error::KVError;
 
+mod codecs;
+
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
 pub enum EnvKind {

@@ -1,0 +1,39 @@
+use crate::kv::{Decode, Encode, KVError};
+use parity_scale_codec::decode_from_bytes;
+use reth_primitives::*;
+
+/// Marker trait type to restrict the TableEncode and TableDecode with scale to chosen types.
+pub trait ScaleOnly {}
+
+impl<T> Encode for T
+where
+    T: ScaleOnly + parity_scale_codec::Encode + Sync + Send + std::fmt::Debug,
+{
+    type Encoded = Vec<u8>;
+
+    fn encode(self) -> Self::Encoded {
+        parity_scale_codec::Encode::encode(&self)
+    }
+}
+
+impl<T> Decode for T
+where
+    T: ScaleOnly + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
+{
+    fn decode(value: bytes::Bytes) -> Result<T, KVError> {
+        decode_from_bytes(value)
+            .map_err(|_| KVError::InvalidValue(Some("Error decoding value.".into())))
+    }
+}
+
+macro_rules! impl_scale {
+    ($($name:tt),+) => {
+        $(
+            impl ScaleOnly for $name {}
+        )+
+    };
+}
+
+impl_scale!(u16, H256, U256, H160, u8, u64, Header);
+
+impl ScaleOnly for Vec<u8> {}
