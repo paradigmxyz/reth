@@ -1,6 +1,6 @@
 //! Peer sessions.
 
-use crate::{bitfield::BitField, sha1::ShaHash, torrent::torrent::TorrentCtx};
+use crate::{bitfield::BitField, sha1::Sha1Hash, torrent::torrent::TorrentCtx};
 use tokio::time::Instant;
 
 /// An established session to a remote peer
@@ -15,7 +15,7 @@ pub struct PeerSession {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerCtx {
     /// The peer's bittorrent id
-    pub bittorrent_id: ShaHash,
+    pub bittorrent_id: Sha1Hash,
     /// What pieces this peers owns or lacks
     pub bitfield: Option<BitField>,
     /// History of send/receive statistics
@@ -35,7 +35,7 @@ pub struct PeerCtx {
 }
 
 impl PeerCtx {
-    pub fn new<T: Into<ShaHash>>(peer_btt_id: T) -> Self {
+    pub fn new<T: Into<Sha1Hash>>(peer_btt_id: T) -> Self {
         Self {
             bitfield: None,
             bittorrent_id: peer_btt_id.into(),
@@ -49,7 +49,7 @@ impl PeerCtx {
         }
     }
 
-    pub fn new_with_bitfield<T: Into<ShaHash>>(peer_btt_id: T, piece_field: BitField) -> Self {
+    pub fn new_with_bitfield<T: Into<Sha1Hash>>(peer_btt_id: T, piece_field: BitField) -> Self {
         Self {
             bitfield: Some(piece_field),
             bittorrent_id: peer_btt_id.into(),

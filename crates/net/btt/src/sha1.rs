@@ -15,15 +15,15 @@ use tokio::io::AsyncWrite;
 pub const SHA_HASH_LEN: usize = 20;
 
 /// Peers are identified by a hash.
-pub(crate) type PeerId = ShaHash;
+pub(crate) type PeerId = Sha1Hash;
 
 /// SHA-1 hash wrapper type for performing operations on the hash.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
-pub struct ShaHash {
+pub struct Sha1Hash {
     hash: [u8; SHA_HASH_LEN],
 }
 
-impl ShaHash {
+impl Sha1Hash {
     /// Create a ShaHash by hashing the given bytes.
     #[inline]
     pub fn digest(bytes: &[u8]) -> Self {
@@ -91,25 +91,25 @@ impl<'a> AsyncWrite for AsyncWriteSha1<'a> {
     }
 }
 
-impl AsRef<[u8]> for ShaHash {
+impl AsRef<[u8]> for Sha1Hash {
     fn as_ref(&self) -> &[u8] {
         &self.hash
     }
 }
 
-impl From<ShaHash> for [u8; SHA_HASH_LEN] {
-    fn from(val: ShaHash) -> [u8; SHA_HASH_LEN] {
+impl From<Sha1Hash> for [u8; SHA_HASH_LEN] {
+    fn from(val: Sha1Hash) -> [u8; SHA_HASH_LEN] {
         val.hash
     }
 }
 
-impl From<[u8; SHA_HASH_LEN]> for ShaHash {
-    fn from(sha_hash: [u8; SHA_HASH_LEN]) -> ShaHash {
-        ShaHash { hash: sha_hash }
+impl From<[u8; SHA_HASH_LEN]> for Sha1Hash {
+    fn from(sha_hash: [u8; SHA_HASH_LEN]) -> Sha1Hash {
+        Sha1Hash { hash: sha_hash }
     }
 }
 
-impl TryFrom<&[u8]> for ShaHash {
+impl TryFrom<&[u8]> for Sha1Hash {
     type Error = ();
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -124,13 +124,13 @@ impl TryFrom<&[u8]> for ShaHash {
     }
 }
 
-impl PartialEq<[u8]> for ShaHash {
+impl PartialEq<[u8]> for Sha1Hash {
     fn eq(&self, other: &[u8]) -> bool {
         other == &self.hash[..]
     }
 }
 
-impl fmt::Display for ShaHash {
+impl fmt::Display for Sha1Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for i in self.hash.iter() {
             write!(f, "{:08x}", i)?

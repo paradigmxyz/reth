@@ -1,7 +1,7 @@
 //! This module contains a type safe representation of a torrent's metainfo, as
 //! well as utilities to construct it.
 
-use crate::{info::storage::FileInfo, sha1::ShaHash};
+use crate::{info::storage::FileInfo, sha1::Sha1Hash};
 use reqwest::Url;
 pub use serde_bencode::Error as BencodeError;
 use std::{
@@ -38,7 +38,7 @@ pub struct Metainfo {
     /// path.
     pub name: String,
     /// This hash is used to identify a torrent with trackers and peers.
-    pub info_hash: ShaHash,
+    pub info_hash: Sha1Hash,
     /// The concatenation of the 20 byte SHA-1 hash of each piece in torrent.
     /// This is used to verify the data sent to us by peers.
     pub pieces: Vec<u8>,
@@ -201,7 +201,7 @@ mod raw {
     //! [`super::Metainfo`] type, which is essentially a mapping of
     //! [`Metainfo`], but with semantic requirements encoded in the type
     //! system.
-    use super::{Result, ShaHash};
+    use super::{Result, Sha1Hash};
     use serde::{Deserialize, Serialize};
     use sha1::Digest;
 
@@ -216,9 +216,9 @@ mod raw {
 
     impl Metainfo {
         /// Creates a SHA-1 hash of the encoded `info` field's value.
-        pub(crate) fn info_hash(&self) -> Result<ShaHash> {
+        pub(crate) fn info_hash(&self) -> Result<Sha1Hash> {
             let info = serde_bencode::to_bytes(&self.info)?;
-            Ok(ShaHash::digest(&info))
+            Ok(Sha1Hash::digest(&info))
         }
     }
 

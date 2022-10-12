@@ -1647,6 +1647,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "os_str_bytes"
+version = "6.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ff7415e9ae3fff1225851df9e0d9e4e5479f947619774677a63572e55e80eff"
+
+[[package]]
 name = "page_size"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1976,6 +1982,7 @@ dependencies = [
  "bytes",
  "fnv",
  "futures",
+ "percent-encoding",
  "pin-project",
  "rand",
  "reqwest",

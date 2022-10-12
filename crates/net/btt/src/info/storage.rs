@@ -1,6 +1,5 @@
 use crate::info::{meta::Metainfo, FileIndex, PieceIndex};
 use std::{ops::Range, path::PathBuf};
-use tracing::trace;
 
 /// Information about a torrent's file.
 #[derive(Clone, Debug)]

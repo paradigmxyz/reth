@@ -14,6 +14,7 @@ Reth bittorrent downloader
 # torrent
 bitvec = "1.0"
 serde_bencode = "0.2"
+percent-encoding = "2.1"
 
 # async/futures
 futures = "0.3"

@@ -1,6 +1,6 @@
 // //! All bittorrent message types.
 
-use crate::{bitfield::BitField, piece::Piece, sha1::ShaHash};
+use crate::{bitfield::BitField, piece::Piece, sha1::Sha1Hash};
 use bytes::{BufMut, BytesMut};
 
 /// A request for a specific (part) of a piece.
@@ -197,9 +197,9 @@ pub struct Handshake {
     pub reserved: [u8; 8],
     /// 20-byte SHA1 hash of the info key in the metainfo file.
     /// This is the same info_hash that is transmitted in tracker requests.
-    pub info_hash: ShaHash,
+    pub info_hash: Sha1Hash,
     /// 20-byte string used as a unique ID for the client
-    pub peer_id: ShaHash,
+    pub peer_id: Sha1Hash,
 }
 
 impl Handshake {
@@ -211,12 +211,12 @@ impl Handshake {
         [66, 105, 116, 84, 111, 114, 114, 101, 110, 116, 32, 112, 114, 111, 116, 111, 99, 111, 108];
 
     /// Create a new `Handshake` message
-    pub fn new(info_hash: ShaHash, peer_id: ShaHash) -> Self {
+    pub fn new(info_hash: Sha1Hash, peer_id: Sha1Hash) -> Self {
         Self { reserved: [0; 8], info_hash, peer_id }
     }
 
     /// Create a new `Handshake` message with a random peer id.
-    pub fn new_with_random_id(info_hash: ShaHash) -> Self {
-        Self { reserved: [0u8; 8], info_hash, peer_id: ShaHash::random() }
+    pub fn new_with_random_id(info_hash: Sha1Hash) -> Self {
+        Self { reserved: [0u8; 8], info_hash, peer_id: Sha1Hash::random() }
     }
 }

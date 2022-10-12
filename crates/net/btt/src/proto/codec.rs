@@ -201,7 +201,7 @@ impl Encoder<PeerMessage> for PeerCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{bitfield::BitField, piece::BLOCK_SIZE_MIN, sha1::ShaHash};
+    use crate::{bitfield::BitField, piece::BLOCK_SIZE_MIN, sha1::Sha1Hash};
     use bytes::BufMut;
 
     macro_rules! peer_wire_msg_encode_decode {
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn peer_wire_codec() {
         let handshake =
-            PeerMessage::Handshake { handshake: Handshake::new_with_random_id(ShaHash::random()) };
+            PeerMessage::Handshake { handshake: Handshake::new_with_random_id(Sha1Hash::random()) };
 
         peer_wire_msg_encode_decode!(
             PeerMessage::KeepAlive,
