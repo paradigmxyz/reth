@@ -166,7 +166,7 @@ pub enum SealEngine {
     NoProof,
 }
 
-/// Ehereum blockchain test Transaction data.
+/// Ethereum blockchain test transaction data.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
