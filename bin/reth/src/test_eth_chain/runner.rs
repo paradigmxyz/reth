@@ -9,8 +9,6 @@ pub async fn run_test(path: &Path) -> Result<()> {
 
     for suit in suits.0 {
         println!("TODO:{:?}", suit.0);
-        let data = suit.1;
-        //data.
     }
     Ok(())
 }
