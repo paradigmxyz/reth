@@ -1852,6 +1852,7 @@ dependencies = [
  "linked-hash-map",
  "parking_lot",
  "paste",
+ "rand",
  "reth-primitives",
  "serde",
  "thiserror",
