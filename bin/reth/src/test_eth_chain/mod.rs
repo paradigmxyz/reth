@@ -2,7 +2,7 @@ use crate::util;
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-/// models for parsing json blockchain test.
+/// Models for parsing JSON blockchain tests
 pub mod models;
 /// Runs eth blockhain tests
 pub mod runner;
