@@ -60,8 +60,6 @@ const MIN_PROTOCOL_BASE_FEE: U256 = U256([7, 0, 0, 0]);
 ///   new -->  |apply state changes| pool
 /// ```
 pub struct TxPool<T: TransactionOrdering> {
-    /// How to order transactions.
-    ordering: Arc<T>,
     /// Contains the currently known info
     sender_info: FnvHashMap<SenderId, SenderInfo>,
     /// pending subpool
@@ -87,11 +85,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn new(ordering: Arc<T>) -> Self {
         Self {
             sender_info: Default::default(),
-            pending_pool: PendingPool::new(ordering.clone()),
+            pending_pool: PendingPool::new(ordering),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
             all_transactions: Default::default(),
-            ordering,
         }
     }
     /// Updates the pool based on the changed base fee.
@@ -332,6 +329,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
+    #[cfg(test)]
     pub(crate) fn txs_iter(
         &self,
         sender: SenderId,
@@ -343,6 +341,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns a mutable iterator over all transactions for the given sender, starting with the
     /// lowest nonce
+    #[cfg(test)]
     pub(crate) fn txs_iter_mut(
         &mut self,
         sender: SenderId,
@@ -396,6 +395,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T>>> {
         let tx = self.txs.remove(id)?;
+
+        // decrement the counter for the sender.
+        self.tx_decr(tx.transaction.sender_id());
+
         self.by_hash.remove(tx.transaction.hash())
     }
 
@@ -506,7 +509,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 tx.cumulative_cost = cumulative_cost;
 
                 // Update for next transaction
-                cumulative_cost = tx.cumulative_cost + tx.transaction.cost;
+                cumulative_cost = tx.next_cumulative_cost();
 
                 if cumulative_cost > on_chain_balance {
                     // sender lacks sufficient funds to pay for this transaction

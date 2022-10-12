@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockID};
 use futures::channel::mpsc::Receiver;
 use reth_primitives::{Address, TxHash, H256, U256};
-use std::{fmt, hash::Hash, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// General purpose abstraction fo a transaction-pool.
 ///

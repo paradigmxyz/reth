@@ -1,5 +1,4 @@
-//! Internal helpers for testing.
-#![allow(missing_docs, unused)]
+//! Mock Types
 
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
