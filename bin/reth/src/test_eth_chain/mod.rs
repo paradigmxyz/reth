@@ -4,7 +4,7 @@ use clap::Parser;
 use std::path::PathBuf;
 /// Models for parsing JSON blockchain tests
 pub mod models;
-/// Runs eth blockhain tests
+/// Ethereum blockhain test runner
 pub mod runner;
 
 /// Execute ethereum blockchain tests by specifying path to json files
