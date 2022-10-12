@@ -1,4 +1,4 @@
-use reth_primitives::U256;
+use crate::U256;
 use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -71,8 +71,8 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
 
 #[cfg(test)]
 mod test {
-    use crate::util::JsonU256;
-    use reth_primitives::U256;
+    use super::JsonU256;
+    use crate::U256;
     use serde_json;
 
     #[test]

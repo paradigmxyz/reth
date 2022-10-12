@@ -1,8 +1,6 @@
-use reth_primitives::{Address, Bloom, Bytes, H160, H256, H64};
+use reth_primitives::{Address, Bloom, Bytes, H160, H256, H64,JsonU256};
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
-
-use crate::util::JsonU256;
 
 /// Blockchain test deserializer.
 #[derive(Debug, PartialEq, Eq, Deserialize)]

@@ -1824,6 +1824,8 @@ dependencies = [
  "bytes",
  "ethers-core",
  "fastrlp",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
