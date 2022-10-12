@@ -12,7 +12,7 @@ pub struct Node {
 
 impl Node {
     /// Stream peer messages
-    pub async fn stream_messages(&self) -> MessageStream {
+    pub async fn stream_messages<T>(&self, _request: T) -> MessageStream {
         todo!()
     }
 
