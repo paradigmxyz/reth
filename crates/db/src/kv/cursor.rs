@@ -5,7 +5,7 @@ use crate::{
     kv::{Decode, DupSort, Encode, Table},
     utils::*,
 };
-use libmdbx::{self, TransactionKind};
+use libmdbx::{self, TransactionKind, WriteFlags, RW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, KVError>;
@@ -105,6 +105,15 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         let start = self.inner.set_range(start_key.encode().as_ref())?.map(decoder::<T>);
 
         Ok(Walker { cursor: self, start })
+    }
+}
+
+impl<'tx, T: Table> Cursor<'tx, RW, T> {
+    /// Inserts a `(key, value)` to the database. Repositions the cursor to the new item
+    pub fn put(&mut self, k: T::Key, v: T::Value, f: Option<WriteFlags>) -> Result<(), KVError> {
+        self.inner
+            .put(k.encode().as_ref(), v.encode().as_ref(), f.unwrap_or_default())
+            .map_err(KVError::Put)
     }
 }
 
