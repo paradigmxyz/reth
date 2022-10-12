@@ -62,6 +62,7 @@ where
     T: parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
     fn decode(value: Bytes) -> Result<T, KVError> {
-        Ok(decode_from_bytes(value).unwrap())
+        decode_from_bytes(value)
+            .map_err(|_| KVError::InvalidValue(Some("Error decoding value.".into())))
     }
 }
