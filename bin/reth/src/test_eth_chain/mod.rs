@@ -7,7 +7,7 @@ pub mod models;
 /// Ethereum blockhain test runner
 pub mod runner;
 
-/// Execute ethereum blockchain tests by specifying path to json files
+/// Execute Ethereum blockchain tests by specifying path to json files
 #[derive(Debug, Parser)]
 pub struct Command {
     /// Path to json files
