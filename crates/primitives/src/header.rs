@@ -48,7 +48,7 @@ pub struct Header {
     pub timestamp: u64,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
-    pub extra_data: Vec<u8>,
+    pub extra_data: bytes::Bytes,
     /// A 256-bit hash which, combined with the
     /// nonce, proves that a sufficient amount of computation has been carried out on this block;
     /// formally Hm.
