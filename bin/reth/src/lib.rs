@@ -7,7 +7,7 @@
 
 //! Rust Ethereum (reth) binary executable.
 
-/// cli that handles input
+/// CLI definition and entrypoint
 pub mod cli;
 
 /// Utility functions.
