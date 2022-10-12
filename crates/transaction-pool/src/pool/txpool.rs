@@ -279,12 +279,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 }
 
-
 // Additional test impls
 #[cfg(test)]
 #[allow(missing_docs)]
 impl<T: TransactionOrdering> TxPool<T> {
-
     pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
         &self.all_transactions
     }

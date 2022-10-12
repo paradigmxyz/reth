@@ -1,8 +1,11 @@
 //! Test helpers for mocking an entire pool.
 
 use crate::{
-    pool::txpool::TxPool,
-    test_util::{MockOrdering, MockTransactionDistribution},
+    error::PoolResult,
+    pool::{txpool::TxPool, AddedTransaction},
+    test_util::{
+        MockOrdering, MockTransaction, MockTransactionDistribution, MockTransactionFactory,
+    },
     TransactionOrdering,
 };
 use rand::Rng;
@@ -11,11 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
-use std::sync::Arc;
-use crate::error::PoolResult;
-use crate::pool::AddedTransaction;
-use crate::test_util::{MockTransaction, MockTransactionFactory};
 
 /// A wrapped `TxPool` with additional helpers for testing
 pub struct MockPool<T: TransactionOrdering = MockOrdering> {
@@ -24,23 +24,24 @@ pub struct MockPool<T: TransactionOrdering = MockOrdering> {
 }
 
 impl MockPool {
-
     /// The total size of all subpools
     fn total_subpool_size(&self) -> usize {
-        self.pool.pending().len() + self.pool.base_fee().len() +  self.pool.queued().len()
+        self.pool.pending().len() + self.pool.base_fee().len() + self.pool.queued().len()
     }
 
     /// Checks that all pool invariants hold.
-    fn enforce_invariants(&self)  {
-        assert_eq!(self.pool.len(), self.total_subpool_size(), "Tx in AllTransactions and sum(subpools) must match");
+    fn enforce_invariants(&self) {
+        assert_eq!(
+            self.pool.len(),
+            self.total_subpool_size(),
+            "Tx in AllTransactions and sum(subpools) must match"
+        );
     }
 }
 
 impl Default for MockPool {
     fn default() -> Self {
-        Self {
-            pool: TxPool::new(Arc::new(MockOrdering::default()))
-        }
+        Self { pool: TxPool::new(Arc::new(MockOrdering::default())) }
     }
 }
 
@@ -128,7 +129,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
 
                 let res = pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce).unwrap();
 
-                // TODO(mattsse): need a way expect based on the current state of the pool and tx settings
+                // TODO(mattsse): need a way expect based on the current state of the pool and tx
+                // settings
 
                 match res {
                     AddedTransaction::Pending(_) => {}
@@ -138,7 +140,6 @@ impl<R: Rng> MockTransactionSimulator<R> {
                 }
 
                 // TODO(mattsse): check subpools
-
             }
             ScenarioType::HigherNonce { .. } => {
                 unimplemented!()
@@ -147,7 +148,6 @@ impl<R: Rng> MockTransactionSimulator<R> {
 
         // make sure everything is set
         pool.enforce_invariants()
-
     }
 }
 
@@ -221,7 +221,7 @@ fn test_on_chain_nonce_scenario() {
         balance: 200_000u64.into(),
         scenarios: vec![ScenarioType::OnchainNonce],
         base_fee: 100u64.into(),
-        tx_generator: MockTransactionDistribution::new(30, 10..1_000),
+        tx_generator: MockTransactionDistribution::new(30, 10..100),
     };
     let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
     let mut pool = MockPool::default();
