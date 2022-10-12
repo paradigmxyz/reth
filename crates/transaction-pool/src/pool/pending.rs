@@ -5,10 +5,9 @@ use crate::{
 use reth_primitives::rpc::TxHash;
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use tracing::debug;
 
 /// A pool of validated and gapless transactions that are ready on the current state and are waiting
 /// to be included in a block.

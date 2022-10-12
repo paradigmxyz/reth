@@ -5,7 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::PoolTransaction,
 };
-use reth_primitives::{BlockID, TxHash, U256};
+use reth_primitives::{rpc::Address, BlockID, TxHash, U256};
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
@@ -19,9 +19,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         /// Validated transaction.
         transaction: T,
     },
-    /// The transaction is considered invalid.
-    ///
-    /// Note: This does not indicate whether the transaction will not be valid in the future
+    /// The transaction is considered invalid indefinitely.
     Invalid(T, PoolError),
 }
 
@@ -57,8 +55,6 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub propagate: bool,
     /// Whether the tx is from a local source.
     pub is_local: bool,
-    /// Internal `Sender` identifier.
-    pub sender_id: SenderId,
     /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`.
     pub cost: U256,
     /// Timestamp when this was added to the pool.
@@ -73,23 +69,33 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.hash()
     }
 
+    /// Returns the address of the sender
+    pub fn sender(&self) -> &Address {
+        self.transaction.sender()
+    }
+
+    /// Returns the internal identifier for the sender of this transaction
+    pub(crate) fn sender_id(&self) -> SenderId {
+        self.transaction_id.sender
+    }
+
     /// Returns the internal identifier for this transaction.
     pub(crate) fn id(&self) -> &TransactionId {
         &self.transaction_id
     }
 
     /// Returns the nonce set for this transaction.
-    pub(crate) fn nonce(&self) -> u64 {
+    pub fn nonce(&self) -> u64 {
         self.transaction.nonce()
     }
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
-    pub(crate) fn max_fee_per_gas(&self) -> Option<U256> {
+    pub fn max_fee_per_gas(&self) -> Option<U256> {
         self.transaction.max_fee_per_gas()
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
-    pub(crate) fn gas_limit(&self) -> u64 {
+    pub fn gas_limit(&self) -> u64 {
         self.transaction.gas_limit()
     }
 
@@ -107,7 +113,6 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             transaction_id: self.transaction_id,
             propagate: self.propagate,
             is_local: self.is_local,
-            sender_id: self.sender_id,
             cost: self.cost,
             timestamp: self.timestamp,
         }

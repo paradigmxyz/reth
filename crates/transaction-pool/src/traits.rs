@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockID};
 use futures::channel::mpsc::Receiver;
 use reth_primitives::{Address, TxHash, H256, U256};
-use std::{fmt, hash::Hash, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// General purpose abstraction fo a transaction-pool.
 ///
@@ -61,6 +61,14 @@ pub trait TransactionPool: Send + Sync {
         &self,
         tx_hashes: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns if the transaction for the given hash is already included in this pool.
+    fn contains(&self, tx_hash: &TxHash) -> bool {
+        self.get(tx_hash).is_some()
+    }
+
+    /// Returns the transaction for the given hash.
+    fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
 /// Event fired when a new block was mined
@@ -97,7 +105,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
-    /// Hash of the transaction
+    /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
     /// The Sender of the transaction.
@@ -112,6 +120,8 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
     fn cost(&self) -> U256;
 
     /// Returns the effective gas price for this transaction.
+    ///
+    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
     fn effective_gas_price(&self) -> U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.

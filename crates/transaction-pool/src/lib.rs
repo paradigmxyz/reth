@@ -1,4 +1,5 @@
-#![warn(missing_docs)] // unreachable_pub, missing_debug_implementations
+#![warn(missing_docs)]
+// unreachable_pub, missing_debug_implementations
 #![allow(unused)] // TODO(mattsse) remove after progress was made
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -83,7 +84,7 @@ pub use crate::{
 };
 use crate::{error::PoolResult, pool::PoolInner, validate::ValidPoolTransaction};
 use futures::channel::mpsc::Receiver;
-use parking_lot::Mutex;
+
 use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::{collections::HashMap, sync::Arc};
 
@@ -162,6 +163,16 @@ where
 
         todo!()
     }
+
+    /// Number of transactions in the entire pool
+    pub fn len(&self) -> usize {
+        self.pool.len()
+    }
+
+    /// Whether the pool is empty
+    pub fn is_empty(&self) -> bool {
+        self.pool.is_empty()
+    }
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
@@ -215,15 +226,10 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         todo!()
     }
-}
 
-/// Tracks the current update status of the pool.
-#[derive(Debug, Clone, Default)]
-struct UpdateStatus {
-    /// Block number when the pool was last updated.
-    updated_at: U64,
-    /// Current base fee that needs to be enforced
-    base_fee: U256,
+    fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.inner().get(tx_hash)
+    }
 }
 
 impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {

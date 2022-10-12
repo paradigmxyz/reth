@@ -172,7 +172,7 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self.0.transaction.max_fee_per_gas(), other.0.transaction.max_fee_per_gas()) {
             (Some(fee), Some(other)) => fee.cmp(&other),
-            (None, Some(other)) => Ordering::Less,
+            (None, Some(_other)) => Ordering::Less,
             (Some(_), None) => Ordering::Greater,
             _ => Ordering::Equal,
         }
@@ -187,7 +187,7 @@ pub struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 impl_ord_wrapper!(QueuedOrd);
 
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, _other: &Self) -> Ordering {
         // TODO ideally compare by distance here.
         Ordering::Equal
     }
