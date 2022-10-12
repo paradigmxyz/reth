@@ -16,6 +16,7 @@ bytes = "1.2.1"
 libmdbx = "0.1.8"
 page_size = "0.4.2"
 thiserror = "1.0.37"
+parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 
 [dev-dependencies]
 tempfile = "3.3.0"

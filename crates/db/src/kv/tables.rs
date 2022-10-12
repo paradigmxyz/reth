@@ -4,7 +4,7 @@ use crate::{
     kv::blocks::{BlockNumber_BlockHash, HeaderHash, NumTransactions, NumTxesInBlock},
     utils::TableType,
 };
-use reth_primitives::{Address, BlockNumber};
+use reth_primitives::{Address, BlockNumber, Header};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 17] = [
@@ -71,7 +71,7 @@ macro_rules! table {
 table!(CanonicalHeaders => BlockNumber => HeaderHash);
 table!(HeaderTD => BlockNumber_BlockHash => RlpTotalDifficulty);
 table!(HeaderNumbers => BlockNumber_BlockHash => BlockNumber);
-table!(Headers => BlockNumber_BlockHash => RlpHeader);
+table!(Headers => BlockNumber_BlockHash => Header);
 
 table!(BlockBodies => BlockNumber_BlockHash => NumTxesInBlock);
 table!(CumulativeTxCount => BlockNumber_BlockHash => NumTransactions); // TODO U256?
@@ -100,7 +100,6 @@ type ConfigKey = Vec<u8>;
 type ConfigValue = Vec<u8>;
 #[allow(non_camel_case_types)]
 type BlockNumber_BlockHash_TxId = Vec<u8>;
-type RlpHeader = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
 type Receipt = Vec<u8>;

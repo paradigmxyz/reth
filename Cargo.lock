@@ -1195,6 +1195,7 @@ dependencies = [
  "arrayvec",
  "bitvec",
  "byte-slice-cast",
+ "bytes",
  "impl-trait-for-tuples",
  "parity-scale-codec-derive",
  "serde",
@@ -1441,6 +1442,7 @@ dependencies = [
  "bytes",
  "libmdbx",
  "page_size",
+ "parity-scale-codec",
  "reth-primitives",
  "tempfile",
  "thiserror",
@@ -1481,6 +1483,7 @@ dependencies = [
  "bytes",
  "ethers-core",
  "fastrlp 0.2.0",
+ "parity-scale-codec",
 ]
 
 [[package]]

@@ -142,9 +142,12 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tables::PlainState, Env, EnvKind};
+    use super::{
+        tables::{Headers, PlainState},
+        Env, EnvKind,
+    };
     use libmdbx::{NoWriteMap, WriteMap};
-    use reth_primitives::Address;
+    use reth_primitives::{Address, Header, H256};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -172,18 +175,17 @@ mod tests {
                 .expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
 
-        let value = vec![1, 3, 3, 7];
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let value = Header::default();
+        let key = (1u64, H256::zero());
 
         // PUT
         let tx = env.begin_mut_tx().expect(ERROR_INIT_TX);
-        tx.put(PlainState, key, value.clone()).expect(ERROR_PUT);
+        tx.put(Headers, key.into(), value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // GET
         let tx = env.begin_tx().expect(ERROR_INIT_TX);
-        let result = tx.get(PlainState, key).expect(ERROR_GET);
+        let result = tx.get(Headers, key.into()).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);
     }

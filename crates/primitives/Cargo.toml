@@ -11,3 +11,4 @@ description = "Commonly used types in reth."
 fastrlp = { version = "0.2.0" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 bytes = "1.2"
+parity-scale-codec = { version = "3.2.1", features = ["derive"] }

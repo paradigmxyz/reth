@@ -4,6 +4,7 @@ use crate::kv::{
     table::{Decode, Encode},
     KVError,
 };
+use bytes::Bytes;
 use reth_primitives::{BlockHash, BlockNumber, H256};
 
 /// Total chain number of transactions. Key for [`CumulativeTxCount`].
@@ -28,6 +29,12 @@ impl BlockNumber_BlockHash {
     }
 }
 
+impl From<(u64, H256)> for BlockNumber_BlockHash {
+    fn from(tpl: (u64, H256)) -> Self {
+        BlockNumber_BlockHash(tpl)
+    }
+}
+
 impl Encode for BlockNumber_BlockHash {
     type Encoded = [u8; 40];
 
@@ -37,14 +44,14 @@ impl Encode for BlockNumber_BlockHash {
 
         let mut rnum = [0; 40];
 
-        rnum.copy_from_slice(&number.encode());
+        rnum[..8].copy_from_slice(&number.encode());
         rnum[8..].copy_from_slice(&hash.encode());
         rnum
     }
 }
 
 impl Decode for BlockNumber_BlockHash {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
-        Ok(BlockNumber_BlockHash((u64::decode(value)?, H256::decode(&value[8..])?)))
+    fn decode(value: Bytes) -> Result<Self, KVError> {
+        Ok(BlockNumber_BlockHash((u64::decode(value.clone())?, H256::decode(value.slice(8..))?)))
     }
 }
