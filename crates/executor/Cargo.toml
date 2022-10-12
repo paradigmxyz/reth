@@ -12,4 +12,4 @@ reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
-anyhow = "1.0"
+eyre = "0.6.8"
