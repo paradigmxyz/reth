@@ -171,7 +171,7 @@ where
 {
     type Transaction = T::Transaction;
 
-    async fn on_new_block(&self, _event: NewBlockEvent) {
+    fn on_new_block(&self, _event: NewBlockEvent<Self::Transaction>) {
         // TODO perform maintenance: update pool accordingly
         todo!()
     }

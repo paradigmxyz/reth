@@ -9,7 +9,7 @@ use crate::{
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
-    PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    NewBlockEvent, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
@@ -91,13 +91,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             all_transactions: Default::default(),
         }
     }
-    /// Updates the pool based on the changed base fee.
-    ///
-    /// This enforces the dynamic fee requirement.
-    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
-        // TODO update according to the changed base_fee
-        todo!()
-    }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
@@ -115,6 +108,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx_hash: &TxHash,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.all_transactions.by_hash.get(tx_hash).cloned()
+    }
+
+    /// Updates the entire pool after a new block was mined.
+    ///
+    pub(crate) fn on_new_block(&mut self, block: NewBlockEvent<T::Transaction>) -> Vec<PoolUpdate> {
+        todo!()
     }
 
     /// Adds the transaction into the pool.
