@@ -2,8 +2,11 @@ use crate::kv::{Decode, Encode, KVError};
 use parity_scale_codec::decode_from_bytes;
 use reth_primitives::*;
 
+mod sealed {
+    pub trait Sealed {}
+}
 /// Marker trait type to restrict the TableEncode and TableDecode with scale to chosen types.
-pub trait ScaleOnly {}
+pub trait ScaleOnly: sealed::Sealed {}
 
 impl<T> Encode for T
 where
@@ -29,6 +32,7 @@ macro_rules! impl_scale {
     ($($name:tt),+) => {
         $(
             impl ScaleOnly for $name {}
+            impl sealed::Sealed for $name {}
         )+
     };
 }
@@ -36,3 +40,4 @@ macro_rules! impl_scale {
 impl_scale!(u16, H256, U256, H160, u8, u64, Header);
 
 impl ScaleOnly for Vec<u8> {}
+impl sealed::Sealed for Vec<u8> {}
