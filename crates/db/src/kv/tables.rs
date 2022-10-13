@@ -1,6 +1,6 @@
 //! Declaration of all MDBX tables.
 use crate::{
-    kv::blocks::{BlockNumber_BlockHash, HeaderHash, NumTransactions, NumTxesInBlock},
+    kv::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
     utils::TableType,
 };
 use reth_primitives::{Account, Address, BlockNumber, Header};
@@ -66,14 +66,14 @@ macro_rules! table {
 //
 
 table!(CanonicalHeaders => BlockNumber => HeaderHash);
-table!(HeaderTD => BlockNumber_BlockHash => RlpTotalDifficulty);
-table!(HeaderNumbers => BlockNumber_BlockHash => BlockNumber);
-table!(Headers => BlockNumber_BlockHash => Header);
+table!(HeaderTD => BlockNumHash => RlpTotalDifficulty);
+table!(HeaderNumbers => BlockNumHash => BlockNumber);
+table!(Headers => BlockNumHash => Header);
 
-table!(BlockBodies => BlockNumber_BlockHash => NumTxesInBlock);
-table!(CumulativeTxCount => BlockNumber_BlockHash => NumTransactions); // TODO U256?
+table!(BlockBodies => BlockNumHash => NumTxesInBlock);
+table!(CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
 
-table!(NonCanonicalTransactions => BlockNumber_BlockHash_TxNumber => RlpTxBody);
+table!(NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
 table!(Transactions => TxNumber => RlpTxBody); // Canonical only
 table!(Receipts => TxNumber => Receipt); // Canonical only
 table!(Logs => TxNumber => Receipt); // Canonical only
@@ -98,7 +98,7 @@ table!(SyncStage => StageId => BlockNumber);
 type ConfigKey = Vec<u8>;
 type ConfigValue = Vec<u8>;
 #[allow(non_camel_case_types)]
-type BlockNumber_BlockHash_TxNumber = Vec<u8>;
+type BlockNumHashTxNumber = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
 type Receipt = Vec<u8>;

@@ -20,22 +20,22 @@ pub type HeaderHash = H256;
 /// element as BlockNumber, helps out with querying/sorting.
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
-pub struct BlockNumber_BlockHash((BlockNumber, BlockHash));
+pub struct BlockNumHash((BlockNumber, BlockHash));
 
-impl BlockNumber_BlockHash {
+impl BlockNumHash {
     /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]
     pub fn take(self) -> (BlockNumber, BlockHash) {
         (self.0 .0, self.0 .1)
     }
 }
 
-impl From<(u64, H256)> for BlockNumber_BlockHash {
+impl From<(u64, H256)> for BlockNumHash {
     fn from(tpl: (u64, H256)) -> Self {
-        BlockNumber_BlockHash(tpl)
+        BlockNumHash(tpl)
     }
 }
 
-impl Encode for BlockNumber_BlockHash {
+impl Encode for BlockNumHash {
     type Encoded = [u8; 40];
 
     fn encode(self) -> Self::Encoded {
@@ -50,9 +50,9 @@ impl Encode for BlockNumber_BlockHash {
     }
 }
 
-impl Decode for BlockNumber_BlockHash {
+impl Decode for BlockNumHash {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, KVError> {
         let value = value.into();
-        Ok(BlockNumber_BlockHash((u64::decode(value.clone())?, H256::decode(value.slice(8..))?)))
+        Ok(BlockNumHash((u64::decode(value.clone())?, H256::decode(value.slice(8..))?)))
     }
 }
