@@ -1,5 +1,5 @@
-use crate::{error::PoolResult, validate::ValidPoolTransaction, BlockID};
-use futures::channel::mpsc::Receiver;
+use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, BlockID};
+use futures::{channel::mpsc::Receiver, future::Shared};
 use reth_primitives::{Address, TxHash, H256, U256};
 use std::{fmt, sync::Arc};
 
@@ -23,11 +23,7 @@ pub trait TransactionPool: Send + Sync {
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(
-        &self,
-        block_id: BlockID,
-        transaction: Self::Transaction,
-    ) -> PoolResult<TxHash>;
+    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash>;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -36,14 +32,16 @@ pub trait TransactionPool: Send + Sync {
     /// Consumer: RPC
     async fn add_transactions(
         &self,
-        block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
-    fn ready_transactions_listener(&self) -> Receiver<TxHash>;
+    fn pending_transactions_listener(&self) -> Receiver<TxHash>;
+
+    /// Returns a new stream that yields new valid transactions added to the pool.
+    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -69,6 +67,21 @@ pub trait TransactionPool: Send + Sync {
 
     /// Returns the transaction for the given hash.
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+}
+
+/// Represents a new transaction
+#[derive(Debug)]
+pub struct NewTransactionEvent<T: PoolTransaction> {
+    /// The pool which the transaction was moved to.
+    pub subpool: SubPool,
+    /// Actual transaction
+    pub transaction: Arc<ValidPoolTransaction<T>>,
+}
+
+impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
+    fn clone(&self) -> Self {
+        Self { subpool: self.subpool, transaction: self.transaction.clone() }
+    }
 }
 
 /// Event fired when a new block was mined

@@ -1,5 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
+    config::MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::PoolError,
     identifier::{SenderId, TransactionId},
     pool::{
@@ -9,7 +10,7 @@ use crate::{
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
-    PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
@@ -64,6 +65,8 @@ pub struct TxPool<T: TransactionOrdering> {
     sender_info: FnvHashMap<SenderId, SenderInfo>,
     /// pending subpool
     pending_pool: PendingPool<T>,
+    /// Pool settings to enforce limits etc.
+    config: PoolConfig,
     /// queued subpool
     ///
     /// Holds all parked transactions that depend on external changes from the sender:
@@ -80,15 +83,18 @@ pub struct TxPool<T: TransactionOrdering> {
     all_transactions: AllTransactions<T::Transaction>,
 }
 
+// === impl TxPool ===
+
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub fn new(ordering: Arc<T>) -> Self {
+    pub fn new(ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
-            all_transactions: Default::default(),
+            all_transactions: AllTransactions::new(config.max_account_slots),
+            config,
         }
     }
     /// Updates the pool based on the changed base fee.
@@ -150,19 +156,19 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             InsertResult::Inserted { transaction, move_to, replaced_tx, updates, .. } => {
-                self.add_new_transaction(transaction, replaced_tx, move_to);
+                self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
-                        hash,
+                        transaction,
                         promoted,
                         discarded,
                         removed,
                     })
                 } else {
-                    AddedTransaction::Parked { hash }
+                    AddedTransaction::Parked { transaction, subpool: move_to }
                 };
 
                 Ok(res)
@@ -277,6 +283,27 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 }
 
+// Additional test impls
+#[cfg(test)]
+#[allow(missing_docs)]
+impl<T: TransactionOrdering> TxPool<T> {
+    pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
+        &self.all_transactions
+    }
+
+    pub(crate) fn pending(&self) -> &PendingPool<T> {
+        &self.pending_pool
+    }
+
+    pub(crate) fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
+        &self.basefee_pool
+    }
+
+    pub(crate) fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
+        &self.queued_pool
+    }
+}
+
 /// Container for _all_ transaction in the pool.
 ///
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
@@ -290,6 +317,8 @@ pub struct AllTransactions<T: PoolTransaction> {
     minimal_protocol_basefee: U256,
     /// The max gas limit of the block
     block_gas_limit: u64,
+    /// Max number of executable transaction slots guaranteed per account
+    max_account_slots: usize,
     /// _All_ transactions identified by their hash.
     by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
@@ -299,6 +328,11 @@ pub struct AllTransactions<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
+    /// Create a new instance
+    fn new(max_account_slots: usize) -> Self {
+        Self { max_account_slots, ..Default::default() }
+    }
+
     /// Returns if the transaction for the given hash is already included in this pool
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.by_hash.contains_key(tx_hash)
@@ -565,6 +599,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
+            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
             pending_basefee: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: 30_000_000,

@@ -15,10 +15,10 @@
 //!
 //! The transaction pool is responsible for
 //!
-//!      - recording incoming transactions
-//!      - providing existing transactions
-//!      - ordering and providing the best transactions for block production
-//!      - monitoring memory footprint and enforce pool size limits
+//!    - recording incoming transactions
+//!    - providing existing transactions
+//!    - ordering and providing the best transactions for block production
+//!    - monitoring memory footprint and enforce pool size limits
 //!
 //! ## Assumptions
 //!
@@ -51,9 +51,9 @@
 //!
 //! Once a new block is mined, the pool needs to be updated with a changeset in order to:
 //!
-//!     - remove mined transactions
-//!     - update using account changes: balance changes
-//!     - base fee updates
+//!   - remove mined transactions
+//!   - update using account changes: balance changes
+//!   - base fee updates
 //!
 //! ## Implementation details
 //!
@@ -76,19 +76,18 @@
 //! that provides the `TransactionPool` interface.
 
 pub use crate::{
-    client::PoolClient,
     config::PoolConfig,
     ordering::TransactionOrdering,
     traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
-use crate::{error::PoolResult, pool::PoolInner, validate::ValidPoolTransaction};
+use crate::{
+    error::PoolResult, pool::PoolInner, traits::NewTransactionEvent, validate::ValidPoolTransaction,
+};
 use futures::channel::mpsc::Receiver;
-
 use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::{collections::HashMap, sync::Arc};
 
-mod client;
 mod config;
 pub mod error;
 mod identifier;
@@ -101,67 +100,53 @@ mod validate;
 mod test_util;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
-pub struct Pool<P: PoolClient, T: TransactionOrdering> {
+pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
     /// Arc'ed instance of the pool internals
-    pool: Arc<PoolInner<P, T>>,
+    pool: Arc<PoolInner<V, T>>,
 }
 
 // === impl Pool ===
 
-impl<P, T> Pool<P, T>
+impl<V, T> Pool<V, T>
 where
-    P: PoolClient,
-    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub fn new(client: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
         Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
     }
 
-    /// Returns the wrapped pool
-    pub(crate) fn inner(&self) -> &PoolInner<P, T> {
+    /// Returns the wrapped pool.
+    pub(crate) fn inner(&self) -> &PoolInner<V, T> {
         &self.pool
     }
 
-    /// Returns the actual block number for the block id
-    fn resolve_block_number(&self, block_id: &BlockID) -> PoolResult<U64> {
-        self.pool.client().ensure_block_number(block_id)
-    }
-
-    /// Returns future that validates all transaction in the given iterator at the block the
-    /// `block_id` points to.
+    /// Returns future that validates all transaction in the given iterator.
     async fn validate_all(
         &self,
-        block_id: &BlockID,
-        transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
-        // get the actual block number which is required to validate the transactions
-        let block_number = self.resolve_block_number(block_id)?;
-
-        let outcome = futures::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(block_id, block_number, tx)),
-        )
-        .await
-        .into_iter()
-        .collect::<HashMap<_, _>>();
+        transactions: impl IntoIterator<Item = V::Transaction>,
+    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
+        let outcome =
+            futures::future::join_all(transactions.into_iter().map(|tx| self.validate(tx)))
+                .await
+                .into_iter()
+                .collect::<HashMap<_, _>>();
 
         Ok(outcome)
     }
 
-    /// Validates the given transaction at the given block
+    /// Validates the given transaction
     async fn validate(
         &self,
-        block_id: &BlockID,
-        _block_number: U64,
-        transaction: P::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
-        let _hash = *transaction.hash();
-        // TODO this is where additional validate checks would go, like banned senders etc...
-        let _res = self.pool.client().validate_transaction(block_id, transaction).await;
+        transaction: V::Transaction,
+    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
+        let hash = *transaction.hash();
+        // TODO(mattsse): this is where additional validate checks would go, like banned senders
+        // etc...
+        let outcome = self.pool.validator().validate_transaction(transaction).await;
 
-        // TODO blockstamp the transaction
-
-        todo!()
+        (hash, outcome)
     }
 
     /// Number of transactions in the entire pool
@@ -177,10 +162,10 @@ where
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
 #[async_trait::async_trait]
-impl<P, T> TransactionPool for Pool<P, T>
+impl<V, T> TransactionPool for Pool<V, T>
 where
-    P: PoolClient,
-    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     type Transaction = T::Transaction;
 
@@ -189,29 +174,26 @@ where
         todo!()
     }
 
-    async fn add_transaction(
-        &self,
-        block_id: BlockID,
-        transaction: Self::Transaction,
-    ) -> PoolResult<TxHash> {
-        self.add_transactions(block_id, vec![transaction])
-            .await?
-            .pop()
-            .expect("transaction exists; qed")
+    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
+        let (_, tx) = self.validate(transaction).await;
+        self.pool.add_transactions(std::iter::once(tx)).pop().expect("exists; qed")
     }
 
     async fn add_transactions(
         &self,
-        block_id: BlockID,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        let validated = self.validate_all(&block_id, transactions).await?;
+        let validated = self.validate_all(transactions).await?;
         let transactions = self.pool.add_transactions(validated.into_values());
         Ok(transactions)
     }
 
-    fn ready_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pool.add_ready_listener()
+    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
+        self.pool.add_pending_listener()
+    }
+
+    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_transaction_listener()
     }
 
     fn best_transactions(
@@ -232,7 +214,7 @@ where
     }
 }
 
-impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {
+impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
     }
