@@ -9,8 +9,16 @@ use std::{
     sync::Arc,
 };
 
-/// A pool of validated and gapless transactions that are ready on the current state and are waiting
-/// to be included in a block.
+/// A pool of validated and gapless transactions that are ready to be executed on the current state
+/// and are waiting to be included in a block.
+///
+/// This pool distinguishes between `independent` transactions and pending transactions. A
+/// transaction is `independent`, if it is in the pending pool, and it has the current on chain
+/// nonce of the sender. Meaning `independent` transactions can be executed right away, other
+/// pending transactions depend on at least one `independent` transaction.
+///
+/// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
+/// is also pending, then this will be moved to the `independent` queue.
 pub(crate) struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: Arc<T>,
