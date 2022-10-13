@@ -32,7 +32,7 @@ bitflags::bitflags! {
 /// Identifier for the used Sub-pool
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u8)]
-pub(crate) enum SubPool {
+pub enum SubPool {
     Queued = 0,
     Pending,
     BaseFee,
@@ -42,12 +42,12 @@ pub(crate) enum SubPool {
 
 impl SubPool {
     /// Whether this transaction is to be moved to the pending sub-pool.
-    pub(crate) fn is_pending(&self) -> bool {
+    pub fn is_pending(&self) -> bool {
         matches!(self, SubPool::Pending)
     }
 
     /// Returns whether this is a promotion depending on the current sub-pool location.
-    pub(crate) fn is_promoted(&self, other: SubPool) -> bool {
+    pub fn is_promoted(&self, other: SubPool) -> bool {
         self > &other
     }
 }
