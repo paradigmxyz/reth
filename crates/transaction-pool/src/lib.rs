@@ -82,7 +82,9 @@ pub use crate::{
     traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
-use crate::{error::PoolResult, pool::PoolInner, validate::ValidPoolTransaction};
+use crate::{
+    error::PoolResult, pool::PoolInner, traits::NewTransactionEvent, validate::ValidPoolTransaction,
+};
 use futures::channel::mpsc::Receiver;
 use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::{collections::HashMap, sync::Arc};
@@ -117,13 +119,12 @@ where
         Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
     }
 
-    /// Returns the wrapped pool
+    /// Returns the wrapped pool.
     pub(crate) fn inner(&self) -> &PoolInner<P, T> {
         &self.pool
     }
 
-    /// Returns future that validates all transaction in the given iterator at the block the
-    /// `block_id` points to.
+    /// Returns future that validates all transaction in the given iterator.
     async fn validate_all(
         &self,
         transactions: impl IntoIterator<Item = P::Transaction>,
@@ -137,18 +138,17 @@ where
         Ok(outcome)
     }
 
-    /// Validates the given transaction at the given block
+    /// Validates the given transaction
     async fn validate(
         &self,
         transaction: P::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
-        let _hash = *transaction.hash();
-        // TODO this is where additional validate checks would go, like banned senders etc...
-        let _res = self.pool.client().validate_transaction(transaction).await;
+        let hash = *transaction.hash();
+        // TODO(mattsse): this is where additional validate checks would go, like banned senders
+        // etc...
+        let outcome = self.pool.client().validate_transaction(transaction).await;
 
-        // TODO blockstamp the transaction
-
-        todo!()
+        (hash, outcome)
     }
 
     /// Number of transactions in the entire pool
@@ -190,8 +190,12 @@ where
         Ok(transactions)
     }
 
-    fn ready_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pool.add_ready_listener()
+    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
+        self.pool.add_pending_listener()
+    }
+
+    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_transaction_listener()
     }
 
     fn best_transactions(
