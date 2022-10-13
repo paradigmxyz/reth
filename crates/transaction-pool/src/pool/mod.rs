@@ -69,7 +69,7 @@ use crate::{
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
     traits::{NewTransactionEvent, PoolTransaction},
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
+    PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
@@ -89,11 +89,11 @@ mod transaction;
 pub mod txpool;
 
 /// Transaction pool internals.
-pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
+pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Internal mapping of addresses to plain ints.
     identifiers: RwLock<SenderIdentifiers>,
-    /// Chain/Storage access.
-    client: Arc<P>,
+    /// Transaction validation.
+    validator: Arc<V>,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
@@ -108,16 +108,16 @@ pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
 
 // === impl PoolInner ===
 
-impl<P: PoolClient, T: TransactionOrdering> PoolInner<P, T>
+impl<V: TransactionValidator, T: TransactionOrdering> PoolInner<V, T>
 where
-    P: PoolClient,
-    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub fn new(client: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
             identifiers: Default::default(),
-            client,
+            validator: client,
             config,
             event_listener: Default::default(),
             pool: RwLock::new(TxPool::new(ordering)),
@@ -136,9 +136,9 @@ where
         self.pool.write().update_base_fee(base_fee);
     }
 
-    /// Get client reference.
-    pub fn client(&self) -> &P {
-        &self.client
+    /// Get the validator reference.
+    pub fn validator(&self) -> &V {
+        &self.validator
     }
 
     /// Adds a new transaction listener to the pool that gets notified about every new _ready_
