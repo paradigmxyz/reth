@@ -39,9 +39,7 @@ pub trait TransactionValidator: Send + Sync {
     async fn validate_transaction(
         &self,
         _transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        unimplemented!()
-    }
+    ) -> TransactionValidationOutcome<Self::Transaction>;
 }
 
 /// A valida transaction in the pool.

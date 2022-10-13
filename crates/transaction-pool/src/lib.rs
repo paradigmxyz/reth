@@ -76,7 +76,6 @@
 //! that provides the `TransactionPool` interface.
 
 pub use crate::{
-    client::PoolClient,
     config::PoolConfig,
     ordering::TransactionOrdering,
     traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
@@ -87,7 +86,6 @@ use futures::channel::mpsc::Receiver;
 use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::{collections::HashMap, sync::Arc};
 
-mod client;
 mod config;
 pub mod error;
 mod identifier;
@@ -100,25 +98,25 @@ mod validate;
 mod test_util;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
-pub struct Pool<P: PoolClient, T: TransactionOrdering> {
+pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
     /// Arc'ed instance of the pool internals
-    pool: Arc<PoolInner<P, T>>,
+    pool: Arc<PoolInner<V, T>>,
 }
 
 // === impl Pool ===
 
-impl<P, T> Pool<P, T>
+impl<V, T> Pool<V, T>
 where
-    P: PoolClient,
-    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(client: Arc<P>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub fn new(client: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
         Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
     }
 
     /// Returns the wrapped pool
-    pub(crate) fn inner(&self) -> &PoolInner<P, T> {
+    pub(crate) fn inner(&self) -> &PoolInner<V, T> {
         &self.pool
     }
 
@@ -126,8 +124,8 @@ where
     /// `block_id` points to.
     async fn validate_all(
         &self,
-        transactions: impl IntoIterator<Item = P::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<P::Transaction>>> {
+        transactions: impl IntoIterator<Item = V::Transaction>,
+    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
         let outcome =
             futures::future::join_all(transactions.into_iter().map(|tx| self.validate(tx)))
                 .await
@@ -140,11 +138,11 @@ where
     /// Validates the given transaction at the given block
     async fn validate(
         &self,
-        transaction: P::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<P::Transaction>) {
+        transaction: V::Transaction,
+    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let _hash = *transaction.hash();
         // TODO this is where additional validate checks would go, like banned senders etc...
-        let _res = self.pool.client().validate_transaction(transaction).await;
+        let _res = self.pool.validator().validate_transaction(transaction).await;
 
         // TODO blockstamp the transaction
 
@@ -164,10 +162,10 @@ where
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
 #[async_trait::async_trait]
-impl<P, T> TransactionPool for Pool<P, T>
+impl<V, T> TransactionPool for Pool<V, T>
 where
-    P: PoolClient,
-    T: TransactionOrdering<Transaction = <P as TransactionValidator>::Transaction>,
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     type Transaction = T::Transaction;
 
@@ -212,7 +210,7 @@ where
     }
 }
 
-impl<P: PoolClient, O: TransactionOrdering> Clone for Pool<P, O> {
+impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
     }
