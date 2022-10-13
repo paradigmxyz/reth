@@ -120,9 +120,9 @@ where
         Self {
             identifiers: Default::default(),
             client,
-            config,
             event_listener: Default::default(),
-            pool: RwLock::new(TxPool::new(ordering)),
+            pool: RwLock::new(TxPool::new(ordering, config.clone())),
+            config,
             ready_transaction_listener: Default::default(),
         }
     }
