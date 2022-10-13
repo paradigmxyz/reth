@@ -15,10 +15,10 @@
 //!
 //! The transaction pool is responsible for
 //!
-//!      - recording incoming transactions
-//!      - providing existing transactions
-//!      - ordering and providing the best transactions for block production
-//!      - monitoring memory footprint and enforce pool size limits
+//!    - recording incoming transactions
+//!    - providing existing transactions
+//!    - ordering and providing the best transactions for block production
+//!    - monitoring memory footprint and enforce pool size limits
 //!
 //! ## Assumptions
 //!
@@ -51,9 +51,9 @@
 //!
 //! Once a new block is mined, the pool needs to be updated with a changeset in order to:
 //!
-//!     - remove mined transactions
-//!     - update using account changes: balance changes
-//!     - base fee updates
+//!   - remove mined transactions
+//!   - update using account changes: balance changes
+//!   - base fee updates
 //!
 //! ## Implementation details
 //!
