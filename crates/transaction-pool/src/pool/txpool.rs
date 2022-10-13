@@ -152,19 +152,19 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             InsertResult::Inserted { transaction, move_to, replaced_tx, updates, .. } => {
-                self.add_new_transaction(transaction, replaced_tx, move_to);
+                self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
-                        hash,
+                        transaction,
                         promoted,
                         discarded,
                         removed,
                     })
                 } else {
-                    AddedTransaction::Parked { hash }
+                    AddedTransaction::Parked { transaction, subpool: move_to }
                 };
 
                 Ok(res)
