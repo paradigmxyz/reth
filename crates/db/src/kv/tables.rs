@@ -3,7 +3,7 @@ use crate::{
     kv::blocks::{BlockNumber_BlockHash, HeaderHash, NumTransactions, NumTxesInBlock},
     utils::TableType,
 };
-use reth_primitives::{Address, BlockNumber, Header};
+use reth_primitives::{Account, Address, BlockNumber, Header};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [
@@ -78,7 +78,7 @@ table!(Transactions => TxNumber => RlpTxBody); // Canonical only
 table!(Receipts => TxNumber => Receipt); // Canonical only
 table!(Logs => TxNumber => Receipt); // Canonical only
 
-table!(PlainState => PlainStateKey => Vec<u8>);
+table!(PlainState => PlainStateKey => Account);
 
 table!(AccountHistory => Address => TxNumberList);
 table!(StorageHistory => Address_StorageKey => TxNumberList);

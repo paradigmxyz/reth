@@ -174,7 +174,7 @@ mod tests {
         test_utils, Env, EnvKind,
     };
     use libmdbx::{NoWriteMap, WriteMap};
-    use reth_primitives::{Address, Header, H256};
+    use reth_primitives::{Account, Address, Header, H256, U256};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -214,7 +214,11 @@ mod tests {
     fn db_closure_put_get() {
         let path = TempDir::new().expect(test_utils::ERROR_TEMPDIR).into_path();
 
-        let value = vec![1, 3, 3, 7];
+        let value = Account {
+            nonce: 18446744073709551615,
+            bytecode_hash: H256::random(),
+            balance: U256::max_value(),
+        };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
 
@@ -223,7 +227,7 @@ mod tests {
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainState>(key, value.clone()).expect(ERROR_PUT);
+                tx.put::<PlainState>(key, value).expect(ERROR_PUT);
                 200
             });
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
