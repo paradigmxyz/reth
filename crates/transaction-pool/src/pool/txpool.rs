@@ -80,6 +80,8 @@ pub struct TxPool<T: TransactionOrdering> {
     all_transactions: AllTransactions<T::Transaction>,
 }
 
+// === impl TxPool ===
+
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
     pub fn new(ordering: Arc<T>) -> Self {
@@ -274,6 +276,27 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.all_transactions.is_empty()
+    }
+}
+
+// Additional test impls
+#[cfg(test)]
+#[allow(missing_docs)]
+impl<T: TransactionOrdering> TxPool<T> {
+    pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
+        &self.all_transactions
+    }
+
+    pub(crate) fn pending(&self) -> &PendingPool<T> {
+        &self.pending_pool
+    }
+
+    pub(crate) fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
+        &self.basefee_pool
+    }
+
+    pub(crate) fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
+        &self.queued_pool
     }
 }
 

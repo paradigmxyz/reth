@@ -142,6 +142,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn get(&self, id: &TransactionId) -> Option<Arc<PendingTransaction<T>>> {
         self.by_id.get(id).cloned()
     }
+
+    /// Number of transactions in the entire pool
+    pub(crate) fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    /// Whether the pool is empty
+    pub(crate) fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
 }
 
 /// A transaction that is ready to be included in a block.
