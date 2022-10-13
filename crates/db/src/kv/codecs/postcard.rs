@@ -3,7 +3,7 @@ use heapless::Vec;
 use postcard::{from_bytes, to_vec};
 use reth_primitives::Account;
 
-// Just add `Serialize` and `Deserialize`, and set impl_heapless_postcard!(T)
+// Just add `Serialize` and `Deserialize`, and set impl_heapless_postcard!(T, MaxSize(T))
 //
 //
 // use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use reth_primitives::Account;
 // pub struct T {
 // }
 //
-// impl_postcard!(T)
+// impl_heapless_postcard!(T, MaxSize(T))
 
 macro_rules! impl_heapless_postcard {
     ($name:tt, $static_size:tt) => {
