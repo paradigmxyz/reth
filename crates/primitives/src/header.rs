@@ -1,10 +1,11 @@
 use std::ops::Deref;
 
 use crate::{BlockNumber, H160, H256, U256};
-use parity_scale_codec::{Decode, Encode};
+use codecs::*;
 
 /// Block header
-#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, Decode)]
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.
@@ -34,17 +35,13 @@ pub struct Header {
     pub difficulty: U256,
     /// A scalar value equal to the number of ancestor blocks. The genesis block has a number of
     /// zero; formally Hi.
-    #[codec(compact)]
     pub number: BlockNumber,
     /// A scalar value equal to the current limit of gas expenditure per block; formally Hl.
-    #[codec(compact)]
     pub gas_limit: u64,
     /// A scalar value equal to the total gas used in transactions in this block; formally Hg.
-    #[codec(compact)]
     pub gas_used: u64,
     /// A scalar value equal to the reasonable output of Unix’s time() at this block’s inception;
     /// formally Hs.
-    #[codec(compact)]
     pub timestamp: u64,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
@@ -53,7 +50,6 @@ pub struct Header {
     /// nonce, proves that a sufficient amount of computation has been carried out on this block;
     /// formally Hm.
     pub mix_hash: H256,
-    #[codec(compact)]
     /// A 64-bit value which, combined with the mixhash, proves that a sufficient amount of
     /// computation has been carried out on this block; formally Hn.
     pub nonce: u64,

@@ -1,0 +1,26 @@
+[package]
+name = "codecs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }
+
+# codecs
+serde = { version = "1.0.*", default-features = false }
+postcard = { version = "*", features = ["heapless"] }
+heapless = "0.7.16"
+parity-scale-codec = { version = "3.2.1", features = ["derive"] }
+
+[lib]
+proc-macro = true
+
+[features]
+default = ["scale"]
+scale = []
+postcard = []
+no_codec = []

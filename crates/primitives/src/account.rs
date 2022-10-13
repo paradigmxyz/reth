@@ -1,8 +1,9 @@
 use crate::{H256, U256};
-use serde::{Deserialize, Serialize};
+use codecs::use_postcard;
 
 /// Account saved in database
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[use_postcard]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Account {
     /// Nonce.
     pub nonce: u64,

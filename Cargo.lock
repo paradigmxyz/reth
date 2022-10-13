@@ -354,6 +354,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
+name = "codecs"
+version = "0.1.0"
+dependencies = [
+ "heapless",
+ "parity-scale-codec",
+ "postcard",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2002,6 +2015,7 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "codecs",
  "ethers-core",
  "fastrlp",
  "heapless",
