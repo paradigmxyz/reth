@@ -114,15 +114,15 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(client: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub fn new(validator: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
             identifiers: Default::default(),
-            validator: client,
-            config,
+            validator,
             event_listener: Default::default(),
-            pool: RwLock::new(TxPool::new(ordering)),
+            pool: RwLock::new(TxPool::new(ordering, config.clone())),
             pending_transaction_listener: Default::default(),
             transaction_listener: Default::default(),
+            config,
         }
     }
 

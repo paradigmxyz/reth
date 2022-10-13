@@ -1,5 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
+    config::MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::PoolError,
     identifier::{SenderId, TransactionId},
     pool::{
@@ -9,7 +10,7 @@ use crate::{
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
-    PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
@@ -64,6 +65,8 @@ pub struct TxPool<T: TransactionOrdering> {
     sender_info: FnvHashMap<SenderId, SenderInfo>,
     /// pending subpool
     pending_pool: PendingPool<T>,
+    /// Pool settings to enforce limits etc.
+    config: PoolConfig,
     /// queued subpool
     ///
     /// Holds all parked transactions that depend on external changes from the sender:
@@ -84,13 +87,14 @@ pub struct TxPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub fn new(ordering: Arc<T>) -> Self {
+    pub fn new(ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
-            all_transactions: Default::default(),
+            all_transactions: AllTransactions::new(config.max_account_slots),
+            config,
         }
     }
     /// Updates the pool based on the changed base fee.
@@ -313,6 +317,8 @@ pub struct AllTransactions<T: PoolTransaction> {
     minimal_protocol_basefee: U256,
     /// The max gas limit of the block
     block_gas_limit: u64,
+    /// Max number of executable transaction slots guaranteed per account
+    max_account_slots: usize,
     /// _All_ transactions identified by their hash.
     by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
@@ -322,6 +328,11 @@ pub struct AllTransactions<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
+    /// Create a new instance
+    fn new(max_account_slots: usize) -> Self {
+        Self { max_account_slots, ..Default::default() }
+    }
+
     /// Returns if the transaction for the given hash is already included in this pool
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.by_hash.contains_key(tx_hash)
@@ -588,6 +599,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
+            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
             pending_basefee: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: 30_000_000,
