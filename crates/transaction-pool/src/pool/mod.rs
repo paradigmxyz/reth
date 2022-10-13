@@ -64,12 +64,15 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    error::PoolResult, pool::listener::PoolEventListener, traits::PoolTransaction,
-    validate::ValidPoolTransaction, PoolClient, PoolConfig, TransactionOrdering,
-    TransactionValidator, U256,
+    error::PoolResult,
+    identifier::{SenderId, SenderIdentifiers, TransactionId},
+    pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
+    traits::{NewTransactionEvent, PoolTransaction},
+    validate::{TransactionValidationOutcome, ValidPoolTransaction},
+    PoolClient, PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
-
 use best::BestTransactions;
+pub use events::TransactionEvent;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash};
@@ -85,13 +88,6 @@ pub(crate) mod state;
 mod transaction;
 pub mod txpool;
 
-use crate::{
-    identifier::{SenderId, SenderIdentifiers, TransactionId},
-    pool::txpool::TxPool,
-    validate::TransactionValidationOutcome,
-};
-pub use events::TransactionEvent;
-
 /// Transaction pool internals.
 pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     /// Internal mapping of addresses to plain ints.
@@ -105,7 +101,9 @@ pub struct PoolInner<P: PoolClient, T: TransactionOrdering> {
     /// Manages listeners for transaction state change events.
     event_listener: RwLock<PoolEventListener<TxHash>>,
     /// Listeners for new ready transactions.
-    ready_transaction_listener: Mutex<Vec<Sender<TxHash>>>,
+    pending_transaction_listener: Mutex<Vec<Sender<TxHash>>>,
+    /// Listeners for new transactions added to the pool.
+    transaction_listener: Mutex<Vec<Sender<NewTransactionEvent<T::Transaction>>>>,
 }
 
 // === impl PoolInner ===
@@ -123,7 +121,8 @@ where
             config,
             event_listener: Default::default(),
             pool: RwLock::new(TxPool::new(ordering)),
-            ready_transaction_listener: Default::default(),
+            pending_transaction_listener: Default::default(),
+            transaction_listener: Default::default(),
         }
     }
 
@@ -142,12 +141,20 @@ where
         &self.client
     }
 
-    /// Adds a new transaction listener to the pool that gets notified about every new ready
+    /// Adds a new transaction listener to the pool that gets notified about every new _ready_
     /// transaction
-    pub fn add_ready_listener(&self) -> Receiver<TxHash> {
+    pub fn add_pending_listener(&self) -> Receiver<TxHash> {
         const TX_LISTENER_BUFFER_SIZE: usize = 2048;
         let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
-        self.ready_transaction_listener.lock().push(tx);
+        self.pending_transaction_listener.lock().push(tx);
+        rx
+    }
+
+    /// Adds a new transaction listener to the pool that gets notified about every new transaction
+    pub fn add_transaction_listener(&self) -> Receiver<NewTransactionEvent<T::Transaction>> {
+        const TX_LISTENER_BUFFER_SIZE: usize = 1024;
+        let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
+        self.transaction_listener.lock().push(tx);
         rx
     }
 
@@ -176,14 +183,20 @@ where
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;
+                let hash = *added.hash();
 
+                // Notify about new pending transactions
                 if let Some(pending_hash) = added.as_pending() {
                     self.on_new_pending_transaction(pending_hash);
                 }
 
+                // Notify tx event listeners
                 self.notify_event_listeners(&added);
 
-                Ok(*added.hash())
+                // Notify listeners for _all_ transactions
+                self.on_new_transaction(added.into_new_transaction_event());
+
+                Ok(hash)
             }
             TransactionValidationOutcome::Invalid(_tx, err) => {
                 // TODO notify listeners about invalid
@@ -202,9 +215,9 @@ where
         transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>()
     }
 
-    /// Notify all listeners about the new transaction.
+    /// Notify all listeners about a new pending transaction.
     fn on_new_pending_transaction(&self, ready: &TxHash) {
-        let mut transaction_listeners = self.ready_transaction_listener.lock();
+        let mut transaction_listeners = self.pending_transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| match listener.try_send(*ready) {
             Ok(()) => true,
             Err(e) => {
@@ -222,17 +235,37 @@ where
         });
     }
 
+    /// Notify all listeners about a new pending transaction.
+    fn on_new_transaction(&self, event: NewTransactionEvent<T::Transaction>) {
+        let mut transaction_listeners = self.transaction_listener.lock();
+
+        transaction_listeners.retain_mut(|listener| match listener.try_send(event.clone()) {
+            Ok(()) => true,
+            Err(e) => {
+                if e.is_full() {
+                    warn!(
+                        target: "txpool",
+                        "dropping full transaction listener",
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
+        });
+    }
+
     /// Fire events for the newly added transaction.
     fn notify_event_listeners(&self, tx: &AddedTransaction<T::Transaction>) {
         let mut listener = self.event_listener.write();
 
         match tx {
             AddedTransaction::Pending(tx) => {
-                listener.ready(&tx.hash, None);
+                listener.ready(tx.transaction.hash(), None);
                 // TODO  more listeners for discarded, removed etc...
             }
-            AddedTransaction::Parked { hash } => {
-                listener.queued(hash);
+            AddedTransaction::Parked { transaction, .. } => {
+                listener.queued(transaction.hash());
             }
         }
     }
@@ -264,8 +297,8 @@ where
 /// Tracks an added transaction and all graph changes caused by adding it.
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
-    /// the hash of the submitted transaction
-    hash: TxHash,
+    /// Inserted transaction.
+    transaction: Arc<ValidPoolTransaction<T>>,
     /// transactions promoted to the ready queue
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
@@ -276,9 +309,9 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Create a new, empty transaction.
-    fn new(hash: TxHash) -> Self {
+    fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
         Self {
-            hash,
+            transaction,
             promoted: Default::default(),
             discarded: Default::default(),
             removed: Default::default(),
@@ -294,26 +327,40 @@ pub enum AddedTransaction<T: PoolTransaction> {
     /// Transaction was successfully added but not yet ready for processing and moved to a
     /// parked pool instead.
     Parked {
-        /// Hash of the submitted transaction that is currently parked.
-        hash: TxHash,
+        /// Inserted transaction.
+        transaction: Arc<ValidPoolTransaction<T>>,
+        /// The subpool it was moved to.
+        subpool: SubPool,
     },
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns the hash of the transaction if it's pending
-    pub fn as_pending(&self) -> Option<&TxHash> {
+    pub(crate) fn as_pending(&self) -> Option<&TxHash> {
         if let AddedTransaction::Pending(tx) = self {
-            Some(&tx.hash)
+            Some(tx.transaction.hash())
         } else {
             None
         }
     }
 
     /// Returns the hash of the transaction
-    pub fn hash(&self) -> &TxHash {
+    pub(crate) fn hash(&self) -> &TxHash {
         match self {
-            AddedTransaction::Pending(tx) => &tx.hash,
-            AddedTransaction::Parked { hash } => hash,
+            AddedTransaction::Pending(tx) => tx.transaction.hash(),
+            AddedTransaction::Parked { transaction, .. } => transaction.hash(),
+        }
+    }
+
+    /// Converts this type into the event type for listeners
+    pub(crate) fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
+        match self {
+            AddedTransaction::Pending(tx) => {
+                NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
+            }
+            AddedTransaction::Parked { transaction, subpool } => {
+                NewTransactionEvent { transaction, subpool }
+            }
         }
     }
 }
