@@ -51,7 +51,8 @@ impl Encode for BlockNumber_BlockHash {
 }
 
 impl Decode for BlockNumber_BlockHash {
-    fn decode(value: Bytes) -> Result<Self, KVError> {
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, KVError> {
+        let value = value.into();
         Ok(BlockNumber_BlockHash((u64::decode(value.clone())?, H256::decode(value.slice(8..))?)))
     }
 }

@@ -20,8 +20,8 @@ impl<T> Decode for T
 where
     T: ScaleOnly + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
-    fn decode(value: bytes::Bytes) -> Result<T, KVError> {
-        decode_from_bytes(value)
+    fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<T, KVError> {
+        decode_from_bytes(value.into())
             .map_err(|_| KVError::InvalidValue(Some("Error decoding value.".into())))
     }
 }

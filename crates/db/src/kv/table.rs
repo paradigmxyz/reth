@@ -18,7 +18,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode(value: Bytes) -> Result<Self, KVError>;
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, KVError>;
 }
 
 /// Generic trait that enforces the database value to implement [`Encode`] and [`Decode`].
