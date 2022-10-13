@@ -630,7 +630,7 @@ version = "17.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4966fba78396ff92db3b817ee71143eccd98acf0f876b8d600e585a670c5d1b"
 dependencies = [
- "ethereum-types 0.13.1",
+ "ethereum-types",
  "hex",
  "once_cell",
  "regex",
@@ -656,14 +656,14 @@ dependencies = [
 
 [[package]]
 name = "ethereum-forkid"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70b823f6b913b97e58a2bd67a7beeb48b0338d4aa8e3cc21d9cdab457716e4d4"
+checksum = "46e61cdc29def2ba89221f2e72c8a31c6413655122d29a8dd69749b8492c80c5"
 dependencies = [
  "crc",
- "fastrlp",
+ "fastrlp 0.2.1",
  "maplit",
- "primitive-types 0.11.1",
+ "primitive-types 0.12.0",
  "thiserror",
 ]
 
@@ -682,17 +682,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ethereum-types"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81224dc661606574f5a0f28c9947d0ee1d93ff11c5f1c4e7272f52e8c0b5483c"
-dependencies = [
- "fixed-hash 0.8.0",
- "primitive-types 0.12.0",
- "uint",
-]
-
-[[package]]
 name = "ethers-core"
 version = "0.17.0"
 source = "git+https://github.com/gakonst/ethers-rs#f3a5a7aef06db391f8d2c4370bbc2a1b6ae4ea0f"
@@ -702,7 +691,7 @@ dependencies = [
  "chrono",
  "elliptic-curve",
  "ethabi",
- "fastrlp",
+ "fastrlp 0.1.3",
  "generic-array",
  "hex",
  "k256",
@@ -758,7 +747,19 @@ dependencies = [
  "arrayvec",
  "auto_impl",
  "bytes",
- "ethereum-types 0.13.1",
+ "ethereum-types",
+ "fastrlp-derive",
+]
+
+[[package]]
+name = "fastrlp"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7b51163ed1f3dd0d3c0c61f86f67c58f41d7450f7c1aabe1854a7e00737ca40"
+dependencies = [
+ "arrayvec",
+ "auto_impl",
+ "bytes",
  "fastrlp-derive",
 ]
 
@@ -802,8 +803,6 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
 dependencies = [
- "byteorder",
- "rustc-hex",
  "static_assertions",
 ]
 
@@ -2079,12 +2078,11 @@ name = "reth-eth-wire"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "ethereum-forkid",
  "ethers-core",
- "fastrlp",
  "hex",
  "hex-literal",
  "reth-primitives",
+ "reth-rlp",
  "thiserror",
 ]
 
@@ -2131,10 +2129,14 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "crc",
  "ethers-core",
- "fastrlp",
+ "hex-literal",
+ "maplit",
+ "reth-rlp",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -2145,7 +2147,8 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
- "ethereum-types 0.14.0",
+ "ethereum-forkid",
+ "ethereum-types",
  "ethnum",
  "hex-literal",
  "reth-rlp",
@@ -2187,7 +2190,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
- "fastrlp",
+ "fastrlp 0.1.3",
  "reth-primitives",
  "serde",
  "serde_json",

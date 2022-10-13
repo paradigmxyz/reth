@@ -1,6 +1,5 @@
-use ethereum_forkid::ForkId;
-use fastrlp::{RlpDecodable, RlpEncodable};
-use reth_primitives::{Chain, H256, U256};
+use reth_primitives::{Chain, H256, U256,ForkId};
+use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
@@ -87,12 +86,10 @@ impl Debug for Status {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-
-    use ethereum_forkid::{ForkHash, ForkId};
     use ethers_core::types::Chain as NamedChain;
-    use fastrlp::{Decodable, Encodable};
     use hex_literal::hex;
-    use reth_primitives::{Chain, H256, U256};
+    use reth_primitives::{Chain, H256, U256,ForkHash, ForkId};
+    use reth_rlp::{Decodable, Encodable};
 
     use crate::{EthVersion, Status};
 
