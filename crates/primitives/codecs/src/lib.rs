@@ -2,22 +2,19 @@ use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-#[cfg(feature = "scale")]
 #[proc_macro_attribute]
+#[rustfmt::skip]
+#[clippy::skip]
+#[allow(unreachable_code)]
 pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
-    use_scale(args, input)
-}
+    #[cfg(feature = "scale")]
+    return use_scale(args, input);
 
-#[cfg(feature = "no_codec")]
-#[proc_macro_attribute]
-pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
-    use_scale(args, input)
-}
+    #[cfg(feature = "no_codec")]
+    return no_codec(args, input);
 
-#[cfg(feature = "postcard")]
-#[proc_macro_attribute]
-pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
-    use_postcard(args, input)
+    #[cfg(feature = "no_codec")]
+    return use_postcard(args, input);
 }
 
 #[proc_macro_attribute]
