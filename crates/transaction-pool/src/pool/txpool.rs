@@ -83,6 +83,8 @@ pub struct TxPool<T: TransactionOrdering> {
     all_transactions: AllTransactions<T::Transaction>,
 }
 
+// === impl TxPool ===
+
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
     pub fn new(ordering: Arc<T>, config: PoolConfig) -> Self {
@@ -154,19 +156,19 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             InsertResult::Inserted { transaction, move_to, replaced_tx, updates, .. } => {
-                self.add_new_transaction(transaction, replaced_tx, move_to);
+                self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
                 let res = if move_to.is_pending() {
                     AddedTransaction::Pending(AddedPendingTransaction {
-                        hash,
+                        transaction,
                         promoted,
                         discarded,
                         removed,
                     })
                 } else {
-                    AddedTransaction::Parked { hash }
+                    AddedTransaction::Parked { transaction, subpool: move_to }
                 };
 
                 Ok(res)
@@ -278,6 +280,27 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.all_transactions.is_empty()
+    }
+}
+
+// Additional test impls
+#[cfg(test)]
+#[allow(missing_docs)]
+impl<T: TransactionOrdering> TxPool<T> {
+    pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
+        &self.all_transactions
+    }
+
+    pub(crate) fn pending(&self) -> &PendingPool<T> {
+        &self.pending_pool
+    }
+
+    pub(crate) fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
+        &self.basefee_pool
+    }
+
+    pub(crate) fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
+        &self.queued_pool
     }
 }
 
