@@ -12,3 +12,6 @@ pub mod executor;
 
 /// Consensus traits.
 pub mod consensus;
+
+/// Stage sync related traits
+pub mod stages;

@@ -12,6 +12,7 @@ mod error;
 mod id;
 mod pipeline;
 mod stage;
+mod stages;
 mod util;
 
 pub use error::*;

@@ -1847,6 +1847,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "auto_impl",
+ "futures",
  "reth-primitives",
  "reth-rpc-types",
  "thiserror",
@@ -1914,7 +1915,10 @@ name = "reth-stages"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
+ "rand",
  "reth-db",
+ "reth-interfaces",
  "reth-primitives",
  "tempfile",
  "thiserror",

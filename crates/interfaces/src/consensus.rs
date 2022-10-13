@@ -7,12 +7,12 @@ use tokio::sync::watch::Receiver;
 /// Consensus is a protocol that chooses canonical chain.
 /// We are checking validity of block header here.
 #[async_trait]
-pub trait Consensus {
+pub trait Consensus: Sync + Send {
     /// Get a receiver for the fork choice state
-    fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
+    fn forkchoice_state(&self) -> Receiver<ForkchoiceState>;
 
     /// Validate if header is correct and follows consensus specification
-    fn validate_header(&self, _header: &Header) -> Result<(), Error> {
+    fn validate_header(&self, _header: &Header, _parent: &Header) -> Result<(), Error> {
         Ok(())
     }
 }
