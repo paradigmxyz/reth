@@ -1,8 +1,7 @@
 use bytes::{Bytes, BytesMut};
 use ethnum::U256;
-use reth_rlp::*;
 use hex_literal::hex;
-use reth_rlp::DecodeError;
+use reth_rlp::{DecodeError, *};
 
 #[derive(Debug, PartialEq, RlpEncodable, RlpDecodable)]
 struct Item {
@@ -36,9 +35,7 @@ fn encoded<T: Encodable>(t: &T) -> BytesMut {
 
 #[test]
 fn test_encode_item() {
-    let item = Item {
-        a: b"dog".to_vec().into(),
-    };
+    let item = Item { a: b"dog".to_vec().into() };
 
     let expected = vec![0xc4, 0x83, b'd', b'o', b'g'];
     let out = encoded(&item);
@@ -76,12 +73,7 @@ fn test_encode_item() {
     assert_eq!(rlp_view.get_next::<Bytes>().unwrap(), None);
 
     assert_eq!(
-        encoded(&Test4NumbersGenerics {
-            a: item.a,
-            b: item.b,
-            c: &item.c,
-            d: &item.d
-        }),
+        encoded(&Test4NumbersGenerics { a: item.a, b: item.b, c: &item.c, d: &item.d }),
         expected
     );
 
@@ -94,10 +86,7 @@ fn invalid_decode_sideeffect() {
     let fixture = hex!("f84d0588deadbeefbaadcafea056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
     let mut sl: &[u8] = &fixture;
 
-    assert_eq!(
-        Test4Numbers::decode(&mut sl),
-        Err(DecodeError::InputTooShort)
-    );
+    assert_eq!(Test4Numbers::decode(&mut sl), Err(DecodeError::InputTooShort));
 
     assert_eq!(sl.len(), fixture.len());
 }

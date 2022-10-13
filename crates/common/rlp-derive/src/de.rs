@@ -8,12 +8,8 @@ pub fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
         panic!("#[derive(RlpDecodable)] is only defined for structs.");
     };
 
-    let stmts: Vec<_> = body
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, field)| decodable_field(i, field))
-        .collect();
+    let stmts: Vec<_> =
+        body.fields.iter().enumerate().map(|(i, field)| decodable_field(i, field)).collect();
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 

@@ -12,11 +12,7 @@ fn zeroless_view(v: &impl AsRef<[u8]>) -> &[u8] {
 impl Header {
     pub fn encode(&self, out: &mut dyn BufMut) {
         if self.payload_length < 56 {
-            let code = if self.list {
-                EMPTY_LIST_CODE
-            } else {
-                EMPTY_STRING_CODE
-            };
+            let code = if self.list { EMPTY_LIST_CODE } else { EMPTY_STRING_CODE };
             out.put_u8(code + self.payload_length as u8);
         } else {
             let len_be = self.payload_length.to_be_bytes();
@@ -85,11 +81,7 @@ impl<'a> Encodable for &'a [u8] {
 
     fn encode(&self, out: &mut dyn BufMut) {
         if self.len() != 1 || self[0] >= EMPTY_STRING_CODE {
-            Header {
-                list: false,
-                payload_length: self.len(),
-            }
-            .encode(out);
+            Header { list: false, payload_length: self.len() }.encode(out);
         }
         out.put_slice(self);
     }
@@ -199,9 +191,7 @@ mod ethereum_types_support {
                     self.0.encode(out)
                 }
             }
-            impl_max_encoded_len!($t, {
-                length_of_length(<$t>::len_bytes()) + <$t>::len_bytes()
-            });
+            impl_max_encoded_len!($t, { length_of_length(<$t>::len_bytes()) + <$t>::len_bytes() });
         };
     }
 
@@ -291,10 +281,7 @@ where
     E: Encodable + ?Sized,
     K: Borrow<E>,
 {
-    let mut h = Header {
-        list: true,
-        payload_length: 0,
-    };
+    let mut h = Header { list: true, payload_length: 0 };
     for x in v {
         h.payload_length += x.borrow().length();
     }
@@ -392,10 +379,8 @@ mod tests {
     }
 
     fn u32_fixtures() -> impl IntoIterator<Item = (u32, &'static [u8])> {
-        c(u16_fixtures()).chain(vec![
-            (0xFFCCB5, &hex!("83ffccb5")[..]),
-            (0xFFCCB5DD, &hex!("84ffccb5dd")[..]),
-        ])
+        c(u16_fixtures())
+            .chain(vec![(0xFFCCB5, &hex!("83ffccb5")[..]), (0xFFCCB5DD, &hex!("84ffccb5dd")[..])])
     }
 
     fn u64_fixtures() -> impl IntoIterator<Item = (u64, &'static [u8])> {
@@ -511,9 +496,6 @@ mod tests {
     #[test]
     fn rlp_list() {
         assert_eq!(encoded_list::<u64>(&[]), &hex!("c0")[..]);
-        assert_eq!(
-            encoded_list(&[0xFFCCB5_u64, 0xFFC0B5_u64]),
-            &hex!("c883ffccb583ffc0b5")[..]
-        );
+        assert_eq!(encoded_list(&[0xFFCCB5_u64, 0xFFC0B5_u64]), &hex!("c883ffccb583ffc0b5")[..]);
     }
 }
