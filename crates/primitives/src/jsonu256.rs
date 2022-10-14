@@ -73,7 +73,6 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
 mod test {
     use super::JsonU256;
     use crate::U256;
-    use serde_json;
 
     #[test]
     fn jsonu256_deserialize() {
