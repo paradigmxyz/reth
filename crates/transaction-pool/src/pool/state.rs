@@ -4,10 +4,6 @@ bitflags::bitflags! {
     /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
     #[derive(Default)]
     pub(crate) struct TxState: u8 {
-        /// Set to `1` if the `feeCap` of the transaction meets the chain's minimum `feeCap` requirement.
-        ///
-        /// This is different from `ENOUGH_FEE_CAP_BLOCK` which tracks on a per-block basis.
-        const ENOUGH_FEE_CAP_PROTOCOL = 0b100000;
         /// Set to `1` of the transaction is either the next transaction of the sender (on chain nonce == tx.nonce) or all prior transactions are also present in the pool.
         const NO_NONCE_GAPS = 0b010000;
         /// Bit derived from the sender's balance.
@@ -23,9 +19,9 @@ bitflags::bitflags! {
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
         const IS_LOCAL = 0b000001;
 
-        const BASE_FEE_POOL_BITS = Self::ENOUGH_FEE_CAP_PROTOCOL.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits;
+        const BASE_FEE_POOL_BITS = Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits;
 
-        const QUEUED_POOL_BITS  = Self::ENOUGH_FEE_CAP_PROTOCOL.bits;
+        const QUEUED_POOL_BITS  = 0b100000;
     }
 }
 
@@ -73,5 +69,11 @@ mod tests {
         let mut state = TxState::default();
         state |= TxState::NO_NONCE_GAPS;
         assert!(state.intersects(TxState::NO_NONCE_GAPS))
+    }
+
+    #[test]
+    fn test_tx_queud() {
+        let mut state = TxState::default();
+        assert_eq!(SubPool::Queued, state.into());
     }
 }
