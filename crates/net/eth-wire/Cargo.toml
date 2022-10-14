@@ -15,6 +15,10 @@ thiserror = "1"
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp", features = ["alloc", "derive", "std", "ethereum-types"] }
 
+#used for forkid
+crc = "1"
+maplit = "1"
+
 [dev-dependencies]
 hex-literal = "0.3"
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }

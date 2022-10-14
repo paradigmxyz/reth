@@ -11,7 +11,7 @@ arrayvec = { version = "0.7", default-features = false }
 auto_impl = "1"
 bytes = { version = "1", default-features = false }
 ethnum = { version = "1", default-features = false, optional = true }
-ethereum-types = { version = "0.14", default-features = false, optional = true }
+ethereum-types = { version = "0.13", default-features = false, optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
 
 [dev-dependencies]

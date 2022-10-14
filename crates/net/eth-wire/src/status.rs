@@ -1,6 +1,7 @@
-use reth_primitives::{Chain, ForkId, H256, U256};
+use reth_primitives::{Chain, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
+use crate::forkid::{ForkId};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -87,11 +88,11 @@ impl Debug for Status {
 mod tests {
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
-    use reth_primitives::{Chain, ForkHash, ForkId, H256, U256};
+    use reth_primitives::{Chain, H256, U256};
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
-    use crate::{EthVersion, Status};
+    use crate::{EthVersion, Status,forkid::{ForkHash, ForkId}};
 
     #[test]
     fn encode_eth_status_message() {
