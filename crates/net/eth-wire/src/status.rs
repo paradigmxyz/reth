@@ -1,7 +1,7 @@
+use crate::forkid::ForkId;
 use reth_primitives::{Chain, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
-use crate::forkid::{ForkId};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -92,7 +92,10 @@ mod tests {
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
-    use crate::{EthVersion, Status,forkid::{ForkHash, ForkId}};
+    use crate::{
+        forkid::{ForkHash, ForkId},
+        EthVersion, Status,
+    };
 
     #[test]
     fn encode_eth_status_message() {
