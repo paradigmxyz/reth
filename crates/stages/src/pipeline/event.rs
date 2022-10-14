@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_primitives::BlockNumber;
 
-/// An event emitted by a [Pipeline].
+/// An event emitted by a [Pipeline][crate::Pipeline].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PipelineEvent {
     /// Emitted when a stage is about to be run.
