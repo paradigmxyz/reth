@@ -1,4 +1,7 @@
+use codecs::main_codec;
+
 /// Transaction Type
+#[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929

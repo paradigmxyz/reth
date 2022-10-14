@@ -3,7 +3,7 @@ use crate::{
     kv::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
     utils::TableType,
 };
-use reth_primitives::{Account, Address, BlockNumber, Header};
+use reth_primitives::{Account, Address, BlockNumber, Header, Receipt};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [
@@ -101,7 +101,6 @@ type ConfigValue = Vec<u8>;
 type BlockNumHashTxNumber = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
-type Receipt = Vec<u8>;
 type TxNumber = u64; // TODO check size
 type PlainStateKey = Address; // TODO new type will have to account for address_incarna_skey as well
 type TxNumberList = Vec<u8>;
