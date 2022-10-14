@@ -7,4 +7,6 @@
 
 //! Reth RPC implementation
 //!
-//! Provides the implementation of all RPC interfaces
+//! Provides the implementation of all RPC interfaces.
+
+pub mod eth;
