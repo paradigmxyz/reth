@@ -2,6 +2,8 @@
 members = [
     "bin/reth",
     "crate-template",
+    "crates/common/rlp",
+    "crates/common/rlp-derive",
     "crates/db",
     "crates/executor",
     "crates/interfaces",
