@@ -1,0 +1,16 @@
+[package]
+name = "reth-rlp-derive"
+version = "0.1.1"
+license = "Apache-2.0"
+edition = "2021"
+description = "Procedural macros for fastrlp"
+repository = "https://github.com/foundry-rs/reth"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+bytes = { version = "1", default-features = false }
+syn = "1"
+quote = "1"
+proc-macro2 = "1"
