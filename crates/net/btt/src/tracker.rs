@@ -206,16 +206,10 @@ impl fmt::Display for Tracker {
     }
 }
 
-/// Peers can be sent in two ways: as a bencoded list of dicts including full
-/// peer metadata, or as a single bencoded string that contains only the peer IP
-/// and port (compact representation). This helper method deserializes both into
-/// the same type, discarding the peer id present in the full representation.
-/// This is because most trackers send the compact response by default, and
-/// because cratetorrent doesn't make use of the peer id at the stage of
-/// receiving a peer list from the tracker, so it is discarded for simplicity.
-///
-/// https://serde.rs/field-attrs.html#deserialize_with
-/// https://users.rust-lang.org/t/need-help-with-serde-deserialize-with/18374/2
+/// Peers can be sent in two ways:
+///   - as a bencoded list of dicts including full peer metadata,
+///   - or as a single bencoded string that contains only the peer IP
+/// and port (compact representation).
 fn deserialize_peers<'de, D>(deserializer: D) -> Result<Vec<SocketAddr>, D::Error>
 where
     D: Deserializer<'de>,
@@ -229,8 +223,6 @@ where
             formatter.write_str("a string or list of dicts representing peers")
         }
 
-        /// Deserializes a compact string of peers.
-        ///
         /// Each entry is 6 bytes long, where the first 4 bytes are the IPv4
         /// address of the peer, and the last 2 bytes are the port of the peer.
         /// Both are in network byte order.
