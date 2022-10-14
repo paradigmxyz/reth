@@ -1,13 +1,8 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use crate::{
-    kv::{
-        cursor::{Cursor, ValueOnlyResult},
-        KVError,
-    },
-};
+use crate::{kv::cursor::{Cursor, ValueOnlyResult}, utils::decode_one};
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use reth_interfaces::db::{DbTx, DbTxMut,Encode, Table};
+use reth_interfaces::db::{DbTx, DbTxMut, Encode, Error, Table};
 use std::marker::PhantomData;
 
 /// Wrapper for the libmdbx transaction.
@@ -56,13 +51,16 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     }
 
     /// Open cursor on `table`.
-    pub fn cursor<'a, T: Table>(&'a self) -> Result<Cursor<'a, K, T>, KVError>
+    pub fn cursor<'a, T: Table>(&'a self) -> Result<Cursor<'a, K, T>, Error>
     where
         'env: 'a,
         T: Table,
     {
         Ok(Cursor {
-            inner: self.inner.cursor(&self.inner.open_db(Some(T::NAME))?)?,
+            inner: self
+                .inner
+                .cursor(&self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?)
+                .map_err(|e| Error::Internal(e.into()))?,
             table: T::NAME,
             _dbi: PhantomData,
         })
@@ -71,35 +69,42 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     /// Gets value associated with `key` on `table`. If it's a DUPSORT table, then returns the first
     /// entry.
     pub fn get<T: Table>(&self, key: T::Key) -> ValueOnlyResult<T> {
-        // self.inner
-        //     .get(&self.inner.open_db(Some(T::NAME))?, key.encode().as_ref())?
-        //     .map(decode_one::<T>)
-        //     .transpose()
-        // TODO cause of error
-        todo!()
+        self.inner
+            .get(
+                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                key.encode().as_ref(),
+            )
+            .map_err(|e| Error::Internal(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
     }
 
     /// Saves all changes and frees up storage memory.
-    pub fn commit(self) -> Result<bool, KVError> {
-        self.inner.commit().map_err(KVError::Commit)
+    pub fn commit(self) -> Result<bool, Error> {
+        self.inner.commit().map_err(|e| Error::Internal(e.into()))
     }
 }
 
 impl<'a, E: EnvironmentKind> Tx<'a, RW, E> {
     /// Opens `table` and inserts `(key, value)` pair. If the `key` already exists, it replaces the
     /// value it if the table doesn't support DUPSORT.
-    pub fn put<T>(&self, k: T::Key, v: T::Value) -> Result<(), KVError>
+    pub fn put<T>(&self, k: T::Key, v: T::Value) -> Result<(), Error>
     where
         T: Table,
     {
         self.inner
-            .put(&self.inner.open_db(Some(T::NAME))?, &k.encode(), &v.encode(), WriteFlags::UPSERT)
-            .map_err(KVError::Put)
+            .put(
+                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                &k.encode(),
+                &v.encode(),
+                WriteFlags::UPSERT,
+            )
+            .map_err(|e| Error::Internal(e.into()))
     }
 
     /// Deletes the `(key, value)` entry on `table`. When `value` is `None`, all entries with `key`
     /// are to be deleted. Otherwise, only the item matching that data shall be.
-    pub fn delete<T>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, KVError>
+    pub fn delete<T>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error>
     where
         T: Table,
     {
@@ -111,16 +116,22 @@ impl<'a, E: EnvironmentKind> Tx<'a, RW, E> {
         };
 
         self.inner
-            .del(&self.inner.open_db(Some(T::NAME))?, key.encode(), data)
-            .map_err(KVError::Delete)
+            .del(
+                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                key.encode(),
+                data,
+            )
+            .map_err(|e| Error::Internal(e.into()))
     }
 
     /// Empties `table`.
-    pub fn clear<T>(&self) -> Result<(), KVError>
+    pub fn clear<T>(&self) -> Result<(), Error>
     where
         T: Table,
     {
-        self.inner.clear_db(&self.inner.open_db(Some(T::NAME))?)?;
+        self.inner
+            .clear_db(&self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?)
+            .map_err(|e| Error::Internal(e.into()))?;
 
         Ok(())
     }

@@ -1,8 +1,16 @@
-//! Declaration of all MDBX tables.
+//! Declaration of all Database tables.
 
-use crate::utils::TableType;
 use reth_primitives::{Address, BlockNumber, U256};
-use reth_interfaces::db::Table;
+use super::Table;
+
+/// Enum for the type of table present in libmdbx.
+#[derive(Debug)]
+pub enum TableType {
+    /// key value table
+    Table,
+    /// Duplicate key value table
+    DupSort,
+}
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [

@@ -1,15 +1,8 @@
 //! Utils crate for `db`.
 
-//suse crate::kv::KVError;
-use reth_interfaces::db::{Decode,Table,KVError};
+//suse crate::kv::Error;
+use reth_interfaces::db::{Decode, Error, Table};
 use std::borrow::Cow;
-
-/// Enum for the type of table present in libmdbx.
-#[derive(Debug)]
-pub enum TableType {
-    Table,
-    DupSort,
-}
 
 /// Returns the default page size that can be used in this OS.
 pub(crate) fn default_page_size() -> usize {
@@ -28,7 +21,7 @@ pub(crate) fn default_page_size() -> usize {
 /// Helper function to decode a `(key, value)` pair.
 pub(crate) fn decoder<'a, T>(
     kv: (Cow<'a, [u8]>, Cow<'a, [u8]>),
-) -> Result<(T::Key, T::Value), KVError>
+) -> Result<(T::Key, T::Value), Error>
 where
     T: Table,
     T::Key: Decode,
@@ -37,7 +30,7 @@ where
 }
 
 /// Helper function to decode only a value from a `(key, value)` pair.
-pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> Result<T::Value, KVError>
+pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> Result<T::Value, Error>
 where
     T: Table,
 {
@@ -45,7 +38,7 @@ where
 }
 
 /// Helper function to decode a value. It can be a key or subkey.
-pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, KVError>
+pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, Error>
 where
     T: Table,
 {

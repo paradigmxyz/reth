@@ -2022,6 +2022,7 @@ name = "reth-db"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "eyre",
  "libmdbx",
  "page_size",
  "reth-interfaces",
@@ -2063,6 +2064,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "auto_impl",
+ "eyre",
  "reth-primitives",
  "reth-rpc-types",
  "thiserror",
@@ -2161,6 +2163,7 @@ dependencies = [
  "aquamarine",
  "async-trait",
  "reth-db",
+ "reth-interfaces",
  "reth-primitives",
  "tempfile",
  "thiserror",

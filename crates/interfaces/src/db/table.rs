@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use reth_primitives::{Bytes,Address,U256};
 
-use super::KVError;
+use super::Error;
 
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
@@ -15,7 +15,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode(value: &[u8]) -> Result<Self, KVError>; //TODO impl proper error
+    fn decode(value: &[u8]) -> Result<Self, Error>; //TODO impl proper error
 }
 
 /// Generic trait that enforces the database value to implement [`Encode`] and [`Decode`].
@@ -51,7 +51,7 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
+    fn decode(value: &[u8]) -> Result<Self, Error> {
         Ok(value.to_vec())
     }
 }
@@ -65,7 +65,7 @@ impl Encode for Bytes {
 }
 
 impl Decode for Bytes {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
+    fn decode(value: &[u8]) -> Result<Self, Error> {
         Ok(value.to_vec().into())
     }
 }
@@ -79,7 +79,7 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
+    fn decode(value: &[u8]) -> Result<Self, Error> {
         Ok(Address::from_slice(value))
     }
 }
@@ -93,7 +93,7 @@ impl Encode for u16 {
 }
 
 impl Decode for u16 {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
+    fn decode(value: &[u8]) -> Result<Self, Error> {
         unsafe { Ok(u16::from_be_bytes(*(value.as_ptr() as *const [_; 2]))) }
     }
 }
@@ -107,7 +107,7 @@ impl Encode for u64 {
 }
 
 impl Decode for u64 {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
+    fn decode(value: &[u8]) -> Result<Self, Error> {
         unsafe { Ok(u64::from_be_bytes(*(value.as_ptr() as *const [_; 8]))) }
     }
 }
@@ -123,7 +123,7 @@ impl Encode for U256 {
 }
 
 impl Decode for U256 {
-    fn decode(value: &[u8]) -> Result<Self, KVError> {
+    fn decode(value: &[u8]) -> Result<Self, Error> {
         let mut result = [0; 32];
         result.copy_from_slice(value);
         Ok(Self::from_big_endian(&result))
