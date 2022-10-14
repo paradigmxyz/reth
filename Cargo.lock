@@ -2197,6 +2197,7 @@ dependencies = [
 name = "reth-stages"
 version = "0.1.0"
 dependencies = [
+ "aquamarine",
  "async-trait",
  "reth-db",
  "reth-primitives",

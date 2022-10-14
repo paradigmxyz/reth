@@ -17,6 +17,7 @@ use ctrl::*;
 pub use event::*;
 use state::*;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
 ///
 /// The pipeline executes queued [stages][Stage] serially. An external component determines the tip
@@ -26,6 +27,40 @@ use state::*;
 ///
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
 /// [Pipeline::set_max_block]).
+///
+/// ```mermaid
+/// graph TB
+///   Start[Start]
+///   Done[Done]
+///   Error[Error]
+///   subgraph Unwind
+///     StartUnwind(Unwind by unwind priority)
+///     UnwindStage(Unwind stage)
+///     NextStageToUnwind(Next stage)
+///   end
+///   subgraph Single loop
+///     RunLoop(Run loop)
+///     NextStage(Next stage)
+///     LoopDone(Loop done)
+///     subgraph Stage Execution
+///       Execute(Execute stage)
+///     end
+///   end
+///   Start --> RunLoop --> NextStage
+///   NextStage --> |No stages left| LoopDone
+///   NextStage --> |Next stage| Execute
+///   Execute --> |Not done| Execute
+///   Execute --> |Unwind requested| StartUnwind
+///   Execute --> |Done| NextStage
+///   Execute --> |Error| Error
+///   StartUnwind --> NextStageToUnwind
+///   NextStageToUnwind --> |Next stage| UnwindStage
+///   NextStageToUnwind --> |No stages left| RunLoop
+///   UnwindStage --> |Error| Error
+///   UnwindStage --> |Unwound| NextStageToUnwind
+///   LoopDone --> |Target block reached| Done
+///   LoopDone --> |Target block not reached| RunLoop
+/// ```
 ///
 /// # Unwinding
 ///
