@@ -67,6 +67,16 @@ pub trait TransactionPool: Send + Sync {
 
     /// Returns the transaction for the given hash.
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions objects for the given hashes.
+    ///
+    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// The transactions must be in same order as in the request, but it is OK to skip transactions
+    /// which are not available.
+    fn get_all(
+        &self,
+        txs: impl IntoIterator<Item = TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
 /// Represents a new transaction
