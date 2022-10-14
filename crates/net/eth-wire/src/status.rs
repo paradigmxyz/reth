@@ -1,4 +1,4 @@
-use reth_primitives::{Chain, H256, U256,ForkId};
+use reth_primitives::{Chain, ForkId, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
@@ -85,11 +85,11 @@ impl Debug for Status {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
-    use reth_primitives::{Chain, H256, U256,ForkHash, ForkId};
+    use reth_primitives::{Chain, ForkHash, ForkId, H256, U256};
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     use crate::{EthVersion, Status};
 

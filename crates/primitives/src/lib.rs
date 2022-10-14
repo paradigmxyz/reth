@@ -10,22 +10,22 @@
 mod account;
 mod block;
 mod chain;
+mod forkid;
 mod header;
 mod jsonu256;
 mod log;
 mod receipt;
 mod transaction;
-mod forkid;
 
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
+pub use forkid::{ForkFilter, ForkHash, ForkId};
 pub use header::{Header, HeaderLocked};
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
 pub use transaction::{AccessList, AccessListItem, Transaction, TransactionSigned, TxType};
-pub use forkid::{ForkFilter,ForkHash,ForkId};
 
 /// Block Number is height of chain
 pub type BlockNumber = u64;
