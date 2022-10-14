@@ -10,11 +10,14 @@ use crate::{
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
-    PoolConfig, NewBlockEvent, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    traits::StateDiff,
+    NewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
+    ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
+    cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
     fmt,
     ops::Bound::{Excluded, Unbounded},
@@ -118,8 +121,21 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates the entire pool after a new block was mined.
     ///
-    pub(crate) fn on_new_block(&mut self, block: NewBlockEvent<T::Transaction>) -> Vec<PoolUpdate> {
-        todo!()
+    /// This removes all mined transactions, updates according to the new base fee and rechecks
+    /// sender allowance.
+    pub(crate) fn on_new_block(&mut self, block: NewBlockEvent<T::Transaction>) {
+        // Remove all transaction that were included in the block
+        for mined in &block.mined_transactions {
+            self.all_transactions.remove_mined_tx(mined.id());
+            self.pending_pool.remove_transaction(mined.id());
+        }
+
+        // Apply the state changes to the total set of transactions which triggers sub-pool updates.
+        let updates =
+            self.all_transactions.update(block.pending_block_base_fee, &block.state_changes);
+
+        // Process the sub-pool updates
+        self.process_updates(updates);
     }
 
     /// Adds the transaction into the pool.
@@ -360,6 +376,78 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
     }
 
+    /// Rechecks all transactions in the pool against the changes.
+    ///
+    /// Possible changes are:
+    ///
+    /// For all transactions:
+    ///   - decreased basefee: promotes from `basefee` to `pending` sub-pool.
+    ///   - increased basefee: demotes from `pending` to `basefee` sub-pool.
+    /// Individually:
+    ///   - decreased sender allowance: demote from (`basefee`|`pending`) to `queued`.
+    ///   - increased sender allowance: promote from `queued` to
+    ///       - `pending` if basefee condition is met.
+    ///       - `basefee` if basefee condition is _not_ met.
+    pub(crate) fn update(
+        &mut self,
+        pending_block_base_fee: U256,
+        state_diffs: &StateDiff,
+    ) -> Vec<PoolUpdate> {
+        let pending_basefee_change = self.pending_basefee.cmp(&pending_block_base_fee);
+        self.pending_basefee = pending_block_base_fee;
+
+        // TODO(mattsse): probably good idea to allocate some capacity here.
+        let mut updates = Vec::new();
+
+        let mut iter = self.txs.iter_mut().peekable();
+
+        let mut current_sender =
+            if let Some((id, _)) = iter.peek() { id.sender } else { return updates };
+
+        // Loop over all individual senders and update all affacted transactions.
+        // One sender may have up to `max_account_slots` transactions here, which means, worst case
+        // `max_accounts_slots` need to be updated, for example if the first transaction is blocked
+        // due to too low base fee.
+        // However, we don't have to necessarily check every transaction of a sender. If no updates
+        // are possible then we can skip to the next sender.
+        while let Some((id, tx)) = iter.next() {
+            // this advances the iterator to the next sender
+            let mut to_next_sender = || {
+                while let Some((peek, _)) = iter.peek() {
+                    if peek.sender != current_sender {
+                        current_sender = peek.sender;
+                        break
+                    }
+                    iter.next();
+                }
+            };
+
+            // Check if promoting is even possible
+            if tx.state.has_nonce_gaps() {
+                to_next_sender();
+                continue
+            }
+
+            // Check dynamic fee condition
+            if let Some(fee) = tx.transaction.max_fee_per_gas() {
+                let tx_fee_to_basefee = fee.cmp(&self.pending_basefee);
+                let current_pool = tx.subpool;
+                // A changed basefee only triggers an update if
+                match (pending_basefee_change, tx_fee_to_basefee, current_pool) {
+                    (Ordering::Less, Ordering::Greater, SubPool::BaseFee) => {
+                        // decreased base fee unblocks this dynamic fee requirement for this
+                        // transaction
+                    }
+                    _ => {
+                        todo!()
+                    }
+                }
+            }
+        }
+
+        updates
+    }
+
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
     #[cfg(test)]
@@ -577,11 +665,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
 
         InsertResult::Inserted { transaction, move_to: state.into(), state, replaced_tx, updates }
-    }
-
-    /// Rechecks the transaction of the given sender and returns a set of updates.
-    pub(crate) fn on_mined(&mut self, _sender: &SenderId, _new_balance: U256, _old_balance: U256) {
-        todo!("ideally we want to process updates in bulk")
     }
 
     /// Number of transactions in the entire pool

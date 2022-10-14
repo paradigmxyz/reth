@@ -131,11 +131,6 @@ where
         self.identifiers.write().sender_id_or_create(addr)
     }
 
-    /// Updates the pool
-    pub(crate) fn update_base_fee(&self, base_fee: U256) {
-        self.pool.write().update_base_fee(base_fee);
-    }
-
     /// Get the validator reference.
     pub fn validator(&self) -> &V {
         &self.validator

@@ -29,6 +29,14 @@ bitflags::bitflags! {
     }
 }
 
+impl TxState {
+    /// Returns whether the bitflag misses the `NO_NONCE_GAPS` bit
+    #[inline]
+    pub(crate) fn has_nonce_gaps(self) -> bool {
+        self <= TxState::NO_NONCE_GAPS
+    }
+}
+
 /// Identifier for the used Sub-pool
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u8)]
