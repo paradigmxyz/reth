@@ -796,7 +796,8 @@ mod tests {
         assert_eq!(pool.len(), 1);
 
         let valid_tx = f.validated(tx.next());
-        let InsertOk { updates, replaced_tx, move_to, state, .. } = pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let InsertOk { updates, replaced_tx, move_to, state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
 
         assert!(updates.is_empty());
         assert!(replaced_tx.is_none());
@@ -820,7 +821,8 @@ mod tests {
         let first = f.validated(tx.clone());
         let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
         let replacement = f.validated(tx.rng_hash().inc_price());
-        let   InsertOk { updates, replaced_tx, .. } = pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let InsertOk { updates, replaced_tx, .. } =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
         assert!(updates.is_empty());
         let replaced = replaced_tx.unwrap();
         assert_eq!(replaced.0.hash(), first.hash());
