@@ -1,8 +1,8 @@
 use crate::{H256, U256};
-use codecs::use_postcard;
+use codecs::main_codec;
 
 /// Account saved in database
-#[use_postcard]
+#[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Account {
     /// Nonce.

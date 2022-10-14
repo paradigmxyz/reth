@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::kv::{Decode, Encode, KVError};
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
@@ -31,5 +33,3 @@ macro_rules! impl_heapless_postcard {
         }
     };
 }
-
-impl_heapless_postcard!(Account, 144);
