@@ -15,6 +15,7 @@ thiserror = "1.0.37"
 tracing = "0.1.36"
 tracing-futures = "0.2.5"
 tokio = { version = "1.21.2", features = ["sync"] }
+aquamarine = "0.1.12"
 
 [dev-dependencies]
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
