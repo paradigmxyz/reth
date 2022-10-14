@@ -283,6 +283,16 @@ where
         self.pool.read().get(tx_hash)
     }
 
+    /// Returns all the transactions belonging to the hashes.
+    ///
+    /// If no transaction exists, it is skipped.
+    pub(crate) fn get_all(
+        &self,
+        txs: impl IntoIterator<Item = TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().get_all(txs).collect()
+    }
+
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
         self.pool.read().len()

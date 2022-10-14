@@ -123,6 +123,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.by_hash.get(tx_hash).cloned()
     }
 
+    /// Returns all transaction for the hashes, if it exis.
+    pub(crate) fn get_all<'a>(
+        &'a self,
+        txs: impl IntoIterator<Item = TxHash> + 'a,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + 'a {
+        txs.into_iter().filter_map(|tx| self.get(&tx))
+    }
+
     /// Adds the transaction into the pool.
     ///
     /// This pool consists of two three-pools: `Queued`, `Pending` and `BaseFee`.
