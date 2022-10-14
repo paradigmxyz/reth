@@ -27,10 +27,19 @@ pub trait Object: Encode + Decode {}
 impl<T> Object for T where T: Encode + Decode {}
 
 /// Generic trait that a database table should follow.
+///
+/// [`Table::Key`], [`Table::Value`], [`Table::SeekKey`] types should implement [`Encode`] and
+/// [`Decode`] when appropriate. These traits define how the data is stored and read from the
+/// database.
+///
+/// It allows for the use of codecs. See [`crate::kv::models::blocks::BlockNumHash`] for a custom
+/// implementation, and [`crate::kv::codecs::scale`] for the use of an external codec.
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
     const NAME: &'static str;
     /// Key element of `Table`.
+    ///
+    /// Sorting should be taken into account when encoding this.
     type Key: Encode;
     /// Value element of `Table`.
     type Value: Object;
@@ -42,5 +51,7 @@ pub trait Table: Send + Sync + Debug + 'static {
 /// for more check: https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
 pub trait DupSort: Table {
     /// Subkey type. For more check https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
+    ///
+    /// Sorting should be taken into account when encoding this.
     type SubKey: Object;
 }
