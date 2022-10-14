@@ -16,7 +16,7 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     return no_codec(args, input);
 
     // no features
-    return no_codec(args, input);
+    no_codec(args, input)
 }
 
 #[proc_macro_attribute]
