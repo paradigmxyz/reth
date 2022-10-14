@@ -1,6 +1,9 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use crate::{kv::cursor::{Cursor, ValueOnlyResult}, utils::decode_one};
+use crate::{
+    kv::cursor::{Cursor, ValueOnlyResult},
+    utils::decode_one,
+};
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use reth_interfaces::db::{DbTx, DbTxMut, Encode, Error, Table};
 use std::marker::PhantomData;
@@ -13,22 +16,49 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind, T: Table> DbTx<'env, T> for Tx<'env, K, E> {
-    fn commit(self) {
-        todo!()
+    fn commit(self) -> Result<bool, Error> {
+        self.inner.commit().map_err(|e| Error::Internal(e.into()))
     }
 
-    fn get(&self) -> Option<<T as Table>::Value> {
-        todo!()
+    fn get(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
+        self.inner
+            .get(
+                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                key.encode().as_ref(),
+            )
+            .map_err(|e| Error::Internal(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
     }
 }
 
-impl<'env, K: TransactionKind, E: EnvironmentKind, T: Table> DbTxMut<'env, T> for Tx<'env, K, E> {
-    fn put(&self) {
-        todo!()
+impl<'env, E: EnvironmentKind, T: Table> DbTxMut<'env, T> for Tx<'env, RW, E> {
+    fn put(&self, key: T::Key, value: T::Value) -> Result<(), Error> {
+        self.inner
+            .put(
+                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                &key.encode(),
+                &value.encode(),
+                WriteFlags::UPSERT,
+            )
+            .map_err(|e| Error::Internal(e.into()))
     }
 
-    fn delete(&self) {
-        todo!()
+    fn delete(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error> {
+        let mut data = None;
+
+        let value = value.map(Encode::encode);
+        if let Some(value) = &value {
+            data = Some(value.as_ref());
+        };
+
+        self.inner
+            .del(
+                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                key.encode(),
+                data,
+            )
+            .map_err(|e| Error::Internal(e.into()))
     }
 
     // fn cursor_mut(&self) -> Cursor<'env, RW, T> {

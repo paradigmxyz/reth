@@ -33,12 +33,12 @@ pub struct Env<E: EnvironmentKind> {
 }
 
 impl<E: EnvironmentKind> Database for Env<E> {
-    fn tx<'a, T: Table>(&'a self) -> Box<dyn DbTx<'a, T> + 'a> {
-        Box::new(Tx::new(self.inner.begin_ro_txn().unwrap()))
+    fn tx<'a, T: Table>(&'a self) -> Result<Box<dyn DbTx<'a, T> + 'a>,Error> {
+        Ok(Box::new(Tx::new(self.inner.begin_ro_txn().unwrap())))
     }
 
-    fn tx_mut<'a, T: Table>(&'a self) -> Box<dyn DbTxMut<'a, T> + 'a> {
-        Box::new(Tx::new(self.inner.begin_rw_txn().unwrap()))
+    fn tx_mut<'a, T: Table>(&'a self) -> Result<Box<dyn DbTxMut<'a, T> + 'a>,Error> {
+        Ok(Box::new(Tx::new(self.inner.begin_rw_txn().unwrap())))
     }
 }
 
