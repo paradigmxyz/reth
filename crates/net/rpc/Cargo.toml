@@ -13,8 +13,13 @@ Reth RPC implementation
 reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-types = { path = "../rpc-types" }
+reth-transaction-pool = { path = "../../transaction-pool" }
+
+# rpc
+jsonrpsee = { version = "0.15" }
 
 # misc
+async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
