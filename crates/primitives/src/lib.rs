@@ -10,6 +10,7 @@
 mod account;
 mod block;
 mod chain;
+mod forkid;
 mod header;
 mod jsonu256;
 mod log;
@@ -19,6 +20,7 @@ mod transaction;
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
+pub use forkid::{ForkFilter, ForkHash, ForkId};
 pub use header::{Header, HeaderLocked};
 pub use jsonu256::JsonU256;
 pub use log::Log;

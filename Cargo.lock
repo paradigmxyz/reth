@@ -630,7 +630,7 @@ version = "17.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4966fba78396ff92db3b817ee71143eccd98acf0f876b8d600e585a670c5d1b"
 dependencies = [
- "ethereum-types 0.13.1",
+ "ethereum-types",
  "hex",
  "once_cell",
  "regex",
@@ -648,23 +648,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11da94e443c60508eb62cf256243a64da87304c2802ac2528847f79d750007ef"
 dependencies = [
  "crunchy",
- "fixed-hash 0.7.0",
+ "fixed-hash",
  "impl-rlp",
  "impl-serde",
  "tiny-keccak",
-]
-
-[[package]]
-name = "ethereum-forkid"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70b823f6b913b97e58a2bd67a7beeb48b0338d4aa8e3cc21d9cdab457716e4d4"
-dependencies = [
- "crc",
- "fastrlp",
- "maplit",
- "primitive-types 0.11.1",
- "thiserror",
 ]
 
 [[package]]
@@ -674,21 +661,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2827b94c556145446fcce834ca86b7abf0c39a805883fe20e72c5bfdb5a0dc6"
 dependencies = [
  "ethbloom",
- "fixed-hash 0.7.0",
+ "fixed-hash",
  "impl-rlp",
  "impl-serde",
- "primitive-types 0.11.1",
- "uint",
-]
-
-[[package]]
-name = "ethereum-types"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81224dc661606574f5a0f28c9947d0ee1d93ff11c5f1c4e7272f52e8c0b5483c"
-dependencies = [
- "fixed-hash 0.8.0",
- "primitive-types 0.12.0",
+ "primitive-types",
  "uint",
 ]
 
@@ -758,7 +734,7 @@ dependencies = [
  "arrayvec",
  "auto_impl",
  "bytes",
- "ethereum-types 0.13.1",
+ "ethereum-types",
  "fastrlp-derive",
 ]
 
@@ -792,17 +768,6 @@ checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
 dependencies = [
  "byteorder",
  "rand",
- "rustc-hex",
- "static_assertions",
-]
-
-[[package]]
-name = "fixed-hash"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
-dependencies = [
- "byteorder",
  "rustc-hex",
  "static_assertions",
 ]
@@ -1877,20 +1842,10 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e28720988bff275df1f51b171e1b2a18c30d194c4d2b61defdacecd625a5d94a"
 dependencies = [
- "fixed-hash 0.7.0",
+ "fixed-hash",
  "impl-codec",
  "impl-rlp",
  "impl-serde",
- "uint",
-]
-
-[[package]]
-name = "primitive-types"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cfd65aea0c5fa0bfcc7c9e7ca828c921ef778f43d325325ec84bda371bfa75a"
-dependencies = [
- "fixed-hash 0.8.0",
  "uint",
 ]
 
@@ -2079,12 +2034,13 @@ name = "reth-eth-wire"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "ethereum-forkid",
+ "crc",
  "ethers-core",
- "fastrlp",
  "hex",
  "hex-literal",
+ "maplit",
  "reth-primitives",
+ "reth-rlp",
  "thiserror",
 ]
 
@@ -2131,10 +2087,14 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "crc",
  "ethers-core",
- "fastrlp",
+ "hex-literal",
+ "maplit",
+ "reth-rlp",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -2145,7 +2105,7 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
- "ethereum-types 0.14.0",
+ "ethereum-types",
  "ethnum",
  "hex-literal",
  "reth-rlp",
@@ -2239,7 +2199,7 @@ dependencies = [
  "bytes",
  "hashbrown",
  "num_enum",
- "primitive-types 0.11.1",
+ "primitive-types",
  "revm_precompiles",
  "rlp",
  "sha3",
@@ -2255,7 +2215,7 @@ dependencies = [
  "hashbrown",
  "num",
  "once_cell",
- "primitive-types 0.11.1",
+ "primitive-types",
  "ripemd",
  "secp256k1",
  "sha2",
