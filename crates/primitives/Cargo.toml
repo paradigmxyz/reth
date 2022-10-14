@@ -14,7 +14,7 @@ bytes = "1.2"
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
-parity-scale-codec = { version = "3.2.1", features = ["derive"] }
+parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 codecs = { version = "0.1.0", path = "codecs" }
 
 
