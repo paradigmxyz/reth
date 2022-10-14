@@ -1,6 +1,7 @@
 use reth_primitives::BlockNumber;
 
 /// Determines the control flow during pipeline execution.
+#[derive(Debug)]
 pub(crate) enum ControlFlow {
     /// An unwind was requested and must be performed before continuing.
     Unwind {
