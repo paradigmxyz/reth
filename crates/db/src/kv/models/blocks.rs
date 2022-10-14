@@ -18,6 +18,8 @@ pub type HeaderHash = H256;
 
 /// BlockNumber concatenated with BlockHash. Used as a key for multiple tables. Having the first
 /// element as BlockNumber, helps out with querying/sorting.
+///
+/// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub struct BlockNumHash((BlockNumber, BlockHash));
@@ -44,7 +46,7 @@ impl Encode for BlockNumHash {
 
         let mut rnum = [0; 40];
 
-        rnum[..8].copy_from_slice(&number.encode());
+        rnum[..8].copy_from_slice(&number.to_be_bytes());
         rnum[8..].copy_from_slice(&hash.encode());
         rnum
     }
@@ -52,7 +54,11 @@ impl Encode for BlockNumHash {
 
 impl Decode for BlockNumHash {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, KVError> {
-        let value = value.into();
-        Ok(BlockNumHash((u64::decode(value.clone())?, H256::decode(value.slice(8..))?)))
+        let value: bytes::Bytes = value.into();
+
+        let num = u64::from_be_bytes(value.as_ref().try_into().map_err(|_| KVError::InvalidValue)?);
+        let hash = H256::decode(value.slice(8..))?;
+
+        Ok(BlockNumHash((num, hash)))
     }
 }
