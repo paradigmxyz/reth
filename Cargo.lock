@@ -2126,9 +2126,12 @@ dependencies = [
 name = "reth-rpc"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "jsonrpsee",
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-types",
+ "reth-transaction-pool",
  "serde",
  "serde_json",
  "thiserror",
