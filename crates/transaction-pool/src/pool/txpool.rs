@@ -24,7 +24,7 @@ use std::{
 /// The minimal value the basefee can decrease to
 ///
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` (https://eips.ethereum.org/EIPS/eip-1559) is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
-const MIN_PROTOCOL_BASE_FEE: U256 = U256([7, 0, 0, 0]);
+pub(crate) const MIN_PROTOCOL_BASE_FEE: U256 = U256([7, 0, 0, 0]);
 
 /// A pool that manages transactions.
 ///
@@ -182,7 +182,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Ok(res)
             }
             InsertResult::Underpriced { existing, .. } => {
-                Err(PoolError::AlreadyAdded(Box::new(existing)))
+                Err(PoolError::ReplacementUnderpriced(existing))
+            }
+            InsertResult::ProtocolFeeCapTooLow { transaction, fee_cap } => {
+                Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
             }
         }
     }
@@ -477,17 +480,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
 
         // Check dynamic fee
-        if let Some(fee) = transaction.max_fee_per_gas() {
-            if fee >= self.pending_basefee {
-                state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+        if let Some(fee_cap) = transaction.max_fee_per_gas() {
+            if fee_cap < self.minimal_protocol_basefee {
+                return InsertResult::ProtocolFeeCapTooLow { transaction, fee_cap }
             }
-            if fee > self.minimal_protocol_basefee {
-                state.insert(TxState::ENOUGH_FEE_CAP_PROTOCOL);
+            if fee_cap >= self.pending_basefee {
+                state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
             }
         } else {
             // legacy transactions always satisfy the condition
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-            state.insert(TxState::ENOUGH_FEE_CAP_PROTOCOL);
         }
 
         // Ensure tx does not exceed block gas limit
@@ -654,6 +656,10 @@ pub(crate) enum InsertResult<T: PoolTransaction> {
     },
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced { transaction: Arc<ValidPoolTransaction<T>>, existing: TxHash },
+    /// The transactions feeCap is lower than the chain's minimum fee requirement.
+    ///
+    /// See also [`MIN_PROTOCOL_BASE_FEE`]
+    ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: U256 },
 }
 
 // === impl InsertResult ===
@@ -785,7 +791,7 @@ mod tests {
                 assert!(!state.contains(TxState::ENOUGH_BALANCE));
                 assert_eq!(move_to, SubPool::Queued);
             }
-            InsertResult::Underpriced { .. } => {
+            _ => {
                 panic!("not underpriced")
             }
         };
@@ -810,7 +816,7 @@ mod tests {
                 assert!(!state.contains(TxState::ENOUGH_BALANCE));
                 assert_eq!(move_to, SubPool::Queued);
             }
-            InsertResult::Underpriced { .. } => {
+            _ => {
                 panic!("not underpriced")
             }
         };
@@ -837,8 +843,8 @@ mod tests {
                 let replaced = replaced_tx.unwrap();
                 assert_eq!(replaced.0.hash(), first.hash());
             }
-            InsertResult::Underpriced { .. } => {
-                panic!("not underpriced")
+            _ => {
+                panic!("is inserted")
             }
         };
         assert!(!pool.contains(first.hash()));
@@ -872,8 +878,8 @@ mod tests {
                 assert!(state.contains(TxState::NO_NONCE_GAPS));
                 assert_eq!(move_to, SubPool::Queued);
             }
-            InsertResult::Underpriced { .. } => {
-                panic!("not underpriced")
+            _ => {
+                panic!("is inserted")
             }
         };
 
@@ -909,8 +915,8 @@ mod tests {
                 assert!(state.contains(TxState::NO_NONCE_GAPS));
                 assert_eq!(move_to, SubPool::Pending);
             }
-            InsertResult::Underpriced { .. } => {
-                panic!("not underpriced")
+            _ => {
+                panic!("is inserted")
             }
         };
 
