@@ -422,21 +422,34 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 }
             };
 
-            // Check if promoting is even possible
-            if tx.state.has_nonce_gaps() {
-                to_next_sender();
-                continue
-            }
+            // // Check if promoting is even possible
+            // if tx.state.has_nonce_gaps() {
+            //     // can't satisfy nonce gaps in this update routine, so all transactions of this
+            // sender remain unchanged     to_next_sender();
+            //     continue
+            // }
+
+            // TODO check new allowance for the sender
 
             // Check dynamic fee condition
             if let Some(fee) = tx.transaction.max_fee_per_gas() {
                 let tx_fee_to_basefee = fee.cmp(&self.pending_basefee);
                 let current_pool = tx.subpool;
                 // A changed basefee only triggers an update if
-                match (pending_basefee_change, tx_fee_to_basefee, current_pool) {
-                    (Ordering::Less, Ordering::Greater, SubPool::BaseFee) => {
+                match (pending_basefee_change, tx_fee_to_basefee) {
+                    (Ordering::Less, Ordering::Greater) => {
                         // decreased base fee unblocks this dynamic fee requirement for this
                         // transaction
+                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        if current_pool != tx.subpool {
+                            updates.push(PoolUpdate {
+                                id: *id,
+                                hash: *tx.transaction.hash(),
+                                current: current_pool,
+                                destination: Destination::Pool(tx.subpool),
+                            })
+                        }
                     }
                     _ => {
                         todo!()
