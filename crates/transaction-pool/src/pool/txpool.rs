@@ -642,8 +642,10 @@ pub(crate) struct PoolUpdate {
     pub(crate) destination: Destination,
 }
 
+/// Result type for inserting a transaction
 pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 
+/// Err variant of `InsertResult`
 #[derive(Debug)]
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
