@@ -354,7 +354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
-name = "codecs"
+name = "codecs-derive"
 version = "0.1.0"
 dependencies = [
  "parity-scale-codec",
@@ -1937,6 +1937,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-codecs"
+version = "0.1.0"
+dependencies = [
+ "codecs-derive",
+]
+
+[[package]]
 name = "reth-crate-template"
 version = "0.1.0"
 
@@ -2013,10 +2020,10 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "codecs",
  "ethers-core",
  "fastrlp",
  "parity-scale-codec",
+ "reth-codecs",
  "serde",
  "serde_json",
 ]

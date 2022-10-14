@@ -9,11 +9,14 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     #[cfg(feature = "scale")]
     return use_scale(args, input);
 
+    #[cfg(feature = "postcard")]
+    return use_postcard(args, input);
+
     #[cfg(feature = "no_codec")]
     return no_codec(args, input);
 
-    #[cfg(feature = "no_codec")]
-    return use_postcard(args, input);
+    // no features
+    return no_codec(args, input);
 }
 
 #[proc_macro_attribute]

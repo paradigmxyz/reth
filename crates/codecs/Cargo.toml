@@ -1,0 +1,13 @@
+[package]
+name = "reth-codecs"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["scale"]
+scale = ["codecs-derive/scale"]
+postcard = ["codecs-derive/postcard"]
+no_codec = ["codecs-derive/no_codec"]
+
+[dependencies]
+codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }

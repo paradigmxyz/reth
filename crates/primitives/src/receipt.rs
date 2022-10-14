@@ -1,5 +1,5 @@
 use crate::{Log, TxType, H256};
-use codecs::main_codec;
+use reth_codecs::main_codec;
 
 /// Receipt containing result of transaction execution.
 #[main_codec]

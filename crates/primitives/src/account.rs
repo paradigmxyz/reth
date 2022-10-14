@@ -1,5 +1,5 @@
 use crate::{H256, U256};
-use codecs::main_codec;
+use reth_codecs::main_codec;
 
 /// Account saved in database
 #[main_codec]

@@ -1,5 +1,5 @@
 use crate::{Address, H256};
-use codecs::main_codec;
+use reth_codecs::main_codec;
 
 /// Ethereum Log
 #[main_codec]

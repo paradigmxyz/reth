@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use crate::{BlockNumber, H160, H256, U256};
-use codecs::*;
+use reth_codecs::main_codec;
 
 /// Block header
 #[main_codec]

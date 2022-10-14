@@ -1,4 +1,4 @@
-use codecs::main_codec;
+use reth_codecs::main_codec;
 
 /// Transaction Type
 #[main_codec]
