@@ -1,11 +1,9 @@
-[package]
-name = "reth"
-version = "0.1.0"
-edition = "2021"
-
 [workspace]
 members = [
+    "bin/reth",
     "crate-template",
+    "crates/common/rlp",
+    "crates/common/rlp-derive",
     "crates/db",
     "crates/executor",
     "crates/interfaces",
@@ -19,9 +17,4 @@ members = [
     "crates/transaction-pool",
     "crates/db"
 ]
-
-[dependencies]
-
-[[bin]]
-path = "bin/reth.rs"
-name = "reth"
+default-members = ["bin/reth"]

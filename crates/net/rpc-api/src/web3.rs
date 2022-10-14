@@ -2,7 +2,8 @@ use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{Bytes, H256};
 
 /// Web3 rpc interface.
-#[rpc(server)]
+#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(feature = "client", rpc(server, client))]
 pub trait Web3Api {
     /// Returns current client version.
     #[method(name = "web3_clientVersion")]

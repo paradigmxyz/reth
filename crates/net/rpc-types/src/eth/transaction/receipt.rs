@@ -1,8 +1,8 @@
 use reth_primitives::{rpc::Log, Address, Bloom, H256, U256, U64};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
-#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionReceipt {
     /// Transaction Hash.
