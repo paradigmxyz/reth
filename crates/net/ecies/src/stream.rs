@@ -145,3 +145,13 @@ where
         Pin::new(&mut self.get_mut().stream).poll_close(cx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    // TODO: implement test for the proposed
+    // API: https://github.com/foundry-rs/reth/issues/64#issue-1408708420
+    async fn can_write_and_read() {}
+}
