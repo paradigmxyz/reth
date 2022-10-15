@@ -15,12 +15,12 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     pub inner: Transaction<'a, K, E>,
 }
 
-impl<'env, K: TransactionKind, E: EnvironmentKind, T: Table> DbTx<'env, T> for Tx<'env, K, E> {
-    fn commit(self) -> Result<bool, Error> {
-        self.inner.commit().map_err(|e| Error::Internal(e.into()))
-    }
+impl<'env, K: TransactionKind, E: EnvironmentKind> DbTx<'env> for Tx<'env, K, E> {
+    // fn commit(self) -> Result<bool, Error> {
+    //     self.inner.commit().map_err(|e| Error::Internal(e.into()))
+    // }
 
-    fn get(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
+    fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
         self.inner
             .get(
                 &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
