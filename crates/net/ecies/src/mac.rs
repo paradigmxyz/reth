@@ -2,8 +2,8 @@ use aes::Aes256Enc;
 use block_padding::NoPadding;
 use cipher::BlockEncrypt;
 use digest::KeyInit;
-use reth_primitives::{H128, H256};
 use generic_array::GenericArray;
+use reth_primitives::{H128, H256};
 use sha3::{Digest, Keccak256};
 use typenum::U16;
 
@@ -17,10 +17,7 @@ pub struct MAC {
 
 impl MAC {
     pub fn new(secret: H256) -> Self {
-        Self {
-            secret,
-            hasher: Keccak256::new(),
-        }
+        Self { secret, hasher: Keccak256::new() }
     }
 
     pub fn update(&mut self, data: &[u8]) {
@@ -30,8 +27,7 @@ impl MAC {
     pub fn update_header(&mut self, data: &HeaderBytes) {
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
         let mut encrypted = self.digest().to_fixed_bytes();
-        aes.encrypt_padded::<NoPadding>(&mut encrypted, H128::len_bytes())
-            .unwrap();
+        aes.encrypt_padded::<NoPadding>(&mut encrypted, H128::len_bytes()).unwrap();
         for i in 0..data.len() {
             encrypted[i] ^= data[i];
         }
@@ -43,8 +39,7 @@ impl MAC {
         let prev = self.digest();
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
         let mut encrypted = self.digest().to_fixed_bytes();
-        aes.encrypt_padded::<NoPadding>(&mut encrypted, H128::len_bytes())
-            .unwrap();
+        aes.encrypt_padded::<NoPadding>(&mut encrypted, H128::len_bytes()).unwrap();
         for i in 0..16 {
             encrypted[i] ^= prev[i];
         }

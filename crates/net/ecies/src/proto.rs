@@ -1,20 +1,24 @@
 use super::algorithm::{ECIES, MAX_BODY_SIZE};
-use reth_primitives::H512 as PeerId;
 use anyhow::{bail, Context as _};
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt};
+use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,
     io,
+    net::SocketAddr,
     pin::Pin,
-    task::{Context, Poll}, net::SocketAddr,
+    task::{Context, Poll},
 };
-use tokio::{io::{AsyncRead, AsyncWrite}, net::TcpStream};
+use thiserror::Error;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 use tracing::{debug, instrument, trace};
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ECIESError {
@@ -85,18 +89,12 @@ pub struct ECIESCodec {
 impl ECIESCodec {
     /// Create a new server codec using the given secret key
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
-        Ok(Self {
-            ecies: ECIES::new_server(secret_key)?,
-            state: ECIESState::Auth,
-        })
+        Ok(Self { ecies: ECIES::new_server(secret_key)?, state: ECIESState::Auth })
     }
 
     /// Create a new client codec using the given secret key and the server's public id
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        Ok(Self {
-            ecies: ECIES::new_client(secret_key, remote_id)?,
-            state: ECIESState::Auth,
-        })
+        Ok(Self { ecies: ECIES::new_client(secret_key, remote_id)?, state: ECIESState::Auth })
     }
 }
 
@@ -111,7 +109,7 @@ impl Decoder for ECIESCodec {
                 ECIESState::Auth => {
                     trace!("parsing auth");
                     if buf.len() < 2 {
-                        return Ok(None);
+                        return Ok(None)
                     }
 
                     let payload_size = u16::from_be_bytes([buf[0], buf[1]]) as usize;
@@ -119,18 +117,18 @@ impl Decoder for ECIESCodec {
 
                     if buf.len() < total_size {
                         trace!("current len {}, need {}", buf.len(), total_size);
-                        return Ok(None);
+                        return Ok(None)
                     }
 
                     self.ecies.read_auth(&mut *buf.split_to(total_size))?;
 
                     self.state = ECIESState::Header;
-                    return Ok(Some(IngressECIESValue::AuthReceive(self.ecies.remote_id())));
+                    return Ok(Some(IngressECIESValue::AuthReceive(self.ecies.remote_id())))
                 }
                 ECIESState::Ack => {
                     trace!("parsing ack with len {}", buf.len());
                     if buf.len() < 2 {
-                        return Ok(None);
+                        return Ok(None)
                     }
 
                     let payload_size = u16::from_be_bytes([buf[0], buf[1]]) as usize;
@@ -138,35 +136,34 @@ impl Decoder for ECIESCodec {
 
                     if buf.len() < total_size {
                         trace!("current len {}, need {}", buf.len(), total_size);
-                        return Ok(None);
+                        return Ok(None)
                     }
 
                     self.ecies.read_ack(&mut *buf.split_to(total_size))?;
 
                     self.state = ECIESState::Header;
-                    return Ok(Some(IngressECIESValue::Ack));
+                    return Ok(Some(IngressECIESValue::Ack))
                 }
                 ECIESState::Header => {
                     if buf.len() < ECIES::header_len() {
                         trace!("current len {}, need {}", buf.len(), ECIES::header_len());
-                        return Ok(None);
+                        return Ok(None)
                     }
 
-                    self.ecies
-                        .read_header(&mut *buf.split_to(ECIES::header_len()))?;
+                    self.ecies.read_header(&mut *buf.split_to(ECIES::header_len()))?;
 
                     self.state = ECIESState::Body;
                 }
                 ECIESState::Body => {
                     if buf.len() < self.ecies.body_len() {
-                        return Ok(None);
+                        return Ok(None)
                     }
 
                     let mut data = buf.split_to(self.ecies.body_len());
                     let ret = Bytes::copy_from_slice(self.ecies.read_body(&mut *data)?);
 
                     self.state = ECIESState::Header;
-                    return Ok(Some(IngressECIESValue::Message(ret)));
+                    return Ok(Some(IngressECIESValue::Message(ret)))
                 }
             }
         }
@@ -198,7 +195,7 @@ impl Encoder<EgressECIESValue> for ECIESCodec {
                             data.len(),
                             MAX_BODY_SIZE
                         ),
-                    ));
+                    ))
                 }
 
                 self.ecies.write_header(buf, data.len());
@@ -215,7 +212,6 @@ pub struct ECIESStream<Io> {
     stream: Framed<Io, ECIESCodec>,
     remote_id: PeerId,
 }
-
 
 // This trait is just for instrumenting the stream with a socket addr
 pub trait HasRemoteAddr {
@@ -252,10 +248,7 @@ where
 
         trace!("parsing ecies ack ...");
         if matches!(ack, Some(IngressECIESValue::Ack)) {
-            Ok(Self {
-                stream: transport,
-                remote_id,
-            })
+            Ok(Self { stream: transport, remote_id })
         } else {
             bail!("invalid handshake: expected ack, got {:?} instead", ack)
         }
@@ -280,15 +273,9 @@ where
         };
 
         debug!("sending ecies ack ...");
-        transport
-            .send(EgressECIESValue::Ack)
-            .await
-            .context("failed to send ECIES auth")?;
+        transport.send(EgressECIESValue::Ack).await.context("failed to send ECIES auth")?;
 
-        Ok(Self {
-            stream: transport,
-            remote_id,
-        })
+        Ok(Self { stream: transport, remote_id })
     }
 
     /// Get the remote id
@@ -308,10 +295,7 @@ where
             Some(Ok(IngressECIESValue::Message(body))) => Poll::Ready(Some(Ok(body))),
             Some(other) => Poll::Ready(Some(Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!(
-                    "ECIES stream protocol error: expected message, received {:?}",
-                    other
-                ),
+                format!("ECIES stream protocol error: expected message, received {:?}", other),
             )))),
             None => Poll::Ready(None),
         }

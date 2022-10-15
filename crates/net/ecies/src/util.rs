@@ -1,5 +1,5 @@
-use reth_primitives::{H256, H512 as PeerId};
 use hmac::{Hmac, Mac};
+use reth_primitives::{H256, H512 as PeerId};
 use secp256k1::PublicKey;
 use sha2::Sha256;
 use sha3::{Digest, Keccak256};

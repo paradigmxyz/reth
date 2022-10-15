@@ -1,7 +1,7 @@
 use crate::{
     mac::{HeaderBytes, MAC},
-    util::{hmac_sha256, id2pk, pk2id, sha256},
     proto::ECIESError,
+    util::{hmac_sha256, id2pk, pk2id, sha256},
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
 use anyhow::{format_err, Context};
@@ -10,9 +10,9 @@ use bytes::{BufMut, Bytes, BytesMut};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
 use educe::Educe;
+use rand::{thread_rng, Rng};
 use reth_primitives::{H128, H256, H512 as PeerId};
 use reth_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
-use rand::{thread_rng, Rng};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     PublicKey, SecretKey, SECP256K1,
@@ -37,12 +37,7 @@ fn kdf(secret: H256, s1: &[u8], dest: &mut [u8]) {
     let mut written = 0_usize;
     while written < dest.len() {
         let mut hasher = Sha256::default();
-        let ctrs = [
-            (ctr >> 24) as u8,
-            (ctr >> 16) as u8,
-            (ctr >> 8) as u8,
-            ctr as u8,
-        ];
+        let ctrs = [(ctr >> 24) as u8, (ctr >> 16) as u8, (ctr >> 8) as u8, ctr as u8];
         hasher.update(&ctrs);
         hasher.update(secret.as_bytes());
         hasher.update(s1);
@@ -87,10 +82,7 @@ pub struct ECIES {
 
 fn split_at_mut<T>(arr: &mut [T], mid: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
     if mid > arr.len() {
-        return Err(ECIESError::Other(format_err!(
-            "too short: {mid} > {}",
-            arr.len()
-        )));
+        return Err(ECIESError::Other(format_err!("too short: {mid} > {}", arr.len())))
     }
     Ok(arr.split_at_mut(mid))
 }
@@ -203,11 +195,8 @@ impl ECIES {
 
         let total_size: u16 = u16::try_from(65 + 16 + data.len() + 32).unwrap();
 
-        let tag = hmac_sha256(
-            mac_key.as_ref(),
-            &[iv.as_bytes(), &encrypted],
-            &total_size.to_be_bytes(),
-        );
+        let tag =
+            hmac_sha256(mac_key.as_ref(), &[iv.as_bytes(), &encrypted], &total_size.to_be_bytes());
 
         out.extend_from_slice(iv.as_bytes());
         out.extend_from_slice(&encrypted);
@@ -231,7 +220,7 @@ impl ECIES {
 
         let check_tag = hmac_sha256(mac_key.as_ref(), &[iv, encrypted_data], auth_data);
         if check_tag != tag {
-            return Err(ECIESError::TagCheckFailed);
+            return Err(ECIESError::TagCheckFailed)
         }
 
         let decrypted_data = encrypted_data;
@@ -308,9 +297,7 @@ impl ECIES {
     fn parse_auth_unencrypted(&mut self, data: &[u8]) -> Result<(), ECIESError> {
         let mut data = Rlp::new(data)?;
 
-        let sigdata = data
-            .get_next::<[u8; 65]>()?
-            .ok_or(ECIESError::InvalidAuthData)?;
+        let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESError::InvalidAuthData)?;
         let signature = RecoverableSignature::from_compact(
             &sigdata[0..64],
             RecoveryId::from_i32(sigdata[64] as i32)?,
@@ -325,10 +312,8 @@ impl ECIES {
             &secp256k1::Message::from_slice((x ^ self.remote_nonce.unwrap()).as_ref()).unwrap(),
             &signature,
         )?);
-        self.ephemeral_shared_secret = Some(ecdh_x(
-            &self.remote_ephemeral_public_key.unwrap(),
-            &self.ephemeral_secret_key,
-        ));
+        self.ephemeral_shared_secret =
+            Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));
 
         Ok(())
     }
@@ -390,10 +375,8 @@ impl ECIES {
             Some(id2pk(data.get_next()?.ok_or(ECIESError::InvalidAckData)?)?);
         self.remote_nonce = Some(data.get_next()?.ok_or(ECIESError::InvalidAckData)?);
 
-        self.ephemeral_shared_secret = Some(ecdh_x(
-            &self.remote_ephemeral_public_key.unwrap(),
-            &self.ephemeral_secret_key,
-        ));
+        self.ephemeral_shared_secret =
+            Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));
         Ok(())
     }
 
@@ -430,14 +413,10 @@ impl ECIES {
             hasher.update(shared_secret.as_ref());
             H256::from(hasher.finalize().as_ref())
         };
-        self.ingress_aes = Some(Ctr64BE::<Aes256>::new(
-            aes_secret.as_ref().into(),
-            iv.as_ref().into(),
-        ));
-        self.egress_aes = Some(Ctr64BE::<Aes256>::new(
-            aes_secret.as_ref().into(),
-            iv.as_ref().into(),
-        ));
+        self.ingress_aes =
+            Some(Ctr64BE::<Aes256>::new(aes_secret.as_ref().into(), iv.as_ref().into()));
+        self.egress_aes =
+            Some(Ctr64BE::<Aes256>::new(aes_secret.as_ref().into(), iv.as_ref().into()));
 
         let mac_secret: H256 = {
             let mut hasher = Keccak256::new();
@@ -446,23 +425,14 @@ impl ECIES {
             H256::from(hasher.finalize().as_ref())
         };
         self.ingress_mac = Some(MAC::new(mac_secret));
-        self.ingress_mac
-            .as_mut()
-            .unwrap()
-            .update((mac_secret ^ self.nonce).as_ref());
-        self.ingress_mac
-            .as_mut()
-            .unwrap()
-            .update(self.remote_init_msg.as_ref().unwrap());
+        self.ingress_mac.as_mut().unwrap().update((mac_secret ^ self.nonce).as_ref());
+        self.ingress_mac.as_mut().unwrap().update(self.remote_init_msg.as_ref().unwrap());
         self.egress_mac = Some(MAC::new(mac_secret));
         self.egress_mac
             .as_mut()
             .unwrap()
             .update((mac_secret ^ self.remote_nonce.unwrap()).as_ref());
-        self.egress_mac
-            .as_mut()
-            .unwrap()
-            .update(self.init_msg.as_ref().unwrap());
+        self.egress_mac.as_mut().unwrap().update(self.init_msg.as_ref().unwrap());
     }
 
     #[cfg(test)]
@@ -480,10 +450,7 @@ impl ECIES {
         header[3..6].copy_from_slice(&[194, 128, 128]);
 
         let mut header = HeaderBytes::from(header);
-        self.egress_aes
-            .as_mut()
-            .unwrap()
-            .apply_keystream(&mut header);
+        self.egress_aes.as_mut().unwrap().apply_keystream(&mut header);
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
@@ -500,12 +467,12 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESError::TagCheckFailed);
+            return Err(ECIESError::TagCheckFailed)
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
         if header.as_slice().len() < 3 {
-            return Err(ECIESError::InvalidHeader);
+            return Err(ECIESError::InvalidHeader)
         }
         let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)
             .context("excessive body len")?;
@@ -513,11 +480,8 @@ impl ECIES {
         if body_size > MAX_BODY_SIZE {
             return Err(ECIESError::IO(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "body size ({}) exceeds limit ({} bytes)",
-                    body_size, MAX_BODY_SIZE
-                ),
-            )));
+                format!("body size ({}) exceeds limit ({} bytes)", body_size, MAX_BODY_SIZE),
+            )))
         }
 
         self.body_size = Some(body_size);
@@ -531,11 +495,7 @@ impl ECIES {
 
     pub fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
-        (if len % 16 == 0 {
-            len
-        } else {
-            (len / 16 + 1) * 16
-        }) + 16
+        (if len % 16 == 0 { len } else { (len / 16 + 1) * 16 }) + 16
     }
 
     #[cfg(test)]
@@ -546,11 +506,7 @@ impl ECIES {
     }
 
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
-        let len = if data.len() % 16 == 0 {
-            data.len()
-        } else {
-            (data.len() / 16 + 1) * 16
-        };
+        let len = if data.len() % 16 == 0 { data.len() } else { (data.len() / 16 + 1) * 16 };
         let old_len = out.len();
         out.resize(old_len + len, 0);
 
@@ -570,7 +526,7 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESError::TagCheckFailed);
+            return Err(ECIESError::TagCheckFailed)
         }
 
         let size = self.body_size.unwrap();
@@ -687,22 +643,13 @@ mod tests {
         ))
         .unwrap();
 
-        let client_nonce = H256(hex!(
-            "7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6"
-        ));
+        let client_nonce =
+            H256(hex!("7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6"));
 
-        let server_id = pk2id(&PublicKey::from_secret_key(
-            SECP256K1,
-            &eip8_test_server_key(),
-        ));
+        let server_id = pk2id(&PublicKey::from_secret_key(SECP256K1, &eip8_test_server_key()));
 
-        ECIES::new_static_client(
-            client_static_key,
-            server_id,
-            client_nonce,
-            client_ephemeral_key,
-        )
-        .unwrap()
+        ECIES::new_static_client(client_static_key, server_id, client_nonce, client_ephemeral_key)
+            .unwrap()
     }
 
     fn eip8_test_server() -> ECIES {
@@ -711,9 +658,8 @@ mod tests {
         ))
         .unwrap();
 
-        let server_nonce = H256(hex!(
-            "559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd"
-        ));
+        let server_nonce =
+            H256(hex!("559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd"));
 
         ECIES::new_static_server(eip8_test_server_key(), server_nonce, server_ephemeral_key)
             .unwrap()
@@ -801,9 +747,7 @@ mod tests {
         let mut test_client = eip8_test_client();
         let mut test_server = eip8_test_server();
 
-        test_server
-            .read_auth(&mut test_client.create_auth())
-            .unwrap();
+        test_server.read_auth(&mut test_client.create_auth()).unwrap();
 
         test_client.read_ack(&mut test_server.create_ack()).unwrap();
 
