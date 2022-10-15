@@ -1,5 +1,7 @@
-use super::algorithm::{ECIES, MAX_BODY_SIZE};
-use anyhow::{bail, Context as _};
+use crate::{
+    algorithm::{ECIES, MAX_BODY_SIZE},
+    ECIESError,
+};
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt};
 use reth_primitives::H512 as PeerId;
@@ -11,7 +13,6 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -19,41 +20,6 @@ use tokio::{
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 use tracing::{debug, instrument, trace};
-
-/// An error that occurs while reading or writing to an ECIES stream.
-#[derive(Debug, Error)]
-pub enum ECIESError {
-    #[error("IO error")]
-    IO(#[from] io::Error),
-    #[error("tag check failure")]
-    TagCheckFailed,
-    #[error("invalid auth data")]
-    InvalidAuthData,
-    #[error("invalid ack data")]
-    InvalidAckData,
-    #[error("invalid body data")]
-    InvalidHeader,
-    #[error("other")]
-    Other(#[from] anyhow::Error),
-}
-
-impl From<ECIESError> for io::Error {
-    fn from(error: ECIESError) -> Self {
-        Self::new(io::ErrorKind::Other, format!("ECIES error: {:?}", error))
-    }
-}
-
-impl From<secp256k1::Error> for ECIESError {
-    fn from(error: secp256k1::Error) -> Self {
-        Self::Other(error.into())
-    }
-}
-
-impl From<reth_rlp::DecodeError> for ECIESError {
-    fn from(error: reth_rlp::DecodeError) -> Self {
-        Self::Other(error.into())
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Current ECIES state of a connection
@@ -107,7 +73,7 @@ impl ECIESCodec {
 
 impl Decoder for ECIESCodec {
     type Item = IngressECIESValue;
-    type Error = io::Error;
+    type Error = ECIESError;
 
     #[instrument(level = "trace", skip_all, fields(peer=&*format!("{:?}", self.ecies.remote_id.map(|s| s.to_string())), state=&*format!("{:?}", self.state)))]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -241,7 +207,7 @@ where
         transport: Io,
         secret_key: SecretKey,
         remote_id: PeerId,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_client(secret_key, remote_id)
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid handshake"))?;
 
@@ -251,36 +217,38 @@ where
         transport.send(EgressECIESValue::Auth).await?;
 
         trace!("waiting for ecies ack ...");
-        let ack = transport.try_next().await?;
+        let msg = transport.try_next().await?;
 
         trace!("parsing ecies ack ...");
-        if matches!(ack, Some(IngressECIESValue::Ack)) {
+        if matches!(msg, Some(IngressECIESValue::Ack)) {
             Ok(Self { stream: transport, remote_id })
         } else {
-            bail!("invalid handshake: expected ack, got {:?} instead", ack)
+            Err(ECIESError::InvalidHandshake { expected: IngressECIESValue::Ack, msg })
         }
     }
 
     /// Listen on a just connected ECIES client
     #[instrument(skip_all, fields(peer=&*format!("{:?}", transport.remote_addr())))]
-    pub async fn incoming(transport: Io, secret_key: SecretKey) -> anyhow::Result<Self> {
-        let ecies = ECIESCodec::new_server(secret_key).context("handshake error")?;
+    pub async fn incoming(transport: Io, secret_key: SecretKey) -> Result<Self, ECIESError> {
+        let ecies = ECIESCodec::new_server(secret_key)?;
 
         debug!("incoming ecies stream ...");
         let mut transport = ecies.framed(transport);
-        let ack = transport.try_next().await?;
+        let msg = transport.try_next().await?;
 
         debug!("receiving ecies auth");
-        let remote_id = match ack {
-            Some(IngressECIESValue::AuthReceive(remote_id)) => remote_id,
+        let remote_id = match &msg {
+            Some(IngressECIESValue::AuthReceive(remote_id)) => *remote_id,
             other => {
-                debug!("expected auth, got {:?} instead", other);
-                bail!("invalid handshake");
+                return Err(ECIESError::InvalidHandshake {
+                    expected: IngressECIESValue::AuthReceive(Default::default()),
+                    msg,
+                })
             }
         };
 
         debug!("sending ecies ack ...");
-        transport.send(EgressECIESValue::Ack).await.context("failed to send ECIES auth")?;
+        transport.send(EgressECIESValue::Ack).await?;
 
         Ok(Self { stream: transport, remote_id })
     }

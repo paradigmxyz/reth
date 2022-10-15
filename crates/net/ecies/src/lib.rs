@@ -11,3 +11,6 @@ pub mod algorithm;
 pub mod mac;
 pub mod proto;
 pub mod util;
+
+mod error;
+pub use error::ECIESError;

@@ -1,11 +1,10 @@
 #![allow(missing_docs)]
 use crate::{
     mac::{HeaderBytes, MAC},
-    proto::ECIESError,
     util::{hmac_sha256, id2pk, pk2id, sha256},
+    ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
-use anyhow::{format_err, Context};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use bytes::{BufMut, Bytes, BytesMut};
 use ctr::Ctr64BE;
@@ -81,11 +80,11 @@ pub struct ECIES {
     body_size: Option<usize>,
 }
 
-fn split_at_mut<T>(arr: &mut [T], mid: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
-    if mid > arr.len() {
-        return Err(ECIESError::Other(format_err!("too short: {mid} > {}", arr.len())))
+fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
+    if idx > arr.len() {
+        return Err(ECIESError::OutOfBounds { idx, len: arr.len() })
     }
-    Ok(arr.split_at_mut(mid))
+    Ok(arr.split_at_mut(idx))
 }
 
 impl ECIES {
@@ -214,8 +213,7 @@ impl ECIES {
     fn decrypt_message<'a>(&self, data: &'a mut [u8]) -> Result<&'a mut [u8], ECIESError> {
         let (auth_data, encrypted) = split_at_mut(data, 2)?;
         let (pubkey_bytes, encrypted) = split_at_mut(encrypted, 65)?;
-        let public_key = PublicKey::from_slice(pubkey_bytes)
-            .with_context(|| format!("bad public key {}", hex::encode(pubkey_bytes)))?;
+        let public_key = PublicKey::from_slice(pubkey_bytes)?;
         let (data_iv, tag_bytes) = split_at_mut(encrypted, encrypted.len() - 32)?;
         let (iv, encrypted_data) = split_at_mut(data_iv, 16)?;
         let tag = H256::from_slice(tag_bytes);
@@ -313,7 +311,7 @@ impl ECIES {
         )?;
         let remote_id = data.get_next()?.ok_or(ECIESError::InvalidAuthData)?;
         self.remote_id = Some(remote_id);
-        self.remote_public_key = Some(id2pk(remote_id).context("failed to parse peer id")?);
+        self.remote_public_key = Some(id2pk(remote_id)?);
         self.remote_nonce = Some(data.get_next()?.ok_or(ECIESError::InvalidAuthData)?);
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
@@ -486,8 +484,7 @@ impl ECIES {
         if header.as_slice().len() < 3 {
             return Err(ECIESError::InvalidHeader)
         }
-        let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)
-            .context("excessive body len")?;
+        let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)?;
 
         if body_size > MAX_BODY_SIZE {
             return Err(ECIESError::IO(io::Error::new(
