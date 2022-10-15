@@ -9,7 +9,7 @@
 
 pub mod algorithm;
 pub mod mac;
-pub mod proto;
+pub mod stream;
 mod util;
 
 mod error;
