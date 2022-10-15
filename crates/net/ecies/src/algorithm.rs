@@ -88,6 +88,8 @@ fn split_at_mut<T>(arr: &mut [T], mid: usize) -> Result<(&mut [T], &mut [T]), EC
 }
 
 impl ECIES {
+    /// Create a new client with the given static secret key, remote peer id, nonce, and ephemeral
+    /// secret key.
     fn new_static_client(
         secret_key: SecretKey,
         remote_id: PeerId,
@@ -122,6 +124,7 @@ impl ECIES {
         })
     }
 
+    /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
         let nonce = H256::random();
         let ephemeral_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
@@ -129,6 +132,8 @@ impl ECIES {
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
 
+    /// Create a new server with the given static secret key, remote peer id, and ephemeral secret
+    /// key.
     pub fn new_static_server(
         secret_key: SecretKey,
         nonce: H256,
@@ -161,6 +166,7 @@ impl ECIES {
         })
     }
 
+    /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         let nonce = H256::random();
         let ephemeral_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
@@ -168,6 +174,7 @@ impl ECIES {
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
+    /// Return the contained remote peer ID.
     pub fn remote_id(&self) -> PeerId {
         self.remote_id.unwrap()
     }
@@ -275,6 +282,7 @@ impl ECIES {
         buf
     }
 
+    /// Write an auth message to the given buffer.
     pub fn write_auth(&mut self, buf: &mut BytesMut) {
         let unencrypted = self.create_auth_unencrypted();
 
@@ -318,6 +326,7 @@ impl ECIES {
         Ok(())
     }
 
+    /// Read and verify an auth message from the input data.
     pub fn read_auth(&mut self, data: &mut [u8]) -> Result<(), ECIESError> {
         self.remote_init_msg = Some(Bytes::copy_from_slice(data));
         let unencrypted = self.decrypt_message(data)?;
@@ -346,6 +355,7 @@ impl ECIES {
         buf
     }
 
+    /// Write an ack message to the given buffer.
     pub fn write_ack(&mut self, out: &mut BytesMut) {
         let unencrypted = self.create_ack_unencrypted();
 
@@ -380,6 +390,7 @@ impl ECIES {
         Ok(())
     }
 
+    /// Read and verify an ack message from the input data.
     pub fn read_ack(&mut self, data: &mut [u8]) -> Result<(), ECIESError> {
         self.remote_init_msg = Some(Bytes::copy_from_slice(data));
         let unencrypted = self.decrypt_message(data)?;

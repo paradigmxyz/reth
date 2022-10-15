@@ -20,6 +20,7 @@ use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 use tracing::{debug, instrument, trace};
 
+/// An error that occurs while reading or writing to an ECIES stream.
 #[derive(Debug, Error)]
 pub enum ECIESError {
     #[error("IO error")]
@@ -57,7 +58,13 @@ impl From<reth_rlp::DecodeError> for ECIESError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Current ECIES state of a connection
 pub enum ECIESState {
+    /// The first stage of the ECIES handshake, where each side of the connection sends an auth
+    /// message containing the ephemeral public key, signature of the public key, nonce, and other
+    /// metadata.
     Auth,
+
+    /// The second stage of the ECIES handshake, where each side of the connection sends an ack
+    /// message containing the nonce and other metadata.
     Ack,
     Header,
     Body,
