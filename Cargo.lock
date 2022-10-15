@@ -671,7 +671,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "0.17.0"
-source = "git+https://github.com/gakonst/ethers-rs#f3a5a7aef06db391f8d2c4370bbc2a1b6ae4ea0f"
+source = "git+https://github.com/rjected/ethers-rs?branch=add-h128#e600580c0348e959d74fdfb0db9d3cdfb67222d7"
 dependencies = [
  "arrayvec",
  "bytes",
