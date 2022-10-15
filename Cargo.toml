@@ -18,6 +18,3 @@ members = [
     "crates/db"
 ]
 default-members = ["bin/reth"]
-
-[patch."https://github.com/gakonst/ethers-rs"]
-ethers-core = { git = "https://github.com/rjected/ethers-rs", branch = "add-h128" }
