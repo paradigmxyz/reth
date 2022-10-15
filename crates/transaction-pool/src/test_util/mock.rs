@@ -2,7 +2,7 @@
 
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
-    pool::txpool::TxPool,
+    pool::txpool::{TxPool, MIN_PROTOCOL_BASE_FEE},
     PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use paste::paste;
@@ -123,8 +123,8 @@ impl MockTransaction {
             hash: H256::random(),
             sender: Address::random(),
             nonce: 0,
-            max_fee_per_gas: U256::zero(),
-            max_priority_fee_per_gas: U256::zero(),
+            max_fee_per_gas: MIN_PROTOCOL_BASE_FEE,
+            max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE,
             gas_limit: 0,
             value: Default::default(),
         }

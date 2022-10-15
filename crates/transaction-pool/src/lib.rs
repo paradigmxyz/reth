@@ -212,6 +212,13 @@ where
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get(tx_hash)
     }
+
+    fn get_all(
+        &self,
+        txs: impl IntoIterator<Item = TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.inner().get_all(txs)
+    }
 }
 
 impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
