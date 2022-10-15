@@ -10,7 +10,33 @@
 pub mod algorithm;
 pub mod mac;
 pub mod proto;
-pub mod util;
+mod util;
 
 mod error;
 pub use error::ECIESError;
+
+mod codec;
+
+use reth_primitives::H512 as PeerId;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Raw egress values for an ECIES protocol
+pub enum EgressECIESValue {
+    /// The AUTH message being sent out
+    Auth,
+    /// The ACK message being sent out
+    Ack,
+    /// The message being sent out (wrapped bytes)
+    Message(bytes::Bytes),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Raw ingress values for an ECIES protocol
+pub enum IngressECIESValue {
+    /// Receiving a message from a [`peerId`]
+    AuthReceive(PeerId),
+    /// Receiving an ACK message
+    Ack,
+    /// Receiving a message
+    Message(bytes::Bytes),
+}

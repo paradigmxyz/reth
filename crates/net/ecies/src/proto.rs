@@ -1,8 +1,6 @@
-use crate::{
-    algorithm::{ECIES, MAX_BODY_SIZE},
-    ECIESError,
-};
-use bytes::{Bytes, BytesMut};
+//! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
+use crate::{ECIESError, EgressECIESValue, IngressECIESValue};
+use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
@@ -34,22 +32,6 @@ pub enum ECIESState {
     Ack,
     Header,
     Body,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// Raw egress values for an ECIES protocol
-pub enum EgressECIESValue {
-    Auth,
-    Ack,
-    Message(Bytes),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// Raw ingress values for an ECIES protocol
-pub enum IngressECIESValue {
-    AuthReceive(PeerId),
-    Ack,
-    Message(Bytes),
 }
 
 /// Tokio codec for ECIES
