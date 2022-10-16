@@ -1,10 +1,10 @@
-use crate::torrent::torrent::{TorrentHandle, TorrentId};
+use crate::torrent::TorrentId;
 use fnv::FnvHashMap;
 
 /// Container for all active torrents.
 pub(crate) struct TorrentPool {
     /// Identifier counter for new torrents.
-    id: u64,
+    id: u32,
     /// All active torrents.
     torrents: FnvHashMap<TorrentId, TorrentHandle>,
 }
@@ -19,3 +19,5 @@ impl TorrentPool {
         TorrentId(id)
     }
 }
+
+pub struct TorrentHandle {}

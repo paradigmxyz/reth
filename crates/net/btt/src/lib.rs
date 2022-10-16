@@ -17,6 +17,7 @@
 
 pub mod bitfield;
 pub mod bittorrent;
+pub mod block;
 pub mod disk;
 pub mod error;
 pub mod info;

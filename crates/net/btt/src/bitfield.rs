@@ -1,7 +1,10 @@
 //! Bittorrent bitfield
 
 use bitvec::prelude::Msb0;
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 
 // Helper alias.
 type BitVec = bitvec::vec::BitVec<u8, Msb0>;
@@ -59,5 +62,11 @@ impl Deref for BitField {
 impl DerefMut for BitField {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl fmt::Display for BitField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
     }
 }

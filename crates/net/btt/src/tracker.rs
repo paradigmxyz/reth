@@ -117,6 +117,7 @@ pub struct Response {
 
 /// The HTTP tracker for a torrent for which we can request peers as well as to
 /// announce transfer progress.
+#[derive(Debug)]
 pub struct Tracker {
     /// The HTTP client.
     client: Client,
