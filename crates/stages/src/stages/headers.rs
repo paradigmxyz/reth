@@ -370,35 +370,25 @@ mod temp {
 mod tests {
     use super::{DownloadError, HeaderStage};
     use assert_matches::assert_matches;
+    use rand::{self, Rng};
     use reth_interfaces::stages::{HeaderRequest, MessageStream};
-    use reth_primitives::{HeaderLocked, H256};
+    use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
     use std::sync::Arc;
-    use tokio::sync::mpsc::{channel, Sender};
+    use tokio::sync::mpsc::channel;
     use tokio_stream::{pending, wrappers::ReceiverStream, StreamExt};
-
-    fn setup_stage(
-        tx: Sender<(u64, HeaderRequest)>,
-        batch_size: u64,
-        request_timeout: u64,
-        request_retries: usize,
-    ) -> HeaderStage {
-        let client = utils::TestHeaderClient::new(tx);
-        let consensus = utils::TestConsensus::new();
-        HeaderStage {
-            consensus: Arc::new(consensus),
-            client: Arc::new(client),
-            batch_size,
-            request_retries,
-            request_timeout,
-        }
-    }
 
     #[tokio::test]
     async fn download_batch_timeout() {
         let (tx, rx) = channel(1);
         let (req_tx, _req_rx) = channel(1);
-        let (batch, timeout, retries) = (1, 1, 1);
-        let stage = setup_stage(req_tx, batch, timeout, retries);
+        let (batch_size, request_retries, request_timeout) = (1, 1, 1);
+        let stage = HeaderStage {
+            consensus: Arc::new(utils::TestConsensus::new()),
+            client: Arc::new(utils::TestHeaderClient::new(req_tx)),
+            batch_size,
+            request_retries,
+            request_timeout,
+        };
 
         let mut stream = Box::pin(pending()) as MessageStream<utils::HeaderResponse>;
         tokio::spawn(async move {
@@ -419,9 +409,14 @@ mod tests {
         let (tx, rx) = channel(1);
         let (req_tx, req_rx) = channel(3);
         let (res_tx, res_rx) = channel(3);
-
-        let (batch, timeout, retries) = (1, 5, 3);
-        let stage = setup_stage(req_tx, batch, timeout, retries);
+        let (batch_size, request_retries, request_timeout) = (1, 3, 5);
+        let stage = HeaderStage {
+            consensus: Arc::new(utils::TestConsensus::new()),
+            client: Arc::new(utils::TestHeaderClient::new(req_tx)),
+            batch_size,
+            request_retries,
+            request_timeout,
+        };
 
         let mut stream =
             Box::pin(ReceiverStream::new(res_rx)) as MessageStream<utils::HeaderResponse>;
@@ -444,6 +439,47 @@ mod tests {
         assert_matches!(
             *ReceiverStream::new(rx).collect::<Vec<Result<bool, DownloadError>>>().await,
             [Err(DownloadError::NoHeaderResponse { request_id })] if request_id == last_req_id.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn download_batch_propagates_consensus_error() {
+        let (tx, rx) = channel(1);
+        let (req_tx, req_rx) = channel(3);
+        let (res_tx, res_rx) = channel(3);
+        let (batch_size, request_retries, request_timeout) = (1, 3, 5);
+
+        let mut head_block = Header::default();
+        head_block.state_root = H256::from_low_u64_be(rand::thread_rng().gen());
+        let chain_tip = head_block.hash_slow();
+
+        let mut consensus = utils::TestConsensus::new();
+        consensus.update_tip(chain_tip);
+        consensus.set_fail_validation(false);
+
+        let stage = HeaderStage {
+            consensus: Arc::new(consensus),
+            client: Arc::new(utils::TestHeaderClient::new(req_tx)),
+            batch_size,
+            request_retries,
+            request_timeout,
+        };
+
+        let mut stream =
+            Box::pin(ReceiverStream::new(res_rx)) as MessageStream<utils::HeaderResponse>;
+        tokio::spawn(async move {
+            let result = stage
+                .download_batch(&HeaderLocked::default(), H256::zero(), &mut stream, &mut vec![])
+                .await;
+            tx.send(result).await.unwrap();
+        });
+
+        let mut req_stream = ReceiverStream::new(req_rx);
+        let request = req_stream.next().await;
+        assert_matches!(
+            request,
+            Some((_, HeaderRequest { start, .. }))
+                if matches!(start, BlockId::Hash(hash) if hash == chain_tip)
         );
     }
 
@@ -490,36 +526,63 @@ mod tests {
         /// Consensus client impl for testing
         #[derive(Debug)]
         pub(crate) struct TestConsensus {
-            chain_tip: H256,
+            /// Watcher over the forkchoice state
+            channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
+            /// Flag whether the header validation should purposefully fail
+            fail_validation: bool,
         }
 
         impl TestConsensus {
             pub(crate) fn new() -> Self {
-                Self { chain_tip: H256::zero() }
+                Self {
+                    channel: watch::channel(ForkchoiceState {
+                        head_block_hash: H256::zero(),
+                        finalized_block_hash: H256::zero(),
+                        safe_block_hash: H256::zero(),
+                    }),
+                    fail_validation: false,
+                }
             }
 
-            /// Set the chain tip
-            pub(crate) fn set_chain_tip(&mut self, tip: H256) {
-                self.chain_tip = tip;
+            /// Update the forkchoice state
+            pub(crate) fn update_tip(&mut self, tip: H256) {
+                let state = ForkchoiceState {
+                    head_block_hash: tip,
+                    finalized_block_hash: H256::zero(),
+                    safe_block_hash: H256::zero(),
+                };
+                self.channel.0.send(state).expect("updating forkchoice state failed");
+            }
+
+            /// Update the validation flag
+            pub(crate) fn set_fail_validation(&mut self, val: bool) {
+                self.fail_validation = val;
             }
         }
 
         #[async_trait]
         impl Consensus for TestConsensus {
+            /// Return the watcher over the forkchoice state
             fn forkchoice_state(&self) -> watch::Receiver<ForkchoiceState> {
-                todo!()
+                self.channel.1.clone()
             }
 
+            /// Retrieve the current chain tip
             fn tip(&self) -> H256 {
-                self.chain_tip
+                self.channel.1.borrow().head_block_hash
             }
 
+            /// Validate the header against its parent
             fn validate_header(
                 &self,
                 _header: &Header,
                 _parent: &Header,
             ) -> Result<(), consensus::Error> {
-                Ok(())
+                if self.fail_validation {
+                    Err(consensus::Error::ConsensusError)
+                } else {
+                    Ok(())
+                }
             }
         }
     }
