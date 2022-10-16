@@ -1,3 +1,5 @@
+//! Utility functions for hashing and encoding.
+
 use hmac::{Hmac, Mac};
 use reth_primitives::{H256, H512 as PeerId};
 use secp256k1::PublicKey;

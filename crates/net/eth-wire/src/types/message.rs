@@ -1,9 +1,8 @@
 #![allow(missing_docs)]
-use std::fmt::Debug;
-
-use reth_rlp::{length_of_length, Decodable, Encodable, Header};
-
 use super::{broadcast::NewBlockHashes, Status};
+use bytes::Buf;
+use reth_rlp::{length_of_length, Decodable, Encodable, Header};
+use std::fmt::Debug;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An `eth` protocol message, containing a message ID and payload.
@@ -234,7 +233,7 @@ impl Encodable for EthMessageID {
 impl Decodable for EthMessageID {
     fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
         let id = buf.first().ok_or(reth_rlp::DecodeError::InputTooShort)?;
-        Ok(match id {
+        let id = match id {
             0x00 => EthMessageID::Status,
             0x01 => EthMessageID::NewBlockHashes,
             0x02 => EthMessageID::Transactions,
@@ -251,7 +250,9 @@ impl Decodable for EthMessageID {
             0x0f => EthMessageID::GetReceipts,
             0x10 => EthMessageID::Receipts,
             _ => return Err(reth_rlp::DecodeError::Custom("Invalid message ID")),
-        })
+        };
+        buf.advance(1);
+        Ok(id)
     }
 }
 

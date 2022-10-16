@@ -1,3 +1,5 @@
+//! Types for the eth wire protocol.
+
 mod status;
 pub use status::Status;
 

@@ -1,5 +1,5 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
-use crate::{ECIESError, EgressECIESValue, IngressECIESValue};
+use crate::{codec::ECIESCodec, ECIESError, EgressECIESValue, IngressECIESValue};
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
 use reth_primitives::H512 as PeerId;
@@ -18,8 +18,6 @@ use tokio::{
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{debug, instrument, trace};
-
-use crate::codec::ECIESCodec;
 
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]

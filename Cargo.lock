@@ -2203,6 +2203,8 @@ dependencies = [
  "hex",
  "hex-literal",
  "maplit",
+ "pin-project",
+ "rand",
  "reth-ecies",
  "reth-primitives",
  "reth-rlp",

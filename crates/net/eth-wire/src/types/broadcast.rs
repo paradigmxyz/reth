@@ -1,3 +1,4 @@
+//! Types for broadcasting new data.
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// This informs peers of new blocks that have appeared on the network.
