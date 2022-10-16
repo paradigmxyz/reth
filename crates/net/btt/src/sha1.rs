@@ -17,6 +17,11 @@ pub const SHA_HASH_LEN: usize = 20;
 /// Peers are identified by a hash.
 pub(crate) type PeerId = Sha1Hash;
 
+/// The default client id for reth's torrent client `reth-00000000000`.
+pub const RETH_TORRENT_CLIENT_ID: Sha1Hash = Sha1Hash {
+    hash: [114, 101, 116, 104, 45, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48],
+};
+
 /// SHA-1 hash wrapper type for performing operations on the hash.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub struct Sha1Hash {

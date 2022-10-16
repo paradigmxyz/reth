@@ -138,17 +138,13 @@ pub(crate) struct Params {
 /// ([`PeerSession`](crate::peer::PeerSession) instances) and stores metadata
 /// about the torrent.
 pub(crate) struct Torrent {
-    /// The peers in this torrent.
+    /// The peer session for this torrent
     peers: HashMap<SocketAddr, UnboundedReceiver<PeerEvent>>,
     /// The peers returned by tracker to which we can connect.
     available_peers: Vec<SocketAddr>,
     /// Information that is shared with peer sessions.
     ctx: Arc<TorrentContext>,
-    /// The port on which other entities in the engine send this torrent
-    /// messages.
-    ///
-    /// The channel has to be wrapped in a `stream::Fuse` so that we can
-    /// `select!` on it in the torrent event loop.
+    /// Listener for commands.
     cmd_rx: CommandReceiver,
     /// The trackers we can announce to.
     trackers: Vec<TrackerSession>,
