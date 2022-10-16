@@ -19,3 +19,4 @@ pub use error::*;
 pub use id::*;
 pub use pipeline::*;
 pub use stage::*;
+pub use stages::*;

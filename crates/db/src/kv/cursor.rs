@@ -115,6 +115,11 @@ impl<'tx, T: Table> Cursor<'tx, RW, T> {
             .put(k.encode().as_ref(), v.encode().as_ref(), f.unwrap_or_default())
             .map_err(KVError::Put)
     }
+
+    /// Deletes the current `(key, value)` entry on `table` that the cursor is positioned at.
+    pub fn delete(&mut self) -> Result<(), KVError> {
+        self.inner.del(WriteFlags::CURRENT).map_err(KVError::Delete)
+    }
 }
 
 impl<'txn, K, T> Cursor<'txn, K, T>

@@ -54,6 +54,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-lock"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1873,6 +1879,7 @@ name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "ethereum-types",
  "ethers-core",
  "fastrlp",
  "serde",
@@ -1914,12 +1921,14 @@ dependencies = [
 name = "reth-stages"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "futures",
  "rand",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
+ "reth-rpc-types",
  "tempfile",
  "thiserror",
  "tokio",
@@ -2518,9 +2527,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6edf2d6bc038a43d31353570e27270603f4648d18f5ed10c0e179abe43255af"
+checksum = "d660770404473ccd7bc9f8b28494a811bc18542b915c0855c51e8f419d5223ce"
 dependencies = [
  "futures-core",
  "pin-project-lite",

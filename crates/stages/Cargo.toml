@@ -16,6 +16,7 @@ tracing = "0.1.36"
 tracing-futures = "0.2.5"
 tokio = { version = "1.21.2", features = ["sync"] }
 rand = "0.8" # TODO:
+tokio-stream = "0.1.11"
 
 # async/futures
 async-trait = "0.1.57"
@@ -26,3 +27,5 @@ tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tokio-stream = "0.1.10"
 tempfile = "3.3.0"
 reth-db = { path = "../db", features = ["test-utils"] }
+reth-rpc-types = { path = "../net/rpc-types" }
+assert_matches = "1.5.0"

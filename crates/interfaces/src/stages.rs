@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::Stream;
 use reth_primitives::{rpc::BlockId, Header, H256, H512};
-use std::{collections::HashSet, pin::Pin};
+use std::{collections::HashSet, fmt::Debug, pin::Pin};
 
 /// The stream of messages
 pub type MessageStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
@@ -20,9 +20,9 @@ pub struct HeaderRequest {
 
 /// The block headers downloader client
 #[async_trait]
-pub trait HeadersClient: Send + Sync {
+pub trait HeadersClient: Send + Sync + Debug {
     /// Update the current node status
-    async fn update_status(&mut self, height: u64, hash: H256, td: H256);
+    async fn update_status(&self, height: u64, hash: H256, td: H256);
 
     /// Send the header request
     async fn send_header_request(&self, id: u64, request: HeaderRequest) -> HashSet<H512>;

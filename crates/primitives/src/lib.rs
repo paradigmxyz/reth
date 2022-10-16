@@ -45,3 +45,6 @@ pub use ethers_core::{
     types as rpc,
     types::{Bloom, Bytes, H160, H256, H512, H64, U256, U64},
 };
+
+// For uint to hash conversion
+pub use ethereum_types::BigEndianHash;
