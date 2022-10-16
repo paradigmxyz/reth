@@ -2,12 +2,16 @@
 
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
-    pool::txpool::TxPool,
+    pool::txpool::{TxPool, MIN_PROTOCOL_BASE_FEE},
     PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use paste::paste;
+use rand::{
+    distributions::{Uniform, WeightedIndex},
+    prelude::Distribution,
+};
 use reth_primitives::{Address, TxHash, H256, U256};
-use std::{sync::Arc, time::Instant};
+use std::{ops::Range, sync::Arc, time::Instant};
 
 pub type MockTxPool = TxPool<MockOrdering>;
 
@@ -15,7 +19,7 @@ pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 /// Create an empty `TxPool`
 pub fn mock_tx_pool() -> MockTxPool {
-    MockTxPool::new(Arc::new(Default::default()))
+    MockTxPool::new(Arc::new(Default::default()), Default::default())
 }
 
 /// Sets the value for the field
@@ -119,8 +123,8 @@ impl MockTransaction {
             hash: H256::random(),
             sender: Address::random(),
             nonce: 0,
-            max_fee_per_gas: U256::zero(),
-            max_priority_fee_per_gas: U256::zero(),
+            max_fee_per_gas: MIN_PROTOCOL_BASE_FEE,
+            max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE,
             gas_limit: 0,
             value: Default::default(),
         }
@@ -256,6 +260,14 @@ impl MockTransaction {
         let gas = self.get_gas_limit() + 1;
         next.with_gas_limit(gas)
     }
+
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, MockTransaction::Legacy { .. })
+    }
+
+    pub fn is_eip1559(&self) -> bool {
+        matches!(self, MockTransaction::Eip1559 { .. })
+    }
 }
 
 impl PoolTransaction for MockTransaction {
@@ -361,6 +373,39 @@ impl TransactionOrdering for MockOrdering {
 
     fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
         transaction.cost()
+    }
+}
+
+/// A configured distribution that can generate transactions
+pub struct MockTransactionDistribution {
+    /// legacy to EIP-1559 ration
+    legacy_ratio: WeightedIndex<u32>,
+    /// generates the gas limit
+    gas_limit_range: Uniform<u64>,
+}
+
+impl MockTransactionDistribution {
+    /// Creates a new generator distribution.
+    ///
+    /// Expects legacy tx in full pct: `30u32` is `30%`.
+    pub fn new(legacy_pct: u32, gas_limit_range: Range<u64>) -> Self {
+        assert!(legacy_pct <= 100, "expect pct");
+
+        let eip_1559 = 100 - legacy_pct;
+        Self {
+            legacy_ratio: WeightedIndex::new([eip_1559, legacy_pct]).unwrap(),
+            gas_limit_range: gas_limit_range.into(),
+        }
+    }
+
+    /// Generates a new transaction
+    pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
+        let tx = if self.legacy_ratio.sample(rng) == 0 {
+            MockTransaction::eip1559()
+        } else {
+            MockTransaction::legacy()
+        };
+        tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng))
     }
 }
 

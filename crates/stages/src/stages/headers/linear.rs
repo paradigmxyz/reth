@@ -245,5 +245,7 @@ mod tests {
             Some((_, HeaderRequest { start, .. }))
                 if matches!(start, BlockId::Hash(hash) if hash == chain_tip)
         );
+
+        // TODO: match the propagated error
     }
 }

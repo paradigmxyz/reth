@@ -51,6 +51,16 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.submission_id = self.submission_id.wrapping_add(1);
         id
     }
+
+    /// Number of transactions in the entire pool
+    pub(crate) fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    /// Whether the pool is empty
+    pub(crate) fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
 }
 
 impl<T: ParkedOrd> Default for ParkedPool<T> {

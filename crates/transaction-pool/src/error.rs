@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use reth_primitives::BlockID;
+use reth_primitives::{BlockID, TxHash, U256};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -9,15 +9,9 @@ pub type PoolResult<T> = Result<T, PoolError>;
 #[derive(Debug, thiserror::Error)]
 pub enum PoolError {
     /// Thrown if a replacement transaction's gas price is below the already imported transaction
-    #[error("Tx: insufficient gas price to replace existing transaction")]
-    ReplacementUnderpriced,
+    #[error("[{0:?}]: insufficient gas price to replace existing transaction.")]
+    ReplacementUnderpriced(TxHash),
     /// Encountered a transaction that was already added into the poll
-    #[error("[{0:?}] Already added")]
-    AlreadyAdded(Box<dyn std::any::Any + Send + Sync>),
-    /// Encountered a cycle in the graph pool
-    #[error("Transaction with cyclic dependent transactions")]
-    CyclicTransaction,
-    /// Thrown if no number was found for the given block id
-    #[error("Invalid block id: {0:?}")]
-    BlockNumberNotFound(BlockID),
+    #[error("[{0:?}] Transaction feeCap {1} below chain minimum.")]
+    ProtocolFeeCapTooLow(TxHash, U256),
 }
