@@ -84,7 +84,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        codec::RlpCodec,
+        codec::PassthroughCodec,
         types::{broadcast::BlockHashNumber, EthMessage},
         EthStream,
     };
@@ -110,7 +110,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
-            let stream = RlpCodec::prepend_header().framed(incoming);
+            let stream = PassthroughCodec::default().framed(incoming);
             let mut stream = EthStream { inner: stream };
 
             // use the stream to get the next message
@@ -119,7 +119,7 @@ mod tests {
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let sink = RlpCodec::prepend_header().framed(outgoing);
+        let sink = PassthroughCodec::default().framed(outgoing);
         let mut client_stream = EthStream { inner: sink };
 
         client_stream.send(test_msg).await.unwrap();
