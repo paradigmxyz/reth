@@ -148,10 +148,39 @@ where
 
 #[cfg(test)]
 mod tests {
+    use secp256k1::{rand, SECP256K1};
+    use tokio::net::TcpListener;
+
+    use crate::util::pk2id;
+
     use super::*;
 
     #[tokio::test]
     // TODO: implement test for the proposed
     // API: https://github.com/foundry-rs/reth/issues/64#issue-1408708420
-    async fn can_write_and_read() {}
+    async fn can_write_and_read() {
+        let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+        let server_key = SecretKey::new(&mut rand::thread_rng());
+
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let mut stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
+
+            // use the stream to get the next messagse
+            let message = stream.next().await.unwrap().unwrap();
+            assert_eq!(message, Bytes::from("hello"));
+        });
+
+        // create the server pubkey
+        let server_id = pk2id(&server_key.public_key(SECP256K1));
+
+        let client_key = SecretKey::new(&mut rand::thread_rng());
+        let outgoing = TcpStream::connect("127.0.0.1:8080").await.unwrap();
+        let mut client_stream = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        client_stream.send(Bytes::from("hello")).await.unwrap();
+
+        // make sure the server receives the message and asserts before ending the test
+        handle.await.unwrap();
+    }
 }
