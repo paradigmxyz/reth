@@ -10,7 +10,7 @@
 pub mod algorithm;
 pub mod mac;
 pub mod stream;
-mod util;
+pub mod util;
 
 mod error;
 pub use error::ECIESError;

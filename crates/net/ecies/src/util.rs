@@ -22,7 +22,7 @@ pub(crate) fn hmac_sha256(key: &[u8], input: &[&[u8]], auth_data: &[u8]) -> H256
 
 /// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
 /// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag and storing the rest of the slice in the [PeerId].
-pub(crate) fn pk2id(pk: &PublicKey) -> PeerId {
+pub fn pk2id(pk: &PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
