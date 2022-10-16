@@ -1,4 +1,4 @@
-use crate::forkid::ForkId;
+use super::forkid::ForkId;
 use reth_primitives::{Chain, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
