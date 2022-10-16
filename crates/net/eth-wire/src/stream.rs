@@ -58,13 +58,17 @@ impl<S> Sink<EthMessage> for EthStream<S>
 where
     S: Sink<bytes::Bytes, Error = io::Error> + Unpin,
 {
-    type Error = io::Error;
+    type Error = EthStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_ready(cx)
+        Pin::new(&mut self.get_mut().stream).poll_ready(cx).map_err(Into::into)
     }
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
+        if matches!(item, EthMessage::Status(_)) {
+            return Err(EthStreamError::StatusInHandshake)
+        }
+
         let mut bytes = BytesMut::new();
         item.encode(&mut bytes);
         let bytes = bytes.freeze();
@@ -75,10 +79,10 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+        Pin::new(&mut self.get_mut().stream).poll_flush(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_close(cx)
+        Pin::new(&mut self.get_mut().stream).poll_close(cx).map_err(Into::into)
     }
 }
