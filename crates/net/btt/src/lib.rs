@@ -16,7 +16,7 @@
 //! - Peer: session for connected peer
 
 pub mod bitfield;
-pub mod bittorrent;
+mod bittorrent;
 pub mod block;
 pub mod disk;
 pub mod error;
@@ -27,3 +27,5 @@ pub mod proto;
 pub mod sha1;
 pub mod torrent;
 pub mod tracker;
+
+pub use bittorrent::*;

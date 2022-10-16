@@ -1,7 +1,7 @@
 //! Basic usage of the torrent downloader.
 
 use futures::StreamExt;
-use reth_bittorrent::bittorrent::{Bittorrent, BittorrentConfig};
+use reth_bittorrent::{Bittorrent, BittorrentConfig};
 use tempfile::tempdir;
 
 #[tokio::main]

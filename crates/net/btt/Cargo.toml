@@ -36,6 +36,8 @@ url = "2.3"
 fnv = "1.0"
 tracing = "0.1"
 typed-builder = "0.10"
+lru = "0.8.1"
+hex = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3.3"

@@ -2,6 +2,8 @@
 
 use crate::{
     bitfield::BitField,
+    block::BlockInfo,
+    disk::error::ReadError,
     info::{PieceIndex, StorageInfo},
     peer::{PeerEvent, SessionTick},
     sha1::{PeerId, Sha1Hash},
@@ -15,10 +17,13 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::{
+    mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
     RwLock,
 };
+use crate::disk::error::WriteError;
 
 pub(crate) mod config;
 pub(crate) mod piece_picker;
@@ -30,6 +35,18 @@ pub(crate) mod tracker;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct TorrentId(pub(crate) u32);
 
+impl TorrentId {
+    /// Produces a new unique torrent id.
+    pub(crate) fn new() -> Self {
+        static TORRENT_ID: AtomicU32 = AtomicU32::new(0);
+
+        // the atomic is not used to synchronize data access around it so
+        // relaxed ordering is fine for our purposes
+        let id = TORRENT_ID.fetch_add(1, Ordering::Relaxed);
+        Self(id)
+    }
+}
+
 impl fmt::Display for TorrentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "t#{}", self.0)
@@ -37,24 +54,21 @@ impl fmt::Display for TorrentId {
 }
 
 /// The channel for communicating with torrent.
-pub(crate) type CommandSender = UnboundedSender<Command>;
+pub(crate) type Sender = UnboundedSender<TorrentCommand>;
 
 /// The type of channel on which a torrent can listen for block write
 /// completions.
-pub(crate) type CommandReceiver = UnboundedReceiver<Command>;
+pub(crate) type Receiver = UnboundedReceiver<TorrentCommand>;
 
 /// The types of messages that the torrent can receive from other parts of the
 /// engine.
 #[derive(Debug)]
-pub(crate) enum Command {
-    // /// Sent when some blocks were written to disk or an error occurred while
-    // /// writing.
-    // PieceCompletion(Result<PieceCompletion, WriteError>),
+pub(crate) enum TorrentCommand {
+    /// Sent when some blocks were written to disk or an error occurred while
+    /// writing.
+    PieceCompletion(Result<PieceCompletion, WriteError>),
     /// There was an error reading a block.
-    ReadError {
-        // block_info: BlockInfo,
-        // error: ReadError,
-    },
+    ReadError { block_info: BlockInfo, error: ReadError },
     /// A message sent only once, after the peer has been connected.
     PeerConnected { addr: SocketAddr, id: PeerId },
     /// Peer sessions periodically send this message when they have a state
@@ -93,7 +107,7 @@ pub(crate) struct TorrentContext {
     /// A copy of the torrent channel sender. This is not used by torrent itself,
     /// but by the peer session tasks to which an arc copy of this torrent
     /// context is given.
-    pub cmd_tx: CommandSender,
+    pub cmd_tx: Sender,
     /// The piece picker picks the next most optimal piece to download and is
     /// shared by all peers in a torrent.
     pub piece_picker: Arc<RwLock<PiecePicker>>,
@@ -145,7 +159,7 @@ pub(crate) struct Torrent {
     /// Information that is shared with peer sessions.
     ctx: Arc<TorrentContext>,
     /// Listener for commands.
-    cmd_rx: CommandReceiver,
+    cmd_rx: Receiver,
     /// The trackers we can announce to.
     trackers: Vec<TrackerSession>,
     /// The address on which torrent should listen for new peers.

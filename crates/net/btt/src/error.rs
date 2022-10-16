@@ -2,8 +2,7 @@
 
 use crate::peer::error::PeerError;
 use std::io;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 /// Error alias for this crate
 pub type TorrentResult<T> = std::result::Result<T, Error>;
@@ -18,6 +17,10 @@ pub enum Error {
     /// IO-related error.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// The torrent ID did not correspond to any entry. This is returned when
+    /// the user specified a torrent that does not exist.
+    #[error("invalid torrent id")]
+    InvalidTorrentId,
 }
 
 impl<T> From<SendError<T>> for Error {

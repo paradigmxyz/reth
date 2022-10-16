@@ -17,6 +17,7 @@ use tokio::sync::{
 };
 use tracing::trace;
 use typed_builder::TypedBuilder;
+use crate::disk::error::NewTorrentError;
 
 /// Provides the API to interact with torrents.
 #[derive(Debug, Clone)]
@@ -107,14 +108,20 @@ impl BittorrentConfig {
 
 /// User facing events.
 #[derive(Debug)]
-pub enum BittorrentEvent {
-}
+pub enum BittorrentEvent {}
 
 /// Commands that can be sent from [`Bittorrent`] to the [`BittorrentHandler`]
 #[allow(clippy::large_enum_variant)]
-enum BttCommand {
+pub(crate) enum BttCommand {
     /// Contains the information for creating a new torrent.
     CreateTorrent { params: TorrentParams, tx: OneshotSender<TorrentResult<TorrentId>> },
+    /// Torrent allocation result. If successful, the id of the allocated
+    /// torrent is returned for identification, if not, the reason of the error
+    /// is included.
+    TorrentAllocation {
+        id: TorrentId,
+        result: Result<(), NewTorrentError>,
+    },
     /// Gracefully shuts down the engine and waits for all its torrents to do
     /// the same.
     Shutdown,
