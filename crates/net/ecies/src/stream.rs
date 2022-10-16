@@ -177,7 +177,8 @@ mod tests {
 
         let client_key = SecretKey::new(&mut rand::thread_rng());
         let outgoing = TcpStream::connect("127.0.0.1:8080").await.unwrap();
-        let mut client_stream = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let mut client_stream =
+            ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
         client_stream.send(Bytes::from("hello")).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test

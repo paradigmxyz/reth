@@ -17,7 +17,7 @@ pub(crate) fn hmac_sha256(key: &[u8], input: &[&[u8]], auth_data: &[u8]) -> H256
         hmac.update(input);
     }
     hmac.update(auth_data);
-    H256::from_slice(&*hmac.finalize().into_bytes())
+    H256::from_slice(&hmac.finalize().into_bytes())
 }
 
 /// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the

@@ -38,7 +38,7 @@ fn kdf(secret: H256, s1: &[u8], dest: &mut [u8]) {
     while written < dest.len() {
         let mut hasher = Sha256::default();
         let ctrs = [(ctr >> 24) as u8, (ctr >> 16) as u8, (ctr >> 8) as u8, ctr as u8];
-        hasher.update(&ctrs);
+        hasher.update(ctrs);
         hasher.update(secret.as_bytes());
         hasher.update(s1);
         let d = hasher.finalize();
