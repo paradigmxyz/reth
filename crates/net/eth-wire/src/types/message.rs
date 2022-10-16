@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 
-use super::Status;
+use super::{broadcast::NewBlockHashes, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An `eth` protocol message, containing a message ID and payload.
@@ -20,10 +20,10 @@ impl ProtocolMessage {
     ) -> Result<Self, reth_rlp::DecodeError> {
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
+            EthMessageID::NewBlockHashes => {
+                EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
+            }
             _ => unimplemented!(),
-            // EthMessageID::NewBlockHashes => {
-            //     EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
-            // }
             // EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
             // EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             // EthMessageID::NewPooledTransactionHashes => {
@@ -118,7 +118,7 @@ pub enum EthMessage {
     // Status is required for the protocol handshake
     Status(Status),
     // // The following messages are broadcast to the network
-    // NewBlockHashes(NewBlockHashes),
+    NewBlockHashes(NewBlockHashes),
     // NewBlock(Box<NewBlock>),
     // Transactions(Transactions),
     // NewPooledTransactionHashes(NewPooledTransactionHashes),
@@ -141,7 +141,7 @@ impl EthMessage {
     pub fn message_id(&self) -> EthMessageID {
         match self {
             EthMessage::Status(_) => EthMessageID::Status,
-            // EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
+            EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             // EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             // EthMessage::Transactions(_) => EthMessageID::Transactions,
             // EthMessage::NewPooledTransactionHashes(_) =>
@@ -164,7 +164,7 @@ impl Encodable for EthMessage {
     fn length(&self) -> usize {
         match self {
             EthMessage::Status(status) => status.length(),
-            // EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
+            EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
             // EthMessage::NewBlock(new_block) => new_block.length(),
             // EthMessage::Transactions(transactions) => transactions.length(),
             // EthMessage::NewPooledTransactionHashes(hashes) => hashes.length(),
@@ -183,7 +183,7 @@ impl Encodable for EthMessage {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             EthMessage::Status(status) => status.encode(out),
-            // EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
+            EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
             // EthMessage::NewBlock(new_block) => new_block.encode(out),
             // EthMessage::Transactions(transactions) => transactions.encode(out),
             // EthMessage::NewPooledTransactionHashes(hashes) => hashes.encode(out),
