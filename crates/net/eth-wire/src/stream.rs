@@ -70,7 +70,7 @@ where
         }
 
         let mut bytes = BytesMut::new();
-        item.encode(&mut bytes);
+        ProtocolMessage::from(item).encode(&mut bytes);
         let bytes = bytes.freeze();
 
         Pin::new(&mut self.get_mut().stream).start_send(bytes)?;
