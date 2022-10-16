@@ -24,11 +24,15 @@ use crate::{
     torrent::{stats::TorrentStats, TorrentId},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub(crate) type AlertSender = UnboundedSender<Alert>;
 /// The channel on which alerts from the engine can be received. See [`Alert`]
 /// for the type of messages that can be received.
 pub type AlertReceiver = UnboundedReceiver<Alert>;
+
+/// A Stream that yields `Alerts`
+pub type AlertStream = UnboundedReceiverStream<Alert>;
 
 /// The alerts that the engine may send the library user.
 #[derive(Debug)]

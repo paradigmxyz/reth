@@ -25,35 +25,41 @@ use tokio::{
         oneshot::{channel, Sender as OneshotSender},
     },
     task,
+    task::JoinHandle,
 };
-use tracing::trace;
+use tracing::{error, info, trace};
 use typed_builder::TypedBuilder;
+use crate::alert::AlertStream;
 
 /// Provides the API to interact with torrents.
 #[derive(Debug)]
 pub struct Bittorrent {
     /// Channel used to communicate with the [`BittorrentHandler`].
     command_tx: mpsc::UnboundedSender<BttCommand>,
-    alert_rx: AlertReceiver,
+    join_handle: Option<JoinHandle<TorrentResult<()>>>,
 }
 
 // === impl Bittorrent ===
 
 impl Bittorrent {
     /// Creates a new instance of [`Bittorrent`] and the [`BittorrentHandler`] task.
-    pub fn new(config: BittorrentConfig) -> TorrentResult<(Self, BittorrentHandler)> {
+    pub fn spawn(config: BittorrentConfig) -> TorrentResult<(Self, AlertStream)> {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (disk_join_handle, disk_tx) = disk::spawn(command_tx.clone())?;
         let (alert_tx, alert_rx) = mpsc::unbounded_channel();
-        let handler = BittorrentHandler {
+        let mut handler = BittorrentHandler {
             torrents: Default::default(),
             command_rx,
             disk_tx,
             disk_join_handle: Some(disk_join_handle),
             config,
             alert_tx,
+            next_id: 0,
         };
-        Ok((Self { command_tx, alert_rx }, handler))
+
+        let join_handle = task::spawn(async move { handler.run().await });
+
+        Ok((Self { command_tx, join_handle: Some(join_handle) }, AlertStream::new(alert_rx)))
     }
 
     /// Creates and starts a torrent, if its metainfo is valid.
@@ -63,7 +69,7 @@ impl Bittorrent {
     pub async fn create_torrent(&self, params: TorrentParams) -> TorrentResult<TorrentId> {
         let (tx, rx) = oneshot::channel();
         self.command_tx.send(BttCommand::CreateTorrent { params, tx })?;
-        rx.await?
+        Ok(rx.await?)
     }
 
     /// Gracefully shuts down the engine and waits for all its torrents to do
@@ -96,9 +102,18 @@ pub struct BittorrentHandler {
     alert_tx: AlertSender,
     /// The config this client was configured with.
     config: BittorrentConfig,
+    /// Counter for torrent ids.
+    next_id: u32,
 }
 
 impl BittorrentHandler {
+    /// Returns the next id for a torrent
+    fn next_torrent_id(&mut self) -> TorrentId {
+        let id = self.next_id;
+        self.next_id += 1;
+        TorrentId(id)
+    }
+
     /// Creates and spawns a new torrent based on the parameters given.
     async fn create_torrent(&mut self, id: TorrentId, params: TorrentParams) -> TorrentResult<()> {
         let conf = params.conf.unwrap_or_else(|| self.config.torrent_config.clone());
@@ -153,13 +168,71 @@ impl BittorrentHandler {
 
         Ok(())
     }
-}
 
-impl Stream for BittorrentHandler {
-    type Item = BittorrentEvent;
+    /// Runs the handler until an unrecoverable error occurs, or until the user
+    /// sends a shutdown command.
+    async fn run(&mut self) -> TorrentResult<()> {
+        info!("Starting engine");
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
+        while let Some(cmd) = self.command_rx.recv().await {
+            match cmd {
+                BttCommand::CreateTorrent { tx, params } => {
+                    let id = self.next_torrent_id();
+                    self.create_torrent(id, params).await?;
+                    tx.send(id);
+                }
+                BttCommand::TorrentAllocation { id, result } => match result {
+                    Ok(_) => {
+                        info!("Torrent {} allocated on disk", id);
+                    }
+                    Err(e) => {
+                        error!("Error allocating torrent {} on disk: {}", id, e);
+                    }
+                },
+                BttCommand::Shutdown => {
+                    self.shutdown().await?;
+                    break
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Gracefully shuts down the engine and all its components.
+    async fn shutdown(&mut self) -> TorrentResult<()> {
+        info!("Shutting down engine");
+
+        // tell all torrents to shut down and join their tasks
+        for torrent in self.torrents.values_mut() {
+            // the torrent task may no longer be running, so don't panic here
+            torrent.tx.send(torrent::TorrentCommand::Shutdown).ok();
+        }
+        // Then join all torrent task handles. Shutting down a torrent may take
+        // a while, so join as a separate step to first initiate the shutdown of
+        // all torrents.
+        for torrent in self.torrents.values_mut() {
+            if let Err(e) = torrent
+                .join_handle
+                .take()
+                .expect("torrent join handle missing")
+                .await
+                .expect("task error")
+            {
+                error!("Torrent error: {}", e);
+            }
+        }
+
+        // send a shutdown command to disk
+        self.disk_tx.send(disk::DiskCommand::Shutdown)?;
+        // and join on its handle
+        self.disk_join_handle
+            .take()
+            .expect("disk join handle missing")
+            .await
+            .expect("Disk task has panicked");
+
+        Ok(())
     }
 }
 
@@ -198,7 +271,7 @@ pub enum BittorrentEvent {}
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum BttCommand {
     /// Contains the information for creating a new torrent.
-    CreateTorrent { params: TorrentParams, tx: OneshotSender<TorrentResult<TorrentId>> },
+    CreateTorrent { params: TorrentParams, tx: OneshotSender<TorrentId> },
     /// Torrent allocation result. If successful, the id of the allocated
     /// torrent is returned for identification, if not, the reason of the error
     /// is included.

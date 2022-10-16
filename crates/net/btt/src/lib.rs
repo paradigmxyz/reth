@@ -27,5 +27,5 @@ pub mod tracker;
 
 pub use bittorrent::*;
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 pub(crate) mod iovecs;
