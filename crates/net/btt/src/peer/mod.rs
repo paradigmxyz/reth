@@ -8,22 +8,10 @@
 //! Each peer session is spawned within a torrent and cannot be used without
 //! one, due to making use of shared data in torrent.
 
-use crate::{
-    bitfield::BitField,
-    block::{Block, BlockInfo},
-    counter::ThruputCounters,
-    download::PieceDownload,
-    error::Error,
-    info::PieceIndex,
-    peer::{
-        error::{PeerError, PeerResult},
-        state::{ConnectionState, SessionContext, SessionState},
-    },
-    piece::Piece,
-    proto::{PeerCodec, PeerMessage, PeerRequest},
-    sha1::PeerId,
-    torrent::{self, TorrentContext},
-};
+use crate::{bitfield::BitField, block::{Block, BlockInfo}, counter::ThruputCounters, disk, download::PieceDownload, error::Error, info::PieceIndex, peer::{
+    error::{PeerError, PeerResult},
+    state::{ConnectionState, SessionContext, SessionState},
+}, piece::Piece, proto::{Handshake, PeerCodec, PeerMessage, PeerRequest}, sha1::PeerId, torrent::{self, TorrentContext}};
 use futures::{stream::SplitSink, SinkExt, StreamExt};
 use std::{
     collections::HashSet,
@@ -40,7 +28,8 @@ use tokio::{
     time,
 };
 use tokio_util::codec::{Framed, FramedParts};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
+use crate::download::BlockStatus;
 
 pub(crate) mod error;
 mod state;
@@ -163,31 +152,25 @@ impl PeerSession {
     /// This constructor only initializes the session components but does not
     /// actually start it. See [`Self::start`].
     pub fn new(torrent: Arc<TorrentContext>, addr: SocketAddr) -> (Self, Sender) {
-        // let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        // let piece_count = torrent.storage.piece_count;
-        // let log_target =
-        //     format!("cratetorrent::peer [{}][{}]", torrent.id, addr);
-        // (
-        //     Self {
-        //         torrent,
-        //         cmd_tx: cmd_tx.clone(),
-        //         cmd_rx,
-        //         peer: PeerInfo {
-        //             addr,
-        //             pieces: BitField::repeat(false, piece_count),
-        //             piece_count: 0,
-        //             id: Default::default(),
-        //         },
-        //         ctx: SessionContext {
-        //             log_target,
-        //             ..SessionContext::default()
-        //         },
-        //         outgoing_requests: HashSet::new(),
-        //         incoming_requests: HashSet::new(),
-        //     },
-        //     cmd_tx,
-        // )
-        todo!()
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let piece_count = torrent.storage.piece_count;
+        (
+            Self {
+                torrent,
+                cmd_tx: cmd_tx.clone(),
+                cmd_rx,
+                peer: PeerInfo {
+                    addr,
+                    pieces: BitField::new_all_clear( piece_count),
+                    piece_count: 0,
+                    id: Default::default(),
+                },
+                ctx: Default::default(),
+                outgoing_requests: HashSet::new(),
+                incoming_requests: HashSet::new(),
+            },
+            cmd_tx,
+        )
     }
 
     /// Starts an outbound peer session.
@@ -196,14 +179,12 @@ impl PeerSession {
     /// constructor, send a handshake, and start the session.
     /// It returns if the connection is closed or an error occurs.
     pub async fn start_outbound(&mut self) -> PeerResult<()> {
-        //
-        // // establish the TCP connection
-        // self.ctx.set_connection_state(ConnectionState::Connecting);
-        // let socket = TcpStream::connect(self.peer.addr).await?;
-        //
-        // let socket = Framed::new(socket, HandshakeCodec);
-        // self.start(socket, Direction::Outbound).await
-        todo!()
+        // establish the TCP connection
+        self.ctx.set_connection_state(ConnectionState::Connecting);
+        let socket = TcpStream::connect(self.peer.addr).await?;
+
+        let socket = Framed::new(socket, PeerCodec::default());
+        self.start(socket, Direction::Outbound).await
     }
 
     /// Starts an inbound peer session from an existing TCP connection.
@@ -212,10 +193,9 @@ impl PeerSession {
     /// with a handshake, and starts the session.
     /// It returns if the connection is closed or an error occurs.
     pub async fn start_inbound(&mut self, socket: TcpStream) -> PeerResult<()> {
-        // self.ctx.set_connection_state(ConnectionState::Connecting);
-        // let socket = Framed::new(socket, HandshakeCodec);
-        // self.start(socket, Direction::Inbound).await
-        todo!()
+        self.ctx.set_connection_state(ConnectionState::Connecting);
+        let socket = Framed::new(socket, PeerCodec::default());
+        self.start(socket, Direction::Inbound).await
     }
 
     /// Helper method for the common steps of setting up a session.
@@ -224,113 +204,102 @@ impl PeerSession {
         mut socket: Framed<TcpStream, PeerCodec>,
         direction: Direction,
     ) -> PeerResult<()> {
-        // self.ctx.set_connection_state(ConnectionState::Handshaking);
-        //
-        // // if this is an outbound connection, we have to send the first
-        // // handshake
-        // if direction == Direction::Outbound {
-        //     let handshake =
-        //         Handshake::new(self.torrent.info_hash, self.torrent.client_id);
-        //     self.ctx.counters.protocol.up += handshake.len();
-        //     socket.send(handshake).await?;
-        // }
-        //
-        // // receive peer's handshake
-        // if let Some(peer_handshake) = socket.next().await {
-        //     let peer_handshake = peer_handshake?;
-        //     // codec should only return handshake if the protocol string in it
-        //     // is valid
-        //     debug_assert_eq!(peer_handshake.prot, PROTOCOL_STRING.as_bytes());
-        //
-        //     self.ctx.counters.protocol.down += peer_handshake.len();
-        //
-        //     // verify that the advertised torrent info hash is the same as ours
-        //     if peer_handshake.info_hash != self.torrent.info_hash {
-        //         // abort session, info hash is invalid
-        //         return Err(PeerError::InvalidInfoHash);
-        //     }
-        //
-        //     // set the peer's id
-        //     self.peer.id = Some(peer_handshake.peer_id);
-        //
-        //     // if this is an inbound connection, we reply with the handshake
-        //     if direction == Direction::Inbound {
-        //         let handshake = Handshake::new(
-        //             self.torrent.info_hash,
-        //             self.torrent.client_id,
-        //         );
-        //         self.ctx.counters.protocol.up += handshake.len();
-        //         socket.send(handshake).await?;
-        //     }
-        //
-        //     // now that we have the handshake, we need to switch to the peer
-        //     // message codec and save the socket in self (note that we need to
-        //     // keep the buffer from the original codec as it may contain bytes
-        //     // of any potential message the peer may have sent after the
-        //     // handshake)
-        //     let old_parts = socket.into_parts();
-        //     let mut new_parts = FramedParts::new(old_parts.io, PeerCodec);
-        //     // reuse buffers of previous codec
-        //     new_parts.read_buf = old_parts.read_buf;
-        //     new_parts.write_buf = old_parts.write_buf;
-        //     let socket = Framed::from_parts(new_parts);
-        //
-        //     // update torrent of connection
-        //     self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerConnected {
-        //         addr: self.peer.addr,
-        //         id: peer_handshake.peer_id,
-        //     })?;
-        //
-        //     // enter the piece availability exchange state
-        //     self.ctx
-        //         .set_connection_state(ConnectionState::AvailabilityExchange);
-        // self.ctx.state.connection);
-        //
-        //     // run the session
-        //     if let Err(e) = self.run(socket).await {
-        //         error!(
-        //             "Session stopped due to an error: {}",
-        //             e
-        //         );
-        //         self.ctx.set_connection_state(ConnectionState::Disconnected);
-        //         self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
-        //             addr: self.peer.addr,
-        //             info: self.session_info(),
-        //         })?;
-        //         self.torrent.alert_tx.send(Alert::Error(Error::Peer {
-        //             id: self.torrent.id,
-        //             addr: self.peer.addr,
-        //             error: e,
-        //         }))?;
-        //     }
-        // } else {
-        //     self.ctx.set_connection_state(ConnectionState::Disconnected);
-        //     self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
-        //         addr: self.peer.addr,
-        //         info: self.session_info(),
-        //     })?;
-        // }
-        //
-        // // session exited as a result of a clean shutdown or an error, perform
-        // // some cleanup before exiting
-        //
-        // // cancel any pending requests to not block other peers from completing
-        // // the piece
-        // if !self.outgoing_requests.is_empty() {
-        //     info!(
-        //         "Cancelling remaining {} request(s)",
-        //         self.outgoing_requests.len()
-        //     );
-        //     self.free_pending_blocks().await;
-        // }
-        //
-        // // send a state update message to torrent to actualize possible download
-        // // stats changes
-        // self.ctx.set_connection_state(ConnectionState::Disconnected);
-        // self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
-        //     addr: self.peer.addr,
-        //     info: self.session_info(),
-        // })?;
+        self.ctx.set_connection_state(ConnectionState::Handshaking);
+
+        // if this is an outbound connection, we have to send the first
+        // handshake
+        if direction == Direction::Outbound {
+            let handshake = PeerMessage::Handshake {
+                handshake: Handshake::new(self.torrent.info_hash, self.torrent.client_id),
+            };
+
+            self.ctx.counters.protocol.up += handshake.size() as u64;
+            socket.send(handshake).await?;
+        }
+
+        // receive peer's handshake
+        if let Some(peer_handshake) = socket.next().await {
+            let peer_handshake = peer_handshake?;
+            let size = peer_handshake.size();
+            let peer_handshake = match peer_handshake {
+                PeerMessage::Handshake { handshake } => handshake,
+                _ => return Err(PeerError::InvalidInfoHash),
+            };
+
+            self.ctx.counters.protocol.down += size as u64;
+
+            // verify that the advertised torrent info hash is the same as ours
+            if peer_handshake.info_hash != self.torrent.info_hash {
+                // abort session, info hash is invalid
+                return Err(PeerError::InvalidInfoHash)
+            }
+
+            // set the peer's id
+            self.peer.id = Some(peer_handshake.peer_id);
+
+            // if this is an inbound connection, we reply with the handshake
+            if direction == Direction::Inbound {
+                let handshake = Handshake::new(self.torrent.info_hash, self.torrent.client_id);
+                let msg = PeerMessage::Handshake { handshake };
+                self.ctx.counters.protocol.up += msg.size() as u64;
+                socket.send(msg).await?;
+            }
+
+            // now that we have the handshake, we need to switch to the peer
+            // message codec and save the socket in self (note that we need to
+            // keep the buffer from the original codec as it may contain bytes
+            // of any potential message the peer may have sent after the
+            // handshake)
+            let old_parts = socket.into_parts();
+            let mut new_parts = FramedParts::new(old_parts.io, PeerCodec::default());
+            // reuse buffers of previous codec
+            new_parts.read_buf = old_parts.read_buf;
+            new_parts.write_buf = old_parts.write_buf;
+            let socket = Framed::from_parts(new_parts);
+
+            // update torrent of connection
+            self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerConnected {
+                addr: self.peer.addr,
+                id: peer_handshake.peer_id,
+            })?;
+
+            // enter the piece availability exchange state
+            self.ctx.set_connection_state(ConnectionState::AvailabilityExchange);
+
+            // run the session
+            if let Err(e) = self.run(socket).await {
+                error!("Session stopped due to an error: {}", e);
+                self.ctx.set_connection_state(ConnectionState::Disconnected);
+                self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
+                    addr: self.peer.addr,
+                    info: self.session_info(),
+                })?;
+            }
+        } else {
+            self.ctx.set_connection_state(ConnectionState::Disconnected);
+            self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
+                addr: self.peer.addr,
+                info: self.session_info(),
+            })?;
+        }
+
+        // session exited as a result of a clean shutdown or an error, perform
+        // some cleanup before exiting
+
+        // cancel any pending requests to not block other peers from completing
+        // the piece
+        if !self.outgoing_requests.is_empty() {
+            info!("Cancelling remaining {} request(s)", self.outgoing_requests.len());
+            self.free_pending_blocks().await;
+        }
+
+        // send a state update message to torrent to actualize possible download
+        // stats changes
+        self.ctx.set_connection_state(ConnectionState::Disconnected);
+        self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
+            addr: self.peer.addr,
+            info: self.session_info(),
+        })?;
 
         Ok(())
     }
@@ -340,99 +309,97 @@ impl PeerSession {
     /// This is the main session "loop" and performs the core of the session
     /// logic: exchange of messages, timeout logic, etc.
     async fn run(&mut self, socket: Framed<TcpStream, PeerCodec>) -> PeerResult<()> {
-        // self.ctx.connected_time = Some(Instant::now());
-        //
-        // // split the sink and stream so that we can pass the sink while holding
-        // // a reference to the stream in the loop
-        // let (mut sink, mut stream) = socket.split();
-        //
-        // // This is the beginning of the session, which is the only time
-        // // a peer is allowed to advertise their pieces. If we have pieces
-        // // available, send a bitfield message.
-        // {
-        //     let piece_picker_guard = self.torrent.piece_picker.read().await;
-        //     let own_pieces = piece_picker_guard.own_pieces();
-        //     if own_pieces.any() {
-        //         info!( "Sending piece availability");
-        //         sink.send(PeerMessage::Bitfield(own_pieces.clone())).await?;
-        //         info!( "Sent piece availability");
-        //     }
-        // }
-        //
-        // // used for collecting session stats every second
-        // let mut tick_timer = time::interval(Duration::from_secs(1));
-        //
-        // // start the loop for receiving messages from peer and commands from
-        // // other parts of the engine
-        // loop {
-        //     tokio::select! {
-        //         now = tick_timer.tick() => {
-        //             self.tick(&mut sink, now.into_std()).await?;
-        //         }
-        //         Some(msg) = stream.next() => {
-        //             let msg = msg?;
-        //
-        //             // handle bitfield message separately as it may only be
-        //             // received directly after the handshake (later once we
-        //             // implement the FAST extension, there will be other piece
-        //             // availability related messages to handle)
-        //             if self.ctx.state.connection == ConnectionState::AvailabilityExchange {
-        //                 if let PeerMessage::Bitfield(bitfield) = msg {
-        //                     self.handle_bitfield_msg(&mut sink, bitfield).await?;
-        //                 } else {
-        //                     // it's not mandatory to send a bitfield message
-        //                     // right after the handshake
-        //                     self.handle_msg(&mut sink, msg).await?;
-        //                 }
-        //
-        //                 // if neither of us have any pieces, disconnect, there
-        //                 // is no point in keeping the connection alive
-        //                 if self
-        //                     .torrent
-        //                     .piece_picker
-        //                     .read()
-        //                     .await
-        //                     .own_pieces()
-        //                     .not_any()
-        //                     && self.peer.pieces.not_any()
-        //                 {
-        //                     warn!(
-        //
-        //                         "Neither side of connection has any pieces, disconnecting"
-        //                     );
-        //                     return Ok(());
-        //                 }
-        //
-        //                 // enter connected state
-        //                 self.ctx.set_connection_state(ConnectionState::Connected);
-        //                 info!(
-        //                     "Session state: {:?}",
-        //                     self.ctx.state.connection
-        //                 );
-        //             } else {
-        //                 self.handle_msg(&mut sink, msg).await?;
-        //             }
-        //         }
-        //         Some(cmd) = self.cmd_rx.recv() => {
-        //             match cmd {
-        //                 Command::Block(block)=> {
-        //                     self.send_block(&mut sink, block).await?;
-        //                 }
-        //                 Command::PieceCompletion { index, in_endgame } => {
-        //                     self.ctx.in_endgame = in_endgame;
-        //                     self.handle_piece_completion(&mut sink, index).await?;
-        //                 }
-        //                 Command::Shutdown => {
-        //                     info!(
-        //
-        //                         "Shutting down session"
-        //                     );
-        //                     break;
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+        self.ctx.connected_time = Some(Instant::now());
+
+        // split the sink and stream so that we can pass the sink while holding
+        // a reference to the stream in the loop
+        let (mut sink, mut stream) = socket.split();
+
+        // This is the beginning of the session, which is the only time
+        // a peer is allowed to advertise their pieces. If we have pieces
+        // available, send a bitfield message.
+        {
+            let piece_picker_guard = self.torrent.piece_picker.read().await;
+            let own_pieces = piece_picker_guard.own_pieces();
+            if own_pieces.any() {
+                info!("Sending piece availability");
+                sink.send(PeerMessage::Bitfield { index_field: own_pieces.clone() }).await?;
+                info!("Sent piece availability");
+            }
+        }
+
+        // used for collecting session stats every second
+        let mut tick_timer = time::interval(Duration::from_secs(1));
+
+        // start the loop for receiving messages from peer and commands from
+        // other parts of the engine
+        loop {
+            tokio::select! {
+                now = tick_timer.tick() => {
+                    self.tick(&mut sink, now.into_std()).await?;
+                }
+                Some(msg) = stream.next() => {
+                    let msg = msg?;
+
+                    // handle bitfield message separately as it may only be
+                    // received directly after the handshake (later once we
+                    // implement the FAST extension, there will be other piece
+                    // availability related messages to handle)
+                    if self.ctx.state.connection == ConnectionState::AvailabilityExchange {
+                        if let PeerMessage::Bitfield{index_field} = msg {
+                            self.handle_bitfield_msg(&mut sink, index_field).await?;
+                        } else {
+                            // it's not mandatory to send a bitfield message
+                            // right after the handshake
+                            self.handle_msg(&mut sink, msg).await?;
+                        }
+
+                        // if neither of us have any pieces, disconnect, there
+                        // is no point in keeping the connection alive
+                        if self
+                            .torrent
+                            .piece_picker
+                            .read()
+                            .await
+                            .own_pieces()
+                            .not_any()
+                            && self.peer.pieces.not_any()
+                        {
+                            warn!(
+                                "Neither side of connection has any pieces, disconnecting"
+                            );
+                            return Ok(());
+                        }
+
+                        // enter connected state
+                        self.ctx.set_connection_state(ConnectionState::Connected);
+                        info!(
+                            "Session state: {:?}",
+                            self.ctx.state.connection
+                        );
+                    } else {
+                        self.handle_msg(&mut sink, msg).await?;
+                    }
+                }
+                Some(cmd) = self.cmd_rx.recv() => {
+                    match cmd {
+                        PeerCommand::Block(block)=> {
+                            self.send_block(&mut sink, block).await?;
+                        }
+                        PeerCommand::PieceCompletion { index, in_endgame } => {
+                            self.ctx.in_endgame = in_endgame;
+                            self.handle_piece_completion(&mut sink, index).await?;
+                        }
+                        PeerCommand::Shutdown => {
+                            info!(
+                                "Shutting down session"
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -449,76 +416,48 @@ impl PeerSession {
         sink: &mut SplitSink<Framed<TcpStream, PeerCodec>, PeerMessage>,
         now: Instant,
     ) -> PeerResult<()> {
-        // // if we haven't become interested in each other for too long,
-        // // disconnect
-        // if !self.ctx.state.is_interested
-        //     && !self.ctx.state.is_peer_interested
-        //     && now.saturating_duration_since(
-        //     self.ctx.connected_time.expect("not connected"),
-        // ) >= INACTIVITY_TIMEOUT
-        // {
-        //     warn!( "Not interested in each other,
-        // disconnecting");     return Err(PeerError::InactivityTimeout);
-        // }
-        //
-        // // resent requests if we have pending requests and more time has elapsed
-        // // since the last request than the current timeout value
-        // if !self.outgoing_requests.is_empty() {
-        //     self.check_request_timeout(sink).await?;
-        // }
-        //
-        // // TODO(https://github.com/mandreyel/cratetorrent/issues/42): send
-        // // keep-alive
-        //
-        // // if there was any state change, notify torrent
-        // if self.ctx.changed {
-        //     debug!(
-        //
-        //         "State changed, updating torrent",
-        //     );
-        //     self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
-        //         addr: self.peer.addr,
-        //         info: self.session_info(),
-        //     })?;
-        // }
-        //
-        // // update session context
-        // let prev_queue_len = self.ctx.target_request_queue_len;
-        // self.ctx.tick();
-        // if let (Some(prev_queue_len), Some(curr_queue_len)) =
-        // (prev_queue_len, self.ctx.target_request_queue_len)
-        // {
-        //     if prev_queue_len != curr_queue_len {
-        //         info!(
-        //
-        //             "Request queue changed from {} to {}",
-        //             prev_queue_len,
-        //             curr_queue_len
-        //         );
-        //     }
-        // }
-        //
-        // debug!(
-        //
-        //     "Stats: \
-        //     download: {dl_rate} b/s (peak: {dl_peak} b/s, total: {dl_total} b), \
-        //     pending: {out_req}, queue: {queue}, rtt: {rtt_ms} ms (~{rtt_s} s), \
-        //     waste: {waste},
-        //     upload: {ul_rate} b/s (peak: {ul_peak} b/s, total: {ul_total} b), \
-        //     pending: {in_req}",
-        //     dl_rate = self.ctx.counters.payload.down.avg(),
-        //     dl_peak = self.ctx.counters.payload.down.peak(),
-        //     dl_total = self.ctx.counters.payload.down.total(),
-        //     out_req = self.outgoing_requests.len(),
-        //     queue = self.ctx.target_request_queue_len.unwrap_or_default(),
-        //     rtt_ms = self.ctx.avg_request_rtt.mean().as_millis(),
-        //     rtt_s = self.ctx.avg_request_rtt.mean().as_secs(),
-        //     waste = self.ctx.counters.waste.total(),
-        //     ul_rate = self.ctx.counters.payload.up.avg(),
-        //     ul_peak = self.ctx.counters.payload.up.peak(),
-        //     ul_total = self.ctx.counters.payload.up.total(),
-        //     in_req = self.incoming_requests.len(),
-        // );
+        // if we haven't become interested in each other for too long,
+        // disconnect
+        if !self.ctx.state.is_interested &&
+            !self.ctx.state.is_peer_interested &&
+            now.saturating_duration_since(self.ctx.connected_time.expect("not connected")) >=
+                INACTIVITY_TIMEOUT
+        {
+            warn!(
+                "Not interested in each other,
+        disconnecting"
+            );
+            return Err(PeerError::InactivityTimeout)
+        }
+
+        // resent requests if we have pending requests and more time has elapsed
+        // since the last request than the current timeout value
+        if !self.outgoing_requests.is_empty() {
+            self.check_request_timeout(sink).await?;
+        }
+
+        // TODO(https://github.com/mandreyel/cratetorrent/issues/42): send
+        // keep-alive
+
+        // if there was any state change, notify torrent
+        if self.ctx.changed {
+            debug!("State changed, updating torrent",);
+            self.torrent.cmd_tx.send(torrent::TorrentCommand::PeerState {
+                addr: self.peer.addr,
+                info: self.session_info(),
+            })?;
+        }
+
+        // update session context
+        let prev_queue_len = self.ctx.target_request_queue_len;
+        self.ctx.tick();
+        if let (Some(prev_queue_len), Some(curr_queue_len)) =
+            (prev_queue_len, self.ctx.target_request_queue_len)
+        {
+            if prev_queue_len != curr_queue_len {
+                info!("Request queue changed from {} to {}", prev_queue_len, curr_queue_len);
+            }
+        }
 
         Ok(())
     }
@@ -528,41 +467,37 @@ impl PeerSession {
         &mut self,
         sink: &mut SplitSink<Framed<TcpStream, PeerCodec>, PeerMessage>,
     ) -> PeerResult<()> {
-        // if let Some(last_outgoing_request_time) =
-        // self.ctx.last_outgoing_request_time
-        // {
-        //     let elapsed_since_last_request = Instant::now()
-        //         .saturating_duration_since(last_outgoing_request_time);
-        //     let request_timeout = self.ctx.request_timeout();
-        //
-        //     debug!(
-        //
-        //         "Checking request timeout \
-        //         (last {} ms ago, timeout: {} ms)",
-        //         elapsed_since_last_request.as_millis(),
-        //         request_timeout.as_millis()
-        //     );
-        //
-        //     if elapsed_since_last_request > request_timeout {
-        //         warn!(
-        //
-        //             "Timeout after {} ms, cancelling {} request(s) (timeouts: {})",
-        //             elapsed_since_last_request.as_millis(),
-        //             self.outgoing_requests.len(),
-        //             self.ctx.timed_out_request_count + 1
-        //         );
-        //
-        //         // Cancel all requests and re-issue a single one (since we can
-        //         // only request a single block now). Start by freeing up the
-        //         // blocks in their piece download.
-        //         // Note that we're not telling the peer that we timed out the
-        //         // request so that if it arrives some time later and is not
-        //         // requested by another peer, we can still collect it.
-        //         self.free_pending_blocks().await;
-        //         self.ctx.register_request_timeout();
-        //         self.make_requests(sink).await?;
-        //     }
-        // }
+        if let Some(last_outgoing_request_time) = self.ctx.last_outgoing_request_time {
+            let elapsed_since_last_request =
+                Instant::now().saturating_duration_since(last_outgoing_request_time);
+            let request_timeout = self.ctx.request_timeout();
+
+            debug!(
+                "Checking request timeout \
+                (last {} ms ago, timeout: {} ms)",
+                elapsed_since_last_request.as_millis(),
+                request_timeout.as_millis()
+            );
+
+            if elapsed_since_last_request > request_timeout {
+                warn!(
+                    "Timeout after {} ms, cancelling {} request(s) (timeouts: {})",
+                    elapsed_since_last_request.as_millis(),
+                    self.outgoing_requests.len(),
+                    self.ctx.timed_out_request_count + 1
+                );
+
+                // Cancel all requests and re-issue a single one (since we can
+                // only request a single block now). Start by freeing up the
+                // blocks in their piece download.
+                // Note that we're not telling the peer that we timed out the
+                // request so that if it arrives some time later and is not
+                // requested by another peer, we can still collect it.
+                self.free_pending_blocks().await;
+                self.ctx.register_request_timeout();
+                self.make_requests(sink).await?;
+            }
+        }
 
         Ok(())
     }
@@ -570,21 +505,17 @@ impl PeerSession {
     /// Marks requested blocks as free in their respective downlaods so that
     /// other peer sessions may download them.
     async fn free_pending_blocks(&mut self) {
-        // let downloads_guard = self.torrent.downloads.read().await;
-        // for block in self.outgoing_requests.drain() {
-        //     // The piece may no longer be present if it was compoleted by
-        //     // another peer in the meantime and torrent removed it from the
-        //     // shared download store. This is fine, in this case we don't have
-        //     // anything to do.
-        //     if let Some(download) = downloads_guard.get(&block.piece_index) {
-        //         debug!(
-        //
-        //             "Freeing block {} for download",
-        //             block
-        //         );
-        //         download.write().await.free_block(&block);
-        //     }
-        // }
+        let downloads_guard = self.torrent.downloads.read().await;
+        for block in self.outgoing_requests.drain() {
+            // The piece may no longer be present if it was compoleted by
+            // another peer in the meantime and torrent removed it from the
+            // shared download store. This is fine, in this case we don't have
+            // anything to do.
+            if let Some(download) = downloads_guard.get(&block.piece_index) {
+                debug!("Freeing block {} for download", block);
+                download.write().await.free_block(&block);
+            }
+        }
     }
 
     /// Returns a summary of the most important information of the session
@@ -856,76 +787,47 @@ impl PeerSession {
     /// Blocks are accepted even if timed out/cancelled, if the block has not
     /// been downloaded (e.g. from another peer) since then.
     async fn handle_block_msg(&mut self, block_info: BlockInfo, data: Vec<u8>) -> PeerResult<()> {
-        // // remove pending block request
-        // self.outgoing_requests.remove(&block_info);
-        //
-        // // try to find the piece to which this block corresponds
-        // // and mark the block in piece as downloaded
-        // let prev_status = match self
-        //     .torrent
-        //     .downloads
-        //     .read()
-        //     .await
-        //     .get(&block_info.piece_index)
-        // {
-        //     Some(download) => {
-        //         download.write().await.received_block(&block_info)
-        //     }
-        //     None => {
-        //         // silently ignore this block if we didn't expected it
-        //         //
-        //         // TODO(https://github.com/mandreyel/cratetorrent/issues/10): In
-        //         // the future we could add logic that only accepts blocks within
-        //         // a window after the last request. If not done, peer could DoS
-        //         // us by sending unwanted blocks repeatedly.
-        //         warn!(
-        //
-        //             "Discarding block {} with no piece download{}",
-        //             block_info,
-        //             if self.ctx.in_endgame {
-        //                 " in endgame"
-        //             } else {
-        //                 ""
-        //             }
-        //         );
-        //         self.ctx.record_waste(block_info.len);
-        //         return Ok(());
-        //     }
-        // };
-        //
-        // // don't process the block if already downloaded
-        // if prev_status == BlockStatus::Received {
-        //     self.ctx.record_waste(block_info.len);
-        //     info!(
-        //
-        //         "Already downloaded block {}",
-        //         block_info
-        //     );
-        // } else {
-        //     info!(
-        //
-        //         "Got block {}{}",
-        //         block_info,
-        //         if self.ctx.in_slow_start {
-        //             " in slow-start"
-        //         } else if self.ctx.in_endgame {
-        //             " in endgame"
-        //         } else {
-        //             ""
-        //         }
-        //     );
-        //
-        //     // update download stats
-        //     self.ctx.update_download_stats(block_info.len);
-        //
-        //     // validate and save the block to disk by sending a write command to the
-        //     // disk task
-        //     self.torrent.disk_tx.send(disk::Command::WriteBlock {
-        //         id: self.torrent.id,
-        //         block_info,
-        //         data,
-        //     })?;
-        // }
+        // remove pending block request
+        self.outgoing_requests.remove(&block_info);
+
+        // try to find the piece to which this block corresponds
+        // and mark the block in piece as downloaded
+        let prev_status = match self
+            .torrent
+            .downloads
+            .read()
+            .await
+            .get(&block_info.piece_index)
+        {
+            Some(download) => {
+                download.write().await.received_block(&block_info)
+            }
+            None => {
+                self.ctx.record_waste(block_info.len);
+                return Ok(());
+            }
+        };
+
+        // don't process the block if already downloaded
+        if prev_status == BlockStatus::Received {
+            self.ctx.record_waste(block_info.len);
+            info!(
+
+                "Already downloaded block {}",
+                block_info
+            );
+        } else {
+            // update download stats
+            self.ctx.update_download_stats(block_info.len);
+
+            // validate and save the block to disk by sending a write command to the
+            // disk task
+            self.torrent.disk_tx.send(disk::DiskCommand::WriteBlock {
+                id: self.torrent.id,
+                block_info,
+                data,
+            })?;
+        }
 
         Ok(())
     }
@@ -938,34 +840,34 @@ impl PeerSession {
     /// [`Self::run`]. This is when the block is actually sent to peer, if by
     /// the request is not cancelled by then.
     async fn handle_request_msg(&mut self, block_info: BlockInfo) -> PeerResult<()> {
-        // info!( "Got request: {:?}", block_info);
-        //
-        // // before processing request validate block info
-        // self.validate_block_info(&block_info)?;
-        //
-        // // check if peer is not choked: if they are, they can't request blocks
-        // if self.ctx.state.is_peer_choked {
-        //     warn!( "Choked peer sent request");
-        //     return Err(PeerError::RequestWhileChoked);
-        // }
-        //
-        // // check if peer is not already requesting this block
-        // if self.incoming_requests.contains(&block_info) {
-        //     // TODO: if peer keeps spamming us, close connection
-        //     warn!( "Peer sent duplicate block request");
-        //     return Ok(());
-        // }
-        //
-        // info!( "Issuing disk IO read for block {}",
-        // block_info); self.incoming_requests.insert(block_info);
-        //
-        // // validate and save the block to disk by sending a write command to the
-        // // disk task
-        // self.torrent.disk_tx.send(disk::Command::ReadBlock {
-        //     id: self.torrent.id,
-        //     block_info,
-        //     result_tx: self.cmd_tx.clone(),
-        // })?;
+        info!( "Got request: {:?}", block_info);
+
+        // before processing request validate block info
+        self.validate_block_info(&block_info)?;
+
+        // check if peer is not choked: if they are, they can't request blocks
+        if self.ctx.state.is_peer_choked {
+            warn!( "Choked peer sent request");
+            return Err(PeerError::RequestWhileChoked);
+        }
+
+        // check if peer is not already requesting this block
+        if self.incoming_requests.contains(&block_info) {
+            // TODO: if peer keeps spamming us, close connection
+            warn!( "Peer sent duplicate block request");
+            return Ok(());
+        }
+
+        info!( "Issuing disk IO read for block {}",
+        block_info); self.incoming_requests.insert(block_info);
+
+        // validate and save the block to disk by sending a write command to the
+        // disk task
+        self.torrent.disk_tx.send(disk::DiskCommand::ReadBlock {
+            id: self.torrent.id,
+            block_info,
+            result_tx: self.cmd_tx.clone(),
+        })?;
 
         Ok(())
     }
@@ -977,30 +879,32 @@ impl PeerSession {
         sink: &mut SplitSink<Framed<TcpStream, PeerCodec>, PeerMessage>,
         block: Block,
     ) -> PeerResult<()> {
-        // let info = block.info();
-        // info!( "Read from disk {}", info);
-        //
-        // // remove peer's pending request
-        // let was_present = self.incoming_requests.remove(&info);
-        //
-        // // check if the request hasn't been canceled yet
-        // if !was_present {
-        //     warn!( "No matching request entry for {}", info);
-        //     return Ok(());
-        // }
-        //
-        // // if it hasn't, send the data to peer
-        // info!( "Sending {}", info);
-        // sink.send(PeerMessage::Block {
-        //     piece_index: block.piece_index,
-        //     offset: block.offset,
-        //     data: block.data,
-        // })
-        //     .await?;
-        // info!( "Sent {}", info);
-        //
-        // // update download stats
-        // self.ctx.update_upload_stats(info.len);
+        let info = block.info();
+        info!( "Read from disk {}", info);
+
+        // remove peer's pending request
+        let was_present = self.incoming_requests.remove(&info);
+
+        // check if the request hasn't been canceled yet
+        if !was_present {
+            warn!( "No matching request entry for {}", info);
+            return Ok(());
+        }
+
+        // if it hasn't, send the data to peer
+        info!( "Sending {}", info);
+        sink.send(PeerMessage::Piece {
+            piece: Piece {
+                index: block.piece_index as u32,
+                begin: block.offset,
+                data: block.data.into_owned().into()
+            }
+        })
+            .await?;
+        info!( "Sent {}", info);
+
+        // update download stats
+        self.ctx.update_upload_stats(info.len);
 
         Ok(())
     }
@@ -1012,32 +916,31 @@ impl PeerSession {
         sink: &mut SplitSink<Framed<TcpStream, PeerCodec>, PeerMessage>,
         piece_index: PieceIndex,
     ) -> PeerResult<()> {
-        // info!( "Peer has piece {}", piece_index);
-        //
-        // // validate piece index
-        // self.validate_piece_index(piece_index)?;
-        //
-        // // It's important to check if peer already has this piece.
-        // // Otherwise we'd record duplicate pieces in the swarm in the below
-        // // availability registration.
-        // if self.peer.pieces[piece_index] {
-        //     return Ok(());
-        // }
-        //
-        // self.peer.pieces.set(piece_index, true);
-        // self.peer.piece_count += 1;
-        //
-        // // need to recalculate interest with each received piece
-        // let is_interested = self
-        //     .torrent
-        //     .piece_picker
-        //     .write()
-        //     .await
-        //     .register_peer_piece(piece_index);
-        //
-        // // we may have become interested in peer
-        // self.update_interest(sink, is_interested).await
-        todo!()
+        info!( "Peer has piece {}", piece_index);
+
+        // validate piece index
+        self.validate_piece_index(piece_index)?;
+
+        // It's important to check if peer already has this piece.
+        // Otherwise we'd record duplicate pieces in the swarm in the below
+        // availability registration.
+        if self.peer.pieces[piece_index] {
+            return Ok(());
+        }
+
+        self.peer.pieces.set(piece_index, true);
+        self.peer.piece_count += 1;
+
+        // need to recalculate interest with each received piece
+        let is_interested = self
+            .torrent
+            .piece_picker
+            .write()
+            .await
+            .register_peer_piece(piece_index);
+
+        // we may have become interested in peer
+        self.update_interest(sink, is_interested).await
     }
 
     /// Checks whether we have become or stopped being interested in the peer.

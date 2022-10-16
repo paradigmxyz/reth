@@ -88,9 +88,9 @@ pub(crate) enum TorrentCommand {
 #[derive(Debug)]
 pub(crate) struct PieceCompletion {
     /// The index of the piece.
-    pub index: PieceIndex,
+    pub(crate) index: PieceIndex,
     /// Whether the piece is valid. If it's not, it's not written to disk.
-    pub is_valid: bool,
+    pub(crate) is_valid: bool,
 }
 
 /// Information and methods shared with peer sessions in the torrent.
@@ -100,51 +100,49 @@ pub(crate) struct PieceCompletion {
 /// various synchronization primitives.
 pub(crate) struct TorrentContext {
     /// The torrent ID, unique in this engine.
-    pub id: TorrentId,
+    pub(crate) id: TorrentId,
     /// The info hash of the torrent, derived from its metainfo. This is used to
     /// identify the torrent with other peers and trackers.
-    pub info_hash: Sha1Hash,
+    pub(crate) info_hash: Sha1Hash,
     /// The arbitrary client id, chosen by the user of this library. This is
     /// advertised to peers and trackers.
-    pub client_id: PeerId,
+    pub(crate) client_id: PeerId,
     /// A copy of the torrent channel sender. This is not used by torrent itself,
     /// but by the peer session tasks to which an arc copy of this torrent
     /// context is given.
-    pub cmd_tx: Sender,
+    pub(crate) cmd_tx: Sender,
     /// The piece picker picks the next most optimal piece to download and is
     /// shared by all peers in a torrent.
-    pub piece_picker: Arc<RwLock<PiecePicker>>,
-    // /// These are the active piece downloads in which the peer sessions in this
-    // /// torrent are participating.
-    // ///
-    // /// They are stored and synchronized in this object to download a piece from
-    // /// multiple peers, which helps us to have fewer incomplete pieces.
-    // ///
-    // /// Peer sessions may be run on different threads, any of which may read and
-    // /// write to this map and to the pieces in the map. Thus we need a read
-    // /// write lock on both.
-    // // TODO: Benchmark whether using the nested locking approach isn't too slow.
-    // // For mvp it should do.
-    pub downloads: RwLock<HashMap<PieceIndex, RwLock<PieceDownload>>>,
+    pub(crate) piece_picker: Arc<RwLock<PiecePicker>>,
+    /// These are the active piece downloads in which the peer sessions in this
+    /// torrent are participating.
+    ///
+    /// They are stored and synchronized in this object to download a piece from
+    /// multiple peers, which helps us to have fewer incomplete pieces.
+    ///
+    /// Peer sessions may be run on different threads, any of which may read and
+    /// write to this map and to the pieces in the map. Thus we need a read
+    /// write lock on both.
+    pub(crate) downloads: RwLock<HashMap<PieceIndex, RwLock<PieceDownload>>>,
 
-    // /// The handle to the disk IO task, used to issue commands on it. A copy of
-    // /// this handle is passed down to each peer session.
-    // pub disk_tx: disk::Sender,
+    /// The handle to the disk IO task, used to issue commands on it. A copy of
+    /// this handle is passed down to each peer session.
+    pub(crate) disk_tx: disk::Sender,
     /// Info about the torrent's storage (piece length, download length, etc).
-    pub storage: StorageInfo,
+    pub(crate) storage: StorageInfo,
 }
 
 /// Parameters for the torrent constructor.
 pub(crate) struct Params {
-    pub id: TorrentId,
-    pub disk_tx: disk::Sender,
-    pub info_hash: Sha1Hash,
-    pub storage_info: StorageInfo,
-    pub own_pieces: BitField,
-    pub trackers: Vec<Tracker>,
-    pub client_id: PeerId,
-    pub listen_addr: SocketAddr,
-    pub conf: TorrentConfig,
+    pub(crate) id: TorrentId,
+    pub(crate) disk_tx: disk::Sender,
+    pub(crate) info_hash: Sha1Hash,
+    pub(crate) storage_info: StorageInfo,
+    pub(crate) own_pieces: BitField,
+    pub(crate) trackers: Vec<Tracker>,
+    pub(crate) client_id: PeerId,
+    pub(crate) listen_addr: SocketAddr,
+    pub(crate) conf: TorrentConfig,
     // pub alert_tx: AlertSender,
 }
 

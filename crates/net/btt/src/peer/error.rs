@@ -36,6 +36,9 @@ pub enum PeerError {
     /// Peer's torrent info hash did not match ours.
     #[error("invalid info hash")]
     InvalidInfoHash,
+    /// Peer's torrent info hash did not match ours.
+    #[error("invalid handshake")]
+    InvalidHandshake,
     /// An IO error ocurred.
     #[error(transparent)]
     Io(#[from] std::io::Error),

@@ -139,9 +139,6 @@ pub(super) struct SessionContext {
     /// The time the BitTorrent connection was established (i.e. after
     /// handshaking)
     pub connected_time: Option<Instant>,
-
-    /// The log header to use for logging.
-    pub log_target: String,
 }
 
 impl SessionContext {
