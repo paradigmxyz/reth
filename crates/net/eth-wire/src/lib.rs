@@ -4,7 +4,9 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+//! Implementation of the `eth` wire protocol
 
-//! Types for the eth wire protocol.
-
+/// Types for the eth wire protocol.
 pub mod types;
+
+mod stream;
