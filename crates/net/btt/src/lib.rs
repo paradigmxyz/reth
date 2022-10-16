@@ -7,20 +7,16 @@
 ))]
 
 //! Reth bittorrent support.
-//!
-//! # Design:
-//!
-//! - TorrentPool: tracks the state of all torrents
-//! - Torrent: drives a torrent to completion
-//! - DiskManager: file IO
-//! - Peer: session for connected peer
 
+pub(crate) mod avg;
 pub mod bitfield;
 mod bittorrent;
 pub mod block;
+pub(crate) mod counter;
 pub mod disk;
+pub(crate) mod download;
 pub mod error;
-pub mod info;
+pub(crate) mod info;
 pub mod peer;
 pub mod piece;
 pub mod proto;
@@ -29,3 +25,6 @@ pub mod torrent;
 pub mod tracker;
 
 pub use bittorrent::*;
+
+#[cfg(linux)]
+pub(crate) mod iovecs;

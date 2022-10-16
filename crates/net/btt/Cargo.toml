@@ -40,5 +40,8 @@ typed-builder = "0.10"
 lru = "0.8.1"
 hex = "0.4.3"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = "0.25"
+
 [dev-dependencies]
 tempfile = "3.3"

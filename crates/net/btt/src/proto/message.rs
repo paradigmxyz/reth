@@ -112,6 +112,23 @@ impl PeerMessage {
         }
     }
 
+    /// Returns the header length of the specific message.
+    pub fn header_len(&self) -> u64 {
+        match self {
+            PeerMessage::Choke => 4 + 1,
+            PeerMessage::UnChoke => 4 + 1,
+            PeerMessage::Interested => 4 + 1,
+            PeerMessage::NotInterested => 4 + 1,
+            PeerMessage::Have { .. } => 4 + 1 + 4,
+            PeerMessage::Bitfield { .. } => 4 + 1,
+            PeerMessage::Request { .. } => 4 + 1 + 3 * 4,
+            PeerMessage::Piece { .. } => 4 + 1 + 2 * 4,
+            PeerMessage::Cancel { .. } => 4 + 1 + 3 * 4,
+            PeerMessage::KeepAlive => 1,
+            _ => 0,
+        }
+    }
+
     /// Encodes the message into the given buf.
     pub fn encode_into(&self, buf: &mut BytesMut) {
         match self {

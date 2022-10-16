@@ -3,7 +3,9 @@
 use crate::{
     bitfield::BitField,
     block::BlockInfo,
+    disk,
     disk::error::{ReadError, WriteError},
+    download::PieceDownload,
     info::{PieceIndex, StorageInfo},
     peer::{PeerEvent, SessionTick},
     sha1::{PeerId, Sha1Hash},
@@ -123,7 +125,7 @@ pub(crate) struct TorrentContext {
     // /// write lock on both.
     // // TODO: Benchmark whether using the nested locking approach isn't too slow.
     // // For mvp it should do.
-    // pub downloads: RwLock<HashMap<PieceIndex, RwLock<PieceDownload>>>,
+    pub downloads: RwLock<HashMap<PieceIndex, RwLock<PieceDownload>>>,
 
     // /// The handle to the disk IO task, used to issue commands on it. A copy of
     // /// this handle is passed down to each peer session.
@@ -135,7 +137,7 @@ pub(crate) struct TorrentContext {
 /// Parameters for the torrent constructor.
 pub(crate) struct Params {
     pub id: TorrentId,
-    // pub disk_tx: disk::Sender,
+    pub disk_tx: disk::Sender,
     pub info_hash: Sha1Hash,
     pub storage_info: StorageInfo,
     pub own_pieces: BitField,

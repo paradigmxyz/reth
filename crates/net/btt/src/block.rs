@@ -25,10 +25,6 @@ impl BlockInfo {
     /// Returns the index of the block within its piece, assuming the default
     /// block length of 16 KiB.
     pub fn index_in_piece(&self) -> usize {
-        // we need to use "lower than or equal" as this may be the last block in
-        // which case it may be shorter than the default block length
-        debug_assert!(self.len <= BLOCK_LEN);
-        debug_assert!(self.len > 0);
         (self.offset / BLOCK_LEN) as usize
     }
 }
