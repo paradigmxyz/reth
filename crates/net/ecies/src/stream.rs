@@ -156,8 +156,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    // TODO: implement test for the proposed
-    // API: https://github.com/foundry-rs/reth/issues/64#issue-1408708420
     async fn can_write_and_read() {
         let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
         let server_key = SecretKey::new(&mut rand::thread_rng());
