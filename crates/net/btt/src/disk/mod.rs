@@ -185,18 +185,18 @@ impl Disk {
 
 #[cfg(test)]
 mod tests {
+    use sha1::{Digest, Sha1};
     use std::{
         fs,
         path::{Path, PathBuf},
     };
-    use sha1::{Digest, Sha1};
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::{
         block::{block_count, BLOCK_LEN},
         info::FileInfo,
-        torrent
+        torrent,
     };
 
     /// Tests the allocation of a torrent, and then the allocation of the same
@@ -278,7 +278,9 @@ mod tests {
             });
 
             // wait for disk write result
-            if let Some(torrent::TorrentCommand::PieceCompletion(Ok(piece))) = torrent_rx.recv().await {
+            if let Some(torrent::TorrentCommand::PieceCompletion(Ok(piece))) =
+                torrent_rx.recv().await
+            {
                 // piece is complete so it should be hashed and valid
                 assert_eq!(piece.index, index);
                 assert!(piece.is_valid);

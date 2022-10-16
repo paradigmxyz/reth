@@ -3,7 +3,7 @@
 use crate::{
     bitfield::BitField,
     block::BlockInfo,
-    disk::error::ReadError,
+    disk::error::{ReadError, WriteError},
     info::{PieceIndex, StorageInfo},
     peer::{PeerEvent, SessionTick},
     sha1::{PeerId, Sha1Hash},
@@ -14,16 +14,17 @@ use std::{
     collections::HashMap,
     fmt,
     net::SocketAddr,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
-use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::{
     mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
     RwLock,
 };
-use crate::disk::error::WriteError;
 
 pub(crate) mod config;
 pub(crate) mod piece_picker;

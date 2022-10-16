@@ -115,7 +115,7 @@ struct ThreadContext {
 
     /// Various disk IO related statistics.
     ///
-    /// Stas are atomically updated by the IO worker threads themselves.
+    /// Stats are atomically updated by the IO worker threads themselves.
     stats: Stats,
 }
 
@@ -165,11 +165,6 @@ impl Torrent {
             let mut torrent_files = Vec::with_capacity(info.files.len());
             for file in info.files.iter() {
                 let path = info.download_dir.join(&file.path);
-                // file or subdirectory in download root must not exist if
-                // download root does not exists
-                debug_assert!(!path.exists());
-                debug_assert!(path.is_absolute());
-
                 // get the parent of the file path: if there is one (i.e.
                 // this is not a file in the torrent root), and doesn't
                 // exist, create it
@@ -184,9 +179,6 @@ impl Torrent {
                 }
 
                 // open the file and get a handle to it
-                //
-                // TODO: is there a clean way of avoiding creating the path
-                // buffer twice?
                 torrent_files
                     .push(sync::RwLock::new(TorrentFile::new(&info.download_dir, file.clone())?));
             }

@@ -4,15 +4,6 @@ pub(crate) mod torrent;
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        fs,
-        io::Read,
-        ops::Range,
-        path::{Path, PathBuf},
-        sync,
-    };
-    use sha1::{Digest, Sha1};
     use crate::{
         block::BLOCK_LEN,
         disk::{
@@ -23,6 +14,15 @@ mod tests {
             },
         },
         info::{FileIndex, FileInfo},
+    };
+    use sha1::{Digest, Sha1};
+    use std::{
+        collections::BTreeMap,
+        fs,
+        io::Read,
+        ops::Range,
+        path::{Path, PathBuf},
+        sync,
     };
 
     const DOWNLOAD_DIR: &str = "/tmp";

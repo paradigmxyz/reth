@@ -1,4 +1,5 @@
 use crate::{
+    disk::error::NewTorrentError,
     error::TorrentResult,
     info::Metainfo,
     sha1::{PeerId, RETH_TORRENT_CLIENT_ID},
@@ -17,7 +18,6 @@ use tokio::sync::{
 };
 use tracing::trace;
 use typed_builder::TypedBuilder;
-use crate::disk::error::NewTorrentError;
 
 /// Provides the API to interact with torrents.
 #[derive(Debug, Clone)]
@@ -118,10 +118,7 @@ pub(crate) enum BttCommand {
     /// Torrent allocation result. If successful, the id of the allocated
     /// torrent is returned for identification, if not, the reason of the error
     /// is included.
-    TorrentAllocation {
-        id: TorrentId,
-        result: Result<(), NewTorrentError>,
-    },
+    TorrentAllocation { id: TorrentId, result: Result<(), NewTorrentError> },
     /// Gracefully shuts down the engine and waits for all its torrents to do
     /// the same.
     Shutdown,
