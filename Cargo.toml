@@ -8,6 +8,7 @@ members = [
     "crates/executor",
     "crates/interfaces",
     "crates/net/p2p",
+    "crates/net/ecies",
     "crates/net/eth-wire",
     "crates/net/rpc",
     "crates/net/rpc-api",
