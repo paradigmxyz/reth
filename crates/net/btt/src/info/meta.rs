@@ -3,7 +3,7 @@
 
 use crate::{info::storage::FileInfo, sha1::Sha1Hash};
 use reqwest::Url;
-pub use serde_bencode::Error as BencodeError;
+pub(crate) use serde_bencode::Error as BencodeError;
 use std::{
     fmt,
     path::{Path, PathBuf},

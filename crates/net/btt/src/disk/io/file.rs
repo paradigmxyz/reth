@@ -10,14 +10,14 @@ use std::{
 use tracing::{trace, warn};
 
 pub(crate) struct TorrentFile {
-    pub info: FileInfo,
-    pub handle: File,
+    pub(crate) info: FileInfo,
+    pub(crate) handle: File,
 }
 
 impl TorrentFile {
     /// Opens the file in create, read, and write modes at the path of combining the
     /// download directory and the path defined in the file info.
-    pub fn new(download_dir: &Path, info: FileInfo) -> Result<Self, NewTorrentError> {
+    pub(crate) fn new(download_dir: &Path, info: FileInfo) -> Result<Self, NewTorrentError> {
         trace!("Opening and creating file {:?} in dir {:?}", info, download_dir);
         let path = download_dir.join(&info.path);
         let handle =

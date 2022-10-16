@@ -99,7 +99,7 @@ mod tests {
         file.handle.read_to_end(&mut file_content).expect("cannot read test file");
         assert_eq!(
             file_content,
-            piece.blocks.values().cloned().flatten().collect::<Vec<_>>(),
+            piece.blocks.values().flatten().cloned().collect::<Vec<_>>(),
             "file {:?} content does not equal piece",
             file.info
         );
@@ -159,7 +159,7 @@ mod tests {
 
         // compare contents
         // map Vec<Arc<Vec<u8>>> to Vec<Vec<u8>>
-        let actual: Vec<_> = blocks.iter().map(AsRef::as_ref).cloned().flatten().collect();
+        let actual: Vec<_> = blocks.iter().flat_map(AsRef::as_ref).cloned().collect();
         let expected: Vec<_> = piece.blocks.values().flatten().copied().collect();
         assert_eq!(actual, expected);
 
@@ -220,8 +220,8 @@ mod tests {
                 piece
                     .blocks
                     .values()
-                    .cloned()
                     .flatten()
+                    .cloned()
                     .skip(file.info.torrent_offset as usize)
                     .take(file.info.len as usize)
                     .collect::<Vec<_>>(),
@@ -281,7 +281,7 @@ mod tests {
 
         // compare contents
         // map Vec<Arc<Vec<u8>>> to Vec<Vec<u8>>
-        let actual: Vec<_> = blocks.iter().map(AsRef::as_ref).cloned().flatten().collect();
+        let actual: Vec<_> = blocks.iter().flat_map(AsRef::as_ref).cloned().collect();
         let expected: Vec<_> = piece.blocks.values().flatten().copied().collect();
         assert_eq!(actual, expected);
     }
@@ -306,7 +306,7 @@ mod tests {
         let expected_hash = {
             let mut hasher = Sha1::new();
             for block in blocks.iter() {
-                hasher.update(&block);
+                hasher.update(block);
             }
             hasher.finalize().as_slice().try_into().unwrap()
         };

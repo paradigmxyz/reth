@@ -20,7 +20,7 @@ use std::{convert::TryInto, time::Duration};
 ///
 /// Ported from libtorrent: https://blog.libtorrent.org/2014/09/running-averages/
 #[derive(Debug)]
-pub struct SlidingAvg {
+pub(crate) struct SlidingAvg {
     /// The current running average, effectively the mean.
     ///
     /// This is a fixed-point value. The sample is multiplied by 64 before
@@ -48,11 +48,11 @@ pub struct SlidingAvg {
 }
 
 impl SlidingAvg {
-    pub fn new(inverted_gain: usize) -> Self {
+    pub(crate) fn new(inverted_gain: usize) -> Self {
         Self { mean: 0, deviation: 0, sample_count: 0, inverted_gain }
     }
 
-    pub fn update(&mut self, mut sample: i64) {
+    pub(crate) fn update(&mut self, mut sample: i64) {
         // see comment in `Self::mean`
         sample *= 64;
 
@@ -69,7 +69,7 @@ impl SlidingAvg {
         }
     }
 
-    pub fn mean(&self) -> i64 {
+    pub(crate) fn mean(&self) -> i64 {
         if self.sample_count == 0 {
             0
         } else {
@@ -77,7 +77,7 @@ impl SlidingAvg {
         }
     }
 
-    pub fn deviation(&self) -> i64 {
+    pub(crate) fn deviation(&self) -> i64 {
         if self.sample_count == 0 {
             0
         } else {
@@ -97,26 +97,26 @@ impl Default for SlidingAvg {
 /// [`std::time::Duration`] units (keeping everything in the underlying layer as
 /// milliseconds).
 #[derive(Debug)]
-pub struct SlidingDurationAvg(SlidingAvg);
+pub(crate) struct SlidingDurationAvg(SlidingAvg);
 
 impl SlidingDurationAvg {
-    pub fn new(inverted_gain: usize) -> Self {
+    pub(crate) fn new(inverted_gain: usize) -> Self {
         Self(SlidingAvg::new(inverted_gain))
     }
 
-    pub fn update(&mut self, sample: Duration) {
+    pub(crate) fn update(&mut self, sample: Duration) {
         // TODO: is this safe? Duration::from_millis takes u64 but as_millis
         // returns u128 so it's not clear
         let ms = sample.as_millis().try_into().expect("Millisecond overflow");
         self.0.update(ms);
     }
 
-    pub fn mean(&self) -> Duration {
+    pub(crate) fn mean(&self) -> Duration {
         let ms = self.0.mean() as u64;
         Duration::from_millis(ms)
     }
 
-    pub fn deviation(&self) -> Duration {
+    pub(crate) fn deviation(&self) -> Duration {
         let ms = self.0.deviation() as u64;
         Duration::from_millis(ms)
     }

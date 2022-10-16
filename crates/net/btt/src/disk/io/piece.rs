@@ -16,9 +16,9 @@ use tracing::{debug, warn};
 /// blocks and the expected hash of the piece.
 pub(crate) struct Piece {
     /// The expected hash of the whole piece.
-    pub expected_hash: Sha1Hash,
+    pub(crate) expected_hash: Sha1Hash,
     /// The length of the piece, in bytes.
-    pub len: u32,
+    pub(crate) len: u32,
     /// The so far downloaded blocks. Once the size of this map reaches the
     /// number of blocks in piece, the piece is complete and, if the hash is
     /// correct, saved to disk.
@@ -30,18 +30,18 @@ pub(crate) struct Piece {
     // TODO: consider whether using a preallocated Vec of Options would be more
     // performant due to cache locality (we would have to count the missing
     // blocks though, or keep a separate counter)
-    pub blocks: BTreeMap<u32, Vec<u8>>,
+    pub(crate) blocks: BTreeMap<u32, Vec<u8>>,
     /// The files that this piece overlaps with.
     ///
     /// This is a left-inclusive range of all all file indices, that can be used
     /// to index the `Torrent::files` vector to get the file handles.
-    pub file_range: Range<FileIndex>,
+    pub(crate) file_range: Range<FileIndex>,
 }
 
 impl Piece {
     /// Places block into piece's write buffer if it doesn't exist. TODO: should
     /// we return an error if it does?
-    pub fn enqueue_block(&mut self, offset: u32, data: Vec<u8>) {
+    pub(crate) fn enqueue_block(&mut self, offset: u32, data: Vec<u8>) {
         use std::collections::btree_map::Entry;
         let entry = self.blocks.entry(offset);
         if matches!(entry, Entry::Occupied(_)) {
@@ -52,7 +52,7 @@ impl Piece {
     }
 
     /// Returns true if the piece has all its blocks in its write buffer.
-    pub fn is_complete(&self) -> bool {
+    pub(crate) fn is_complete(&self) -> bool {
         self.blocks.len() == block_count(self.len)
     }
 
@@ -63,13 +63,13 @@ impl Piece {
     ///
     /// This is potentially a computationally expensive function and should be
     /// executed on a thread pool and not the executor.
-    pub fn matches_hash(&self) -> bool {
+    pub(crate) fn matches_hash(&self) -> bool {
         // sanity check that we only call this method if we have all blocks in
         // piece
         debug_assert_eq!(self.blocks.len(), block_count(self.len));
         let mut hasher = Sha1::new();
         for block in self.blocks.values() {
-            hasher.update(&block);
+            hasher.update(block);
         }
         let hash = hasher.finalize();
         debug!("Piece hash: {:x}", hash);
@@ -82,7 +82,7 @@ impl Piece {
     ///
     /// This performs sync IO and is thus potentially blocking and should be
     /// executed on a thread pool, and not the async executor.
-    pub fn write(
+    pub(crate) fn write(
         &self,
         torrent_piece_offset: u64,
         files: &[sync::RwLock<TorrentFile>],

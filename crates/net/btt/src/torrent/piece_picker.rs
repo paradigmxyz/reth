@@ -22,7 +22,7 @@ pub(crate) struct PiecePicker {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Piece {
     /// The frequency of this piece in the torrent swarm.
-    pub frequency: usize,
+    pub(crate) frequency: usize,
     /// Whether we have already picked this piece and are currently downloading
     /// it. This flag is set to true when the piece is picked.
     ///
@@ -32,12 +32,12 @@ pub(crate) struct Piece {
     /// pick this piece until we tell the piece picker that we have it and thus
     /// wouldn't be able to download multiple pieces simultaneously (an
     /// important optimizaiton step).
-    pub is_pending: bool,
+    pub(crate) is_pending: bool,
 }
 
 impl PiecePicker {
     /// Creates a new piece picker with the given own_pieces we already have.
-    pub fn new(own_pieces: BitField) -> Self {
+    pub(crate) fn new(own_pieces: BitField) -> Self {
         let mut pieces = Vec::new();
         pieces.resize_with(own_pieces.len(), Piece::default);
         let missing_count = own_pieces.count_zeros();
@@ -45,25 +45,25 @@ impl PiecePicker {
     }
 
     /// Returns an immutable reference to a bitfield of the pieces we own.
-    pub fn own_pieces(&self) -> &BitField {
+    pub(crate) fn own_pieces(&self) -> &BitField {
         &self.own_pieces
     }
 
     /// Returns the number of missing pieces that are needed to complete the
     /// download.
-    pub fn missing_piece_count(&self) -> usize {
+    pub(crate) fn missing_piece_count(&self) -> usize {
         self.missing_count
     }
 
     /// Returns true if all pieces have been picked (whether pending or
     /// recieved).
-    pub fn all_pieces_picked(&self) -> bool {
+    pub(crate) fn all_pieces_picked(&self) -> bool {
         self.free_count == 0
     }
 
     /// Returns the first piece that we don't yet have and isn't already being
     /// downloaded, or None, if no piece can be picked at this time.
-    pub fn pick_piece(&mut self) -> Option<PieceIndex> {
+    pub(crate) fn pick_piece(&mut self) -> Option<PieceIndex> {
         trace!("Picking next piece");
 
         for index in 0..self.own_pieces.len() {
@@ -94,7 +94,7 @@ impl PiecePicker {
     /// Panics if the peer sent us pieces with a different count than ours.
     /// The validity of the pieces must be ensured at the protocol level (in
     /// [`crate::peer::PeerSession`]).
-    pub fn register_peer_pieces(&mut self, pieces: &BitField) -> bool {
+    pub(crate) fn register_peer_pieces(&mut self, pieces: &BitField) -> bool {
         trace!("Registering piece availability: {}", pieces);
 
         assert_eq!(
@@ -130,7 +130,7 @@ impl PiecePicker {
     ///
     /// Panics if the piece index is out of range. The index validity must be
     /// ensured at the protocol level (in [`crate::peer::PeerSession`]).
-    pub fn register_peer_piece(&mut self, index: PieceIndex) -> bool {
+    pub(crate) fn register_peer_piece(&mut self, index: PieceIndex) -> bool {
         trace!("Registering newly available piece {}", index);
         let is_interested = self.own_pieces.get(index).expect("invalid piece index");
         self.pieces[index].frequency += 1;
@@ -143,7 +143,7 @@ impl PiecePicker {
     /// # Panics
     ///
     /// Panics if the piece was already received.
-    pub fn received_piece(&mut self, index: PieceIndex) {
+    pub(crate) fn received_piece(&mut self, index: PieceIndex) {
         trace!("Registering received piece {}", index);
 
         // we assert here as this method is only called by internal methods on
@@ -175,7 +175,7 @@ impl PiecePicker {
         }
     }
 
-    pub fn pieces(&self) -> &[Piece] {
+    pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
     }
 }

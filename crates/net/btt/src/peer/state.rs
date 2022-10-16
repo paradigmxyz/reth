@@ -64,10 +64,10 @@ impl Default for ConnectionState {
 #[derive(Default)]
 pub(super) struct SessionContext {
     /// The session state.
-    pub state: SessionState,
+    pub(crate) state: SessionState,
 
     /// Measures various transfer statistics.
-    pub counters: ThruputCounters,
+    pub(crate) counters: ThruputCounters,
 
     /// A flag to indicate whether since the previous session tick the state has
     /// changed in a way that requires sending a new message to the torrent
@@ -78,7 +78,7 @@ pub(super) struct SessionContext {
     /// before this field, that is:
     /// - [`Self::state`]
     /// - [`Self::counters`]
-    pub changed: bool,
+    pub(crate) changed: bool,
 
     /// Whether the session is in slow start.
     ///
@@ -87,7 +87,7 @@ pub(super) struct SessionContext {
     /// out in slow start as well, wherein the target request queue size is
     /// increased by one every time one of our requests got served, doubling the
     /// queue size with each round trip.
-    pub in_slow_start: bool,
+    pub(crate) in_slow_start: bool,
 
     /// Whether we're in endgame mode. See
     /// [`crate::torrent::TorrentContext::in_end_game`].
@@ -95,7 +95,7 @@ pub(super) struct SessionContext {
     /// This field is a cache for the one in torrent context, as it's accessed
     /// very frequently and we wouldn't want to incur synchronization costs on
     /// the hot path.
-    pub in_endgame: bool,
+    pub(crate) in_endgame: bool,
 
     /// The target request queue size is the number of block requests we keep
     /// outstanding to fully saturate the link.
@@ -117,28 +117,28 @@ pub(super) struct SessionContext {
     // TODO: consider changing this to just usize starting at 0 and reset to
     // 0 once download finishes so that it's easier to deal with it (not having
     // to match on it all the time)
-    pub target_request_queue_len: Option<usize>,
+    pub(crate) target_request_queue_len: Option<usize>,
 
     /// The last time some requests were sent to the peer.
-    pub last_outgoing_request_time: Option<Instant>,
+    pub(crate) last_outgoing_request_time: Option<Instant>,
     /// Updated with the time of receipt of the most recently received requested
     /// block.
-    pub last_incoming_block_time: Option<Instant>,
+    pub(crate) last_incoming_block_time: Option<Instant>,
     /// Updated with the time of receipt of the most recently uploaded block.
-    pub last_outgoing_block_time: Option<Instant>,
+    pub(crate) last_outgoing_block_time: Option<Instant>,
     /// This is the average network round-trip-time between the last issued
     /// a request and receiving the next block.
     ///
     /// Note that it doesn't have to be the same block since peers are not
     /// required to serve our requests in order, so this is more of a general
     /// approximation.
-    pub avg_request_rtt: SlidingDurationAvg,
-    pub request_timed_out: bool,
-    pub timed_out_request_count: usize,
+    pub(crate) avg_request_rtt: SlidingDurationAvg,
+    pub(crate) request_timed_out: bool,
+    pub(crate) timed_out_request_count: usize,
 
     /// The time the BitTorrent connection was established (i.e. after
     /// handshaking)
-    pub connected_time: Option<Instant>,
+    pub(crate) connected_time: Option<Instant>,
 }
 
 impl SessionContext {
@@ -160,14 +160,14 @@ impl SessionContext {
 
     /// Returns the current request timeout value, based on the running average
     /// of past request round trip times.
-    pub fn request_timeout(&self) -> Duration {
+    pub(crate) fn request_timeout(&self) -> Duration {
         // we allow up to four times the average deviation from the mean
         let t = self.avg_request_rtt.mean() + 4 * self.avg_request_rtt.deviation();
         t.max(Self::MIN_TIMEOUT)
     }
 
     /// Updates state to reflect that peer was timed out.
-    pub fn register_request_timeout(&mut self) {
+    pub(crate) fn register_request_timeout(&mut self) {
         // peer has timed out, only allow a single outstanding request
         // from now until peer hasn't timed out
         self.target_request_queue_len = Some(1);
@@ -181,7 +181,7 @@ impl SessionContext {
     /// Prepares for requesting blocks.
     ///
     /// This should be called after being unchoked and becoming interested.
-    pub fn prepare_for_download(&mut self) {
+    pub(crate) fn prepare_for_download(&mut self) {
         debug_assert!(self.state.is_interested);
         debug_assert!(!self.state.is_choked);
 
@@ -194,7 +194,7 @@ impl SessionContext {
     /// Convenience method to set any field in state and to set the [`Self::changed`]
     /// flag.
     #[inline(always)]
-    pub fn update_state(&mut self, f: impl FnOnce(&mut SessionState)) {
+    pub(crate) fn update_state(&mut self, f: impl FnOnce(&mut SessionState)) {
         f(&mut self.state);
         self.changed = true;
     }
@@ -202,7 +202,7 @@ impl SessionContext {
     /// Convenience method to update connection state and to set the
     /// [`Self::changed`] flag.
     #[inline(always)]
-    pub fn set_connection_state(&mut self, c: ConnectionState) {
+    pub(crate) fn set_connection_state(&mut self, c: ConnectionState) {
         self.state.connection = c;
         self.changed = true;
     }
@@ -210,7 +210,7 @@ impl SessionContext {
     /// Updates various statistics around a block download.
     ///
     /// This should be called every time a block is received.
-    pub fn update_download_stats(&mut self, block_len: u32) {
+    pub(crate) fn update_download_stats(&mut self, block_len: u32) {
         let now = Instant::now();
 
         // update request time
@@ -249,12 +249,12 @@ impl SessionContext {
         self.changed = true;
     }
 
-    pub fn record_waste(&mut self, block_len: u32) {
+    pub(crate) fn record_waste(&mut self, block_len: u32) {
         self.counters.waste += block_len as u64;
         self.changed = true;
     }
 
-    pub fn update_upload_stats(&mut self, block_len: u32) {
+    pub(crate) fn update_upload_stats(&mut self, block_len: u32) {
         self.last_outgoing_block_time = Some(Instant::now());
         self.counters.payload.up += block_len as u64;
 
@@ -264,7 +264,7 @@ impl SessionContext {
     /// Updates various statistics and session state.
     ///
     /// This should be called every second.
-    pub fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         self.maybe_exit_slow_start();
 
         // NOTE: This has to be *after* `maybe_exit_slow_start` and *before*

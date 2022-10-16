@@ -5,25 +5,25 @@ use std::time::{Duration, Instant};
 /// tracker.
 #[derive(Debug)]
 pub(crate) struct TrackerSession {
-    client: Tracker,
+    pub(crate) client: Tracker,
     /// If a previous announce contained a tracker_id, it should be included in
     /// next announces. Therefore it is cached here.
-    id: Option<String>,
+    pub(crate) id: Option<String>,
     /// The last announce time is kept here so that we don't request too often.
-    last_announce_time: Option<Instant>,
+    pub(crate) last_announce_time: Option<Instant>,
     /// The interval at which we should update the tracker of our progress.
     /// This is set after the first announce request.
-    interval: Option<Duration>,
+    pub(crate) interval: Option<Duration>,
     /// The absolute minimum interval at which we can contact tracker.
     /// This is set after the first announce request.
-    min_interval: Option<Duration>,
+    pub(crate) min_interval: Option<Duration>,
     /// Each time we fail to request from tracker, this counter is incremented.
     /// If it fails too often, we stop requesting from tracker.
-    error_count: usize,
+    pub(crate) error_count: usize,
 }
 
 impl TrackerSession {
-    fn new(client: Tracker) -> Self {
+    pub(crate) fn new(client: Tracker) -> Self {
         Self {
             client,
             id: None,
@@ -39,7 +39,7 @@ impl TrackerSession {
     ///
     /// Later this function should take into consideration the client's minimum
     /// announce frequency settings.
-    fn should_announce(&self, t: Instant, default_announce_interval: Duration) -> bool {
+    pub(crate) fn should_announce(&self, t: Instant, default_announce_interval: Duration) -> bool {
         if let Some(last_announce_time) = self.last_announce_time {
             let min_next_announce_time =
                 last_announce_time + self.interval.unwrap_or(default_announce_interval);
@@ -54,7 +54,7 @@ impl TrackerSession {
     /// We may need peers before the next step in the announce interval.
     /// However, we can't do this too often, so we need to check our last
     /// announce time first.
-    fn can_announce(&self, t: Instant, default_announce_interval: Duration) -> bool {
+    pub(crate) fn can_announce(&self, t: Instant, default_announce_interval: Duration) -> bool {
         if let Some(last_announce_time) = self.last_announce_time {
             let min_next_announce_time = last_announce_time +
                 self.min_interval.or(self.min_interval).unwrap_or(default_announce_interval);

@@ -8,6 +8,7 @@
 
 //! Reth bittorrent support.
 
+pub mod alert;
 pub(crate) mod avg;
 pub mod bitfield;
 mod bittorrent;

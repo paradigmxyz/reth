@@ -13,18 +13,18 @@ pub(crate) const BLOCK_LEN: u32 = 0x4000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct BlockInfo {
     /// The index of the piece of which this is a block.
-    pub piece_index: PieceIndex,
+    pub(crate) piece_index: PieceIndex,
     /// The zero-based byte offset into the piece.
-    pub offset: u32,
+    pub(crate) offset: u32,
     /// The block's length in bytes. Always 16 KiB (0x4000 bytes) or less, for
     /// now.
-    pub len: u32,
+    pub(crate) len: u32,
 }
 
 impl BlockInfo {
     /// Returns the index of the block within its piece, assuming the default
     /// block length of 16 KiB.
-    pub fn index_in_piece(&self) -> usize {
+    pub(crate) fn index_in_piece(&self) -> usize {
         (self.offset / BLOCK_LEN) as usize
     }
 }
@@ -62,21 +62,21 @@ pub(crate) fn block_count(piece_len: u32) -> usize {
 /// A piece block that contains the block's metadata and data.
 pub(crate) struct Block {
     /// The index of the piece of which this is a block.
-    pub piece_index: PieceIndex,
+    pub(crate) piece_index: PieceIndex,
     /// The zero-based byte offset into the piece.
-    pub offset: u32,
+    pub(crate) offset: u32,
     /// The actual raw data of the block.
-    pub data: BlockData,
+    pub(crate) data: BlockData,
 }
 
 impl Block {
     /// Constructs a new block based on the metadata and data.
-    pub fn new(info: BlockInfo, data: impl Into<BlockData>) -> Self {
+    pub(crate) fn new(info: BlockInfo, data: impl Into<BlockData>) -> Self {
         Self { piece_index: info.piece_index, offset: info.offset, data: data.into() }
     }
 
     /// Returns a [`BlockInfo`] representing the metadata of this block.
-    pub fn info(&self) -> BlockInfo {
+    pub(crate) fn info(&self) -> BlockInfo {
         BlockInfo {
             piece_index: self.piece_index,
             offset: self.offset,
@@ -108,7 +108,7 @@ impl BlockData {
     /// # Panics
     ///
     /// This method panics if the block is not owned and is in the cache.
-    pub fn into_owned(self) -> Vec<u8> {
+    pub(crate) fn into_owned(self) -> Vec<u8> {
         match self {
             Self::Owned(b) => b,
             _ => panic!("cannot move block out of cache"),

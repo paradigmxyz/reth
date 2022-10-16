@@ -1,6 +1,6 @@
 use std::fmt;
 
-pub use tokio::{io::Error as IoError, sync::mpsc::error::SendError};
+pub(crate) use tokio::{io::Error as IoError, sync::mpsc::error::SendError};
 
 pub(crate) type PeerResult<T> = std::result::Result<T, PeerError>;
 

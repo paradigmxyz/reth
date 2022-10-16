@@ -32,7 +32,7 @@ pub(crate) struct PieceDownload {
 
 impl PieceDownload {
     /// Creates a new piece download instance for the given piece.
-    pub fn new(index: PieceIndex, len: u32) -> Self {
+    pub(crate) fn new(index: PieceIndex, len: u32) -> Self {
         let block_count = block_count(len);
         let mut blocks = Vec::new();
         blocks.resize_with(block_count, Default::default);
@@ -40,13 +40,13 @@ impl PieceDownload {
     }
 
     /// Returns the index of the piece that is downloaded.
-    pub fn piece_index(&self) -> PieceIndex {
+    pub(crate) fn piece_index(&self) -> PieceIndex {
         self.index
     }
 
     /// Picks the requested number of blocks or fewer, if fewer are remaining.
     /// If we're in end game mode, we ignore blocks requested by other peers.
-    pub fn pick_blocks(
+    pub(crate) fn pick_blocks(
         &mut self,
         count: usize,
         pick_buf: &mut Vec<BlockInfo>,
@@ -116,7 +116,7 @@ impl PieceDownload {
     ///
     /// The previous status of the block is returned. This can be used to check
     /// whether the block has already been downloaded, for example.
-    pub fn received_block(&mut self, block: &BlockInfo) -> BlockStatus {
+    pub(crate) fn received_block(&mut self, block: &BlockInfo) -> BlockStatus {
         trace!("Received piece {} block {:?}", self.index, block);
 
         // TODO(https://github.com/mandreyel/cratetorrent/issues/16): this
@@ -139,7 +139,7 @@ impl PieceDownload {
     }
 
     /// Marks all blocks free to be requested again.
-    pub fn free_all_blocks(&mut self) {
+    pub(crate) fn free_all_blocks(&mut self) {
         trace!("Canceling all blocks in piece {}", self.index);
         for block in self.blocks.iter_mut() {
             *block = BlockStatus::Free;
@@ -147,7 +147,7 @@ impl PieceDownload {
     }
 
     /// Marks a previously requested block free to request again.
-    pub fn free_block(&mut self, block: &BlockInfo) {
+    pub(crate) fn free_block(&mut self, block: &BlockInfo) {
         trace!("Canceling request for piece {} block {:?}", self.index, block);
 
         // TODO(https://github.com/mandreyel/cratetorrent/issues/16): this

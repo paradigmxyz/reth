@@ -138,7 +138,7 @@ impl Torrent {
     /// For a single file, there is a path validity check and then the file is
     /// opened. For multi-file torrents, if there are any subdirectories in the
     /// torrent archive, they are created and all files are opened.
-    pub fn new(
+    pub(crate) fn new(
         info: StorageInfo,
         piece_hashes: Vec<u8>,
         torrent_tx: torrent::Sender,
@@ -171,7 +171,7 @@ impl Torrent {
                 if let Some(subdir) = path.parent() {
                     if !subdir.exists() {
                         info!("Creating torrent subdir {:?}", subdir);
-                        fs::create_dir_all(&subdir).map_err(|e| {
+                        fs::create_dir_all(subdir).map_err(|e| {
                             error!("Failed to create subdir {:?}", subdir);
                             NewTorrentError::Io(e)
                         })?;
@@ -200,7 +200,7 @@ impl Torrent {
         })
     }
 
-    pub fn write_block(&mut self, info: BlockInfo, data: Vec<u8>) -> Result<()> {
+    pub(crate) fn write_block(&mut self, info: BlockInfo, data: Vec<u8>) -> Result<()> {
         trace!("Saving block {} to disk", info);
 
         let piece_index = info.piece_index;
@@ -236,7 +236,7 @@ impl Torrent {
                 if is_piece_valid {
                     debug!("Piece {} is valid, writing to disk", piece_index);
 
-                    if let Err(e) = piece.write(torrent_piece_offset, &*ctx.files) {
+                    if let Err(e) = piece.write(torrent_piece_offset, &ctx.files) {
                         error!("Error writing piece {} to disk: {}", piece_index, e);
                         // TODO(https://github.com/mandreyel/cratetorrent/issues/23):
                         // also place back piece write buffer in torrent and
@@ -293,7 +293,7 @@ impl Torrent {
         let hash_slice = &self.piece_hashes[hash_pos..hash_pos + 20];
         let mut expected_hash = [0; 20];
         expected_hash.copy_from_slice(hash_slice);
-        debug!("Piece {} expected hash {}", piece_index, hex::encode(&expected_hash));
+        debug!("Piece {} expected hash {}", piece_index, hex::encode(expected_hash));
 
         let len = self.info.piece_len(piece_index);
         debug!("Piece {} is {} bytes long", piece_index, len);
@@ -323,7 +323,7 @@ impl Torrent {
     /// For now, this is simplified in that we don't pull in blocks from the
     /// next piece. Later, we will make the read cache line size configurable
     /// and it will be applied across piece boundaries.
-    pub fn read_block(&self, block_info: BlockInfo, result_tx: peer::Sender) -> Result<()> {
+    pub(crate) fn read_block(&self, block_info: BlockInfo, result_tx: peer::Sender) -> Result<()> {
         trace!("Reading {} from disk", block_info);
 
         let piece_index = block_info.piece_index;

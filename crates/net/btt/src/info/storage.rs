@@ -70,17 +70,17 @@ pub struct FileSlice {
 /// Information about a torrent's storage details, such as the piece count and
 /// length, download length, etc.
 #[derive(Clone, Debug)]
-pub struct StorageInfo {
+pub(crate) struct StorageInfo {
     /// The number of pieces in the torrent.
-    pub piece_count: usize,
+    pub(crate) piece_count: usize,
     /// The nominal length of a piece.
-    pub piece_len: u32,
+    pub(crate) piece_len: u32,
     /// The length of the last piece in torrent, which may differ from the
     /// normal piece length if the download size is not an exact multiple of the
     /// piece length.
-    pub last_piece_len: u32,
+    pub(crate) last_piece_len: u32,
     /// The sum of the length of all files in the torrent.
-    pub download_len: u64,
+    pub(crate) download_len: u64,
     /// The download destination directory of the torrent.
     ///
     /// In case of single file downloads, this is the directory where the file
@@ -91,14 +91,14 @@ pub struct StorageInfo {
     /// across the download directory, which is an annoyance we want to avoid.
     /// E.g. downloading files into ~/Downloads/<torrent> instead of just
     /// ~/Downloads.
-    pub download_dir: PathBuf,
+    pub(crate) download_dir: PathBuf,
     /// All files in torrent.
-    pub files: Vec<FileInfo>,
+    pub(crate) files: Vec<FileInfo>,
 }
 
 impl StorageInfo {
     /// Extracts storage related information from the torrent metainfo.
-    pub fn new(metainfo: &Metainfo, download_dir: PathBuf) -> Self {
+    pub(crate) fn new(metainfo: &Metainfo, download_dir: PathBuf) -> Self {
         let piece_count = metainfo.piece_count();
         let download_len = metainfo.download_len();
         let piece_len = metainfo.piece_len;
@@ -127,7 +127,7 @@ impl StorageInfo {
     /// Panics if the piece index is invalid. Validation must happen at the
     /// protocol level. The internals of the engine work on the assumption that
     /// piece indices are valid.
-    pub fn files_intersecting_piece(&self, index: PieceIndex) -> Range<FileIndex> {
+    pub(crate) fn files_intersecting_piece(&self, index: PieceIndex) -> Range<FileIndex> {
         let piece_offset = index as u64 * self.piece_len as u64;
         let piece_end = piece_offset + self.piece_len(index) as u64;
         self.files_intersecting_bytes(piece_offset..piece_end)
@@ -136,7 +136,7 @@ impl StorageInfo {
     /// Returns the files that overlap with the given left-inclusive range of
     /// bytes, where `bytes.start` is the offset and `bytes.end` is one past the
     /// last byte offset.
-    pub fn files_intersecting_bytes(&self, byte_range: Range<u64>) -> Range<FileIndex> {
+    pub(crate) fn files_intersecting_bytes(&self, byte_range: Range<u64>) -> Range<FileIndex> {
         debug_assert_ne!(self.files.len(), 0);
         if self.files.len() == 1 {
             // when torrent only has one file, only that file can be returned
@@ -186,7 +186,7 @@ impl StorageInfo {
     }
 
     /// Returns the piece's absolute offset in the torrent.
-    pub fn torrent_piece_offset(&self, index: PieceIndex) -> u64 {
+    pub(crate) fn torrent_piece_offset(&self, index: PieceIndex) -> u64 {
         index as u64 * self.piece_len as u64
     }
 
@@ -197,7 +197,7 @@ impl StorageInfo {
     /// Panics if the piece index is invalid. Validation must happen at the
     /// protocol level. The internals of the engine work on the assumption that
     /// piece indices are valid.
-    pub fn piece_len(&self, index: PieceIndex) -> u32 {
+    pub(crate) fn piece_len(&self, index: PieceIndex) -> u32 {
         assert!(index < self.piece_count, "piece index out of range");
         if index == self.piece_count - 1 {
             self.last_piece_len

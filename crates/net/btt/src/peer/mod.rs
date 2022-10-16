@@ -8,10 +8,24 @@
 //! Each peer session is spawned within a torrent and cannot be used without
 //! one, due to making use of shared data in torrent.
 
-use crate::{bitfield::BitField, block::{Block, BlockInfo}, counter::ThruputCounters, disk, download::PieceDownload, error::Error, info::PieceIndex, peer::{
-    error::{PeerError, PeerResult},
-    state::{ConnectionState, SessionContext, SessionState},
-}, piece::Piece, proto::{Handshake, PeerCodec, PeerMessage, PeerRequest}, sha1::PeerId, torrent::{self, TorrentContext}};
+use crate::{
+    alert::Alert,
+    bitfield::BitField,
+    block::{Block, BlockInfo},
+    counter::ThruputCounters,
+    disk,
+    download::{BlockStatus, PieceDownload},
+    error::Error,
+    info::PieceIndex,
+    peer::{
+        error::{PeerError, PeerResult},
+        state::{ConnectionState, SessionContext, SessionState},
+    },
+    piece::Piece,
+    proto::{Handshake, PeerCodec, PeerMessage, PeerRequest},
+    sha1::PeerId,
+    torrent::{self, TorrentContext},
+};
 use futures::{stream::SplitSink, SinkExt, StreamExt};
 use std::{
     collections::HashSet,
@@ -29,10 +43,9 @@ use tokio::{
 };
 use tokio_util::codec::{Framed, FramedParts};
 use tracing::{debug, error, info, trace, warn};
-use crate::download::BlockStatus;
 
 pub(crate) mod error;
-mod state;
+pub(crate) mod state;
 
 /// After this timeout if the peers haven't become intereseted in each other,
 /// the connection is severed.
@@ -129,19 +142,19 @@ pub(crate) struct PeerSession {
 #[derive(Debug)]
 pub(super) struct PeerInfo {
     /// The IP-port pair of the peer.
-    pub addr: SocketAddr,
+    pub(crate) addr: SocketAddr,
     /// Peer's 20 byte BitTorrent id. Updated when the peer sends us its peer
     /// id, in the handshake.
-    pub id: Option<PeerId>,
+    pub(crate) id: Option<PeerId>,
     /// All pieces peer has, updated when it announces to us a new piece.
     ///
     /// Defaults to all pieces set to missing.
-    pub pieces: BitField,
+    pub(crate) pieces: BitField,
     /// A cache of the pieces that the peer has available.
     ///
     /// This is equivalent to `self.pieces.count_ones()` and is updated every
     /// time the peer sends us an announcement of a new piece.
-    pub piece_count: usize,
+    pub(crate) piece_count: usize,
 }
 
 impl PeerSession {
@@ -151,7 +164,7 @@ impl PeerSession {
     ///
     /// This constructor only initializes the session components but does not
     /// actually start it. See [`Self::start`].
-    pub fn new(torrent: Arc<TorrentContext>, addr: SocketAddr) -> (Self, Sender) {
+    pub(crate) fn new(torrent: Arc<TorrentContext>, addr: SocketAddr) -> (Self, Sender) {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let piece_count = torrent.storage.piece_count;
         (
@@ -161,7 +174,7 @@ impl PeerSession {
                 cmd_rx,
                 peer: PeerInfo {
                     addr,
-                    pieces: BitField::new_all_clear( piece_count),
+                    pieces: BitField::new_all_clear(piece_count),
                     piece_count: 0,
                     id: Default::default(),
                 },
@@ -178,7 +191,7 @@ impl PeerSession {
     /// This method tries to connect to the peer at the address given in the
     /// constructor, send a handshake, and start the session.
     /// It returns if the connection is closed or an error occurs.
-    pub async fn start_outbound(&mut self) -> PeerResult<()> {
+    pub(crate) async fn start_outbound(&mut self) -> PeerResult<()> {
         // establish the TCP connection
         self.ctx.set_connection_state(ConnectionState::Connecting);
         let socket = TcpStream::connect(self.peer.addr).await?;
@@ -192,7 +205,7 @@ impl PeerSession {
     /// The method waits for the peer to send its handshake, responds
     /// with a handshake, and starts the session.
     /// It returns if the connection is closed or an error occurs.
-    pub async fn start_inbound(&mut self, socket: TcpStream) -> PeerResult<()> {
+    pub(crate) async fn start_inbound(&mut self, socket: TcpStream) -> PeerResult<()> {
         self.ctx.set_connection_state(ConnectionState::Connecting);
         let socket = Framed::new(socket, PeerCodec::default());
         self.start(socket, Direction::Inbound).await
@@ -274,6 +287,11 @@ impl PeerSession {
                     addr: self.peer.addr,
                     info: self.session_info(),
                 })?;
+                self.torrent.alert_tx.send(Alert::Error(Error::Peer {
+                    id: self.torrent.id,
+                    addr: self.peer.addr,
+                    error: e,
+                }))?;
             }
         } else {
             self.ctx.set_connection_state(ConnectionState::Disconnected);
@@ -792,30 +810,18 @@ impl PeerSession {
 
         // try to find the piece to which this block corresponds
         // and mark the block in piece as downloaded
-        let prev_status = match self
-            .torrent
-            .downloads
-            .read()
-            .await
-            .get(&block_info.piece_index)
-        {
-            Some(download) => {
-                download.write().await.received_block(&block_info)
-            }
+        let prev_status = match self.torrent.downloads.read().await.get(&block_info.piece_index) {
+            Some(download) => download.write().await.received_block(&block_info),
             None => {
                 self.ctx.record_waste(block_info.len);
-                return Ok(());
+                return Ok(())
             }
         };
 
         // don't process the block if already downloaded
         if prev_status == BlockStatus::Received {
             self.ctx.record_waste(block_info.len);
-            info!(
-
-                "Already downloaded block {}",
-                block_info
-            );
+            info!("Already downloaded block {}", block_info);
         } else {
             // update download stats
             self.ctx.update_download_stats(block_info.len);
@@ -840,26 +846,26 @@ impl PeerSession {
     /// [`Self::run`]. This is when the block is actually sent to peer, if by
     /// the request is not cancelled by then.
     async fn handle_request_msg(&mut self, block_info: BlockInfo) -> PeerResult<()> {
-        info!( "Got request: {:?}", block_info);
+        info!("Got request: {:?}", block_info);
 
         // before processing request validate block info
         self.validate_block_info(&block_info)?;
 
         // check if peer is not choked: if they are, they can't request blocks
         if self.ctx.state.is_peer_choked {
-            warn!( "Choked peer sent request");
-            return Err(PeerError::RequestWhileChoked);
+            warn!("Choked peer sent request");
+            return Err(PeerError::RequestWhileChoked)
         }
 
         // check if peer is not already requesting this block
         if self.incoming_requests.contains(&block_info) {
             // TODO: if peer keeps spamming us, close connection
-            warn!( "Peer sent duplicate block request");
-            return Ok(());
+            warn!("Peer sent duplicate block request");
+            return Ok(())
         }
 
-        info!( "Issuing disk IO read for block {}",
-        block_info); self.incoming_requests.insert(block_info);
+        info!("Issuing disk IO read for block {}", block_info);
+        self.incoming_requests.insert(block_info);
 
         // validate and save the block to disk by sending a write command to the
         // disk task
@@ -880,28 +886,28 @@ impl PeerSession {
         block: Block,
     ) -> PeerResult<()> {
         let info = block.info();
-        info!( "Read from disk {}", info);
+        info!("Read from disk {}", info);
 
         // remove peer's pending request
         let was_present = self.incoming_requests.remove(&info);
 
         // check if the request hasn't been canceled yet
         if !was_present {
-            warn!( "No matching request entry for {}", info);
-            return Ok(());
+            warn!("No matching request entry for {}", info);
+            return Ok(())
         }
 
         // if it hasn't, send the data to peer
-        info!( "Sending {}", info);
+        info!("Sending {}", info);
         sink.send(PeerMessage::Piece {
             piece: Piece {
                 index: block.piece_index as u32,
                 begin: block.offset,
-                data: block.data.into_owned().into()
-            }
+                data: block.data.into_owned().into(),
+            },
         })
-            .await?;
-        info!( "Sent {}", info);
+        .await?;
+        info!("Sent {}", info);
 
         // update download stats
         self.ctx.update_upload_stats(info.len);
@@ -916,7 +922,7 @@ impl PeerSession {
         sink: &mut SplitSink<Framed<TcpStream, PeerCodec>, PeerMessage>,
         piece_index: PieceIndex,
     ) -> PeerResult<()> {
-        info!( "Peer has piece {}", piece_index);
+        info!("Peer has piece {}", piece_index);
 
         // validate piece index
         self.validate_piece_index(piece_index)?;
@@ -925,19 +931,15 @@ impl PeerSession {
         // Otherwise we'd record duplicate pieces in the swarm in the below
         // availability registration.
         if self.peer.pieces[piece_index] {
-            return Ok(());
+            return Ok(())
         }
 
         self.peer.pieces.set(piece_index, true);
         self.peer.piece_count += 1;
 
         // need to recalculate interest with each received piece
-        let is_interested = self
-            .torrent
-            .piece_picker
-            .write()
-            .await
-            .register_peer_piece(piece_index);
+        let is_interested =
+            self.torrent.piece_picker.write().await.register_peer_piece(piece_index);
 
         // we may have become interested in peer
         self.update_interest(sink, is_interested).await
@@ -1068,9 +1070,9 @@ enum Direction {
 #[derive(Debug)]
 pub(crate) struct SessionTick {
     /// A snapshot of the session state.
-    pub state: SessionState,
+    pub(crate) state: SessionState,
     /// Various transfer statistics.
-    pub counters: ThruputCounters,
+    pub(crate) counters: ThruputCounters,
     /// The number of pieces the peer has available.
-    pub piece_count: usize,
+    pub(crate) piece_count: usize,
 }

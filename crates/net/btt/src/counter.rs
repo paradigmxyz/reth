@@ -8,13 +8,13 @@ use std::ops::AddAssign;
 pub(crate) struct ThruputCounters {
     /// Counts protocol chatter, which are the exchanged non-payload related
     /// messages (such as 'unchoke', 'have', 'request', etc).
-    pub protocol: ChannelCounter,
+    pub(crate) protocol: ChannelCounter,
     /// Counts the exchanged block bytes. This only include the block's data,
     /// minus the header, which counts towards the protocol chatter.
-    pub payload: ChannelCounter,
+    pub(crate) payload: ChannelCounter,
     /// Counts the (downloaded) payload bytes that were wasted (i.e. duplicate
     /// blocks that had to be discarded).
-    pub waste: Counter,
+    pub(crate) waste: Counter,
 }
 
 impl ThruputCounters {
@@ -22,7 +22,7 @@ impl ThruputCounters {
     ///
     /// This should be called once a second to provide accurate per second
     /// thruput rates.
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.protocol.reset();
         self.payload.reset();
         self.waste.reset();
@@ -41,8 +41,8 @@ impl AddAssign<&ThruputCounters> for ThruputCounters {
 /// payload transfer), both the ingress and engress sides.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ChannelCounter {
-    pub down: Counter,
-    pub up: Counter,
+    pub(crate) down: Counter,
+    pub(crate) up: Counter,
 }
 
 impl ChannelCounter {
@@ -50,7 +50,7 @@ impl ChannelCounter {
     ///
     /// This should be called once a second to provide accurate per second
     /// thruput rates.
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.down.reset();
         self.up.reset();
     }
@@ -90,7 +90,7 @@ impl Counter {
     const WEIGHT: u64 = 5;
 
     /// Records some bytes that were transferred.
-    pub fn add(&mut self, bytes: u64) {
+    pub(crate) fn add(&mut self, bytes: u64) {
         self.total += bytes;
         self.round += bytes;
     }
@@ -100,7 +100,7 @@ impl Counter {
     /// # Important
     ///
     /// This assumes that this function is called once a second.
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         // https://github.com/arvidn/libtorrent/blob/master/src/stat.cpp
         self.avg = (self.avg * (Self::WEIGHT - 1) as f64 / Self::WEIGHT as f64) +
             (self.round as f64 / Self::WEIGHT as f64);
@@ -112,22 +112,22 @@ impl Counter {
     }
 
     /// Returns the 5 second moving average, rounded to the nearest integer.
-    pub fn avg(&self) -> u64 {
+    pub(crate) fn avg(&self) -> u64 {
         self.avg.round() as u64
     }
 
     /// Returns the average recorded so far, rounded to the nearest integer.
-    pub fn peak(&self) -> u64 {
+    pub(crate) fn peak(&self) -> u64 {
         self.peak.round() as u64
     }
 
     /// Returns the total number recorded.
-    pub fn total(&self) -> u64 {
+    pub(crate) fn total(&self) -> u64 {
         self.total
     }
 
     /// Returns the number recorded in the current round.
-    pub fn round(&self) -> u64 {
+    pub(crate) fn round(&self) -> u64 {
         self.round
     }
 }
