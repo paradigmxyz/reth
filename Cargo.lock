@@ -2199,12 +2199,16 @@ dependencies = [
  "bytes",
  "crc",
  "ethers-core",
+ "futures",
  "hex",
  "hex-literal",
  "maplit",
+ "reth-ecies",
  "reth-primitives",
  "reth-rlp",
  "thiserror",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
