@@ -1,0 +1,43 @@
+[package]
+name = "reth-ecies"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+
+[dependencies]
+reth-rlp = { path = "../../common/rlp", features = ["derive", "ethereum-types", "std"] }
+reth-primitives = { path = "../../primitives" }
+
+futures = "0.3.24"
+thiserror = "1.0.37"
+tokio = { version = "1.21.2", features = ["full"] }
+tokio-stream = "0.1.11"
+tokio-util = { version = "0.7.4", features = ["codec"] }
+
+educe = "0.4.19"
+hex = "0.4.3"
+tracing = "0.1.37"
+
+# HeaderBytes
+generic-array = "0.14.6"
+typenum = "1.15.0"
+byteorder = "1.4.3"
+bytes = "1.2.1"
+
+# crypto
+rand = "0.8.5"
+ctr = "0.9.2"
+digest = "0.10.5"
+secp256k1 = { version = "0.24.0", features = ["global-context", "rand-std", "recovery"] }
+sha2 = "0.10.6"
+sha3 = "0.10.5"
+aes = "0.8.1"
+hmac = "0.12.1"
+block-padding = "0.3.2"
+cipher = { version = "0.4.3", features = ["block-padding"] }
+
+[dev-dependencies]
+hex-literal = "0.3.4"
+proptest = "1.0.0"
