@@ -24,9 +24,7 @@ pub trait Database {
 /// Read only transaction
 pub trait DbTx<'a> {
     /// Cursor GAT
-    type Cursor<T: Table>: DbCursorRO<'a, T>
-    where
-        Self: 'a;
+    type Cursor<T: Table>: DbCursorRO<'a, T>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<bool, Error>;
@@ -83,4 +81,41 @@ pub trait DbCursorRO<'tx, T: Table> {
         &mut self,
         start_key: T::Key,
     ) -> Result<IT, Error>;
+}
+
+/// Read only cursor over table
+pub trait DbCursorRW<'tx, T: Table>: DbCursorRO<'tx,T> {
+    /// Put change.
+    /// TODO implement write flags
+    fn put(&mut self, k: T::Key, v: T::Value/*, f: Option<WriteFlags>*/) -> Result<(), Error>;
+
+}
+
+
+/// DupSort Transaction
+pub trait DbDupCursorRO<'tx, T: DupSort> {
+
+    /// Returns the next `(key, value)` pair of a DUPSORT table.
+    fn next_dup(&mut self) -> PairResult<T>;
+
+    /// Returns the next `(key, value)` pair skipping the duplicates.
+    fn next_no_dup(&mut self) -> PairResult<T>;
+
+    /// Returns the next `value` of a duplicate `key`.
+    fn next_dup_val(&mut self) -> ValueOnlyResult<T>;
+
+    // /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
+    // fn walk_dup(
+    //     mut self,
+    //     key: T::Key,
+    //     subkey: T::SubKey,
+    // ) -> Result<impl Iterator<Item = Result<<T as Table>::Value, Error>>, Error> {
+    //     let start = self
+    //         .inner
+    //         .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+    //         .map_err(|e| Error::Internal(e.into()))?
+    //         .map(decode_one::<T>);
+
+    //     Ok(DupWalker { cursor: self, start })
+    // }
 }
