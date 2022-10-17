@@ -1,8 +1,9 @@
-use crate::{Bloom, Log, TxType, H256, U256};
+use crate::{Log, TxType, Bloom};
 use bytes::{Buf, BufMut, BytesMut};
-use reth_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
-use serde::{Deserialize, Serialize};
+use reth_rlp::{length_of_length, Decodable, Encodable};
+
 use std::cmp::Ordering;
+use reth_codecs::main_codec;
 
 /// Receipt containing result of transaction execution.
 #[main_codec]
@@ -17,7 +18,7 @@ pub struct Receipt {
     /// Gas used
     pub cumulative_gas_used: u64,
     /// Bloom filter.
-    pub bloom: H256,
+    pub bloom: Bloom,
     /// Log send from contracts.
     pub logs: Vec<Log>,
 }
@@ -47,11 +48,11 @@ impl Receipt {
     /// Returns the length of the receipt data.
     fn receipt_length(&self) -> usize {
         let rlp_head = self.receipt_rlp_header();
-        return length_of_length(rlp_head.payload_length) + rlp_head.payload_length
+        length_of_length(rlp_head.payload_length) + rlp_head.payload_length
     }
 
     /// Decodes the receipt payload
-    fn decode_receipt(mut buf: &mut &[u8], tx_type: TxType) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode_receipt(buf: &mut &[u8], tx_type: TxType) -> Result<Self, reth_rlp::DecodeError> {
         let b = &mut &**buf;
         let rlp_head = reth_rlp::Header::decode(b)?;
         if !rlp_head.list {
@@ -84,7 +85,7 @@ impl Encodable for Receipt {
         if matches!(self.tx_type, TxType::EIP1559 | TxType::EIP2930) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
-            payload_len + length_of_length(payload_len);
+            payload_len = length_of_length(payload_len);
         }
 
         payload_len
@@ -145,7 +146,9 @@ impl Decodable for Receipt {
             Ordering::Equal => {
                 Err(reth_rlp::DecodeError::Custom("an empty list is not a valid receipt encoding"))
             }
-            Ordering::Greater => Self::decode_receipt(buf, TxType::Legacy),
+            Ordering::Greater => {
+                Self::decode_receipt(buf, TxType::Legacy)
+            },
         }
     }
 }
@@ -153,7 +156,7 @@ impl Decodable for Receipt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Address;
+    use crate::{Address, H256};
     use ethers_core::{types::Bytes, utils::hex};
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
@@ -166,8 +169,8 @@ mod tests {
         let mut data = vec![];
         let receipt = Receipt {
             tx_type: TxType::Legacy,
-            bloom: H256::zero(),
-            cumulative_gas_used: 0x1u64.into(),
+            bloom: [0; 256].into(),
+            cumulative_gas_used: 0x1u64,
             logs: vec![Log {
                 address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
                 topics: vec![
@@ -180,7 +183,7 @@ mod tests {
                     )
                     .unwrap(),
                 ],
-                data: Bytes::from_str("0100ff").unwrap(),
+                data: Bytes::from_str("0100ff").unwrap().0,
             }],
             success: false,
         };
@@ -200,8 +203,8 @@ mod tests {
         // EIP658Receipt
         let expected = Receipt {
             tx_type: TxType::Legacy,
-            bloom: H256::zero(),
-            cumulative_gas_used: 0x1u64.into(),
+            bloom: [0; 256].into(),
+            cumulative_gas_used: 0x1u64,
             logs: vec![Log {
                 address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
                 topics: vec![
@@ -214,7 +217,7 @@ mod tests {
                     )
                     .unwrap(),
                 ],
-                data: Bytes::from_str("0100ff").unwrap(),
+                data: Bytes::from_str("0100ff").unwrap().0,
             }],
             success: false,
         };
