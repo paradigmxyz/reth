@@ -23,7 +23,11 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash>;
+    async fn add_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> PoolResult<TxHash>;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -32,6 +36,7 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Consumer: RPC
     async fn add_transactions(
         &self,
+        origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
@@ -91,6 +96,30 @@ pub struct NewTransactionEvent<T: PoolTransaction> {
 impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     fn clone(&self) -> Self {
         Self { subpool: self.subpool, transaction: self.transaction.clone() }
+    }
+}
+
+/// Where the transaction originates from.
+///
+/// Depending on where the transaction was picked up, it affects how the transaction is handled
+/// internally, e.g. limits for simultaneous transaction of one sender.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum TransactionOrigin {
+    /// Transaction is coming from a local source.
+    Local,
+    /// Transaction has been received externally.
+    ///
+    /// This is usually considered an "untrusted" source, for example received from another in the
+    /// network.
+    External,
+}
+
+// === impl TransactionOrigin ===
+
+impl TransactionOrigin {
+    /// Whether the transaction originates from a local source.
+    pub fn is_local(&self) -> bool {
+        matches!(self, TransactionOrigin::Local)
     }
 }
 
