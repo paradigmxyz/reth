@@ -10,6 +10,7 @@ fn zeroless_view(v: &impl AsRef<[u8]>) -> &[u8] {
 }
 
 impl Header {
+    /// Encodes the header into the `out` buffer.
     pub fn encode(&self, out: &mut dyn BufMut) {
         if self.payload_length < 56 {
             let code = if self.list { EMPTY_LIST_CODE } else { EMPTY_STRING_CODE };
@@ -21,6 +22,13 @@ impl Header {
             out.put_u8(code + len_be.len() as u8);
             out.put_slice(len_be);
         }
+    }
+
+    /// Returns the length of the encoded header
+    pub fn length(&self) -> usize {
+        let mut out = BytesMut::new();
+        self.encode(&mut out);
+        out.len()
     }
 }
 

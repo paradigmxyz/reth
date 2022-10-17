@@ -9,7 +9,7 @@ use std::{fmt, sync::Arc};
 /// unverified transactions. And by block production that needs to get transactions to execute in a
 /// new block.
 #[async_trait::async_trait]
-pub trait TransactionPool: Send + Sync {
+pub trait TransactionPool: Send + Sync + 'static {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 

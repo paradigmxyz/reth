@@ -5,6 +5,12 @@ use crate::{
 use reth_primitives::BlockNumber;
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
+///
+/// It is possible for multiple of these events to be emitted over the duration of a pipeline's
+/// execution since:
+///
+/// - Other stages may ask the pipeline to unwind
+/// - The pipeline will loop indefinitely unless a target block is set
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PipelineEvent {
     /// Emitted when a stage is about to be run.
@@ -15,16 +21,11 @@ pub enum PipelineEvent {
         stage_progress: Option<BlockNumber>,
     },
     /// Emitted when a stage has run a single time.
-    ///
-    /// It is possible for multiple of these events to be emitted over the duration of a pipeline's
-    /// execution:
-    /// - If the pipeline loops, the stage will be run again at some point
-    /// - If the stage exits early but has acknowledged that it is not entirely done
     Ran {
         /// The stage that was run.
         stage_id: StageId,
-        /// The result of executing the stage. If it is None then an error was encountered.
-        result: Option<ExecOutput>,
+        /// The result of executing the stage.
+        result: ExecOutput,
     },
     /// Emitted when a stage is about to be unwound.
     Unwinding {
@@ -34,13 +35,24 @@ pub enum PipelineEvent {
         input: UnwindInput,
     },
     /// Emitted when a stage has been unwound.
-    ///
-    /// It is possible for multiple of these events to be emitted over the duration of a pipeline's
-    /// execution, since other stages may ask the pipeline to unwind.
     Unwound {
         /// The stage that was unwound.
         stage_id: StageId,
-        /// The result of unwinding the stage. If it is None then an error was encountered.
-        result: Option<UnwindOutput>,
+        /// The result of unwinding the stage.
+        result: UnwindOutput,
+    },
+    /// Emitted when a stage encounters an error either during execution or unwinding.
+    Error {
+        /// The stage that encountered an error.
+        stage_id: StageId,
+    },
+    /// Emitted when a stage was skipped due to it's run conditions not being met:
+    ///
+    /// - The stage might have progressed beyond the point of our target block
+    /// - The stage might not need to be unwound since it has not progressed past the unwind target
+    /// - The stage requires that the pipeline has reached the tip, but it has not done so yet
+    Skipped {
+        /// The stage that was skipped.
+        stage_id: StageId,
     },
 }

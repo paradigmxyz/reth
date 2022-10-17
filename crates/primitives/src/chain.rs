@@ -1,6 +1,6 @@
 use crate::U256;
 use ethers_core::types::{ParseChainError, U64};
-use fastrlp::{Decodable, Encodable};
+use reth_rlp::{Decodable, Encodable};
 use std::{fmt, str::FromStr};
 
 /// Either a named or chain id or the actual id value
@@ -117,7 +117,7 @@ impl Encodable for Chain {
             Self::Id(id) => id.length(),
         }
     }
-    fn encode(&self, out: &mut dyn fastrlp::BufMut) {
+    fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         match self {
             Self::Named(chain) => u64::from(*chain).encode(out),
             Self::Id(id) => id.encode(out),
@@ -126,7 +126,7 @@ impl Encodable for Chain {
 }
 
 impl Decodable for Chain {
-    fn decode(buf: &mut &[u8]) -> Result<Self, fastrlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
         Ok(u64::decode(buf)?.into())
     }
 }
