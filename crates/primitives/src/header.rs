@@ -1,8 +1,10 @@
 use std::ops::Deref;
 
-use crate::{BlockNumber, Bytes, H160, H256, U256};
+use crate::{BlockNumber, H160, H256, U256};
+use reth_codecs::main_codec;
 
 /// Block header
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
@@ -43,7 +45,7 @@ pub struct Header {
     pub timestamp: u64,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
-    pub extra_data: Bytes,
+    pub extra_data: bytes::Bytes,
     /// A 256-bit hash which, combined with the
     /// nonce, proves that a sufficient amount of computation has been carried out on this block;
     /// formally Hm.

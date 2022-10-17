@@ -1,6 +1,8 @@
 use crate::{H256, U256};
+use reth_codecs::main_codec;
 
 /// Account saved in database
+#[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Account {
     /// Nonce.

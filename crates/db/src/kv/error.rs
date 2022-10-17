@@ -31,6 +31,6 @@ pub enum KVError {
     #[error("{0:?}")]
     InitTransaction(Error),
     /// Failed to decode or encode a key or value coming from a table..
-    #[error("{0:?}")]
-    InvalidValue(Option<String>),
+    #[error("Error decoding value.")]
+    InvalidValue,
 }
