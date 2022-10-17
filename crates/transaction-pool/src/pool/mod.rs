@@ -67,7 +67,7 @@ use crate::{
     error::PoolResult,
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
-    traits::{NewTransactionEvent, PoolTransaction},
+    traits::{NewTransactionEvent, PoolTransaction, TransactionOrigin},
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
@@ -166,6 +166,7 @@ where
     /// Add a single validated transaction into the pool.
     fn add_transaction(
         &self,
+        origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
@@ -180,6 +181,7 @@ where
                     propagate: false,
                     is_local: false,
                     timestamp: Instant::now(),
+                    origin,
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;
@@ -208,11 +210,12 @@ where
     /// Adds all transactions in the iterator to the pool, returning a list of results.
     pub fn add_transactions(
         &self,
+        origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
     ) -> Vec<PoolResult<TxHash>> {
         // TODO check pool limits
 
-        transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>()
+        transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>()
     }
 
     /// Notify all listeners about a new pending transaction.
