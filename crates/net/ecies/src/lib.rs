@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 #![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
