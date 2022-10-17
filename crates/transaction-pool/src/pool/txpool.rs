@@ -544,8 +544,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // We need to find out if the next transaction of the sender is considered pending
             //
             let mut has_parked_ancestor = if predecessor.is_none() {
-                 // the new transaction is the next one
-                 false
+                // the new transaction is the next one
+                false
             } else {
                 // SAFETY: the transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
@@ -931,7 +931,7 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        pool.pending_basefee = pool.minimal_protocol_basefee +  1;
+        pool.pending_basefee = pool.minimal_protocol_basefee + 1;
         let tx = MockTransaction::eip1559().inc_nonce().inc_limit();
         let first = f.validated(tx.clone());
 
