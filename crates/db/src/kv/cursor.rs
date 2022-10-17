@@ -5,7 +5,7 @@ use crate::{
     utils::*,
 };
 use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
-use reth_interfaces::db::{DbCursorRO, Error};
+use reth_interfaces::db::{DbCursorRO, DbDupCursorRO, DupWalker, Error, Walker, DbCursorRW, DbDupCursorRW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
@@ -67,10 +67,23 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         todo!()
     }
 
-    fn walk<IT: Iterator<Item = Result<(<T as Table>::Key, <T as Table>::Value), Error>>>(
+    fn walk(&'tx mut self, start_key: <T as Table>::Key) -> Result<Walker<'tx, T>, Error> {
+        let start = self
+            .inner
+            .set_range(start_key.encode().as_ref())
+            .map_err(|e| Error::Internal(e.into()))?
+            .map(decoder::<T>);
+
+        Ok(Walker::<'tx,T> { cursor: self, start })
+    }
+}
+
+impl<'tx, K: TransactionKind, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, K, T> {
+    fn put(
         &mut self,
-        start_key: <T as Table>::Key,
-    ) -> Result<IT, Error> {
+        k: <T as Table>::Key,
+        v: <T as Table>::Value, /* , f: Option<WriteFlags> */
+    ) -> Result<(), Error> {
         todo!()
     }
 }
@@ -133,22 +146,22 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         decode!(self.inner.get_current())
     }
 
-    /// Returns an iterator starting at a key greater or equal than `start_key`.
-    pub fn walk(
-        mut self,
-        start_key: T::Key,
-    ) -> Result<impl Iterator<Item = Result<(<T as Table>::Key, <T as Table>::Value), Error>>, Error>
-    where
-        T::Key: Decode,
-    {
-        let start = self
-            .inner
-            .set_range(start_key.encode().as_ref())
-            .map_err(|e| Error::Internal(e.into()))?
-            .map(decoder::<T>);
+    // /// Returns an iterator starting at a key greater or equal than `start_key`.
+    // pub fn walk(
+    //     mut self,
+    //     start_key: T::Key,
+    // ) -> Result<impl Iterator<Item = Result<(<T as Table>::Key, <T as Table>::Value), Error>>,
+    // Error> where
+    //     T::Key: Decode,
+    // {
+    //     let start = self
+    //         .inner
+    //         .set_range(start_key.encode().as_ref())
+    //         .map_err(|e| Error::Internal(e.into()))?
+    //         .map(decoder::<T>);
 
-        Ok(Walker { cursor: self, start })
-    }
+    //     Ok(Walker { cursor: self, start })
+    // }
 }
 
 impl<'tx, T: Table> Cursor<'tx, RW, T> {
@@ -160,29 +173,19 @@ impl<'tx, T: Table> Cursor<'tx, RW, T> {
     }
 }
 
-impl<'txn, K, T> Cursor<'txn, K, T>
-where
-    K: TransactionKind,
-    T: DupSort,
-{
+impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
-    pub fn next_dup(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
+    fn next_dup(&mut self) -> PairResult<T> {
         decode!(self.inner.next_dup())
     }
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
-    pub fn next_no_dup(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
+    fn next_no_dup(&mut self) -> PairResult<T> {
         decode!(self.inner.next_nodup())
     }
 
     /// Returns the next `value` of a duplicate `key`.
-    pub fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
+    fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
         self.inner
             .next_dup()
             .map_err(|e| Error::Internal(e.into()))?
@@ -191,61 +194,24 @@ where
     }
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
-    pub fn walk_dup(
-        mut self,
-        key: T::Key,
-        subkey: T::SubKey,
-    ) -> Result<impl Iterator<Item = Result<<T as Table>::Value, Error>>, Error> {
+    fn walk_dup(&'tx mut self, key: T::Key, subkey: T::SubKey) -> Result<DupWalker<'tx, T>, Error> {
         let start = self
             .inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
             .map_err(|e| Error::Internal(e.into()))?
             .map(decode_one::<T>);
 
-        Ok(DupWalker { cursor: self, start })
+        Ok(DupWalker::<'tx,T> { cursor: self, start })
     }
 }
 
-/// Provides an iterator to `Cursor` when handling `Table`.
-#[derive(Debug)]
-pub struct Walker<'a, K: TransactionKind, T: Table> {
-    /// Cursor to be used to walk through the table.
-    pub cursor: Cursor<'a, K, T>,
-    /// `(key, value)` where to start the walk.
-    pub start: IterPairResult<T>,
-}
 
-impl<'tx, K: TransactionKind, T: Table> std::iter::Iterator for Walker<'tx, K, T>
-where
-    T::Key: Decode,
-{
-    type Item = Result<(T::Key, T::Value), Error>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let start = self.start.take();
-        if start.is_some() {
-            return start
-        }
-
-        self.cursor.next().transpose()
-    }
-}
-
-/// Provides an iterator to `Cursor` when handling a `DupSort` table.
-#[derive(Debug)]
-pub struct DupWalker<'a, K: TransactionKind, T: DupSort> {
-    /// Cursor to be used to walk through the table.
-    pub cursor: Cursor<'a, K, T>,
-    /// Value where to start the walk.
-    pub start: Option<Result<T::Value, Error>>,
-}
-
-impl<'tx, K: TransactionKind, T: DupSort> std::iter::Iterator for DupWalker<'tx, K, T> {
-    type Item = Result<T::Value, Error>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let start = self.start.take();
-        if start.is_some() {
-            return start
-        }
-        self.cursor.next_dup_val().transpose()
+impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
+    fn put(
+        &mut self,
+        k: <T>::Key,
+        v: <T>::Value, /* , f: Option<WriteFlags> */
+    ) -> Result<(), Error> {
+        todo!()
     }
 }

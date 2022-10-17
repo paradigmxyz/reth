@@ -1,4 +1,4 @@
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub)]
+#![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
