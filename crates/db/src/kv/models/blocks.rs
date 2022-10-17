@@ -20,9 +20,9 @@ pub type HeaderHash = H256;
 /// element as BlockNumber, helps out with querying/sorting.
 ///
 /// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
-pub struct BlockNumHash((BlockNumber, BlockHash));
+pub struct BlockNumHash(pub (BlockNumber, BlockHash));
 
 impl BlockNumHash {
     /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]

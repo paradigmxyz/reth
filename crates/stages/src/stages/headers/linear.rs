@@ -39,13 +39,13 @@ impl Downloader for LinearDownloader {
 
         let mut out = Vec::<HeaderLocked>::new();
         loop {
-            match self.download_batch(&head, tip, &mut stream, &mut out).await {
+            match self.download_batch(head, tip, &mut stream, &mut out).await {
                 Ok(done) => {
                     if done {
                         return Ok(out)
                     }
                 }
-                Err(e) if e.is_retryable() && retries > 0 => {
+                Err(e) if e.is_retryable() && retries > 1 => {
                     retries -= 1;
                 }
                 Err(e) => return Err(e),
@@ -132,85 +132,89 @@ impl LinearDownloader {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::stage::tests::utils, DownloadError, LinearDownloader};
+    use super::{super::stage::tests::utils, DownloadError, Downloader, LinearDownloader};
     use assert_matches::assert_matches;
     use rand::{self, Rng};
-    use reth_interfaces::stages::{HeaderRequest, MessageStream};
+    use reth_interfaces::stages::HeaderRequest;
     use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
     use std::sync::Arc;
-    use tokio::sync::mpsc::channel;
-    use tokio_stream::{pending, wrappers::ReceiverStream, StreamExt};
+    use tokio::sync::{broadcast, mpsc, oneshot};
+    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     #[tokio::test]
     async fn download_batch_timeout() {
-        let (tx, rx) = channel(1);
-        let (req_tx, _req_rx) = channel(1);
+        let (tx, rx) = oneshot::channel();
+        let (req_tx, req_rx) = mpsc::channel(1);
+        let (_res_tx, res_rx) = broadcast::channel(1);
         let (batch_size, request_retries, request_timeout) = (1, 1, 1);
+
         let downloader = LinearDownloader {
             consensus: Arc::new(utils::TestConsensus::new()),
-            client: Arc::new(utils::TestHeaderClient::new(req_tx)),
+            client: Arc::new(utils::TestHeaderClient::new(req_tx, res_rx)),
             batch_size,
             request_retries,
             request_timeout,
         };
 
-        let mut stream = Box::pin(pending()) as MessageStream<utils::HeaderResponse>;
         tokio::spawn(async move {
-            let result = downloader
-                .download_batch(&HeaderLocked::default(), H256::zero(), &mut stream, &mut vec![])
-                .await;
-            tx.send(result).await.unwrap();
+            let result = downloader.download(&HeaderLocked::default(), H256::zero()).await;
+            tx.send(result).expect("failed to forward download response");
         });
 
-        assert_matches!(
-            *ReceiverStream::new(rx).collect::<Vec<Result<bool, DownloadError>>>().await,
-            [Err(DownloadError::NoHeaderResponse { .. })]
-        );
+        let requests = ReceiverStream::new(req_rx).collect::<Vec<_>>().await;
+        assert_eq!(requests.len(), request_retries);
+        assert_matches!(rx.await, Ok(Err(DownloadError::NoHeaderResponse { .. })));
     }
 
     #[tokio::test]
     async fn download_batch_timeout_on_invalid_messages() {
-        let (tx, rx) = channel(1);
-        let (req_tx, req_rx) = channel(3);
-        let (res_tx, res_rx) = channel(3);
-        let (batch_size, request_retries, request_timeout) = (1, 3, 5);
+        let (tx, rx) = oneshot::channel();
+        let (req_tx, req_rx) = mpsc::channel(1);
+        let (res_tx, res_rx) = broadcast::channel(1);
+        let (batch_size, request_retries, request_timeout) = (1, 5, 1);
+
+        let client = Arc::new(utils::TestHeaderClient::new(req_tx, res_rx));
         let downloader = LinearDownloader {
             consensus: Arc::new(utils::TestConsensus::new()),
-            client: Arc::new(utils::TestHeaderClient::new(req_tx)),
+            client: client.clone(),
             batch_size,
             request_retries,
             request_timeout,
         };
 
-        let mut stream =
-            Box::pin(ReceiverStream::new(res_rx)) as MessageStream<utils::HeaderResponse>;
         tokio::spawn(async move {
-            let result = downloader
-                .download_batch(&HeaderLocked::default(), H256::zero(), &mut stream, &mut vec![])
-                .await;
-            tx.send(result).await.unwrap();
+            let result = downloader.download(&HeaderLocked::default(), H256::zero()).await;
+            tx.send(result).expect("failed to forward download response");
         });
 
+        let mut num_of_reqs = 0;
         let mut last_req_id = None;
-        let mut req_stream = ReceiverStream::new(req_rx);
+        let mut req_stream = Box::pin(ReceiverStream::new(req_rx));
         while let Some((id, _req)) = req_stream.next().await {
             // Since the receiving channel filters by id and message length -
             // randomize the input to the tested filter
-            res_tx.send((id.saturating_add(id % 2), vec![])).await.unwrap();
+            res_tx.send((id.saturating_add(id % 2), vec![])).expect("failed to send response");
+            num_of_reqs += 1;
             last_req_id = Some(id);
+
+            if num_of_reqs == request_retries {
+                drop(res_tx);
+                break
+            }
         }
 
+        assert_eq!(num_of_reqs, request_retries);
         assert_matches!(
-            *ReceiverStream::new(rx).collect::<Vec<Result<bool, DownloadError>>>().await,
-            [Err(DownloadError::NoHeaderResponse { request_id })] if request_id == last_req_id.unwrap()
+            rx.await,
+            Ok(Err(DownloadError::NoHeaderResponse { request_id })) if request_id == last_req_id.unwrap()
         );
     }
 
     #[tokio::test]
     async fn download_batch_propagates_consensus_error() {
-        let (tx, rx) = channel(1);
-        let (req_tx, req_rx) = channel(3);
-        let (res_tx, res_rx) = channel(3);
+        let (tx, rx) = oneshot::channel();
+        let (req_tx, req_rx) = mpsc::channel(1);
+        let (res_tx, res_rx) = broadcast::channel(1);
         let (batch_size, request_retries, request_timeout) = (1, 3, 5);
 
         let mut head_block = Header::default();
@@ -223,27 +227,30 @@ mod tests {
 
         let downloader = LinearDownloader {
             consensus: Arc::new(consensus),
-            client: Arc::new(utils::TestHeaderClient::new(req_tx)),
+            client: Arc::new(utils::TestHeaderClient::new(req_tx, res_rx)),
             batch_size,
             request_retries,
             request_timeout,
         };
 
-        let mut stream =
-            Box::pin(ReceiverStream::new(res_rx)) as MessageStream<utils::HeaderResponse>;
         tokio::spawn(async move {
-            let result = downloader
-                .download_batch(&HeaderLocked::default(), H256::zero(), &mut stream, &mut vec![])
-                .await;
-            tx.send(result).await.unwrap();
+            let result = downloader.download(&HeaderLocked::default(), H256::zero()).await;
+            tx.send(result).expect("failed to forward download response");
         });
 
-        let mut req_stream = ReceiverStream::new(req_rx);
-        let request = req_stream.next().await;
+        let request = ReceiverStream::new(req_rx).next().await;
         assert_matches!(
             request,
             Some((_, HeaderRequest { start, .. }))
                 if matches!(start, BlockId::Hash(hash) if hash == chain_tip)
+        );
+
+        let request = request.unwrap();
+        res_tx.send((request.0, vec![head_block])).expect("failed to send header");
+
+        assert_matches!(
+            rx.await,
+            Ok(Err(DownloadError::HeaderValidation { hash, .. })) // TODO:
         );
 
         // TODO: match the propagated error

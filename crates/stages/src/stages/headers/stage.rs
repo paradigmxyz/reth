@@ -1,15 +1,16 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use async_trait::async_trait;
-use rand::Rng;
 use reth_db::{
-    kv::{table::Encode, tables, tx::Tx},
+    kv::{
+        blocks::BlockNumHash,
+        table::{Decode, Encode},
+        tables,
+        tx::Tx,
+    },
     mdbx::{self, WriteFlags},
 };
-use reth_interfaces::{
-    consensus::Consensus,
-    stages::{HeaderRequest, HeadersClient, MessageStream},
-};
-use reth_primitives::{rpc::BlockId, BigEndianHash, BlockNumber, Header, HeaderLocked, H256, U256};
+use reth_interfaces::{consensus::Consensus, stages::HeadersClient};
+use reth_primitives::{BigEndianHash, BlockNumber, Header, HeaderLocked, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::*;
@@ -94,11 +95,9 @@ where
 
         // download the headers
         // TODO: check if some upper block constraint is necessary
-        let last_hash =
-            H256::from_uint(&tx.get::<tables::CanonicalHeaders>(last_block_num)?.unwrap());
-        let last_header: Header = temp::decode_header(
-            tx.get::<tables::Headers>(temp::num_hash_to_key(last_block_num, last_hash))?.unwrap(),
-        );
+        let last_hash = tx.get::<tables::CanonicalHeaders>(last_block_num)?.unwrap();
+        let last_header: Header =
+            tx.get::<tables::Headers>((last_block_num, last_hash).into())?.unwrap();
         let head = HeaderLocked::new(last_header, last_hash);
 
         let forkchoice_state = self.next_forkchoice_state(&head.hash()).await;
@@ -137,15 +136,14 @@ where
         }
 
         let mut walker = tx.cursor::<tables::CanonicalHeaders>()?.walk(input.unwind_to + 1)?;
-        while let Some((_, hash)) = walker.next().transpose()? {
-            tx.delete::<tables::HeaderNumbers>(hash.encode().to_vec(), None)?;
+        while let Some(key) = walker.next().transpose()? {
+            tx.delete::<tables::HeaderNumbers>(key.into(), None)?;
         }
 
         // TODO: cleanup
         let mut cur = tx.cursor::<tables::Headers>()?;
         let mut entry = cur.last()?;
-        while let Some((key, _)) = entry {
-            let (num, _) = temp::num_hash_from_key(key);
+        while let Some((BlockNumHash((num, _)), _)) = entry {
             if num <= input.unwind_to {
                 break
             }
@@ -165,8 +163,7 @@ where
 
         let mut cur = tx.cursor::<tables::HeaderTD>()?;
         let mut entry = cur.last()?;
-        while let Some((key, _)) = entry {
-            let (num, _) = temp::num_hash_from_key(key);
+        while let Some((BlockNumHash((num, _)), _)) = entry {
             if num <= input.unwind_to {
                 break
             }
@@ -184,8 +181,8 @@ impl HeaderStage {
         tx: &'tx mut Tx<'_, mdbx::RW, E>,
         height: BlockNumber,
     ) -> Result<(), StageError> {
-        let hash = H256::from_uint(&tx.get::<tables::CanonicalHeaders>(height)?.unwrap());
-        let td: Vec<u8> = tx.get::<tables::HeaderTD>(temp::num_hash_to_key(height, hash))?.unwrap();
+        let hash = tx.get::<tables::CanonicalHeaders>(height)?.unwrap();
+        let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap();
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
         Ok(())
     }
@@ -220,52 +217,23 @@ impl HeaderStage {
                 continue
             }
 
-            let hash = header.hash();
-            let number = header.number;
-            let num_hash_key = temp::num_hash_to_key(header.number, hash);
+            let key: BlockNumHash = (header.number, header.hash()).into();
+            let header = header.unlock();
+            latest = header.number;
 
             td += header.difficulty;
 
-            cursor_header_number.put(hash.to_fixed_bytes().to_vec(), header.number, None)?;
-            cursor_header.put(
-                num_hash_key.clone(),
-                temp::encode_header(header.unlock()),
-                Some(WriteFlags::APPEND),
-            )?;
-            cursor_canonical.put(number, hash.into_uint(), Some(WriteFlags::APPEND))?;
+            cursor_header_number.put(key, header.number, None)?;
+            cursor_header.put(key, header, Some(WriteFlags::APPEND))?;
+            cursor_canonical.put(key.0 .0, key.0 .1, Some(WriteFlags::APPEND))?;
             cursor_td.put(
-                num_hash_key,
+                key,
                 H256::from_uint(&td).as_bytes().to_vec(),
                 Some(WriteFlags::APPEND),
             )?;
-
-            latest = number;
         }
 
         Ok(latest)
-    }
-}
-
-// TODO: remove
-mod temp {
-    use super::*;
-
-    pub(crate) fn num_hash_to_key(number: BlockNumber, hash: H256) -> Vec<u8> {
-        let mut key = number.to_be_bytes().to_vec();
-        key.extend(hash.0);
-        key
-    }
-
-    pub(crate) fn num_hash_from_key(key: Vec<u8>) -> (BlockNumber, H256) {
-        todo!()
-    }
-
-    pub(crate) fn encode_header(_header: Header) -> Vec<u8> {
-        todo!()
-    }
-
-    pub(crate) fn decode_header(_bytes: Vec<u8>) -> Header {
-        todo!()
     }
 }
 
@@ -280,20 +248,25 @@ pub(crate) mod tests {
         use reth_primitives::{Header, H256, H512};
         use reth_rpc_types::engine::ForkchoiceState;
         use std::collections::HashSet;
-        use tokio::sync::{mpsc::Sender, watch};
+        use tokio::sync::{broadcast, mpsc::Sender, watch};
+        use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
         pub(crate) type HeaderResponse = (u64, Vec<Header>);
 
         #[derive(Debug)]
         pub(crate) struct TestHeaderClient {
             tx: Sender<(u64, HeaderRequest)>,
+            rx: broadcast::Receiver<HeaderResponse>,
         }
 
         impl TestHeaderClient {
             /// Construct a new test header downloader.
-            /// `tx` is the
-            pub(crate) fn new(tx: Sender<(u64, HeaderRequest)>) -> Self {
-                Self { tx }
+            /// TODO:
+            pub(crate) fn new(
+                tx: Sender<(u64, HeaderRequest)>,
+                rx: broadcast::Receiver<HeaderResponse>,
+            ) -> Self {
+                Self { tx, rx }
             }
         }
 
@@ -302,12 +275,12 @@ pub(crate) mod tests {
             async fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
 
             async fn send_header_request(&self, id: u64, request: HeaderRequest) -> HashSet<H512> {
-                self.tx.send((id, request)).await.unwrap();
+                self.tx.send((id, request)).await.expect("failed to send request");
                 HashSet::default()
             }
 
             async fn stream_headers(&self) -> MessageStream<(u64, Vec<Header>)> {
-                todo!()
+                Box::pin(BroadcastStream::new(self.rx.resubscribe()).filter_map(|e| e.ok()))
             }
         }
 
