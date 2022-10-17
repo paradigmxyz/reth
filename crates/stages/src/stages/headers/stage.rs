@@ -261,7 +261,8 @@ pub(crate) mod tests {
 
         impl TestHeaderClient {
             /// Construct a new test header downloader.
-            /// TODO:
+            /// `tx` is the `Sender` for header requests
+            /// `rx` is the `Receiver` of header responses
             pub(crate) fn new(
                 tx: Sender<(u64, HeaderRequest)>,
                 rx: broadcast::Receiver<HeaderResponse>,
