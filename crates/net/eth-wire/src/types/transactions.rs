@@ -1,4 +1,4 @@
-use reth_primitives::Transaction as TypedTransaction;
+use reth_primitives::TransactionSigned as TypedTransaction;
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
