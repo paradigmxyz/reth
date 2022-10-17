@@ -1,11 +1,10 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use crate::{
-    kv::{Decode, DupSort, Encode, Table},
-    utils::*,
+use crate::utils::*;
+use libmdbx::{self, TransactionKind, RO, RW};
+use reth_interfaces::db::{
+    DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Error, Table, Walker, Encode,
 };
-use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
-use reth_interfaces::db::{DbCursorRO, DbDupCursorRO, DupWalker, Error, Walker, DbCursorRW, DbDupCursorRW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
@@ -44,27 +43,27 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     }
 
     fn seek(&mut self, key: <T as Table>::SeekKey) -> reth_interfaces::db::PairResult<T> {
-        todo!()
+        decode!(self.inner.set_range(key.encode().as_ref()))
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> reth_interfaces::db::PairResult<T> {
-        todo!()
+        decode!(self.inner.set_key(key.encode().as_ref()))
     }
 
     fn next(&mut self) -> reth_interfaces::db::PairResult<T> {
-        todo!()
+        decode!(self.inner.next())
     }
 
     fn prev(&mut self) -> reth_interfaces::db::PairResult<T> {
-        todo!()
+        decode!(self.inner.prev())
     }
 
     fn last(&mut self) -> reth_interfaces::db::PairResult<T> {
-        todo!()
+        decode!(self.inner.last())
     }
 
     fn current(&mut self) -> reth_interfaces::db::PairResult<T> {
-        todo!()
+        decode!(self.inner.get_current())
     }
 
     fn walk(&'tx mut self, start_key: <T as Table>::Key) -> Result<Walker<'tx, T>, Error> {
@@ -74,101 +73,19 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             .map_err(|e| Error::Internal(e.into()))?
             .map(decoder::<T>);
 
-        Ok(Walker::<'tx,T> { cursor: self, start })
+        Ok(Walker::<'tx, T> { cursor: self, start })
     }
 }
 
-impl<'tx, K: TransactionKind, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, K, T> {
+impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     fn put(
         &mut self,
         k: <T as Table>::Key,
         v: <T as Table>::Value, /* , f: Option<WriteFlags> */
     ) -> Result<(), Error> {
-        todo!()
-    }
-}
-
-impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
-    /// Returns the first `(key, value)` pair.
-    pub fn first(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.first())
-    }
-
-    /// Seeks for a `(key, value)` pair greater or equal than `key`.
-    pub fn seek(&mut self, key: T::SeekKey) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.set_range(key.encode().as_ref()))
-    }
-
-    /// Seeks for the exact `(key, value)` pair with `key`.
-    pub fn seek_exact(&mut self, key: T::Key) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.set_key(key.encode().as_ref()))
-    }
-
-    /// Returns the next `(key, value)` pair.
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.next())
-    }
-
-    /// Returns the previous `(key, value)` pair.
-    pub fn prev(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.prev())
-    }
-
-    /// Returns the last `(key, value)` pair.
-    pub fn last(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.last())
-    }
-
-    /// Returns the current `(key, value)` pair of the cursor.
-    pub fn current(&mut self) -> PairResult<T>
-    where
-        T::Key: Decode,
-    {
-        decode!(self.inner.get_current())
-    }
-
-    // /// Returns an iterator starting at a key greater or equal than `start_key`.
-    // pub fn walk(
-    //     mut self,
-    //     start_key: T::Key,
-    // ) -> Result<impl Iterator<Item = Result<(<T as Table>::Key, <T as Table>::Value), Error>>,
-    // Error> where
-    //     T::Key: Decode,
-    // {
-    //     let start = self
-    //         .inner
-    //         .set_range(start_key.encode().as_ref())
-    //         .map_err(|e| Error::Internal(e.into()))?
-    //         .map(decoder::<T>);
-
-    //     Ok(Walker { cursor: self, start })
-    // }
-}
-
-impl<'tx, T: Table> Cursor<'tx, RW, T> {
-    /// Inserts a `(key, value)` to the database. Repositions the cursor to the new item
-    pub fn put(&mut self, k: T::Key, v: T::Value, f: Option<WriteFlags>) -> Result<(), Error> {
+        // TODO writeFlag
         self.inner
-            .put(k.encode().as_ref(), v.encode().as_ref(), f.unwrap_or_default())
+            .put(k.encode().as_ref(), v.encode().as_ref(), Default::default())
             .map_err(|e| Error::Internal(e.into()))
     }
 }
@@ -201,10 +118,9 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
             .map_err(|e| Error::Internal(e.into()))?
             .map(decode_one::<T>);
 
-        Ok(DupWalker::<'tx,T> { cursor: self, start })
+        Ok(DupWalker::<'tx, T> { cursor: self, start })
     }
 }
-
 
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     fn put(
@@ -212,6 +128,9 @@ impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
         k: <T>::Key,
         v: <T>::Value, /* , f: Option<WriteFlags> */
     ) -> Result<(), Error> {
-        todo!()
+        // TODO writeFlag
+        self.inner
+            .put(k.encode().as_ref(), v.encode().as_ref(), Default::default())
+            .map_err(|e| Error::Internal(e.into()))
     }
 }

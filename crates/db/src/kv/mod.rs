@@ -5,10 +5,7 @@ use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
-use reth_interfaces::db::{
-    tables::{self, TableType, TABLES},
-    Database, DbTx, DbTxMut, Decode,DbCursorRO, DupSort, Encode, Error, Table,
-};
+use reth_interfaces::db::{tables::{TABLES, TableType}, Database, Error};
 use std::{ops::Deref, path::Path};
 
 pub mod cursor;
@@ -23,33 +20,6 @@ pub enum EnvKind {
     RO,
     /// Read-write MDBX environment.
     RW,
-}
-
-/// Test. Remove it.
-pub struct Test<DB: Database> {
-    db: DB,
-}
-
-impl<DB: Database> Test<DB> {
-    /// crate test
-    pub fn new(db: DB) -> Self {
-        Self { db }
-    }
-    /// test transaction
-    pub fn transact(&self) {
-        //let tx = self.db.tx().unwrap().get::<tables::AccountChangeSet>(10);
-        let tx = self.db.tx().unwrap();
-        let mut cursor = (tx).cursor::<tables::AccountChangeSet>().unwrap();
-        let tx2 = self.db.tx().unwrap();
-        let first = cursor.first();
-
-        let t = tx.commit();
-    }
-
-    /// extract db
-    pub fn unlock(self) -> DB {
-        self.db
-    }
 }
 
 /// Wrapper for the libmdbx environment.
@@ -101,10 +71,7 @@ impl<E: EnvironmentKind> Env<E> {
                 .map_err(|e| Error::Internal(e.into()))?,
         };
 
-        let test = Test::new(env);
-        test.transact();
-
-        Ok(test.unlock())
+        Ok(env)
     }
 
     /// Creates all the defined tables, if necessary.
@@ -123,47 +90,6 @@ impl<E: EnvironmentKind> Env<E> {
         tx.commit().map_err(|e| Error::Initialization(e.into()))?;
 
         Ok(())
-    }
-}
-
-impl<E: EnvironmentKind> Env<E> {
-    /// Initiates a read-only transaction. It should be committed or rolled back in the end, so it
-    /// frees up pages.
-    pub fn begin_tx(&self) -> Result<Tx<'_, RO, E>, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::Internal(e.into()))?))
-    }
-
-    /// Initiates a read-write transaction. It should be committed or rolled back in the end.
-    pub fn begin_mut_tx(&self) -> Result<Tx<'_, RW, E>, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::Internal(e.into()))?))
-    }
-
-    /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
-    /// end of the execution.
-    pub fn view<T, F>(&self, f: F) -> Result<T, Error>
-    where
-        F: Fn(&Tx<'_, RO, E>) -> T,
-    {
-        let tx = self.begin_tx()?;
-
-        let res = f(&tx);
-        tx.commit()?;
-
-        Ok(res)
-    }
-
-    /// Takes a function and passes a write-read transaction into it, making sure it's committed in
-    /// the end of the execution.
-    pub fn update<T, F>(&self, f: F) -> Result<T, Error>
-    where
-        F: Fn(&Tx<'_, RW, E>) -> T,
-    {
-        let tx = self.begin_mut_tx()?;
-
-        let res = f(&tx);
-        tx.commit()?;
-
-        Ok(res)
     }
 }
 
@@ -204,7 +130,7 @@ pub mod test_utils {
 mod tests {
     use super::{test_utils, Env, EnvKind};
     use libmdbx::{NoWriteMap, WriteMap};
-    use reth_interfaces::db::tables::PlainState;
+    use reth_interfaces::db::{tables::PlainState, Database};
     use reth_primitives::Address;
     use std::str::FromStr;
     use tempfile::TempDir;
@@ -231,12 +157,12 @@ mod tests {
             .expect(ERROR_ETH_ADDRESS);
 
         // PUT
-        let tx = env.begin_mut_tx().expect(ERROR_INIT_TX);
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
         tx.put::<PlainState>(key, value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // GET
-        let tx = env.begin_tx().expect(ERROR_INIT_TX);
+        let tx = env.tx().expect(ERROR_INIT_TX);
         let result = tx.get::<PlainState>(key).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);

@@ -6,7 +6,7 @@ use crate::{
 };
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use reth_interfaces::db::{
-    DbTx, DbTxMut, Decode, DupSort, DupWalker, Encode, Error, Table, Walker,
+    DbTx, DbTxMut, DupSort, Encode, Error, Table,
 };
 use std::marker::PhantomData;
 
