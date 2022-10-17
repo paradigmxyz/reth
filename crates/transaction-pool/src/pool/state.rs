@@ -4,6 +4,8 @@ bitflags::bitflags! {
     /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
     #[derive(Default)]
     pub(crate) struct TxState: u8 {
+        /// Set to `1` if all ancestor transactions are pending.
+        const NO_PARKED_ANCESTORS = 0b100000;
         /// Set to `1` of the transaction is either the next transaction of the sender (on chain nonce == tx.nonce) or all prior transactions are also present in the pool.
         const NO_NONCE_GAPS = 0b010000;
         /// Bit derived from the sender's balance.
@@ -19,9 +21,25 @@ bitflags::bitflags! {
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
         const IS_LOCAL = 0b000001;
 
-        const BASE_FEE_POOL_BITS = Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits;
+        const PENDING_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits |  Self::ENOUGH_FEE_CAP_BLOCK.bits;
 
-        const QUEUED_POOL_BITS  = 0b100000;
+        const BASE_FEE_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits;
+
+        const QUEUED_POOL_BITS  = Self::NO_PARKED_ANCESTORS.bits;
+
+    }
+}
+
+// === impl TxState ===
+
+impl TxState {
+    /// The state of a transaction is considered `pending`, if the transaction has:
+    ///   - _No_ parked ancestors
+    ///   - enough balance
+    ///   - enough fee cap
+    #[inline]
+    pub(crate) fn is_pending(&self) -> bool {
+        *self >= TxState::PENDING_POOL_BITS
     }
 }
 
@@ -50,10 +68,10 @@ impl SubPool {
 
 impl From<TxState> for SubPool {
     fn from(value: TxState) -> Self {
-        if value > TxState::BASE_FEE_POOL_BITS {
+        if value.is_pending() {
             return SubPool::Pending
         }
-        if value < TxState::QUEUED_POOL_BITS {
+        if value < TxState::BASE_FEE_POOL_BITS {
             return SubPool::Queued
         }
         SubPool::BaseFee
@@ -72,8 +90,31 @@ mod tests {
     }
 
     #[test]
-    fn test_tx_queud() {
-        let mut state = TxState::default();
+    fn test_tx_queued() {
+        let state = TxState::default();
         assert_eq!(SubPool::Queued, state.into());
+
+        let state = TxState::NO_PARKED_ANCESTORS |
+            TxState::NO_NONCE_GAPS |
+            TxState::NOT_TOO_MUCH_GAS |
+            TxState::ENOUGH_FEE_CAP_BLOCK;
+        assert_eq!(SubPool::Queued, state.into());
+    }
+
+    #[test]
+    fn test_tx_pending() {
+        let state = TxState::PENDING_POOL_BITS;
+        assert_eq!(SubPool::Pending, state.into());
+        assert!(state.is_pending());
+
+        let bits = 0b111110;
+        let state = TxState::from_bits(bits).unwrap();
+        assert_eq!(SubPool::Pending, state.into());
+        assert!(state.is_pending());
+
+        let bits = 0b111111;
+        let state = TxState::from_bits(bits).unwrap();
+        assert_eq!(SubPool::Pending, state.into());
+        assert!(state.is_pending());
     }
 }

@@ -3,7 +3,7 @@
 use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
-    traits::PoolTransaction,
+    traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{rpc::Address, BlockID, TxHash, U256};
 use std::{fmt, time::Instant};
@@ -38,6 +38,7 @@ pub trait TransactionValidator: Send + Sync + 'static {
     /// transactions for the sender.
     async fn validate_transaction(
         &self,
+        origin: TransactionOrigin,
         _transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
 }
@@ -56,6 +57,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub cost: U256,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,
+    /// Where this transaction originated from.
+    pub origin: TransactionOrigin,
 }
 
 // === impl ValidPoolTransaction ===
@@ -112,6 +115,7 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             is_local: self.is_local,
             cost: self.cost,
             timestamp: self.timestamp,
+            origin: self.origin,
         }
     }
 }
