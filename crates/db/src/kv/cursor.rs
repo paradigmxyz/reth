@@ -5,7 +5,7 @@ use crate::{
     utils::*,
 };
 use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
-use reth_interfaces::db::Error;
+use reth_interfaces::db::{DbCursorRO, Error};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
@@ -36,6 +36,43 @@ macro_rules! decode {
     ($v:expr) => {
         $v.map_err(|e| Error::Decode(e.into()))?.map(decoder::<T>).transpose()
     };
+}
+
+impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T> {
+    fn first(&mut self) -> reth_interfaces::db::PairResult<T> {
+        decode!(self.inner.first())
+    }
+
+    fn seek(&mut self, key: <T as Table>::SeekKey) -> reth_interfaces::db::PairResult<T> {
+        todo!()
+    }
+
+    fn seek_exact(&mut self, key: <T as Table>::Key) -> reth_interfaces::db::PairResult<T> {
+        todo!()
+    }
+
+    fn next(&mut self) -> reth_interfaces::db::PairResult<T> {
+        todo!()
+    }
+
+    fn prev(&mut self) -> reth_interfaces::db::PairResult<T> {
+        todo!()
+    }
+
+    fn last(&mut self) -> reth_interfaces::db::PairResult<T> {
+        todo!()
+    }
+
+    fn current(&mut self) -> reth_interfaces::db::PairResult<T> {
+        todo!()
+    }
+
+    fn walk<IT: Iterator<Item = Result<(<T as Table>::Key, <T as Table>::Value), Error>>>(
+        &mut self,
+        start_key: <T as Table>::Key,
+    ) -> Result<IT, Error> {
+        todo!()
+    }
 }
 
 impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
@@ -186,7 +223,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start;
+            return start
         }
 
         self.cursor.next().transpose()
@@ -207,7 +244,7 @@ impl<'tx, K: TransactionKind, T: DupSort> std::iter::Iterator for DupWalker<'tx,
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start;
+            return start
         }
         self.cursor.next_dup_val().transpose()
     }

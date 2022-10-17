@@ -23,11 +23,15 @@ pub trait Database {
 
 /// Read only transaction
 pub trait DbTx<'a> {
+    /// Cursor GAT
+    type Cursor<T: Table>: DbCursorRO<'a, T>
+    where
+        Self: 'a;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<bool, Error>;
     /// Iterate over read only values in database.
-    fn cursor<T: Table, C: DbCursorRO<'a, T>+'a>(&'a self) -> C
+    fn cursor<T: Table>(&self) -> Result<Self::Cursor<T>, Error>
     where
         <T as Table>::Key: Decode;
     /// Get value
@@ -51,10 +55,7 @@ pub type IterPairResult<T> = Option<Result<(<T as Table>::Key, <T as Table>::Val
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, Error>;
 
 /// Read only cursor over table
-pub trait DbCursorRO<'tx, T: Table>
-where
-    T::Key: Decode,
-{
+pub trait DbCursorRO<'tx, T: Table> {
     /// First item in table
     fn first(&mut self) -> PairResult<T>;
 

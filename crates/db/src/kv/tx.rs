@@ -5,7 +5,7 @@ use crate::{
     utils::decode_one,
 };
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use reth_interfaces::db::{DbTx, DbTxMut, Encode, Error, Table};
+use reth_interfaces::db::{DbTx, DbTxMut, Decode, Encode, Error, Table};
 use std::marker::PhantomData;
 
 /// Wrapper for the libmdbx transaction.
@@ -16,6 +16,24 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> DbTx<'env> for Tx<'env, K, E> {
+    type Cursor<T:Table> = Cursor<'env,K,T>;
+    /// Iterate over read only values in database.
+    fn cursor<T: Table>(&self) -> Result<Self::Cursor<T>, Error>
+    where
+        <T as Table>::Key: Decode,
+    {
+        Ok(Cursor {
+            inner: self
+                .inner
+                .cursor(
+                    &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
+                )
+                .map_err(|e| Error::Internal(e.into()))?,
+            table: T::NAME,
+            _dbi: PhantomData,
+        })
+    }
+
     fn commit(self) -> Result<bool, Error> {
         self.inner.commit().map_err(|e| Error::Internal(e.into()))
     }

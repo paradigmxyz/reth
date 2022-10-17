@@ -28,11 +28,11 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
     const NAME: &'static str;
     /// Key element of `Table`.
-    type Key: Encode;
+    type Key: Object;
     /// Value element of `Table`.
     type Value: Object;
     /// Seek Key element of `Table`.
-    type SeekKey: Encode;
+    type SeekKey: Object;
 }
 
 /// DupSort allows for keys not to be repeated in the database,

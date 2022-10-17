@@ -7,7 +7,7 @@ use libmdbx::{
 };
 use reth_interfaces::db::{
     tables::{self, TableType, TABLES},
-    Database, DbTx, DbTxMut, Decode, DupSort, Encode, Error, Table,
+    Database, DbTx, DbTxMut, Decode,DbCursorRO, DupSort, Encode, Error, Table,
 };
 use std::{ops::Deref, path::Path};
 
@@ -37,7 +37,13 @@ impl<DB: Database> Test<DB> {
     }
     /// test transaction
     pub fn transact(&self) {
-        let _ = self.db.tx().unwrap().get::<tables::AccountChangeSet>(10);
+        //let tx = self.db.tx().unwrap().get::<tables::AccountChangeSet>(10);
+        let tx = self.db.tx().unwrap();
+        let mut cursor = (tx).cursor::<tables::AccountChangeSet>().unwrap();
+        let tx2 = self.db.tx().unwrap();
+        let first = cursor.first();
+
+        let t = tx.commit();
     }
 
     /// extract db
