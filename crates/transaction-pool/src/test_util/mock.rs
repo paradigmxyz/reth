@@ -3,6 +3,7 @@
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::{TxPool, MIN_PROTOCOL_BASE_FEE},
+    traits::TransactionOrigin,
     PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use paste::paste;
@@ -351,6 +352,7 @@ impl MockTransactionFactory {
             cost: transaction.cost(),
             transaction,
             timestamp: Instant::now(),
+            origin: TransactionOrigin::External,
         }
     }
 
