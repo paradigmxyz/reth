@@ -13,6 +13,10 @@ use std::{
 };
 use tokio_stream::Stream;
 
+/// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
+// https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
+const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
+
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
@@ -70,7 +74,29 @@ where
             EthMessage::Status(resp) => {
                 self.authed = true;
 
-                if status.genesis != resp.genesis {}
+                if status.genesis != resp.genesis {
+                    return Err(HandshakeError::MismatchedGenesis {
+                        expected: status.genesis,
+                        got: resp.genesis,
+                    }
+                    .into())
+                }
+
+                if status.version != resp.version {
+                    return Err(HandshakeError::MismatchedProtocolVersion {
+                        expected: status.version,
+                        got: resp.version,
+                    }
+                    .into())
+                }
+
+                if status.chain != resp.chain {
+                    return Err(HandshakeError::MismatchedChain {
+                        expected: status.chain,
+                        got: resp.chain,
+                    }
+                    .into())
+                }
 
                 Ok(fork_filter.validate(resp.forkid).map_err(HandshakeError::InvalidFork)?)
             }
@@ -94,6 +120,10 @@ where
             None => return Poll::Ready(None),
         };
 
+        if bytes.len() > MAX_MESSAGE_SIZE {
+            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
+        }
+
         let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => return Poll::Ready(Some(Err(err.into()))),
@@ -101,7 +131,7 @@ where
 
         if *this.authed && matches!(msg.message, EthMessage::Status(_)) {
             return Poll::Ready(Some(Err(EthStreamError::HandshakeError(
-                HandshakeError::StatusInHandshake,
+                HandshakeError::StatusNotInHandshake,
             ))))
         }
 
@@ -121,7 +151,7 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
         if self.authed && matches!(item, EthMessage::Status(_)) {
-            return Err(EthStreamError::HandshakeError(HandshakeError::StatusInHandshake))
+            return Err(EthStreamError::HandshakeError(HandshakeError::StatusNotInHandshake))
         }
 
         let mut bytes = BytesMut::new();
