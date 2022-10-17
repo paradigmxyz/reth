@@ -42,7 +42,7 @@ pub fn use_scale(_args: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     quote! {
-        #[derive(parity_scale_codec::Encode, parity_scale_codec::Decode)]
+        #[derive(parity_scale_codec::Encode, parity_scale_codec::Decode, serde::Serialize, serde::Deserialize)]
         #ast
     }
     .into()
