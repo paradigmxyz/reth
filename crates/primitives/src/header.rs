@@ -283,7 +283,7 @@ mod tests {
             gas_limit: 0x115cu64.into(),
             gas_used: 0x15b3u64.into(),
             timestamp: 0x1a0au64,
-            extra_data: hex::decode("7788").unwrap().into(),
+            extra_data: Bytes::from_str("7788").unwrap().0,
             mix_hash: H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: 0,
             base_fee_per_gas: None,
