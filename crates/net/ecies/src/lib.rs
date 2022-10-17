@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 #![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -10,7 +11,7 @@
 pub mod algorithm;
 pub mod mac;
 pub mod stream;
-mod util;
+pub mod util;
 
 mod error;
 pub use error::ECIESError;
@@ -38,5 +39,5 @@ pub enum IngressECIESValue {
     /// Receiving an ACK message
     Ack,
     /// Receiving a message
-    Message(bytes::Bytes),
+    Message(bytes::BytesMut),
 }

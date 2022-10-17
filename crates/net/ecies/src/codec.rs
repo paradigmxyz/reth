@@ -2,7 +2,7 @@ use crate::{
     algorithm::{ECIES, MAX_BODY_SIZE},
     ECIESError, EgressECIESValue, IngressECIESValue,
 };
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
 use std::{fmt::Debug, io};
@@ -105,7 +105,8 @@ impl Decoder for ECIESCodec {
                     }
 
                     let mut data = buf.split_to(self.ecies.body_len());
-                    let ret = Bytes::copy_from_slice(self.ecies.read_body(&mut data)?);
+                    let mut ret = BytesMut::new();
+                    ret.extend_from_slice(self.ecies.read_body(&mut data)?);
 
                     self.state = ECIESState::Header;
                     return Ok(Some(IngressECIESValue::Message(ret)))
