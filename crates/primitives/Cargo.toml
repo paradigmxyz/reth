@@ -13,8 +13,7 @@ bytes = "1.2"
 
 serde = "1.0"
 thiserror = "1"
-
-reth-rlp = { path = "../common/rlp", features = ["derive"]}
+reth-rlp = { path = "../common/rlp", features = ["std", "derive", "ethereum-types"]}
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 reth-codecs = { version = "0.1.0", path = "../codecs" }
 
