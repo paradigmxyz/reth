@@ -1,5 +1,5 @@
-use reth_codecs::main_codec;
 use crate::{Address, H256};
+use reth_codecs::main_codec;
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// Ethereum Log

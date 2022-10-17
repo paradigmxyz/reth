@@ -1,9 +1,9 @@
-use crate::{Log, TxType, Bloom};
+use crate::{Bloom, Log, TxType};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 
-use std::cmp::Ordering;
 use reth_codecs::main_codec;
+use std::cmp::Ordering;
 
 /// Receipt containing result of transaction execution.
 #[main_codec]
@@ -146,9 +146,7 @@ impl Decodable for Receipt {
             Ordering::Equal => {
                 Err(reth_rlp::DecodeError::Custom("an empty list is not a valid receipt encoding"))
             }
-            Ordering::Greater => {
-                Self::decode_receipt(buf, TxType::Legacy)
-            },
+            Ordering::Greater => Self::decode_receipt(buf, TxType::Legacy),
         }
     }
 }
