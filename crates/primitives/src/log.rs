@@ -1,7 +1,8 @@
 use crate::{Address, Bytes, H256};
+use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// Ethereum Log
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable)]
 pub struct Log {
     /// Contract that emitted this log.
     pub address: Address,

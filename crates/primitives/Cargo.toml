@@ -12,7 +12,7 @@ ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features =
 bytes = "1.2"
 serde = "1.0"
 thiserror = "1"
-reth-rlp = { path = "../common/rlp", features = ["derive"]}
+reth-rlp = { path = "../common/rlp", features = ["std", "derive", "ethereum-types"]}
 
 #used for forkid
 crc = "1"
