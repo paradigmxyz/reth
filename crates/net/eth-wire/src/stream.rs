@@ -136,7 +136,7 @@ where
 mod tests {
     use crate::{
         codec::RlpCodec,
-        types::{broadcast::BlockHashNumber, EthMessage},
+        types::{broadcast::BlockHashNumber, forkid::ForkFilter, EthMessage, Status},
         EthStream,
     };
     use futures::{SinkExt, StreamExt};
@@ -144,6 +144,47 @@ mod tests {
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
+
+    use crate::types::EthVersion;
+    use ethers_core::types::Chain;
+    use reth_primitives::{H256, U256};
+
+    #[tokio::test]
+    async fn can_handshake() {
+        let genesis = H256::random();
+        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+
+        let status = Status {
+            version: EthVersion::Eth67 as u8,
+            chain: Chain::Mainnet.into(),
+            total_difficulty: U256::from(0),
+            blockhash: H256::random(),
+            genesis,
+            // Pass the current fork id.
+            forkid: fork_filter.current(),
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let status_clone = status;
+        let fork_filter_clone = fork_filter.clone();
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = RlpCodec::default().framed(incoming);
+            let _ = EthStream::connect(stream, status_clone, fork_filter_clone).await.unwrap();
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = RlpCodec::default().framed(outgoing);
+
+        // try to connect
+        let _ = EthStream::connect(sink, status, fork_filter).await.unwrap();
+
+        // wait for it to finish
+        handle.await.unwrap();
+    }
 
     #[tokio::test]
     async fn can_write_and_read_cleartext() {
@@ -161,7 +202,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
-            let stream = RlpCodec::prepend_header().framed(incoming);
+            let stream = RlpCodec::default().framed(incoming);
             let mut stream = EthStream { inner: stream, authed: false };
 
             // use the stream to get the next message
@@ -170,7 +211,7 @@ mod tests {
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let sink = RlpCodec::prepend_header().framed(outgoing);
+        let sink = RlpCodec::default().framed(outgoing);
         let mut client_stream = EthStream { inner: sink, authed: false };
 
         client_stream.send(test_msg).await.unwrap();
