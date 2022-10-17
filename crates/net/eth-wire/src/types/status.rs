@@ -1,4 +1,4 @@
-use crate::forkid::ForkId;
+use super::forkid::ForkId;
 use reth_primitives::{Chain, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
@@ -92,7 +92,7 @@ mod tests {
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
-    use crate::{
+    use crate::types::{
         forkid::{ForkHash, ForkId},
         EthVersion, Status,
     };

@@ -4,6 +4,7 @@ use crate::kv::{
     table::{Decode, Table},
     KVError,
 };
+use bytes::Bytes;
 use std::borrow::Cow;
 
 /// Enum for the type of table present in libmdbx.
@@ -35,7 +36,10 @@ where
     T: Table,
     T::Key: Decode,
 {
-    Ok((Decode::decode(&kv.0)?, Decode::decode(&kv.1)?))
+    Ok((
+        Decode::decode(Bytes::from(kv.0.into_owned()))?,
+        Decode::decode(Bytes::from(kv.1.into_owned()))?,
+    ))
 }
 
 /// Helper function to decode only a value from a `(key, value)` pair.
@@ -43,7 +47,7 @@ pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> Result<
 where
     T: Table,
 {
-    Decode::decode(&kv.1)
+    Decode::decode(Bytes::from(kv.1.into_owned()))
 }
 
 /// Helper function to decode a value. It can be a key or subkey.
@@ -51,5 +55,5 @@ pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, KVError>
 where
     T: Table,
 {
-    Decode::decode(&value)
+    Decode::decode(Bytes::from(value.into_owned()))
 }

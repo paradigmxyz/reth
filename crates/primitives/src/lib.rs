@@ -25,6 +25,8 @@ pub use log::Log;
 pub use receipt::Receipt;
 pub use transaction::{AccessList, AccessListItem, Transaction, TransactionSigned, TxType};
 
+/// Block hash.
+pub type BlockHash = H256;
 /// Block Number is height of chain
 pub type BlockNumber = u64;
 /// Ethereum address

@@ -1,5 +1,5 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
-use crate::{ECIESError, EgressECIESValue, IngressECIESValue};
+use crate::{codec::ECIESCodec, ECIESError, EgressECIESValue, IngressECIESValue};
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
 use reth_primitives::H512 as PeerId;
@@ -18,8 +18,6 @@ use tokio::{
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{debug, instrument, trace};
-
-use crate::codec::ECIESCodec;
 
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]
@@ -106,7 +104,7 @@ impl<Io> Stream for ECIESStream<Io>
 where
     Io: AsyncRead + Unpin,
 {
-    type Item = Result<Bytes, io::Error>;
+    type Item = Result<bytes::BytesMut, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match ready!(Pin::new(&mut self.get_mut().stream).poll_next(cx)) {
@@ -156,8 +154,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    // TODO: implement test for the proposed
-    // API: https://github.com/foundry-rs/reth/issues/64#issue-1408708420
     async fn can_write_and_read() {
         let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
         let server_key = SecretKey::new(&mut rand::thread_rng());

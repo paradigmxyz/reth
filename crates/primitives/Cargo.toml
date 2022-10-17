@@ -10,10 +10,14 @@ description = "Commonly used types in reth."
 [dependencies]
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 bytes = "1.2"
+
 serde = "1.0"
 ethereum-types = { version = "0.13.1", default-features = false }
 thiserror = "1"
+
 reth-rlp = { path = "../common/rlp", features = ["derive"]}
+parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
+reth-codecs = { version = "0.1.0", path = "../codecs" }
 
 #used for forkid
 crc = "1"
