@@ -4,6 +4,10 @@
 
 ![Github Actions](https://github.com/foundry-rs/reth/workflows/ci/badge.svg)
 
+# Build
+
+To build this project we are currently using rust nightly for GAT support, that is planed to release in rust 1.65 (4.nov.2022). GAT's are used for Database trait in reth-interface. 
+
 ## Docs
 
 Contributor docs can be found [here](./docs).

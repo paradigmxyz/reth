@@ -6,7 +6,7 @@ use libmdbx::{
     SyncMode, RO, RW,
 };
 use reth_interfaces::db::{
-    tables::{TableType, TABLES,self},
+    tables::{self, TableType, TABLES},
     Database, DbTx, DbTxMut, Decode, DupSort, Encode, Error, Table,
 };
 use std::{ops::Deref, path::Path};
@@ -26,16 +26,14 @@ pub enum EnvKind {
 }
 
 /// Test. Remove it.
-pub struct Test<DB:Database> {
+pub struct Test<DB: Database> {
     db: DB,
 }
 
-impl<DB:Database> Test<DB> {
+impl<DB: Database> Test<DB> {
     /// crate test
     pub fn new(db: DB) -> Self {
-        Self {
-            db,
-        }
+        Self { db }
     }
     /// test transaction
     pub fn transact(&self) {
@@ -56,15 +54,16 @@ pub struct Env<E: EnvironmentKind> {
 }
 
 impl<E: EnvironmentKind> Database for Env<E> {
-    type TX<'a> = tx::Tx<'a,RO,E>;
+    type TX<'a> = tx::Tx<'a, RO, E>;
+    type TXMut<'a> = tx::Tx<'a, RW, E>;
 
-    fn tx<'a>(&'a self) -> Result<Self::TX<'a>,Error> {
-        Ok(Tx::new::<'a>(self.inner.begin_ro_txn().unwrap()))
+    fn tx<'a>(&'a self) -> Result<Self::TX<'a>, Error> {
+        Ok(Tx::new(self.inner.begin_ro_txn().unwrap()))
     }
 
-    // fn tx_mut<'a, T: Table>(&'a self) -> Result<Box<dyn DbTxMut<'a, T> + 'a>,Error> {
-    //     Ok(Box::new(Tx::new(self.inner.begin_rw_txn().unwrap())))
-    // }
+    fn tx_mut<'a>(&'a self) -> Result<Self::TXMut<'a>, Error> {
+        Ok(Tx::new(self.inner.begin_rw_txn().unwrap()))
+    }
 }
 
 impl<E: EnvironmentKind> Env<E> {

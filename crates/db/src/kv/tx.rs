@@ -16,9 +16,9 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> DbTx<'env> for Tx<'env, K, E> {
-    // fn commit(self) -> Result<bool, Error> {
-    //     self.inner.commit().map_err(|e| Error::Internal(e.into()))
-    // }
+    fn commit(self) -> Result<bool, Error> {
+        self.inner.commit().map_err(|e| Error::Internal(e.into()))
+    }
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
         self.inner
@@ -32,8 +32,8 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> DbTx<'env> for Tx<'env, K, E>
     }
 }
 
-impl<'env, E: EnvironmentKind, T: Table> DbTxMut<'env, T> for Tx<'env, RW, E> {
-    fn put(&self, key: T::Key, value: T::Value) -> Result<(), Error> {
+impl<'env, E: EnvironmentKind> DbTxMut<'env> for Tx<'env, RW, E> {
+    fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(
                 &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
@@ -44,7 +44,7 @@ impl<'env, E: EnvironmentKind, T: Table> DbTxMut<'env, T> for Tx<'env, RW, E> {
             .map_err(|e| Error::Internal(e.into()))
     }
 
-    fn delete(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error> {
+    fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error> {
         let mut data = None;
 
         let value = value.map(Encode::encode);
