@@ -1,8 +1,8 @@
-use anvil_core::eth::{
+use reth_primitives::{
     block::{Block, Header},
-    transaction::TypedTransaction,
+    Transaction as TypedTransaction,
 };
-use fastrlp::{
+use reth_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
 use serde::{Deserialize, Serialize};
@@ -148,8 +148,8 @@ mod test {
         transaction::{LegacyTransaction, TransactionKind, TypedTransaction},
     };
     use ethers::core::types::{Bytes, Signature, H64, U256};
-    use fastrlp::{Decodable, Encodable};
     use hex_literal::hex;
+    use reth_rlp::{Decodable, Encodable};
 
     use crate::{message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders};
 

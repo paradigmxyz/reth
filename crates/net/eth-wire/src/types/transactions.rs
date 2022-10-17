@@ -1,5 +1,5 @@
-use anvil_core::eth::transaction::TypedTransaction;
-use fastrlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_primitives::Transaction as TypedTransaction;
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
@@ -357,11 +357,8 @@ mod test {
         };
 
         // checking tx by tx for easier debugging if there are any regressions
-        for (expected, decoded) in decoded_transactions
-            .message
-            .0
-            .iter()
-            .zip(expected_transactions.message.0.iter())
+        for (expected, decoded) in
+            decoded_transactions.message.0.iter().zip(expected_transactions.message.0.iter())
         {
             assert_eq!(expected, decoded);
         }
