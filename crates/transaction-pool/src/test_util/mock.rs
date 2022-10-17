@@ -347,7 +347,6 @@ impl MockTransactionFactory {
         let transaction_id = self.tx_id(&transaction);
         MockValidTx {
             propagate: false,
-            is_local: false,
             transaction_id,
             cost: transaction.cost(),
             transaction,

@@ -19,7 +19,6 @@ bitflags::bitflags! {
         ///
         /// Set to 1 if `feeCap` of the transaction meets the requirement of the pending block.
         const ENOUGH_FEE_CAP_BLOCK = 0b000010;
-        const IS_LOCAL = 0b000001;
 
         const PENDING_POOL_BITS = Self::NO_PARKED_ANCESTORS.bits | Self::NO_NONCE_GAPS.bits | Self::ENOUGH_BALANCE.bits | Self::NOT_TOO_MUCH_GAS.bits |  Self::ENOUGH_FEE_CAP_BLOCK.bits;
 
@@ -112,7 +111,7 @@ mod tests {
         assert_eq!(SubPool::Pending, state.into());
         assert!(state.is_pending());
 
-        let bits = 0b111111;
+        let bits = 0b111110;
         let state = TxState::from_bits(bits).unwrap();
         assert_eq!(SubPool::Pending, state.into());
         assert!(state.is_pending());
