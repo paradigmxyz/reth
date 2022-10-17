@@ -11,6 +11,12 @@ description = "Staged syncing primitives used in reth."
 # reth
 reth-primitives = { path = "../primitives" }
 
+# codecs
+serde = { version = "1.0.*", default-features = false }
+postcard = { version = "1.0.2", features = ["heapless"] }
+heapless = "0.7.16"
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+
 # misc
 bytes = "1.2.1"
 libmdbx = "0.1.8"

@@ -1,6 +1,8 @@
 use crate::{Log, TxType, H256};
+use reth_codecs::main_codec;
 
 /// Receipt containing result of transaction execution.
+#[main_codec]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     /// Receipt type.
