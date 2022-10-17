@@ -1,9 +1,9 @@
 use crate::{
     error::{EthStreamError, HandshakeError},
-    types::{EthMessage, ProtocolMessage},
+    types::{forkid::ForkFilter, EthMessage, ProtocolMessage, Status},
 };
 use bytes::BytesMut;
-use futures::{ready, Sink};
+use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_rlp::{Decodable, Encodable};
 use std::{
@@ -18,6 +18,55 @@ use tokio_stream::Stream;
 pub struct EthStream<S> {
     #[pin]
     inner: S,
+    /// Whether the `Status` handshake has been completed
+    authed: bool,
+}
+
+impl<S> EthStream<S>
+where
+    S: Stream<Item = Result<bytes::Bytes, io::Error>>
+        + Sink<bytes::Bytes, Error = io::Error>
+        + Unpin,
+{
+    /// Given an instantiated transport layer, it proceeds to return an [`EthStream`]
+    /// after performing a [`Status`] message handshake as specified in
+    pub async fn connect(
+        inner: S,
+        status: Status,
+        fork_filter: ForkFilter,
+    ) -> Result<Self, EthStreamError> {
+        let mut this = Self { inner, authed: false };
+        this.handshake(status, fork_filter).await?;
+        Ok(this)
+    }
+
+    async fn handshake(
+        &mut self,
+        status: Status,
+        fork_filter: ForkFilter,
+    ) -> Result<(), EthStreamError> {
+        tracing::trace!("sending eth status ...");
+        self.send(EthMessage::Status(status)).await?;
+
+        tracing::trace!("waiting for eth status from peer ...");
+        let msg = self
+            .next()
+            .await
+            .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
+
+        // TODO: Add any missing checks
+        // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
+        match msg {
+            EthMessage::Status(resp) => {
+                self.authed = true;
+
+                if status.genesis != resp.genesis {}
+
+                Ok(fork_filter.validate(resp.forkid).map_err(HandshakeError::InvalidFork)?)
+            }
+            _ => Err(EthStreamError::HandshakeError(HandshakeError::NonStatusMessageInHandshake)),
+        }
+    }
 }
 
 impl<S> Stream for EthStream<S>
@@ -113,7 +162,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = RlpCodec::prepend_header().framed(incoming);
-            let mut stream = EthStream { inner: stream };
+            let mut stream = EthStream { inner: stream, authed: false };
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -122,7 +171,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = RlpCodec::prepend_header().framed(outgoing);
-        let mut client_stream = EthStream { inner: sink };
+        let mut client_stream = EthStream { inner: sink, authed: false };
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -148,7 +197,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            let mut stream = EthStream { inner: stream };
+            let mut stream = EthStream { inner: stream, authed: false };
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -162,7 +211,7 @@ mod tests {
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let inner = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
 
-        let mut client_stream = EthStream { inner };
+        let mut client_stream = EthStream { inner, authed: false };
         client_stream.send(test_msg).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
