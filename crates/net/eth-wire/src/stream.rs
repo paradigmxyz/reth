@@ -1,5 +1,5 @@
 use crate::{
-    error::EthStreamError,
+    error::{EthStreamError, HandshakeError},
     types::{EthMessage, ProtocolMessage},
 };
 use bytes::BytesMut;
@@ -40,8 +40,10 @@ where
             Err(err) => return Poll::Ready(Some(Err(err.into()))),
         };
 
-        if matches!(msg.message, EthMessage::Status(_)) {
-            return Poll::Ready(Some(Err(EthStreamError::StatusInHandshake)))
+        if *this.authed && matches!(msg.message, EthMessage::Status(_)) {
+            return Poll::Ready(Some(Err(EthStreamError::HandshakeError(
+                HandshakeError::StatusInHandshake,
+            ))))
         }
 
         Poll::Ready(Some(Ok(msg.message)))
@@ -59,8 +61,8 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
-        if matches!(item, EthMessage::Status(_)) {
-            return Err(EthStreamError::StatusInHandshake)
+        if self.authed && matches!(item, EthMessage::Status(_)) {
+            return Err(EthStreamError::HandshakeError(HandshakeError::StatusInHandshake))
         }
 
         let mut bytes = BytesMut::new();
