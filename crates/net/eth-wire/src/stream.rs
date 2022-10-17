@@ -13,13 +13,22 @@ use std::{
 };
 use tokio_stream::Stream;
 
-/// An `EthStream` wraps over any `Stream` that yields rlp encoded messages.
+/// An `EthStream` wraps over any `Stream` that yields bytes and makes it
+/// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
 pub struct EthStream<S> {
     #[pin]
     inner: S,
     /// Whether the `Status` handshake has been completed
     authed: bool,
+}
+
+impl<S> EthStream<S> {
+    /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
+    /// to manually handshake a peer.
+    pub fn new(inner: S) -> Self {
+        Self { inner, authed: false }
+    }
 }
 
 impl<S> EthStream<S>
@@ -35,12 +44,13 @@ where
         status: Status,
         fork_filter: ForkFilter,
     ) -> Result<Self, EthStreamError> {
-        let mut this = Self { inner, authed: false };
+        let mut this = Self::new(inner);
         this.handshake(status, fork_filter).await?;
         Ok(this)
     }
 
-    async fn handshake(
+    /// Performs a handshake with the connected peer over the transport stream.
+    pub async fn handshake(
         &mut self,
         status: Status,
         fork_filter: ForkFilter,
@@ -203,7 +213,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = RlpCodec::default().framed(incoming);
-            let mut stream = EthStream { inner: stream, authed: false };
+            let mut stream = EthStream::new(stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -212,7 +222,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = RlpCodec::default().framed(outgoing);
-        let mut client_stream = EthStream { inner: sink, authed: false };
+        let mut client_stream = EthStream::new(sink);
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -238,7 +248,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            let mut stream = EthStream { inner: stream, authed: false };
+            let mut stream = EthStream::new(stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -249,10 +259,11 @@ mod tests {
         let server_id = pk2id(&server_key.public_key(SECP256K1));
 
         let client_key = SecretKey::new(&mut rand::thread_rng());
-        let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let inner = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
 
-        let mut client_stream = EthStream { inner, authed: false };
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let mut client_stream = EthStream::new(outgoing);
+
         client_stream.send(test_msg).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
