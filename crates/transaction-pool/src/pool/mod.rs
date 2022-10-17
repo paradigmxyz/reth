@@ -179,7 +179,6 @@ where
                     transaction,
                     transaction_id,
                     propagate: false,
-                    is_local: false,
                     timestamp: Instant::now(),
                     origin,
                 };
