@@ -187,6 +187,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap }) => {
                 Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
             }
+            Err(InsertErr::ExceededSenderTransactionsCapacity { transaction }) => {
+                Err(PoolError::SpammerExceededCapacity(*transaction.sender(), *transaction.hash()))
+            }
         }
     }
 
@@ -447,6 +450,27 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.remove(tx.transaction.hash())
     }
 
+    /// Additional checks for a new transaction.
+    ///
+    /// This will enforce all additional rules in the context of this pool, such as:
+    ///   - Spam protection: reject new non-local transaction from a sender that exhausted its slot
+    ///     capacity.
+    fn ensure_valid(
+        &self,
+        transaction: ValidPoolTransaction<T>,
+    ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
+        if !transaction.origin.is_local() {
+            let current_txs =
+                self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
+            if current_txs >= self.max_account_slots {
+                return Err(InsertErr::ExceededSenderTransactionsCapacity {
+                    transaction: Arc::new(transaction),
+                })
+            }
+        }
+        Ok(transaction)
+    }
+
     /// Inserts a new transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -465,8 +489,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
+        let transaction = Arc::new(self.ensure_valid(transaction)?);
         let tx_id = *transaction.id();
-        let transaction = Arc::new(transaction);
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
         let mut updates = Vec::new();
@@ -634,6 +658,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 }
 
+#[cfg(test)]
+#[allow(missing_docs)]
+impl<T: PoolTransaction> AllTransactions<T> {
+    pub(crate) fn tx_count(&self, sender: SenderId) -> usize {
+        self.tx_counter.get(&sender).copied().unwrap_or_default()
+    }
+}
+
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
@@ -682,6 +714,10 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
     ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: U256 },
+    /// Sender currently exceeds the configured limit for max account slots.
+    ///
+    /// The sender can be considered a spammer at this point.
+    ExceededSenderTransactionsCapacity { transaction: Arc<ValidPoolTransaction<T>> },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -796,7 +832,10 @@ impl SenderInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{MockTransaction, MockTransactionFactory};
+    use crate::{
+        test_util::{MockTransaction, MockTransactionFactory},
+        traits::TransactionOrigin,
+    };
 
     #[test]
     fn test_simple_insert() {
@@ -957,5 +996,59 @@ mod tests {
         let first_in_pool = pool.get(first.id()).unwrap();
         // has non nonce gap
         assert!(first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+    }
+
+    #[test]
+    fn rejects_spammer() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let mut tx = MockTransaction::eip1559();
+        for _ in 0..pool.max_account_slots {
+            tx = tx.next();
+            pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
+        }
+
+        assert_eq!(
+            pool.max_account_slots,
+            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+        );
+
+        let err =
+            pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+    }
+
+    #[test]
+    fn allow_local_spamming() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let mut tx = MockTransaction::eip1559();
+        for _ in 0..pool.max_account_slots {
+            tx = tx.next();
+            pool.insert_tx(
+                f.validated_with_origin(TransactionOrigin::Local, tx.clone()),
+                on_chain_balance,
+                on_chain_nonce,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            pool.max_account_slots,
+            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+        );
+
+        pool.insert_tx(
+            f.validated_with_origin(TransactionOrigin::Local, tx.next()),
+            on_chain_balance,
+            on_chain_nonce,
+        )
+        .unwrap();
     }
 }
