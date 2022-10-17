@@ -33,7 +33,7 @@ impl<S> EthStream<S> {
 
 impl<S> EthStream<S>
 where
-    S: Stream<Item = Result<bytes::Bytes, io::Error>>
+    S: Stream<Item = Result<bytes::BytesMut, io::Error>>
         + Sink<bytes::Bytes, Error = io::Error>
         + Unpin,
 {
@@ -81,7 +81,7 @@ where
 
 impl<S> Stream for EthStream<S>
 where
-    S: Stream<Item = Result<bytes::Bytes, io::Error>> + Unpin,
+    S: Stream<Item = Result<bytes::BytesMut, io::Error>> + Unpin,
 {
     type Item = Result<EthMessage, EthStreamError>;
 
@@ -145,9 +145,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        codec::RlpCodec,
         types::{broadcast::BlockHashNumber, forkid::ForkFilter, EthMessage, Status},
-        EthStream,
+        EthStream, PassthroughCodec,
     };
     use futures::{SinkExt, StreamExt};
     use reth_ecies::{stream::ECIESStream, util::pk2id};
@@ -182,12 +181,12 @@ mod tests {
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
-            let stream = RlpCodec::default().framed(incoming);
+            let stream = crate::PassthroughCodec::default().framed(incoming);
             let _ = EthStream::connect(stream, status_clone, fork_filter_clone).await.unwrap();
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let sink = RlpCodec::default().framed(outgoing);
+        let sink = crate::PassthroughCodec::default().framed(outgoing);
 
         // try to connect
         let _ = EthStream::connect(sink, status, fork_filter).await.unwrap();
@@ -212,7 +211,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
-            let stream = RlpCodec::default().framed(incoming);
+            let stream = PassthroughCodec::default().framed(incoming);
             let mut stream = EthStream::new(stream);
 
             // use the stream to get the next message
@@ -221,7 +220,7 @@ mod tests {
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let sink = RlpCodec::default().framed(outgoing);
+        let sink = PassthroughCodec::default().framed(outgoing);
         let mut client_stream = EthStream::new(sink);
 
         client_stream.send(test_msg).await.unwrap();

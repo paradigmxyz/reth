@@ -104,7 +104,7 @@ impl<Io> Stream for ECIESStream<Io>
 where
     Io: AsyncRead + Unpin,
 {
-    type Item = Result<Bytes, io::Error>;
+    type Item = Result<bytes::BytesMut, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match ready!(Pin::new(&mut self.get_mut().stream).poll_next(cx)) {

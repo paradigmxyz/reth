@@ -6,7 +6,9 @@
 ))]
 //! Implementation of the `eth` wire protocol.
 
-pub mod codec;
+pub use tokio_util::codec::{
+    LengthDelimitedCodec as PassthroughCodec, LengthDelimitedCodecError as PassthroughCodecError,
+};
 pub mod error;
 mod stream;
 pub mod types;

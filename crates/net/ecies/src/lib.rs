@@ -38,5 +38,5 @@ pub enum IngressECIESValue {
     /// Receiving an ACK message
     Ack,
     /// Receiving a message
-    Message(bytes::Bytes),
+    Message(bytes::BytesMut),
 }
