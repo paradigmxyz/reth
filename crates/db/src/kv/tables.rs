@@ -1,7 +1,9 @@
 //! Declaration of all MDBX tables.
-
-use crate::utils::TableType;
-use reth_primitives::{Address, BlockNumber, U256};
+use crate::{
+    kv::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+    utils::TableType,
+};
+use reth_primitives::{Account, Address, BlockNumber, Header, Receipt};
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [
@@ -63,28 +65,28 @@ macro_rules! table {
 //  TABLE DEFINITIONS
 //
 
-table!(CanonicalHeaders => BNum => HeaderHash);
-table!(HeaderTD => BNum_BHash => RlpTotalDifficulty);
-table!(HeaderNumbers => BNum_BHash => BNum);
-table!(Headers => BNum_BHash => RlpHeader);
+table!(CanonicalHeaders => BlockNumber => HeaderHash);
+table!(HeaderTD => BlockNumHash => RlpTotalDifficulty);
+table!(HeaderNumbers => BlockNumHash => BlockNumber);
+table!(Headers => BlockNumHash => Header);
 
-table!(BlockBodies => BNum_BHash => NumTxesInBlock);
-table!(CumulativeTxCount => BNum_BHash => u64); // TODO U256?
+table!(BlockBodies => BlockNumHash => NumTxesInBlock);
+table!(CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
 
-table!(NonCanonicalTransactions => BNum_BHash_TxId => RlpTxBody);
-table!(Transactions => TxId => RlpTxBody); // Canonical only
-table!(Receipts => TxId => Receipt); // Canonical only
-table!(Logs => TxId => Receipt); // Canonical only
+table!(NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
+table!(Transactions => TxNumber => RlpTxBody); // Canonical only
+table!(Receipts => TxNumber => Receipt); // Canonical only
+table!(Logs => TxNumber => Receipt); // Canonical only
 
-table!(PlainState => PlainStateKey => Vec<u8>);
+table!(PlainState => PlainStateKey => Account);
 
-table!(AccountHistory => Address => TxIdList);
-table!(StorageHistory => Address_StorageKey => TxIdList);
+table!(AccountHistory => Address => TxNumberList);
+table!(StorageHistory => Address_StorageKey => TxNumberList);
 
-table!(AccountChangeSet => TxId => AccountBeforeTx);
-table!(StorageChangeSet => TxId => StorageKeyBeforeTx);
+table!(AccountChangeSet => TxNumber => AccountBeforeTx);
+table!(StorageChangeSet => TxNumber => StorageKeyBeforeTx);
 
-table!(TxSenders => TxId => Address); // Is it necessary?
+table!(TxSenders => TxNumber => Address); // Is it necessary?
 table!(Config => ConfigKey => ConfigValue);
 
 table!(SyncStage => StageId => BlockNumber);
@@ -96,19 +98,12 @@ table!(SyncStage => StageId => BlockNumber);
 type ConfigKey = Vec<u8>;
 type ConfigValue = Vec<u8>;
 #[allow(non_camel_case_types)]
-type BNum_BHash = Vec<u8>;
-#[allow(non_camel_case_types)]
-type BNum_BHash_TxId = Vec<u8>;
-type RlpHeader = Vec<u8>;
+type BlockNumHashTxNumber = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
-type Receipt = Vec<u8>;
-type NumTxesInBlock = u16; // TODO can it be u16
-type BNum = u64; // TODO check size
-type TxId = u64; // TODO check size
-type HeaderHash = U256;
+type TxNumber = u64; // TODO check size
 type PlainStateKey = Address; // TODO new type will have to account for address_incarna_skey as well
-type TxIdList = Vec<u8>;
+type TxNumberList = Vec<u8>;
 #[allow(non_camel_case_types)]
 type Address_StorageKey = Vec<u8>;
 type AccountBeforeTx = Vec<u8>;

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
 /// Receipt containing result of transaction execution.
+#[main_codec]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     /// Receipt type.
