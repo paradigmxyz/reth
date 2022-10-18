@@ -87,6 +87,7 @@ mod pending;
 pub(crate) mod state;
 mod transaction;
 pub mod txpool;
+mod update;
 
 /// Transaction pool internals.
 pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {

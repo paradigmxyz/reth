@@ -8,6 +8,7 @@ use crate::{
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
+        update::{Destination, PoolUpdate},
         AddedPendingTransaction, AddedTransaction,
     },
     traits::StateDiff,
@@ -402,12 +403,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ///   - increased sender allowance: promote from `queued` to
     ///       - `pending` if basefee condition is met.
     ///       - `basefee` if basefee condition is _not_ met.
+    ///
+    /// Additionally, this will also update the `cumulative_gas_used` for transactions of a sender
+    /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
         pending_block_base_fee: U256,
         state_diffs: &StateDiff,
     ) -> Vec<PoolUpdate> {
-        let pending_basefee_change = self.pending_basefee.cmp(&pending_block_base_fee);
+        // update new basefee
         self.pending_basefee = pending_block_base_fee;
 
         // TODO(mattsse): probably good idea to allocate some capacity here.
@@ -415,64 +419,109 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         let mut iter = self.txs.iter_mut().peekable();
 
-        let mut current_sender =
-            if let Some((id, _)) = iter.peek() { id.sender } else { return updates };
-
-        // Loop over all individual senders and update all affacted transactions.
+        // Loop over all individual senders and update all affected transactions.
         // One sender may have up to `max_account_slots` transactions here, which means, worst case
         // `max_accounts_slots` need to be updated, for example if the first transaction is blocked
         // due to too low base fee.
         // However, we don't have to necessarily check every transaction of a sender. If no updates
-        // are possible then we can skip to the next sender.
-        while let Some((id, tx)) = iter.next() {
-            // this advances the iterator to the next sender
-            let mut to_next_sender = || {
-                while let Some((peek, _)) = iter.peek() {
-                    if peek.sender != current_sender {
-                        current_sender = peek.sender;
-                        break
-                    }
-                    iter.next();
-                }
-            };
+        // are possible (nonce gap) then we can skip to the next sender.
 
-            // // Check if promoting is even possible
-            // if tx.state.has_nonce_gaps() {
-            //     // can't satisfy nonce gaps in this update routine, so all transactions of this
-            // sender remain unchanged     to_next_sender();
-            //     continue
-            // }
-
-            // TODO check new allowance for the sender
-
-            // Check dynamic fee condition
-            if let Some(fee) = tx.transaction.max_fee_per_gas() {
-                let tx_fee_to_basefee = fee.cmp(&self.pending_basefee);
-                let current_pool = tx.subpool;
-                // A changed basefee only triggers an update if
-                match (pending_basefee_change, tx_fee_to_basefee) {
-                    (Ordering::Less, Ordering::Greater) => {
-                        // decreased base fee unblocks this dynamic fee requirement for this
-                        // transaction
-                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        if current_pool != tx.subpool {
-                            updates.push(PoolUpdate {
-                                id: *id,
-                                hash: *tx.transaction.hash(),
-                                current: current_pool,
-                                destination: Destination::Pool(tx.subpool),
-                            })
+        // The `unique_sender` loop will process the first transaction of all senders, update its
+        // state and internally update all consecutive transactions
+        'unique_sender: while let Some((id, tx)) = iter.next() {
+            // Advances the iterator to the next sender
+            macro_rules! next_sender {
+                ($iter:ident) => {
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
                         }
+                        iter.next();
                     }
-                    _ => {
-                        todo!()
-                    }
+                };
+            }
+            // If there's a nonce gap, we can shortcircuit, because there's nothing to update.
+            if tx.state.has_nonce_gap() {
+                next_sender!(iter);
+                continue
+            }
+
+            // TODO(mattsse): if account has balance changes or mined transactions the balance needs
+            // to be checked here
+
+            // Since this is the first transaction of the sender, it has no parked ancestors
+            tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+
+            // Update the first transaction of this sender.
+            Self::update_base_fee(&pending_block_base_fee, tx);
+            // Track if the transaction's sub-pool changed.
+            Self::record_subpool_update(&mut updates, tx);
+
+            // Track blocking transactions.
+            let mut has_parked_ancestor = !tx.state.is_pending();
+
+            // Update all consecutive transaction of this sender
+            while let Some((peek, ref mut tx)) = iter.peek_mut() {
+                if peek.sender != id.sender {
+                    // Found the next sender
+                    continue 'unique_sender
                 }
+
+                if tx.state.has_nonce_gap() {
+                    next_sender!(iter);
+                    continue 'unique_sender
+                }
+
+                // Update ancestor condition.
+                if has_parked_ancestor {
+                    tx.state.remove(TxState::NO_PARKED_ANCESTORS);
+                } else {
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                }
+                has_parked_ancestor = !tx.state.is_pending();
+
+                // Update and record sub-pool changes.
+                Self::update_base_fee(&pending_block_base_fee, tx);
+                Self::record_subpool_update(&mut updates, tx);
+
+                // Advance iterator
+                iter.next();
             }
         }
 
         updates
+    }
+
+    /// This will update the transaction's `subpool` based on its state.
+    ///
+    /// If the sub-pool derived from the state differs from the current pool, it will record a
+    /// `PoolUpdate` for this transaction to move it to the new sub-pool.
+    fn record_subpool_update(updates: &mut Vec<PoolUpdate>, tx: &mut PoolInternalTransaction<T>) {
+        let current_pool = tx.subpool;
+        tx.subpool = tx.state.into();
+        if current_pool != tx.subpool {
+            updates.push(PoolUpdate {
+                id: *tx.transaction.id(),
+                hash: *tx.transaction.hash(),
+                current: current_pool,
+                destination: Destination::Pool(tx.subpool),
+            })
+        }
+    }
+
+    /// Rechecks the transaction's dynamic fee condition.
+    fn update_base_fee(pending_block_base_fee: &U256, tx: &mut PoolInternalTransaction<T>) {
+        // Recheck dynamic fee condition.
+        if let Some(fee_cap) = tx.transaction.max_fee_per_gas() {
+            match fee_cap.cmp(pending_block_base_fee) {
+                Ordering::Greater | Ordering::Equal => {
+                    tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                }
+                Ordering::Less => {
+                    tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+                }
+            }
+        }
     }
 
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
@@ -775,28 +824,6 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
     }
 }
 
-/// Where to move an existing transaction.
-#[derive(Debug)]
-pub(crate) enum Destination {
-    /// Discard the transaction.
-    Discard,
-    /// Move transaction to pool
-    Pool(SubPool),
-}
-
-/// A change of the transaction's location
-///
-/// NOTE: this guarantees that `current` and `destination` differ.
-#[derive(Debug)]
-pub(crate) struct PoolUpdate {
-    pub(crate) id: TransactionId,
-    pub(crate) hash: TxHash,
-    /// Where the transaction is currently held.
-    pub(crate) current: SubPool,
-    /// Where to move the transaction to
-    pub(crate) destination: Destination,
-}
-
 /// Result type for inserting a transaction
 pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 
@@ -834,17 +861,17 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
 /// determining the current state of the transaction.
 pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
-    transaction: Arc<ValidPoolTransaction<T>>,
+    pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
-    subpool: SubPool,
+    pub(crate) subpool: SubPool,
     /// Keeps track of the current state of the transaction and therefor in which subpool it should
     /// reside
-    state: TxState,
+    pub(crate) state: TxState,
     /// The total cost all transactions before this transaction.
     ///
     /// This is the combined `cost` of all transactions from the same sender that currently
     /// come before this transaction.
-    cumulative_cost: U256,
+    pub(crate) cumulative_cost: U256,
 }
 
 // === impl PoolInternalTransaction ===
