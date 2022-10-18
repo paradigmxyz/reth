@@ -18,11 +18,9 @@ pub struct Receipts(
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use crate::types::{message::RequestPair, GetReceipts, Receipts};
     use hex_literal::hex;
-    use reth_primitives::{Log, Receipt, TxType, H256};
+    use reth_primitives::{Log, Receipt, TxType};
     use reth_rlp::{Decodable, Encodable};
 
     #[test]
