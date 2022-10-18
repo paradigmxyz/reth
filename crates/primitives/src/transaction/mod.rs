@@ -502,6 +502,7 @@ impl Decodable for TransactionSigned {
         let original_encoding = *buf;
 
         let header = Header::decode(buf)?;
+        println!("header: {:?}", header);
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
             let tx_type = *buf
@@ -548,6 +549,7 @@ impl Decodable for TransactionSigned {
             let hash = keccak256(original_encoding).into();
             Ok(TransactionSigned { transaction, hash, signature })
         } else {
+            println!("tx is a list");
             let mut transaction = Transaction::Legacy {
                 nonce: Decodable::decode(buf)?,
                 gas_price: Decodable::decode(buf)?,
