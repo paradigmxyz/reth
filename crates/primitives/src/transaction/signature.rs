@@ -2,7 +2,6 @@ use reth_rlp::{Decodable, DecodeError, Encodable};
 
 use crate::U256;
 
-/// Signature TODO
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
