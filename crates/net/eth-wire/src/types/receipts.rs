@@ -1,11 +1,11 @@
-use anvil_core::eth::receipt::TypedReceipt;
-use fastrlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_primitives::{Receipt, H256};
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 /// A request for transaction receipts from the given block hashes.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
-    pub Vec<[u8; 32]>,
+    pub Vec<H256>,
 );
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
@@ -13,16 +13,17 @@ pub struct GetReceipts(
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
-    pub Vec<Vec<TypedReceipt>>,
+    pub Vec<Vec<Receipt>>,
 );
 
 #[cfg(test)]
 mod test {
-    use anvil_core::eth::receipt::{EIP658Receipt, Log, TypedReceipt};
-    use hex_literal::hex;
+    use std::str::FromStr;
 
-    use crate::{message::RequestPair, GetReceipts, Receipts};
-    use fastrlp::{Decodable, Encodable};
+    use crate::types::{message::RequestPair, GetReceipts, Receipts};
+    use hex_literal::hex;
+    use reth_primitives::{Log, Receipt, TxType, H256};
+    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -32,8 +33,8 @@ mod test {
         let request = RequestPair::<GetReceipts> {
             request_id: 1111,
             message: GetReceipts(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
             ]),
         };
         request.encode(&mut data);
@@ -50,8 +51,8 @@ mod test {
             RequestPair::<GetReceipts> {
                 request_id: 1111,
                 message: GetReceipts(vec![
-                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
                 ])
             }
         );
@@ -66,9 +67,10 @@ mod test {
             request_id: 1111,
             message: Receipts(vec![
                 vec![
-                    TypedReceipt::Legacy( EIP658Receipt {
-                        logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                        gas_used: 0x1u64.into(),
+                    Receipt {
+                        tx_type: TxType::Legacy,
+                        bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                        cumulative_gas_used: 0x1u64.into(),
                         logs: vec![
                             Log {
                                 address: hex!("0000000000000000000000000000000000000011").into(),
@@ -76,11 +78,11 @@ mod test {
                                     hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
                                     hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
                                 ],
-                                data: hex!("0100ff").into(),
+                                data: hex!("0100ff")[..].into(),
                             },
                         ],
-                        status_code: 0,
-                    }),
+                        success: false,
+                    },
                 ],
             ]),
         };
@@ -99,9 +101,10 @@ mod test {
                 request_id: 1111,
                 message: Receipts(vec![
                     vec![
-                        TypedReceipt::Legacy( EIP658Receipt {
-                            logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                            gas_used: 0x1u64.into(),
+                        Receipt {
+                            tx_type: TxType::Legacy,
+                            bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                            cumulative_gas_used: 0x1u64.into(),
                             logs: vec![
                                 Log {
                                     address: hex!("0000000000000000000000000000000000000011").into(),
@@ -109,11 +112,11 @@ mod test {
                                         hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
                                         hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
                                     ],
-                                    data: hex!("0100ff").into(),
+                                    data: hex!("0100ff")[..].into(),
                                 },
                             ],
-                            status_code: 0,
-                        }),
+                            success: false,
+                        },
                     ],
                 ]),
             }
