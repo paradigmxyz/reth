@@ -24,7 +24,8 @@ use tx::Tx;
 mod error;
 pub use error::KVError;
 
-mod codecs;
+// Made public so `benches` can access it.
+pub mod codecs;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]

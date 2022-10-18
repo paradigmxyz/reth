@@ -1,9 +1,8 @@
 #![allow(unused)]
 
 use crate::kv::{Decode, Encode, KVError};
-use heapless::Vec;
-use postcard::{from_bytes, to_vec};
-use reth_primitives::Account;
+use postcard::{from_bytes, to_allocvec};
+use reth_primitives::*;
 
 // Just add `Serialize` and `Deserialize`, and set impl_heapless_postcard!(T, MaxSize(T))
 //
@@ -16,20 +15,27 @@ use reth_primitives::Account;
 //
 // impl_heapless_postcard!(T, MaxSize(T))
 
-macro_rules! impl_heapless_postcard {
-    ($name:tt, $static_size:tt) => {
-        impl Encode for $name {
-            type Encoded = Vec<u8, $static_size>;
+macro_rules! impl_postcard {
+    ($($name:tt),+) => {
+        $(
+            impl Encode for $name {
+                type Encoded = Vec<u8>;
 
-            fn encode(self) -> Self::Encoded {
-                to_vec(&self).expect("Failed to encode")
+                fn encode(self) -> Self::Encoded {
+                    to_allocvec(&self).expect("Failed to encode")
+                }
             }
-        }
 
-        impl Decode for $name {
-            fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, KVError> {
-                from_bytes(&value.into()).map_err(|_| KVError::InvalidValue)
+            impl Decode for $name {
+                fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, KVError> {
+                    from_bytes(&value.into()).map_err(|_| KVError::InvalidValue)
+                }
             }
-        }
+        )+
     };
 }
+
+type VecU8 = Vec<u8>;
+
+#[cfg(feature = "bench-postcard")]
+impl_postcard!(VecU8, Receipt, H256, U256, H160, u8, u16, u64, Header, Account, Log, TxType);
