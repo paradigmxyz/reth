@@ -13,6 +13,9 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
+    /// Returns stats about the pool.
+    fn status(&self) -> PoolStatus;
+
     /// Event listener for when a new block was mined.
     ///
     /// Implementers need to update the pool accordingly.
@@ -188,4 +191,15 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<U256>;
+}
+
+/// Represents the current status of the pool.
+#[derive(Debug, Clone)]
+pub struct PoolStatus {
+    /// Number of transactions in the _pending_ sub-pool.
+    pub pending: usize,
+    /// Number of transactions in the _basefee_ pool.
+    pub basefee: usize,
+    /// Number of transactions in the _queued_ sub-pool.
+    pub queued: usize,
 }

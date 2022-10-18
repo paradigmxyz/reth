@@ -10,6 +10,7 @@ use crate::{
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
+    traits::PoolStatus,
     PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
@@ -97,6 +98,16 @@ impl<T: TransactionOrdering> TxPool<T> {
             config,
         }
     }
+
+    /// Returns stats about the pool.
+    pub(crate) fn status(&self) -> PoolStatus {
+        PoolStatus {
+            pending: self.pending_pool.len(),
+            basefee: self.basefee_pool.len(),
+            queued: self.queued_pool.len(),
+        }
+    }
+
     /// Updates the pool based on the changed base fee.
     ///
     /// This enforces the dynamic fee requirement.
