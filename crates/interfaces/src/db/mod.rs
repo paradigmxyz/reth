@@ -1,21 +1,21 @@
+mod codecs;
 mod error;
+pub mod mock;
+pub mod models;
 mod table;
 pub mod tables;
-pub mod models;
-mod codecs;
-pub mod mock;
 
 pub use error::Error;
 pub use table::*;
 
 /// Main Database trait that spawns transactions to be executed.
-pub trait Database {
+pub trait Database: Send+Sync {
     /// RO database transaction
-    type TX<'a>: DbTx<'a>
+    type TX<'a>: DbTx<'a> + Send + Sync
     where
         Self: 'a;
     /// RW database transaction
-    type TXMut<'a>: DbTxMut<'a> + DbTx<'a>
+    type TXMut<'a>: DbTxMut<'a> + DbTx<'a> + Send + Sync
     where
         Self: 'a;
     /// Create read only transaction.

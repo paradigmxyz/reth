@@ -16,8 +16,8 @@ pub enum StageError {
         block: BlockNumber,
     },
     /// The stage encountered a database error.
-    #[error("A database error occurred.")]
-    Database(#[from] DbError),
+    //#[error("A database error occurred.")]
+    //Database(#[from] DbError),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
@@ -34,7 +34,7 @@ pub enum PipelineError {
     Database(#[from] DbError),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
-    Channel(#[from] SendError<PipelineEvent>),
+    sChannel(#[from] SendError<PipelineEvent>),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

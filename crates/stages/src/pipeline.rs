@@ -139,7 +139,7 @@ impl<DB: Database> Pipeline<DB> {
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self, db: &'static DB) -> Result<(), PipelineError> {
+    pub async fn run(&mut self, db: &DB) -> Result<(), PipelineError> {
         loop {
             let mut state = PipelineState {
                 events_sender: self.events_sender.clone(),
@@ -149,7 +149,7 @@ impl<DB: Database> Pipeline<DB> {
                 reached_tip: true,
             };
             //let mut tx = TxContainer::new(db)?;
-            let next_action = self.run_loop(&mut state, db).await?;
+            let next_action = self.run_loop(&mut state, &db).await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -173,7 +173,7 @@ impl<DB: Database> Pipeline<DB> {
     async fn run_loop(
         &mut self,
         state: &mut PipelineState,
-        db: &'static DB,
+        db: &DB,
     ) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
@@ -194,7 +194,7 @@ impl<DB: Database> Pipeline<DB> {
                 ControlFlow::Unwind { target, bad_block } => {
                     // TODO: Note on close
                     // TODO rakita tx.close();
-                    self.unwind(db, target, bad_block).await?;
+                    self.unwind(&db, target, bad_block).await?;
                     // TODO rakita tx.open()?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
@@ -209,7 +209,7 @@ impl<DB: Database> Pipeline<DB> {
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
-        db: &'static DB,
+        db: &DB,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
@@ -361,17 +361,19 @@ impl<DB: Database> QueuedStage<DB> {
 
 #[cfg(test)]
 mod tests {
-    /*
+
+    use std::sync::Arc;
+
     use super::*;
     use crate::{StageId, UnwindOutput};
     use reth_db::{
-        kv::{test_utils, tx::Tx, EnvKind},
+        kv::{test_utils, tx::Tx, Env, EnvKind},
         mdbx::{self, WriteMap},
     };
+    use reth_interfaces::db::mock::DatabaseMock;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
-    use reth_interfaces::db::mock::DatabaseMock;
 
     /// Runs a simple pipeline.
     #[tokio::test]
@@ -759,23 +761,23 @@ mod tests {
 
             async fn execute<'db>(
                 &mut self,
-                tx: &DB::TXMut<'db>,
-                input: ExecInput,
+                _: &DB::TXMut<'db>,
+                _: ExecInput,
             ) -> Result<ExecOutput, StageError> {
                 self.exec_outputs
-                    .pop_front().unwrap()
-                    //.unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
+                    .pop_front()
+                    .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
             }
 
             async fn unwind<'db>(
                 &mut self,
-                tx: &DB::TXMut<'db>,
-                input: UnwindInput,
+                _: &DB::TXMut<'db>,
+                _: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
                 self.unwind_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
             }
         }
-    }*/
+    }
 }
