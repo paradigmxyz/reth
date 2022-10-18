@@ -139,57 +139,41 @@ mod tests {
     use reth_interfaces::stages::HeaderRequest;
     use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
     use std::sync::Arc;
-    use tokio::sync::{
-        broadcast, mpsc,
-        oneshot::{self, error::TryRecvError},
-    };
+    use tokio::sync::{broadcast, mpsc, oneshot::error::TryRecvError};
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     #[tokio::test]
     async fn download_timeout() {
-        let (tx, rx) = oneshot::channel();
         let (req_tx, req_rx) = mpsc::channel(1);
         let (_res_tx, res_rx) = broadcast::channel(1);
-        let (batch_size, request_retries, request_timeout) = (1, 1, 1);
 
-        let downloader = LinearDownloader {
-            consensus: Arc::new(utils::TestConsensus::new()),
-            client: Arc::new(utils::TestHeaderClient::new(req_tx, res_rx)),
-            batch_size,
-            request_retries,
-            request_timeout,
-        };
-
-        tokio::spawn(async move {
-            let result = downloader.download(&HeaderLocked::default(), H256::zero()).await;
-            tx.send(result).expect("failed to forward download response");
-        });
+        let runner = test_runner::LinearTestRunner::new();
+        let retries = runner.retries;
+        let rx = runner.run(
+            utils::TestConsensus::new(),
+            utils::TestHeaderClient::new(req_tx, res_rx),
+            HeaderLocked::default(),
+            H256::zero(),
+        );
 
         let requests = ReceiverStream::new(req_rx).collect::<Vec<_>>().await;
-        assert_eq!(requests.len(), request_retries);
+        assert_eq!(requests.len(), retries);
         assert_matches!(rx.await, Ok(Err(DownloadError::NoHeaderResponse { .. })));
     }
 
     #[tokio::test]
     async fn download_timeout_on_invalid_messages() {
-        let (tx, rx) = oneshot::channel();
         let (req_tx, req_rx) = mpsc::channel(1);
         let (res_tx, res_rx) = broadcast::channel(1);
-        let (batch_size, request_retries, request_timeout) = (1, 5, 1);
 
-        let client = Arc::new(utils::TestHeaderClient::new(req_tx, res_rx));
-        let downloader = LinearDownloader {
-            consensus: Arc::new(utils::TestConsensus::new()),
-            client: client.clone(),
-            batch_size,
-            request_retries,
-            request_timeout,
-        };
-
-        tokio::spawn(async move {
-            let result = downloader.download(&HeaderLocked::default(), H256::zero()).await;
-            tx.send(result).expect("failed to forward download response");
-        });
+        let runner = test_runner::LinearTestRunner::new();
+        let retries = runner.retries;
+        let rx = runner.run(
+            utils::TestConsensus::new(),
+            utils::TestHeaderClient::new(req_tx, res_rx),
+            HeaderLocked::default(),
+            H256::zero(),
+        );
 
         let mut num_of_reqs = 0;
         let mut last_req_id = None;
@@ -201,13 +185,13 @@ mod tests {
             num_of_reqs += 1;
             last_req_id = Some(id);
 
-            if num_of_reqs == request_retries {
+            if num_of_reqs == retries {
                 drop(res_tx);
                 break
             }
         }
 
-        assert_eq!(num_of_reqs, request_retries);
+        assert_eq!(num_of_reqs, retries);
         assert_matches!(
             rx.await,
             Ok(Err(DownloadError::NoHeaderResponse { request_id })) if request_id == last_req_id.unwrap()
@@ -216,10 +200,8 @@ mod tests {
 
     #[tokio::test]
     async fn download_propagates_consensus_validation_error() {
-        let (tx, rx) = oneshot::channel();
         let (req_tx, req_rx) = mpsc::channel(1);
         let (res_tx, res_rx) = broadcast::channel(1);
-        let (batch_size, request_retries, request_timeout) = (100, 2, 5);
 
         let mut tip_parent = Header::default();
         tip_parent.nonce = rand::thread_rng().gen();
@@ -235,18 +217,13 @@ mod tests {
         let mut consensus = utils::TestConsensus::new();
         consensus.set_fail_validation(true);
 
-        let downloader = LinearDownloader {
-            consensus: Arc::new(consensus),
-            client: Arc::new(utils::TestHeaderClient::new(req_tx, res_rx)),
-            batch_size,
-            request_retries,
-            request_timeout,
-        };
-
-        tokio::spawn(async move {
-            let result = downloader.download(&HeaderLocked::default(), chain_tip).await;
-            tx.send(result).expect("failed to forward download response");
-        });
+        let runner = test_runner::LinearTestRunner::new();
+        let rx = runner.run(
+            consensus,
+            utils::TestHeaderClient::new(req_tx, res_rx),
+            HeaderLocked::default(),
+            chain_tip,
+        );
 
         let mut stream = Box::pin(ReceiverStream::new(req_rx));
         let request = stream.next().await;
@@ -263,5 +240,88 @@ mod tests {
             rx.await,
             Ok(Err(DownloadError::HeaderValidation { hash, .. })) if hash == parent_hash
         );
+    }
+
+    #[tokio::test]
+    async fn download_starts_with_chain_tip() {
+        let (req_tx, req_rx) = mpsc::channel(1);
+        let (res_tx, res_rx) = broadcast::channel(1);
+
+        let mut tip_parent = Header::default();
+        tip_parent.nonce = rand::thread_rng().gen();
+        tip_parent.number = 1;
+        let parent_hash = tip_parent.hash_slow();
+
+        let mut tip = Header::default();
+        tip.parent_hash = parent_hash;
+        tip.number = 2;
+        tip.nonce = rand::thread_rng().gen();
+
+        let runner = test_runner::LinearTestRunner::new();
+        let mut rx = runner.run(
+            utils::TestConsensus::new(),
+            utils::TestHeaderClient::new(req_tx, res_rx),
+            tip_parent.clone().lock(),
+            tip.hash_slow(),
+        );
+
+        let mut stream = ReceiverStream::new(req_rx);
+        let request = stream.next().await.unwrap();
+        let mut corrupted_tip = tip.clone();
+        corrupted_tip.nonce = rand::thread_rng().gen();
+        res_tx
+            .send((request.0, vec![corrupted_tip, tip_parent.clone()]))
+            .expect("failed to send header");
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+
+        let request = stream.next().await.unwrap();
+        res_tx
+            .send((request.0, vec![tip.clone(), tip_parent.clone()]))
+            .expect("failed to send header");
+
+        let result = rx.await;
+        assert_matches!(result, Ok(Ok(ref val)) if val.len() == 1);
+        assert_eq!(*result.unwrap().unwrap().first().unwrap(), tip.lock());
+    }
+
+    mod test_runner {
+        use super::*;
+        use reth_interfaces::{consensus::Consensus, stages::HeadersClient};
+        use tokio::sync::oneshot;
+
+        type DownloadResult = Result<Vec<HeaderLocked>, DownloadError>;
+
+        pub(crate) struct LinearTestRunner {
+            pub(crate) retries: usize,
+            test_ch: (oneshot::Sender<DownloadResult>, oneshot::Receiver<DownloadResult>),
+        }
+
+        impl LinearTestRunner {
+            pub(crate) fn new() -> Self {
+                Self { test_ch: oneshot::channel(), retries: 5 }
+            }
+
+            pub(crate) fn run(
+                self,
+                consensus: impl Consensus + 'static,
+                client: impl HeadersClient + 'static,
+                head: HeaderLocked,
+                tip: H256,
+            ) -> oneshot::Receiver<DownloadResult> {
+                let (tx, rx) = self.test_ch;
+                let downloader = LinearDownloader {
+                    consensus: Arc::new(consensus),
+                    client: Arc::new(client),
+                    request_retries: self.retries,
+                    batch_size: 100,
+                    request_timeout: 3,
+                };
+                tokio::spawn(async move {
+                    let result = downloader.download(&head, tip).await;
+                    tx.send(result).expect("failed to forward download response");
+                });
+                rx
+            }
+        }
     }
 }

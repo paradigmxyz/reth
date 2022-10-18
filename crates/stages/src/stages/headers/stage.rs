@@ -1,12 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use async_trait::async_trait;
 use reth_db::{
-    kv::{
-        blocks::BlockNumHash,
-        table::{Decode, Encode},
-        tables,
-        tx::Tx,
-    },
+    kv::{blocks::BlockNumHash, tables, tx::Tx},
     mdbx::{self, WriteFlags},
 };
 use reth_interfaces::{consensus::Consensus, stages::HeadersClient};
