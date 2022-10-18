@@ -10,6 +10,7 @@ fn zeroless_view(v: &impl AsRef<[u8]>) -> &[u8] {
 }
 
 impl Header {
+    /// Encodes the header into the `out` buffer.
     pub fn encode(&self, out: &mut dyn BufMut) {
         if self.payload_length < 56 {
             let code = if self.list { EMPTY_LIST_CODE } else { EMPTY_STRING_CODE };
@@ -21,6 +22,13 @@ impl Header {
             out.put_u8(code + len_be.len() as u8);
             out.put_slice(len_be);
         }
+    }
+
+    /// Returns the length of the encoded header
+    pub fn length(&self) -> usize {
+        let mut out = BytesMut::new();
+        self.encode(&mut out);
+        out.len()
     }
 }
 
@@ -201,7 +209,7 @@ mod ethereum_types_support {
     fixed_hash_impl!(H256);
     fixed_hash_impl!(H512);
     fixed_hash_impl!(H520);
-    //TODO fixed_hash_impl!(Bloom);
+    fixed_hash_impl!(Bloom);
 
     macro_rules! fixed_uint_impl {
         ($t:ty, $n_bytes:tt) => {

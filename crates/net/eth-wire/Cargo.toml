@@ -1,5 +1,6 @@
 [package]
 name = "reth-eth-wire"
+description = "Impements the eth/64 and eth/65 P2P protocols"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -12,13 +13,22 @@ hex = "0.4"
 thiserror = "1"
 
 # reth
+reth-ecies = { path = "../ecies" }
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp", features = ["alloc", "derive", "std", "ethereum-types"] }
 
 #used for forkid
 crc = "1"
 maplit = "1"
+tokio = { version = "1.21.2", features = ["full"] }
+futures = "0.3.24"
+tokio-stream = "0.1.11"
+secp256k1 = { version = "0.24.0", features = ["global-context", "rand-std", "recovery"] }
+tokio-util = { version = "0.7.4", features = ["io"] }
+pin-project = "1.0"
+tracing = "0.1.37"
 
 [dev-dependencies]
 hex-literal = "0.3"
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+rand = "0.8"

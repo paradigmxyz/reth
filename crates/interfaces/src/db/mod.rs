@@ -1,6 +1,8 @@
 mod error;
 mod table;
 pub mod tables;
+pub mod models;
+
 
 pub use error::Error;
 pub use table::*;

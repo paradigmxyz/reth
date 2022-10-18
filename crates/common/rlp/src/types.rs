@@ -1,4 +1,4 @@
-#[derive(Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Header {
     pub list: bool,
     pub payload_length: usize,
