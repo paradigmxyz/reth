@@ -19,3 +19,6 @@ pub use transactions::*;
 
 pub mod state;
 pub use state::*;
+
+pub mod receipts;
+pub use receipts::*;
