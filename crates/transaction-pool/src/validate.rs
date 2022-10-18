@@ -106,6 +106,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn is_local(&self) -> bool {
         self.origin.is_local()
     }
+
+    /// The heap allocated size of this transaction.
+    pub(crate) fn size(&self) -> usize {
+        self.transaction.size()
+    }
 }
 
 #[cfg(test)]
