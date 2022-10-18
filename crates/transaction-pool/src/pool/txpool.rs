@@ -11,7 +11,7 @@ use crate::{
         update::{Destination, PoolUpdate},
         AddedPendingTransaction, AddedTransaction,
     },
-    traits::StateDiff,
+    traits::{PoolStatus, StateDiff},
     NewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
@@ -100,6 +100,23 @@ impl<T: TransactionOrdering> TxPool<T> {
             all_transactions: AllTransactions::new(config.max_account_slots),
             config,
         }
+    }
+
+    /// Returns stats about the pool.
+    pub(crate) fn status(&self) -> PoolStatus {
+        PoolStatus {
+            pending: self.pending_pool.len(),
+            basefee: self.basefee_pool.len(),
+            queued: self.queued_pool.len(),
+        }
+    }
+
+    /// Updates the pool based on the changed base fee.
+    ///
+    /// This enforces the dynamic fee requirement.
+    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
+        // TODO update according to the changed base_fee
+        todo!()
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
