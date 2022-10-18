@@ -104,10 +104,6 @@ impl<'env, E: EnvironmentKind> DbTxMut<'env> for Tx<'env, RW, E> {
     fn cursor_dup_mut<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, Error> {
         todo!()
     }
-
-    // fn cursor_mut(&self) -> Cursor<'env, RW, T> {
-    //     todo!()
-    // }
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
