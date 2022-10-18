@@ -1,5 +1,5 @@
 //! Types for broadcasting new data.
-use reth_primitives::{Header, TransactionSigned, U256};
+use reth_primitives::{Header, TransactionSigned, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// This informs peers of new blocks that have appeared on the network.
@@ -49,7 +49,7 @@ pub struct NewBlock {
     /// A new block.
     pub block: RawBlockBody,
     /// The current total difficulty.
-    pub td: U256,
+    pub td: U128,
 }
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
