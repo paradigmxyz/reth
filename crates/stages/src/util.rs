@@ -64,10 +64,9 @@ pub(crate) mod opt {
 
 pub(crate) mod db {
     use reth_db::{
-        kv::{tx::Tx, Env},
+        kv::{tx::Tx, Env, KVError},
         mdbx,
     };
-    use reth_interfaces::db::Error as DbError;
 
     /// A container for a MDBX transaction that will open a new inner transaction when the current
     /// one is committed.
@@ -92,9 +91,8 @@ pub(crate) mod db {
         /// Create a new container with the given database handle.
         ///
         /// A new inner transaction will be opened.
-        pub(crate) fn new(_db: &'db Env<E>) -> Result<Self, DbError> {
-            //Ok(Self { db, tx: Some(Tx::new(db.begin_rw_txn()?)) })
-            todo!()
+        pub(crate) fn new(db: &'db Env<E>) -> Result<Self, KVError> {
+            Ok(Self { db, tx: Some(Tx::new(db.begin_rw_txn()?)) })
         }
 
         /// Commit the current inner transaction and open a new one.
@@ -103,12 +101,11 @@ pub(crate) mod db {
         ///
         /// Panics if an inner transaction does not exist. This should never be the case unless
         /// [TxContainer::close] was called without following up with a call to [TxContainer::open].
-        pub(crate) fn commit(&mut self) -> Result<bool, DbError> {
-            // let success =
-            //     self.tx.take().expect("Tried committing a non-existent transaction").commit()?;
-            // self.tx = Some(Tx::new(self.db.begin_rw_txn()?));
-            todo!()
-            //Ok(success)
+        pub(crate) fn commit(&mut self) -> Result<bool, KVError> {
+            let success =
+                self.tx.take().expect("Tried committing a non-existent transaction").commit()?;
+            self.tx = Some(Tx::new(self.db.begin_rw_txn()?));
+            Ok(success)
         }
 
         /// Get the inner transaction.
@@ -134,10 +131,9 @@ pub(crate) mod db {
         }
 
         /// Open a new inner transaction.
-        pub(crate) fn open(&mut self) -> Result<(), DbError> {
-            //self.tx = Some(Tx::new(self.db.begin_rw_txn()?));
-            //Ok(())
-            todo!()
+        pub(crate) fn open(&mut self) -> Result<(), KVError> {
+            self.tx = Some(Tx::new(self.db.begin_rw_txn()?));
+            Ok(())
         }
 
         /// Close the current inner transaction.

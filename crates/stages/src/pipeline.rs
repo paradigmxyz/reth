@@ -4,7 +4,6 @@ use crate::{
     ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
 };
 use reth_db::{kv::Env, mdbx};
-use reth_interfaces::db::Database;
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::mpsc::Sender;
@@ -237,7 +236,7 @@ where
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut tx = db.tx_mut()?;
+        let mut tx = db.begin_mut_tx()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);

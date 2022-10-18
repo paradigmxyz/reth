@@ -1,9 +1,8 @@
 use reth_db::{
-    kv::{tx::Tx},
+    kv::{tables::SyncStage, tx::Tx, KVError},
     mdbx,
 };
 use reth_primitives::BlockNumber;
-use reth_interfaces::db::{Error as DbError,tables::SyncStage};
 use std::fmt::Display;
 
 /// The ID of a stage.
@@ -23,7 +22,7 @@ impl StageId {
     pub fn get_progress<'db, K, E>(
         &self,
         tx: &Tx<'db, K, E>,
-    ) -> Result<Option<BlockNumber>, DbError>
+    ) -> Result<Option<BlockNumber>, KVError>
     where
         K: mdbx::TransactionKind,
         E: mdbx::EnvironmentKind,
@@ -36,7 +35,7 @@ impl StageId {
         &self,
         tx: &Tx<'db, mdbx::RW, E>,
         block: BlockNumber,
-    ) -> Result<(), DbError>
+    ) -> Result<(), KVError>
     where
         E: mdbx::EnvironmentKind,
     {
