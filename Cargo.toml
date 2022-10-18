@@ -16,7 +16,6 @@ members = [
     "crates/primitives",
     "crates/stages",
     "crates/transaction-pool",
-    "crates/db",
-    "crates/tests"
+    "crates/db"
 ]
 default-members = ["bin/reth"]

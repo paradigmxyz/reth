@@ -26,6 +26,8 @@ tempfile = { version = "3.3.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.3.0"
+serde = "1.0"
+test-fuzz = "3.0.4"
 
 [features]
 test-utils = ["tempfile"]

@@ -1,12 +1,11 @@
-//! Target encoding/decoding of different types
-
 macro_rules! impl_fuzzer {
     ($($name:tt),+) => {
         $(
             #[allow(non_snake_case)]
+            #[cfg(test)]
             mod $name {
                 use reth_primitives::$name;
-                use reth_db::kv::table;
+                use crate::kv::table;
 
                 #[allow(dead_code)]
                 #[test_fuzz::test_fuzz]

@@ -2411,6 +2411,7 @@ dependencies = [
  "reth-primitives",
  "serde",
  "tempfile",
+ "test-fuzz",
  "thiserror",
 ]
 
@@ -2598,16 +2599,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-futures",
-]
-
-[[package]]
-name = "reth-tests"
-version = "0.1.0"
-dependencies = [
- "reth-db",
- "reth-primitives",
- "serde",
- "test-fuzz",
 ]
 
 [[package]]
