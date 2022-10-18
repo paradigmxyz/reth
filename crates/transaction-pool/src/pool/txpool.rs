@@ -103,8 +103,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn status(&self) -> PoolStatus {
         PoolStatus {
             pending: self.pending_pool.len(),
+            pending_size: self.pending_pool.size(),
             basefee: self.basefee_pool.len(),
+            basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
+            queued_size: self.queued_pool.size(),
         }
     }
 
@@ -282,11 +285,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
 
         self.add_transaction_to_pool(pool, transaction)
-    }
-
-    /// Returns the current size of the entire pool
-    pub fn size_of(&self) -> usize {
-        unimplemented!()
     }
 
     /// Ensures that the transactions in the sub-pools are within the given bounds.

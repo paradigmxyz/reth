@@ -327,6 +327,10 @@ impl PoolTransaction for MockTransaction {
             }
         }
     }
+
+    fn size(&self) -> usize {
+        0
+    }
 }
 
 #[derive(Default)]
