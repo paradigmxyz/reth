@@ -2,5 +2,5 @@
 
 This directory contains documentation for contributors.
 
-- [Repository and project structure](./repo)
-- [Design documents](./design)
+- [Repository and Project Structure](./repo)
+- [Design](./design)
