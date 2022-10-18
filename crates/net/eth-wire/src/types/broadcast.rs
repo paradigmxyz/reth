@@ -1,5 +1,5 @@
 //! Types for broadcasting new data.
-use reth_primitives::{TransactionSigned, Header, U256};
+use reth_primitives::{Header, TransactionSigned, U256};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// This informs peers of new blocks that have appeared on the network.

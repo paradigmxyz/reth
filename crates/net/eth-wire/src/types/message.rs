@@ -1,5 +1,9 @@
 #![allow(missing_docs)]
-use super::{broadcast::NewBlockHashes, Status};
+use super::{
+    broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
+    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, Status, Transactions,
+};
 use bytes::Buf;
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::fmt::Debug;
@@ -22,7 +26,6 @@ impl ProtocolMessage {
             EthMessageID::NewBlockHashes => {
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
-            _ => unimplemented!(),
             EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
@@ -143,8 +146,7 @@ impl EthMessage {
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes(_) =>
-            EthMessageID::NewPooledTransactionHashes,
+            EthMessage::NewPooledTransactionHashes(_) => EthMessageID::NewPooledTransactionHashes,
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
