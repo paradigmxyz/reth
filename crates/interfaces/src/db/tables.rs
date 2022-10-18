@@ -12,7 +12,6 @@ pub enum TableType {
     /// Duplicate key value table
     DupSort,
 }
-
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [
     (TableType::Table, CanonicalHeaders::const_name()),
@@ -43,7 +42,7 @@ macro_rules! table {
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $name;
 
-        impl Table for $name {
+        impl $crate::db::table::Table for $name {
             const NAME: &'static str = $name::const_name();
             type Key = $key;
             type Value = $value;

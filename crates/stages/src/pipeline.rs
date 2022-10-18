@@ -148,7 +148,6 @@ impl<DB: Database> Pipeline<DB> {
                 minimum_progress: None,
                 reached_tip: true,
             };
-            //let mut tx = TxContainer::new(db)?;
             let next_action = self.run_loop(&mut state, &db).await?;
 
             // Terminate the loop early if it's reached the maximum user
@@ -178,11 +177,15 @@ impl<DB: Database> Pipeline<DB> {
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
-            // CHECK rakita should tx be global over all stages
-            let next = queued_stage
-                .execute(state, previous_stage, &db.tx_mut()?)
-                .instrument(info_span!("Running", stage = %stage_id))
-                .await?;
+            let next = {
+                let tx = db.tx_mut()?;
+                let next = queued_stage
+                    .execute(state, previous_stage, &tx)
+                    .instrument(info_span!("Running", stage = %stage_id))
+                    .await?;
+                tx.commit()?;
+                next
+            };
 
             match next {
                 ControlFlow::Continue => {
@@ -762,8 +765,9 @@ mod tests {
             async fn execute<'db>(
                 &mut self,
                 _: &DB::TXMut<'db>,
-                _: ExecInput,
+                input: ExecInput,
             ) -> Result<ExecOutput, StageError> {
+                println!("Stage:{:?} exec input: {:?}", self.id, input);
                 self.exec_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
@@ -772,8 +776,9 @@ mod tests {
             async fn unwind<'db>(
                 &mut self,
                 _: &DB::TXMut<'db>,
-                _: UnwindInput,
+                input: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+                println!("Stage:{:?} unwind input: {:?}", self.id, input);
                 self.unwind_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
