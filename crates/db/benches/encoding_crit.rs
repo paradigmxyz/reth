@@ -3,13 +3,16 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 macro_rules! impl_benchmark {
     ($name:tt) => {
         pub fn criterion_benchmark(c: &mut Criterion) {
+            let mut total_size = 0;
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
-                    reth_db::kv::codecs::fuzz::Header::encode_and_decode(black_box(
+                    total_size += reth_db::kv::codecs::fuzz::Header::encode_and_decode(black_box(
                         reth_primitives::Header::default(),
                     ))
+                    .0;
                 })
             });
+            println!("Size (bytes): `{total_size}`");
         }
 
         criterion_group!(benches, criterion_benchmark);
