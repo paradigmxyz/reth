@@ -88,7 +88,7 @@ mod test {
     use hex_literal::hex;
 
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
-    use fastrlp::{Decodable, Encodable};
+    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
