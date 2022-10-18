@@ -7,7 +7,7 @@ use reth_primitives::{
 /// Client trait for fetching `Block` related data.
 pub trait BlockProvider: Send + Sync {
     /// Returns the current info for the chain.
-    fn block_info(&self) -> Result<BlockInfo>;
+    fn chain_info(&self) -> Result<ChainInfo>;
 
     /// Returns the block. Returns `None` if block is not found.
     fn block(&self, id: BlockId) -> Result<Option<Block>>;
@@ -18,7 +18,7 @@ pub trait BlockProvider: Send + Sync {
         num: BlockNumber,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         let num = match num {
-            BlockNumber::Latest => self.block_info()?.best_number,
+            BlockNumber::Latest => self.chain_info()?.best_number,
             BlockNumber::Earliest => 0,
             BlockNumber::Pending => return Ok(None),
             BlockNumber::Number(num) => num.as_u64(),
@@ -32,7 +32,7 @@ pub trait BlockProvider: Send + Sync {
             BlockId::Hash(hash) => Ok(Some(hash)),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumber::Latest) {
-                    return Ok(Some(self.block_info()?.best_hash))
+                    return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
                     .map(|num| self.block_hash(num.into()))
@@ -61,9 +61,9 @@ pub trait BlockProvider: Send + Sync {
     fn block_hash(&self, number: U256) -> Result<Option<H256>>;
 }
 
-/// Current status of the blockchain's head
+/// Current status of the blockchain's head.
 #[derive(Debug, Eq, PartialEq)]
-pub struct BlockInfo {
+pub struct ChainInfo {
     /// Best block hash.
     pub best_hash: H256,
     /// Best block number.
