@@ -195,10 +195,8 @@ impl<DB: Database> Pipeline<DB> {
                     tx.commit()?;
                 }
                 ControlFlow::Unwind { target, bad_block } => {
-                    // TODO: Note on close
-                    // TODO rakita tx.close();
                     self.unwind(&db, target, bad_block).await?;
-                    // TODO rakita tx.open()?;
+
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }

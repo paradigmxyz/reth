@@ -5,7 +5,10 @@ use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
-use reth_interfaces::db::{tables::{TABLES, TableType}, Database, Error};
+use reth_interfaces::db::{
+    tables::{TableType, TABLES},
+    Database, Error,
+};
 use std::{ops::Deref, path::Path};
 
 pub mod cursor;
@@ -130,7 +133,10 @@ pub mod test_utils {
 mod tests {
     use super::{test_utils, Env, EnvKind};
     use libmdbx::{NoWriteMap, WriteMap};
-    use reth_interfaces::db::{tables::{PlainState, Headers}, Database};
+    use reth_interfaces::db::{
+        tables::{Headers, PlainState},
+        Database,
+    };
     use reth_primitives::{Account, Address, Header, H256, U256};
     use std::str::FromStr;
     use tempfile::TempDir;

@@ -9,7 +9,7 @@ pub use error::Error;
 pub use table::*;
 
 /// Main Database trait that spawns transactions to be executed.
-pub trait Database: Send+Sync {
+pub trait Database: Send + Sync {
     /// RO database transaction
     type TX<'a>: DbTx<'a> + Send + Sync
     where

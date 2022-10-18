@@ -1,8 +1,8 @@
 //! Utils crate for `db`.
 
 //suse crate::kv::Error;
-use reth_interfaces::db::{Decode, Error, Table};
 use bytes::Bytes;
+use reth_interfaces::db::{Decode, Error, Table};
 use std::borrow::Cow;
 
 /// Returns the default page size that can be used in this OS.

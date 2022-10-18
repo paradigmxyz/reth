@@ -16,10 +16,7 @@ impl Display for StageId {
 
 impl StageId {
     /// Get the last committed progress of this stage.
-    pub fn get_progress<'db>(
-        &self,
-        tx: &impl DbTx<'db>,
-    ) -> Result<Option<BlockNumber>, DbError> {
+    pub fn get_progress<'db>(&self, tx: &impl DbTx<'db>) -> Result<Option<BlockNumber>, DbError> {
         tx.get::<SyncStage>(self.0.as_bytes().to_vec())
     }
 

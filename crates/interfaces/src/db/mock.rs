@@ -1,8 +1,9 @@
 //! Mock database
-//! 
 use std::collections::BTreeMap;
 
-use super::{Database, DbCursorRO, DbTx, DbTxMut, Table, DupSort, DbDupCursorRO, DbCursorRW, DbDupCursorRW};
+use super::{
+    Database, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DbTx, DbTxMut, DupSort, Table,
+};
 
 /// Mock database used for testing with inner BTreeMap structure
 pub struct DatabaseMock {
@@ -38,9 +39,7 @@ pub struct TxMock {
 
 impl Default for TxMock {
     fn default() -> Self {
-        Self {
-            table: BTreeMap::new(),
-        }
+        Self { table: BTreeMap::new() }
     }
 }
 
@@ -131,7 +130,6 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
     }
 }
 
-
 impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
     fn next_dup(&mut self) -> super::PairResult<T> {
         todo!()
@@ -145,11 +143,14 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn walk_dup(&'tx mut self, key: <T>::Key, subkey: <T as DupSort>::SubKey) -> Result<super::DupWalker<'tx, T>, super::Error> {
+    fn walk_dup(
+        &'tx mut self,
+        key: <T>::Key,
+        subkey: <T as DupSort>::SubKey,
+    ) -> Result<super::DupWalker<'tx, T>, super::Error> {
         todo!()
     }
 }
-
 
 impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
     fn put(

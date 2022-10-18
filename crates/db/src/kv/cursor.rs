@@ -3,7 +3,8 @@
 use crate::utils::*;
 use libmdbx::{self, TransactionKind, RO, RW};
 use reth_interfaces::db::{
-    DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Error, Table, Walker, Encode,
+    DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode, Error, Table,
+    Walker,
 };
 
 /// Alias type for a `(key, value)` result coming from a cursor.

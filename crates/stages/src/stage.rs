@@ -1,8 +1,7 @@
 use crate::{error::StageError, id::StageId};
 use async_trait::async_trait;
-use reth_primitives::{BlockNumber};
 use reth_interfaces::db::Database;
-
+use reth_primitives::BlockNumber;
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -52,8 +51,7 @@ pub struct UnwindOutput {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 #[async_trait]
-pub trait Stage<DB: Database>: Send + Sync
-{
+pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.

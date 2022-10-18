@@ -1,10 +1,10 @@
-use reth_primitives::{Address,U256};
+use super::Error;
 use bytes::Bytes;
+use reth_primitives::{Address, U256};
 use std::{
     fmt::Debug,
     marker::{Send, Sync},
 };
-use super::Error;
 
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {

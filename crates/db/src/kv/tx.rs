@@ -5,9 +5,7 @@ use crate::{
     utils::decode_one,
 };
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use reth_interfaces::db::{
-    DbTx, DbTxMut, DupSort, Encode, Error, Table,
-};
+use reth_interfaces::db::{DbTx, DbTxMut, DupSort, Encode, Error, Table};
 use std::marker::PhantomData;
 
 /// Wrapper for the libmdbx transaction.
@@ -95,7 +93,6 @@ impl<'env, E: EnvironmentKind> DbTxMut<'env> for Tx<'env, RW, E> {
             )
             .map_err(|e| Error::Internal(e.into()))
     }
-
 
     fn cursor_mut<T: Table>(&self) -> Result<Self::CursorMut<T>, Error> {
         todo!()
