@@ -1,15 +1,67 @@
+use reth_rlp::{Decodable, DecodeError, Encodable};
+
 use crate::U256;
 
-/// Signature TODO
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,
     /// The S field of the signature; the point on the curve.
     pub s: U256,
-    /// yParity: Signature Y parity; forma Ty
+    /// yParity: Signature Y parity; formally Ty
     pub y_parity: u8,
+}
+
+impl Signature {
+    /// Encode the `v`, `r`, `s` values without a RLP header.
+    /// Encodes the `v` value without EIP-155.
+    pub(crate) fn encode_inner(&self, out: &mut dyn reth_rlp::BufMut) {
+        (self.y_parity + 27).encode(out);
+        self.r.encode(out);
+        self.s.encode(out);
+    }
+
+    /// Output the length of the signature without the length of the RLP header, without EIP-155.
+    pub(crate) fn payload_len(&self) -> usize {
+        (self.y_parity + 27).length() + self.r.length() + self.s.length()
+    }
+
+    /// Encode the `v`, `r`, `s` values without a RLP header.
+    /// Encodes the `v` value with EIP-155 support, using the specified chain ID.
+    pub(crate) fn encode_eip155_inner(&self, out: &mut dyn reth_rlp::BufMut, chain_id: u64) {
+        // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+        // assumes y_parity is 0 or 1
+        let v = chain_id * 2 + 35 + self.y_parity as u64;
+        v.encode(out);
+        self.r.encode(out);
+        self.s.encode(out);
+    }
+
+    /// Output the length of the signature without the length of the RLP header, with EIP-155
+    /// support.
+    pub(crate) fn eip155_payload_len(&self, chain_id: u64) -> usize {
+        // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+        // assumes y_parity is 0 or 1
+        let v = chain_id * 2 + 35 + self.y_parity as u64;
+        v.length() + self.r.length() + self.s.length()
+    }
+
+    /// Decodes the `v`, `r`, `s` values without a RLP header.
+    /// This will return a chain ID if the `v` value is EIP-155 compatible.
+    pub(crate) fn decode_eip155_inner(buf: &mut &[u8]) -> Result<(Self, Option<u64>), DecodeError> {
+        let v = u64::decode(buf)?;
+        let r = Decodable::decode(buf)?;
+        let s = Decodable::decode(buf)?;
+        if v >= 35 {
+            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+            let y_parity = ((v - 35) % 2) as u8;
+            let chain_id = (v - 35) >> 1;
+            Ok((Signature { r, s, y_parity }, Some(chain_id)))
+        } else {
+            Ok((Signature { r, s, y_parity: (v % 2) as u8 }, None))
+        }
+    }
 }
