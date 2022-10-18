@@ -9,13 +9,13 @@ pub use error::Error;
 pub use table::*;
 
 /// Main Database trait that spawns transactions to be executed.
-pub trait Database: Send + Sync {
+pub trait Database {
     /// RO database transaction
-    type TX<'a>: DbTx<'a> + Send + Sync
+    type TX<'a>: DbTx<'a>
     where
         Self: 'a;
     /// RW database transaction
-    type TXMut<'a>: DbTxMut<'a> + DbTx<'a> + Send + Sync
+    type TXMut<'a>: DbTxMut<'a> + DbTx<'a>
     where
         Self: 'a;
     /// Create read only transaction.
