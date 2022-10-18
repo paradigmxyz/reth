@@ -8,6 +8,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+use crate::pool::size::SizeTracker;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
@@ -33,6 +34,10 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     ///
     /// Sorted by their scoring value.
     independent_transactions: BTreeSet<PendingTransactionRef<T>>,
+    /// Keeps track of the size of this pool.
+    ///
+    /// See also [`PoolTransaction::size`].
+    size_of: SizeTracker,
 }
 
 // === impl PendingPool ===
@@ -45,6 +50,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             submission_id: 0,
             by_id: Default::default(),
             independent_transactions: Default::default(),
+            size_of: Default::default(),
         }
     }
 
@@ -95,6 +101,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let priority = self.ordering.priority(&tx.transaction);
 
+        // keep track of size
+        self.size_of += tx.size();
+
         let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
 
         // If there's __no__ ancestor in the pool, then this transaction is independent, this is
@@ -113,6 +122,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// If the transactions has a descendant transaction it will advance it to the best queue.
     pub(crate) fn remove_mined(&mut self, id: &TransactionId) {
         if let Some(tx) = self.by_id.remove(id) {
+            // keep track of size
+            self.size_of -= tx.transaction.transaction.size();
             self.independent_transactions.remove(&tx.transaction);
 
             // mark the next as independent if it exists

@@ -191,6 +191,9 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<U256>;
+
+    /// Returns a measurement of the heap usage of this type and all its internals.
+    fn size(&self) -> usize;
 }
 
 /// Represents the current status of the pool.
