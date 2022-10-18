@@ -82,7 +82,10 @@ pub use crate::{
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{
-    error::PoolResult, pool::PoolInner, traits::NewTransactionEvent, validate::ValidPoolTransaction,
+    error::PoolResult,
+    pool::PoolInner,
+    traits::{NewTransactionEvent, TransactionOrigin},
+    validate::ValidPoolTransaction,
 };
 use futures::channel::mpsc::Receiver;
 use reth_primitives::{BlockID, TxHash, U256, U64};
@@ -125,10 +128,11 @@ where
     /// Returns future that validates all transaction in the given iterator.
     async fn validate_all(
         &self,
+        origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
     ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
         let outcome =
-            futures::future::join_all(transactions.into_iter().map(|tx| self.validate(tx)))
+            futures::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
                 .await
                 .into_iter()
                 .collect::<HashMap<_, _>>();
@@ -139,12 +143,13 @@ where
     /// Validates the given transaction
     async fn validate(
         &self,
+        origin: TransactionOrigin,
         transaction: V::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
-        let outcome = self.pool.validator().validate_transaction(transaction).await;
+        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
 
         (hash, outcome)
     }
@@ -174,17 +179,22 @@ where
         todo!()
     }
 
-    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
-        let (_, tx) = self.validate(transaction).await;
-        self.pool.add_transactions(std::iter::once(tx)).pop().expect("exists; qed")
+    async fn add_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> PoolResult<TxHash> {
+        let (_, tx) = self.validate(origin, transaction).await;
+        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
     }
 
     async fn add_transactions(
         &self,
+        origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        let validated = self.validate_all(transactions).await?;
-        let transactions = self.pool.add_transactions(validated.into_values());
+        let validated = self.validate_all(origin, transactions).await?;
+        let transactions = self.pool.add_transactions(origin, validated.into_values());
         Ok(transactions)
     }
 

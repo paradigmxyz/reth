@@ -202,6 +202,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap }) => {
                 Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
             }
+            Err(InsertErr::ExceededSenderTransactionsCapacity { transaction }) => {
+                Err(PoolError::SpammerExceededCapacity(*transaction.sender(), *transaction.hash()))
+            }
         }
     }
 
@@ -547,6 +550,27 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.remove(tx.transaction.hash())
     }
 
+    /// Additional checks for a new transaction.
+    ///
+    /// This will enforce all additional rules in the context of this pool, such as:
+    ///   - Spam protection: reject new non-local transaction from a sender that exhausted its slot
+    ///     capacity.
+    fn ensure_valid(
+        &self,
+        transaction: ValidPoolTransaction<T>,
+    ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
+        if !transaction.origin.is_local() {
+            let current_txs =
+                self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
+            if current_txs >= self.max_account_slots {
+                return Err(InsertErr::ExceededSenderTransactionsCapacity {
+                    transaction: Arc::new(transaction),
+                })
+            }
+        }
+        Ok(transaction)
+    }
+
     /// Inserts a new transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -565,8 +589,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
+        let transaction = Arc::new(self.ensure_valid(transaction)?);
         let tx_id = *transaction.id();
-        let transaction = Arc::new(transaction);
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
         let mut updates = Vec::new();
@@ -574,9 +598,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let predecessor =
             TransactionId::ancestor(transaction.transaction.nonce(), on_chain_nonce, tx_id.sender);
 
-        // If there's no predecessor then this is the next transaction
+        // If there's no predecessor then this is the next transaction.
         if predecessor.is_none() {
             state.insert(TxState::NO_NONCE_GAPS);
+            state.insert(TxState::NO_PARKED_ANCESTORS);
         }
 
         // Check dynamic fee
@@ -635,14 +660,33 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
         {
+            let mut descendants = self.descendant_txs_mut(&on_chain_id).peekable();
+
             // Tracks the next nonce we expect if the transactions are gapless
             let mut next_nonce = on_chain_id.nonce;
 
+            // We need to find out if the next transaction of the sender is considered pending
+            //
+            let mut has_parked_ancestor = if predecessor.is_none() {
+                // the new transaction is the next one
+                false
+            } else {
+                // SAFETY: the transaction was added above so the _inclusive_ descendants iterator
+                // returns at least 1 tx.
+                let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
+                if id.nonce < tx_id.nonce {
+                    !tx.state.is_pending()
+                } else {
+                    true
+                }
+            };
+
             // Traverse all transactions of the sender and update existing transactions
-            for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
+            for (id, tx) in descendants {
                 let current_pool = tx.subpool;
+
+                // If there's a nonce gap, we can shortcircuit
                 if next_nonce != id.nonce {
-                    // nothing to update
                     break
                 }
 
@@ -661,6 +705,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 } else {
                     tx.state.insert(TxState::ENOUGH_BALANCE);
                 }
+
+                // Update ancestor condition.
+                if has_parked_ancestor {
+                    tx.state.remove(TxState::NO_PARKED_ANCESTORS);
+                } else {
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                }
+                has_parked_ancestor = !tx.state.is_pending();
 
                 if tx_id.eq(id) {
                     // if it is the new transaction, track the state
@@ -698,6 +750,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.txs.is_empty()
+    }
+}
+
+#[cfg(test)]
+#[allow(missing_docs)]
+impl<T: PoolTransaction> AllTransactions<T> {
+    pub(crate) fn tx_count(&self, sender: SenderId) -> usize {
+        self.tx_counter.get(&sender).copied().unwrap_or_default()
     }
 }
 
@@ -749,6 +809,10 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
     ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: U256 },
+    /// Sender currently exceeds the configured limit for max account slots.
+    ///
+    /// The sender can be considered a spammer at this point.
+    ExceededSenderTransactionsCapacity { transaction: Arc<ValidPoolTransaction<T>> },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -863,7 +927,10 @@ impl SenderInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{MockTransaction, MockTransactionFactory};
+    use crate::{
+        test_util::{MockTransaction, MockTransactionFactory},
+        traits::TransactionOrigin,
+    };
 
     #[test]
     fn test_simple_insert() {
@@ -941,6 +1008,7 @@ mod tests {
         let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
 
         let first_in_pool = pool.get(first.id()).unwrap();
+
         // has nonce gap
         assert!(!first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
 
@@ -989,5 +1057,93 @@ mod tests {
         // has non nonce gap
         assert!(first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
         assert_eq!(SubPool::Pending, first_in_pool.subpool);
+    }
+
+    #[test]
+    fn insert_previous_blocking() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        pool.pending_basefee = pool.minimal_protocol_basefee + 1;
+        let tx = MockTransaction::eip1559().inc_nonce().inc_limit();
+        let first = f.validated(tx.clone());
+
+        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+
+        let first_in_pool = pool.get(first.id()).unwrap();
+
+        assert!(tx.get_gas_price() < pool.pending_basefee);
+        // has nonce gap
+        assert!(!first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+
+        let prev = f.validated(tx.prev());
+        let InsertOk { updates, replaced_tx, state, move_to, .. } =
+            pool.insert_tx(prev, on_chain_balance, on_chain_nonce).unwrap();
+
+        assert!(!state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        // no updates since still in queued pool
+        assert!(updates.is_empty());
+        assert!(replaced_tx.is_none());
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert_eq!(move_to, SubPool::BaseFee);
+
+        let first_in_pool = pool.get(first.id()).unwrap();
+        // has non nonce gap
+        assert!(first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+    }
+
+    #[test]
+    fn rejects_spammer() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let mut tx = MockTransaction::eip1559();
+        for _ in 0..pool.max_account_slots {
+            tx = tx.next();
+            pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
+        }
+
+        assert_eq!(
+            pool.max_account_slots,
+            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+        );
+
+        let err =
+            pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+    }
+
+    #[test]
+    fn allow_local_spamming() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let mut tx = MockTransaction::eip1559();
+        for _ in 0..pool.max_account_slots {
+            tx = tx.next();
+            pool.insert_tx(
+                f.validated_with_origin(TransactionOrigin::Local, tx.clone()),
+                on_chain_balance,
+                on_chain_nonce,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            pool.max_account_slots,
+            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+        );
+
+        pool.insert_tx(
+            f.validated_with_origin(TransactionOrigin::Local, tx.next()),
+            on_chain_balance,
+            on_chain_nonce,
+        )
+        .unwrap();
     }
 }
