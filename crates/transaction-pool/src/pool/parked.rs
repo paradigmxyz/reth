@@ -1,7 +1,8 @@
-use crate::{identifier::TransactionId, PoolTransaction, ValidPoolTransaction};
+use crate::{
+    identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, ValidPoolTransaction,
+};
 use fnv::FnvHashMap;
 use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
-use crate::pool::size::SizeTracker;
 
 /// A pool of transaction that are currently parked and wait for external changes that eventually
 /// move the transaction into the pending pool.
@@ -65,6 +66,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
         id
     }
 
+    /// The reported size of all transactions in this pool.
+    pub(crate) fn size(&self) -> usize {
+        self.size_of.into()
+    }
+
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
         self.by_id.len()
@@ -78,7 +84,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
 impl<T: ParkedOrd> Default for ParkedPool<T> {
     fn default() -> Self {
-        Self { submission_id: 0, by_id: Default::default(), best: Default::default(), size_of: Default::default() }
+        Self {
+            submission_id: 0,
+            by_id: Default::default(),
+            best: Default::default(),
+            size_of: Default::default(),
+        }
     }
 }
 

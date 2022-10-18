@@ -1,6 +1,7 @@
 use crate::{
-    identifier::TransactionId, pool::best::BestTransactions, TransactionOrdering,
-    ValidPoolTransaction,
+    identifier::TransactionId,
+    pool::{best::BestTransactions, size::SizeTracker},
+    TransactionOrdering, ValidPoolTransaction,
 };
 use reth_primitives::rpc::TxHash;
 use std::{
@@ -8,7 +9,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use crate::pool::size::SizeTracker;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
@@ -152,6 +152,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns the transaction for the id if it's in the pool but not yet mined.
     pub(crate) fn get(&self, id: &TransactionId) -> Option<Arc<PendingTransaction<T>>> {
         self.by_id.get(id).cloned()
+    }
+
+    /// The reported size of all transactions in this pool.
+    pub(crate) fn size(&self) -> usize {
+        self.size_of.into()
     }
 
     /// Number of transactions in the entire pool

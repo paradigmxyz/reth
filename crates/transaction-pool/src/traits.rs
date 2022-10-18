@@ -201,8 +201,14 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
 pub struct PoolStatus {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
+    /// Reported size of transactions in the _pending_ sub-pool.
+    pub pending_size: usize,
     /// Number of transactions in the _basefee_ pool.
     pub basefee: usize,
+    /// Reported size of transactions in the _basefee_ sub-pool.
+    pub basefee_size: usize,
     /// Number of transactions in the _queued_ sub-pool.
     pub queued: usize,
+    /// Reported size of transactions in the _queued_ sub-pool.
+    pub queued_size: usize,
 }
