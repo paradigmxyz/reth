@@ -1,5 +1,8 @@
 use crate::Result;
-use reth_primitives::{rpc::{BlockId, BlockNumber}, H256, U256, Block};
+use reth_primitives::{
+    rpc::{BlockId, BlockNumber},
+    Block, H256, U256,
+};
 
 /// Client trait for fetching `Block` related data.
 pub trait BlockProvider: Send + Sync {
@@ -9,7 +12,7 @@ pub trait BlockProvider: Send + Sync {
     /// Returns the block. Returns `None` if block is not found.
     fn block(&self, id: BlockId) -> Result<Option<Block>>;
 
-    /// Converts the
+    /// Converts the `BlockNumber` variants.
     fn convert_block_number(
         &self,
         num: BlockNumber,
@@ -31,7 +34,10 @@ pub trait BlockProvider: Send + Sync {
                 if matches!(num, BlockNumber::Latest) {
                     return Ok(Some(self.block_info()?.best_hash))
                 }
-                self.convert_block_number(num)?.map(|num| self.block_hash(num.into())).transpose().map(|maybe_hash| maybe_hash.flatten())
+                self.convert_block_number(num)?
+                    .map(|num| self.block_hash(num.into()))
+                    .transpose()
+                    .map(|maybe_hash| maybe_hash.flatten())
             }
         }
     }
