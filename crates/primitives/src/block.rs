@@ -1,3 +1,5 @@
+use reth_rlp::{RlpEncodable, RlpDecodable};
+
 use crate::{Header, HeaderLocked, Receipt, Transaction, TransactionSigned, H256};
 use std::ops::Deref;
 
@@ -42,4 +44,15 @@ impl Deref for BlockLocked {
     fn deref(&self) -> &Self::Target {
         self.header.as_ref()
     }
+}
+
+/// A block body, including transactions and uncle headers.
+#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+pub struct BlockBody {
+    /// This block's header
+    pub header: Header,
+    /// Transactions in this block.
+    pub transactions: Vec<TransactionSigned>,
+    /// Uncle block headers.
+    pub ommers: Vec<Header>,
 }
