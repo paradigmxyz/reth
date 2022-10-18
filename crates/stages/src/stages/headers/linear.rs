@@ -39,7 +39,8 @@ impl Downloader for LinearDownloader {
 
         let mut out = Vec::<HeaderLocked>::new();
         loop {
-            match self.download_batch(head, tip, &mut stream, &mut out).await {
+            let result = self.download_batch(head, tip, &mut stream, &mut out).await;
+            match result {
                 Ok(done) => {
                     if done {
                         return Ok(out)
@@ -138,11 +139,14 @@ mod tests {
     use reth_interfaces::stages::HeaderRequest;
     use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
     use std::sync::Arc;
-    use tokio::sync::{broadcast, mpsc, oneshot};
+    use tokio::sync::{
+        broadcast, mpsc,
+        oneshot::{self, error::TryRecvError},
+    };
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     #[tokio::test]
-    async fn download_batch_timeout() {
+    async fn download_timeout() {
         let (tx, rx) = oneshot::channel();
         let (req_tx, req_rx) = mpsc::channel(1);
         let (_res_tx, res_rx) = broadcast::channel(1);
@@ -167,7 +171,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_batch_timeout_on_invalid_messages() {
+    async fn download_timeout_on_invalid_messages() {
         let (tx, rx) = oneshot::channel();
         let (req_tx, req_rx) = mpsc::channel(1);
         let (res_tx, res_rx) = broadcast::channel(1);
@@ -189,7 +193,7 @@ mod tests {
 
         let mut num_of_reqs = 0;
         let mut last_req_id = None;
-        let mut req_stream = Box::pin(ReceiverStream::new(req_rx));
+        let mut req_stream = ReceiverStream::new(req_rx);
         while let Some((id, _req)) = req_stream.next().await {
             // Since the receiving channel filters by id and message length -
             // randomize the input to the tested filter
@@ -211,19 +215,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_batch_propagates_consensus_error() {
+    async fn download_propagates_consensus_validation_error() {
         let (tx, rx) = oneshot::channel();
         let (req_tx, req_rx) = mpsc::channel(1);
         let (res_tx, res_rx) = broadcast::channel(1);
-        let (batch_size, request_retries, request_timeout) = (1, 3, 5);
+        let (batch_size, request_retries, request_timeout) = (100, 2, 5);
 
-        let mut head_block = Header::default();
-        head_block.state_root = H256::from_low_u64_be(rand::thread_rng().gen());
-        let chain_tip = head_block.hash_slow();
+        let mut tip_parent = Header::default();
+        tip_parent.nonce = rand::thread_rng().gen();
+        tip_parent.number = 1;
+        let parent_hash = tip_parent.hash_slow();
+
+        let mut tip_header = Header::default();
+        tip_header.number = 2;
+        tip_header.nonce = rand::thread_rng().gen();
+        tip_header.parent_hash = parent_hash;
+        let chain_tip = tip_header.hash_slow();
 
         let mut consensus = utils::TestConsensus::new();
-        consensus.update_tip(chain_tip);
-        consensus.set_fail_validation(false);
+        consensus.set_fail_validation(true);
 
         let downloader = LinearDownloader {
             consensus: Arc::new(consensus),
@@ -234,11 +244,12 @@ mod tests {
         };
 
         tokio::spawn(async move {
-            let result = downloader.download(&HeaderLocked::default(), H256::zero()).await;
+            let result = downloader.download(&HeaderLocked::default(), chain_tip).await;
             tx.send(result).expect("failed to forward download response");
         });
 
-        let request = ReceiverStream::new(req_rx).next().await;
+        let mut stream = Box::pin(ReceiverStream::new(req_rx));
+        let request = stream.next().await;
         assert_matches!(
             request,
             Some((_, HeaderRequest { start, .. }))
@@ -246,13 +257,11 @@ mod tests {
         );
 
         let request = request.unwrap();
-        res_tx.send((request.0, vec![head_block])).expect("failed to send header");
+        res_tx.send((request.0, vec![tip_header, tip_parent])).expect("failed to send header");
 
         assert_matches!(
             rx.await,
-            Ok(Err(DownloadError::HeaderValidation { hash, .. })) // TODO:
+            Ok(Err(DownloadError::HeaderValidation { hash, .. })) if hash == parent_hash
         );
-
-        // TODO: match the propagated error
     }
 }
