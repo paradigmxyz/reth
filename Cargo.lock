@@ -2302,18 +2302,13 @@ name = "reth-db"
 version = "0.1.0"
 dependencies = [
  "bytes",
-<<<<<<< HEAD
  "eyre",
- "libmdbx",
- "page_size",
- "reth-interfaces",
-=======
  "heapless",
  "libmdbx",
  "page_size",
  "parity-scale-codec",
  "postcard",
->>>>>>> origin/main
+ "reth-interfaces",
  "reth-primitives",
  "serde",
  "tempfile",
@@ -2394,9 +2389,14 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "auto_impl",
+ "bytes",
  "eyre",
+ "heapless",
+ "parity-scale-codec",
+ "postcard",
  "reth-primitives",
  "reth-rpc-types",
+ "serde",
  "thiserror",
  "tokio",
 ]

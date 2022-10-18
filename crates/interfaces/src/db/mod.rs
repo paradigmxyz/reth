@@ -2,7 +2,8 @@ mod error;
 mod table;
 pub mod tables;
 pub mod models;
-
+mod codecs;
+pub mod mock;
 
 pub use error::Error;
 pub use table::*;
@@ -14,7 +15,7 @@ pub trait Database {
     where
         Self: 'a;
     /// RW database transaction
-    type TXMut<'a>: DbTxMut<'a>
+    type TXMut<'a>: DbTxMut<'a> + DbTx<'a>
     where
         Self: 'a;
     /// Create read only transaction.

@@ -13,8 +13,6 @@ pub mod cursor;
 pub mod tx;
 use tx::Tx;
 
-mod codecs;
-
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
 pub enum EnvKind {

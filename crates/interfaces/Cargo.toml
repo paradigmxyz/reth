@@ -14,3 +14,10 @@ thiserror = "1.0.37"
 eyre = "0.6.8"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
+bytes = "1.2"
+
+# codecs
+serde = { version = "1.0.*", default-features = false }
+postcard = { version = "1.0.2", features = ["heapless"] }
+heapless = "0.7.16"
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }

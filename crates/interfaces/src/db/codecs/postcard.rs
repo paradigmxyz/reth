@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use crate::kv::{Decode, Encode, KVError};
+use crate::db::{Decode, Encode, Error};
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
 use reth_primitives::Account;
@@ -27,8 +27,8 @@ macro_rules! impl_heapless_postcard {
         }
 
         impl Decode for $name {
-            fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, KVError> {
-                from_bytes(&value.into()).map_err(|_| KVError::InvalidValue)
+            fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
+                from_bytes(&value.into()).map_err(|e| Error::Decode(e.into()))
             }
         }
     };

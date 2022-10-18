@@ -1,10 +1,11 @@
 //! Block related models and types.
 
-use crate::kv::{
+use crate::db::{
     table::{Decode, Encode},
-    KVError,
+    Error,
 };
 use bytes::Bytes;
+use eyre::eyre;
 use reth_primitives::{BlockHash, BlockNumber, H256};
 
 /// Total chain number of transactions. Key for [`CumulativeTxCount`].
@@ -53,10 +54,12 @@ impl Encode for BlockNumHash {
 }
 
 impl Decode for BlockNumHash {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, KVError> {
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         let value: bytes::Bytes = value.into();
 
-        let num = u64::from_be_bytes(value.as_ref().try_into().map_err(|_| KVError::InvalidValue)?);
+        let num = u64::from_be_bytes(
+            value.as_ref().try_into().map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
+        );
         let hash = H256::decode(value.slice(8..))?;
 
         Ok(BlockNumHash((num, hash)))

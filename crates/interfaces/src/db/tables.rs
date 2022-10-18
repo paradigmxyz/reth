@@ -1,7 +1,7 @@
 //! Declaration of all Database tables.
 
 use super::Table;
-use crate::models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock};
+use crate::db::models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock};
 use reth_primitives::{Account, Address, BlockNumber, Header, Receipt};
 
 /// Enum for the type of table present in libmdbx.
