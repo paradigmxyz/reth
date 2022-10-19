@@ -1,5 +1,7 @@
 //! Implements fuzzing targets to be used by test-fuzz
 
+/// Fuzzer generates a random instance of the object and proceeds to encode and decode it. It then
+/// makes sure that it matches the original object.
 macro_rules! impl_fuzzer {
     ($($name:tt),+) => {
         $(

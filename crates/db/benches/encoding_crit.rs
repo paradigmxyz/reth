@@ -1,6 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-macro_rules! impl_benchmark {
+/// Benchmarks the encoding and decoding of `Header` using criterion.
+macro_rules! impl_criterion_encoding_benchmark {
     ($name:tt) => {
         pub fn criterion_benchmark(c: &mut Criterion) {
             let mut size = 0;
@@ -25,7 +26,7 @@ macro_rules! impl_benchmark {
 }
 
 #[cfg(not(feature = "bench-postcard"))]
-impl_benchmark!(scale);
+impl_criterion_encoding_benchmark!(scale);
 
 #[cfg(feature = "bench-postcard")]
-impl_benchmark!(postcard);
+impl_criterion_encoding_benchmark!(postcard);
