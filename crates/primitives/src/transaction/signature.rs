@@ -56,13 +56,13 @@ impl Signature {
         let s = Decodable::decode(buf)?;
         if v >= 35 {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let y_parity = ((v - 35) % 2) != 0;
+            let odd_y_parity = ((v - 35) % 2) != 0;
             let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, odd_y_parity: y_parity }, Some(chain_id)))
+            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         } else {
             // non-EIP-155 legacy scheme
-            let y_parity = (v - 27) != 0;
-            Ok((Signature { r, s, odd_y_parity: y_parity }, None))
+            let odd_y_parity = (v - 27) != 0;
+            Ok((Signature { r, s, odd_y_parity }, None))
         }
     }
 }
