@@ -12,5 +12,6 @@ pub use tokio_util::codec::{
 pub mod error;
 mod stream;
 pub mod types;
+pub use types::*;
 
 pub use stream::EthStream;
