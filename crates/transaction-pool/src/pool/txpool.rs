@@ -16,7 +16,7 @@ use crate::{
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -168,7 +168,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
-        // Update sender info
+        // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
             .or_default()
@@ -235,13 +235,26 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will remove the given transaction from one sub-pool and insert it in the other
     /// sub-pool.
     fn move_transaction(&mut self, from: SubPool, to: SubPool, id: &TransactionId) {
-        if let Some(tx) = self.remove_transaction(from, id) {
+        if let Some(tx) = self.remove_from_subpool(from, id) {
             self.add_transaction_to_pool(to, tx);
         }
     }
 
-    /// Removes the transaction from the given pool
+    /// Remove the transaction from the entire pool.
+    ///
+    /// This includes the total set of transaction and the subpool it currently resides in.
     fn remove_transaction(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction(id)?;
+        self.remove_from_subpool(pool, tx.id())
+    }
+
+    /// Removes the transaction from the given pool.
+    ///
+    /// Caution: this only removes the tx from the sub-pool and not from the pool itself
+    fn remove_from_subpool(
         &mut self,
         pool: SubPool,
         tx: &TransactionId,
@@ -250,6 +263,31 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+        }
+    }
+
+    /// Removes _only_ the descendants of the given transaction from the entire pool.
+    ///
+    /// All removed transactions are added to the `removed` vec.
+    fn remove_descendants(
+        &mut self,
+        tx: &TransactionId,
+        removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        let mut id = *tx;
+
+        // this will essentially pop _all_ descendant transactions one by one
+        loop {
+            let descendant =
+                self.all_transactions.descendant_txs_exclusive(&id).map(|(id, _)| *id).next();
+            if let Some(descendant) = descendant {
+                if let Some(tx) = self.remove_transaction(&descendant) {
+                    removed.push(tx)
+                }
+                id = descendant;
+            } else {
+                return
+            }
         }
     }
 
@@ -281,7 +319,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) {
         if let Some((replaced, replaced_pool)) = replaced {
             // Remove the replaced transaction
-            self.remove_transaction(replaced_pool, replaced.id());
+            self.remove_from_subpool(replaced_pool, replaced.id());
         }
 
         self.add_transaction_to_pool(pool, transaction)
@@ -291,8 +329,38 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// If the current size exceeds the given bounds, the worst transactions are evicted from the
     /// pool and returned.
-    pub fn enforce_size_limits(&mut self) {
-        unimplemented!()
+    pub fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed = Vec::new();
+
+        // Helper macro that discards the worst transactions for the pools
+        macro_rules! discard_worst {
+            ($this:ident, $removed:ident,  [$($limit:ident => $pool:ident),*]  ) => {
+                $ (
+                while $this
+                        .config
+                        .$limit
+                        .is_exceeded($this.$pool.len(), $this.$pool.size())
+                    {
+                        if let Some(tx) = $this.$pool.pop_worst() {
+                            let id = tx.transaction_id;
+                            removed.push(tx);
+                            $this.remove_descendants(&id, &mut $removed);
+                        }
+                    }
+
+                )*
+            };
+        }
+
+        discard_worst!(
+            self, removed, [
+                pending_limit  => pending_pool,
+                basefee_limit  => basefee_pool,
+                queued_limit  => queued_pool
+            ]
+        );
+
+        removed
     }
 
     /// Number of transactions in the entire pool
@@ -411,6 +479,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns all transactions that _follow_ after the given id but have the same sender.
     ///
     /// NOTE: The range is _exclusive_
+    pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
+        &'a self,
+        id: &'b TransactionId,
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+        self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
+    }
+
+    /// Returns all transactions that _follow_ after the given id but have the same sender.
+    ///
+    /// NOTE: The range is _exclusive_
     pub(crate) fn descendant_txs_exclusive_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
@@ -442,21 +520,21 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
-    /// Removes a transaction from the pool after it was mined.
+    /// Removes a transaction from the set.
     ///
     /// This will _not_ trigger additional updates, because descendants without nonce gaps are
     /// already in the pending pool, and this transaction will be the first transaction of the
     /// sender in this pool.
-    pub(crate) fn remove_mined_tx(
+    pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
-    ) -> Option<Arc<ValidPoolTransaction<T>>> {
-        let tx = self.txs.remove(id)?;
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
+        let internal = self.txs.remove(id)?;
 
         // decrement the counter for the sender.
-        self.tx_decr(tx.transaction.sender_id());
+        self.tx_decr(internal.transaction.sender_id());
 
-        self.by_hash.remove(tx.transaction.hash())
+        self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool))
     }
 
     /// Additional checks for a new transaction.
