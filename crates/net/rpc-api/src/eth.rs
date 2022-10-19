@@ -1,7 +1,4 @@
-use jsonrpsee::{
-    core::{RpcResult as Result, __reexports::serde_json},
-    proc_macros::rpc,
-};
+use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
     Address, BlockNumber, Bytes, H256, H64, U256, U64,
@@ -11,18 +8,18 @@ use reth_rpc_types::{
     Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
-/// Eth rpc interface.
+/// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server))]
 #[cfg_attr(feature = "client", rpc(server, client))]
 #[async_trait]
 pub trait EthApi {
-    /// Returns protocol version encoded as a string (quotes are necessary).
+    /// Returns protocol version encoded as a string.
     #[method(name = "eth_protocolVersion")]
-    async fn protocol_version(&self) -> Result<u64>;
+    fn protocol_version(&self) -> Result<U64>;
 
     /// Returns an object with data about the sync status or false.
     #[method(name = "eth_syncing")]
-    async fn syncing(&self) -> Result<SyncStatus>;
+    fn syncing(&self) -> Result<SyncStatus>;
 
     /// Returns block author.
     #[method(name = "eth_coinbase")]
@@ -32,9 +29,9 @@ pub trait EthApi {
     #[method(name = "eth_accounts")]
     async fn accounts(&self) -> Result<Vec<Address>>;
 
-    /// Returns highest block number.
+    /// Returns the best block number.
     #[method(name = "eth_blockNumber")]
-    async fn block_number(&self) -> Result<U256>;
+    fn block_number(&self) -> Result<U256>;
 
     /// Returns the chain ID used for transaction signing at the
     /// current best block. None is returned if not
