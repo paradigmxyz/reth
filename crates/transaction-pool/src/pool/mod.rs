@@ -339,7 +339,7 @@ where
 
     /// Enforces the size limits of pool and returns the discarded transactions if violated.
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
-       self.pool.write().discard_worst().into_iter().map(|tx|*tx.hash()).collect()
+        self.pool.write().discard_worst().into_iter().map(|tx| *tx.hash()).collect()
     }
 }
 
