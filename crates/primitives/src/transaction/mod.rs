@@ -592,12 +592,17 @@ impl TransactionSigned {
     /// Output the length of the inner transaction and signature fields.
     pub(crate) fn inner_tx_len(&self) -> usize {
         let mut len = self.transaction.fields_len();
-        if let Transaction::Legacy { chain_id: Some(id), .. } = self.transaction {
-            len += self.signature.eip155_payload_len(id);
+        if let Transaction::Legacy { chain_id, .. } = self.transaction {
+            if let Some(id) = chain_id {
+                len += self.signature.eip155_payload_len(id);
+            } else {
+                // if the transaction has no chain id then it is a pre-EIP-155 transaction
+                len += self.signature.payload_len_legacy();
+            }
         } else {
-            // if the transaction has no chain id then it is a pre-EIP-155 transaction or a typed
-            // transaction
-            len += self.signature.payload_len_legacy();
+            len += self.signature.odd_y_parity.length();
+            len += self.signature.r.length();
+            len += self.signature.s.length();
         }
         len
     }
