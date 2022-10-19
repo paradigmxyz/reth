@@ -130,7 +130,7 @@ impl Transaction {
     /// Heavy operation that return hash over rlp encoded transaction.
     /// It is only used for signature signing.
     pub fn signature_hash(&self) -> TxHash {
-        let mut encoded = vec![];
+        let mut encoded = Vec::with_capacity(self.length());
         self.encode(&mut encoded);
         keccak256(encoded).into()
     }
