@@ -14,8 +14,7 @@ reth-interfaces = { path = "../interfaces" }
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
-postcard = { version = "1.0.2", features = ["heapless"] }
-heapless = "0.7.16"
+postcard = { version = "1.0.2", features = ["alloc"] }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 # misc
@@ -28,6 +27,19 @@ eyre = "0.6.8"
 
 [dev-dependencies]
 tempfile = "3.3.0"
+test-fuzz = "3.0.4"
+criterion = "0.4.0"
+iai = "0.1.1"
 
 [features]
 test-utils = ["tempfile"]
+bench-postcard = ["bench"]
+bench = []
+
+[[bench]]
+name = "encoding_crit"
+harness = false
+
+[[bench]]
+name = "encoding_iai"
+harness = false

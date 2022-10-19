@@ -5,7 +5,7 @@ use reth_primitives::{
 };
 
 /// Client trait for fetching `Block` related data.
-pub trait BlockProvider: Send + Sync {
+pub trait BlockProvider: Send + Sync + 'static {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 

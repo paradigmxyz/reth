@@ -1,4 +1,4 @@
-mod codecs;
+pub mod codecs;
 mod error;
 pub mod mock;
 pub mod models;

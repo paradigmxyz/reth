@@ -1,5 +1,5 @@
 use reth_interfaces::executor::ExecutorDb;
-use reth_primitives::{BlockLocked, Transaction, H160, H256, U256};
+use reth_primitives::{BlockLocked, Transaction, TransactionKind, H160, H256, U256};
 use revm::{
     db::{CacheDB, Database, EmptyDB},
     BlockEnv, TransactTo, TxEnv,
@@ -58,8 +58,10 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*gas_price).into();
             tx_env.gas_priority_fee = None;
-            tx_env.transact_to =
-                if let Some(to) = to { TransactTo::Call(*to) } else { TransactTo::create() };
+            tx_env.transact_to = match to {
+                TransactionKind::Call(to) => TransactTo::Call(*to),
+                TransactionKind::Create => TransactTo::create(),
+            };
             tx_env.value = *value;
             tx_env.data = input.0.clone();
             tx_env.chain_id = *chain_id;
@@ -78,13 +80,16 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*gas_price).into();
             tx_env.gas_priority_fee = None;
-            tx_env.transact_to =
-                if let Some(to) = to { TransactTo::Call(*to) } else { TransactTo::create() };
+            tx_env.transact_to = match to {
+                TransactionKind::Call(to) => TransactTo::Call(*to),
+                TransactionKind::Create => TransactTo::create(),
+            };
             tx_env.value = *value;
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
             tx_env.access_list = access_list
+                .0
                 .iter()
                 .map(|l| {
                     (
@@ -108,13 +113,16 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*max_fee_per_gas).into();
             tx_env.gas_priority_fee = Some((*max_priority_fee_per_gas).into());
-            tx_env.transact_to =
-                if let Some(to) = to { TransactTo::Call(*to) } else { TransactTo::create() };
+            tx_env.transact_to = match to {
+                TransactionKind::Call(to) => TransactTo::Call(*to),
+                TransactionKind::Create => TransactTo::create(),
+            };
             tx_env.value = *value;
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
             tx_env.access_list = access_list
+                .0
                 .iter()
                 .map(|l| {
                     (
