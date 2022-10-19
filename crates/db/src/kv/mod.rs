@@ -36,11 +36,11 @@ impl<E: EnvironmentKind> Database for Env<E> {
     type TX<'a> = tx::Tx<'a, RO, E>;
     type TXMut<'a> = tx::Tx<'a, RW, E>;
 
-    fn tx<'a>(&'a self) -> Result<Self::TX<'a>, Error> {
+    fn tx(&self) -> Result<Self::TX<'_>, Error> {
         Ok(Tx::new(self.inner.begin_ro_txn().unwrap()))
     }
 
-    fn tx_mut<'a>(&'a self) -> Result<Self::TXMut<'a>, Error> {
+    fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error> {
         Ok(Tx::new(self.inner.begin_rw_txn().unwrap()))
     }
 }
@@ -135,7 +135,7 @@ mod tests {
     use libmdbx::{NoWriteMap, WriteMap};
     use reth_interfaces::db::{
         tables::{Headers, PlainState},
-        Database, DbTxMut, DbTx,
+        Database, DbTx, DbTxMut,
     };
     use reth_primitives::{Account, Address, Header, H256, U256};
     use std::str::FromStr;

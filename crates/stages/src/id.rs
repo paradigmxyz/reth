@@ -1,4 +1,4 @@
-use reth_interfaces::db::{tables::SyncStage, Database, DbTx, DbTxMut, Error as DbError};
+use reth_interfaces::db::{tables::SyncStage, DbTx, DbTxMut, Error as DbError};
 use reth_primitives::BlockNumber;
 use std::fmt::Display;
 

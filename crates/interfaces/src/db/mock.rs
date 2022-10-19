@@ -7,15 +7,10 @@ use super::{
 
 /// Mock database used for testing with inner BTreeMap structure
 /// TODO
+#[derive(Clone, Default)]
 pub struct DatabaseMock {
     /// Main data. TODO (Make it table aware)
     pub data: BTreeMap<Vec<u8>, Vec<u8>>,
-}
-
-impl Default for DatabaseMock {
-    fn default() -> Self {
-        Self { data: BTreeMap::new() }
-    }
 }
 
 impl Database for DatabaseMock {
@@ -23,25 +18,20 @@ impl Database for DatabaseMock {
 
     type TXMut<'a> = TxMock;
 
-    fn tx<'a>(&'a self) -> Result<Self::TX<'a>, super::Error> {
+    fn tx(&self) -> Result<Self::TX<'_>, super::Error> {
         Ok(TxMock::default())
     }
 
-    fn tx_mut<'a>(&'a self) -> Result<Self::TXMut<'a>, super::Error> {
+    fn tx_mut(&self) -> Result<Self::TXMut<'_>, super::Error> {
         Ok(TxMock::default())
     }
 }
 
 /// Mock read only tx
+#[derive(Clone, Default)]
 pub struct TxMock {
     /// Table representation
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
-}
-
-impl Default for TxMock {
-    fn default() -> Self {
-        Self { _table: BTreeMap::new() }
-    }
 }
 
 impl<'a> DbTx<'a> for TxMock {
@@ -91,7 +81,7 @@ impl<'a> DbTxMut<'a> for TxMock {
         todo!()
     }
 
-    fn clear<T:Table>(&self) -> Result<(), super::Error> {
+    fn clear<T: Table>(&self) -> Result<(), super::Error> {
         todo!()
     }
 }
@@ -158,25 +148,33 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
 }
 
 impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
-    fn upsert(&mut self, _key: <T as Table>::Key, _value: <T as Table>::Value) -> Result<(),super::Error> {
+    fn upsert(
+        &mut self,
+        _key: <T as Table>::Key,
+        _value: <T as Table>::Value,
+    ) -> Result<(), super::Error> {
         todo!()
     }
 
-    fn append(&mut self, _key: <T as Table>::Key, _value: <T as Table>::Value) -> Result<(),super::Error> {
+    fn append(
+        &mut self,
+        _key: <T as Table>::Key,
+        _value: <T as Table>::Value,
+    ) -> Result<(), super::Error> {
         todo!()
     }
 
-    fn delete_current(&mut self) -> Result<(),super::Error> {
+    fn delete_current(&mut self) -> Result<(), super::Error> {
         todo!()
     }
 }
 
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for CursorMock {
-    fn delete_current_duplicates(&mut self) -> Result<(),super::Error> {
+    fn delete_current_duplicates(&mut self) -> Result<(), super::Error> {
         todo!()
     }
 
-    fn append_dup(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(),super::Error> {
+    fn append_dup(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(), super::Error> {
         todo!()
     }
 }

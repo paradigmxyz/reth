@@ -148,7 +148,7 @@ impl<DB: Database> Pipeline<DB> {
                 minimum_progress: None,
                 reached_tip: true,
             };
-            let next_action = self.run_loop(&mut state, &db).await?;
+            let next_action = self.run_loop(&mut state, db).await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -195,7 +195,7 @@ impl<DB: Database> Pipeline<DB> {
                     tx.commit()?;
                 }
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(&db, target, bad_block).await?;
+                    self.unwind(db, target, bad_block).await?;
 
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
@@ -363,15 +363,12 @@ impl<DB: Database> QueuedStage<DB> {
 #[cfg(test)]
 mod tests {
 
-    use std::sync::Arc;
-
     use super::*;
     use crate::{StageId, UnwindOutput};
     use reth_db::{
-        kv::{test_utils, tx::Tx, Env, EnvKind},
+        kv::{test_utils, Env, EnvKind},
         mdbx::{self, WriteMap},
     };
-    use reth_interfaces::db::mock::DatabaseMock;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;

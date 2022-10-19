@@ -11,17 +11,17 @@ pub use table::*;
 /// Main Database trait that spawns transactions to be executed.
 pub trait Database {
     /// RO database transaction
-    type TX<'a>: DbTx<'a>
+    type TX<'a>: DbTx<'a> + Send + Sync
     where
         Self: 'a;
     /// RW database transaction
-    type TXMut<'a>: DbTxMut<'a> + DbTx<'a>
+    type TXMut<'a>: DbTxMut<'a> + DbTx<'a> + Send + Sync
     where
         Self: 'a;
     /// Create read only transaction.
-    fn tx<'a>(&'a self) -> Result<Self::TX<'a>, Error>;
+    fn tx(&self) -> Result<Self::TX<'_>, Error>;
     /// Create read write transaction only possible if database is open with write access.
-    fn tx_mut<'a>(&'a self) -> Result<Self::TXMut<'a>, Error>;
+    fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error>;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
@@ -57,7 +57,7 @@ pub trait DbTx<'a> {
     /// Cursor GAT
     type Cursor<T: Table>: DbCursorRO<'a, T>;
     /// DupCursor GAT
-    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T>;
+    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T>;
     /// Get value
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
     /// Commit for read only transaction will consume and free transaction and allows
@@ -70,11 +70,14 @@ pub trait DbTx<'a> {
 }
 
 /// Read write transaction that allows writing to database
-pub trait DbTxMut<'a>: DbTx<'a> {
+pub trait DbTxMut<'a> {
     /// Cursor GAT
-    type CursorMut<T: Table>: DbCursorRW<'a, T>;
+    type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T>;
     /// DupCursor GAT
-    type DupCursorMut<T: DupSort>: DbDupCursorRW<'a, T>;
+    type DupCursorMut<T: DupSort>: DbDupCursorRW<'a, T>
+        + DbCursorRW<'a, T>
+        + DbDupCursorRO<'a, T>
+        + DbCursorRO<'a, T>;
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
     /// Delete value from database
@@ -123,7 +126,7 @@ pub trait DbCursorRO<'tx, T: Table> {
 }
 
 /// Read only curor over DupSort table.
-pub trait DbDupCursorRO<'tx, T: DupSort>: DbCursorRO<'tx, T> {
+pub trait DbDupCursorRO<'tx, T: DupSort> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T>;
 
@@ -139,7 +142,7 @@ pub trait DbDupCursorRO<'tx, T: DupSort>: DbCursorRO<'tx, T> {
 }
 
 /// Read write cursor over table.
-pub trait DbCursorRW<'tx, T: Table>: DbCursorRO<'tx, T> {
+pub trait DbCursorRW<'tx, T: Table> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
@@ -152,7 +155,7 @@ pub trait DbCursorRW<'tx, T: Table>: DbCursorRO<'tx, T> {
 }
 
 /// Read Write Cursor over DupSorted table.
-pub trait DbDupCursorRW<'tx, T: DupSort>: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T> {
+pub trait DbDupCursorRW<'tx, T: DupSort> {
     /// Append value to next cursor item
     fn delete_current_duplicates(&mut self) -> Result<(), Error>;
     /// Append duplicate value
