@@ -9,6 +9,10 @@ env:
   NEXTEST_EXPERIMENTAL_FILTER_EXPR: 1
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 name: ci
 jobs:
   test:
