@@ -6,15 +6,12 @@ macro_rules! impl_benchmark {
             let mut size = 0;
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
-                    let (encoded_size, header) =
-                        reth_db::kv::codecs::fuzz::Header::encode_and_decode(black_box(
-                            reth_primitives::Header::default(),
-                        ));
+                    let encoded_size = reth_db::kv::codecs::fuzz::Header::encode_and_decode(
+                        black_box(reth_primitives::Header::default()),
+                    )
+                    .0;
 
                     if size == 0 {
-                        println!("{header:?}");
-                        println!("{encoded_size}");
-
                         size = encoded_size;
                     }
                 })
@@ -22,12 +19,7 @@ macro_rules! impl_benchmark {
             println!("Size (bytes): `{size}`");
         }
 
-        criterion_group! {
-            name = benches;
-            config = Criterion::default().sample_size(10).measurement_time(std::time::Duration::from_millis(100));
-            targets = criterion_benchmark
-        }
-
+        criterion_group!(benches, criterion_benchmark);
         criterion_main!(benches);
     };
 }
