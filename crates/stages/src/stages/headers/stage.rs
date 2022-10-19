@@ -1,3 +1,4 @@
+use super::downloader::{DownloadError, Downloader};
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use async_trait::async_trait;
 use reth_db::{
@@ -5,7 +6,8 @@ use reth_db::{
     mdbx::{self, WriteFlags},
 };
 use reth_interfaces::{consensus::Consensus, stages::HeadersClient};
-use reth_primitives::{BigEndianHash, BlockNumber, Header, HeaderLocked, H256, U256};
+use reth_primitives::{BigEndianHash, BlockNumber, HeaderLocked, H256, U256};
+use reth_rpc_types::engine::ForkchoiceState;
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::*;
@@ -14,57 +16,34 @@ const HEADERS: StageId = StageId("HEADERS");
 
 /// The headers stage implementation for staged sync
 #[derive(Debug)]
-pub struct HeaderStage {
+pub struct HeaderStage<D: Downloader> {
     /// Strategy for downloading the headers
-    pub downloader: Arc<dyn Downloader>,
+    pub downloader: D,
     /// Consensus client implementation
     pub consensus: Arc<dyn Consensus>,
     /// Downloader client implementation
     pub client: Arc<dyn HeadersClient>,
 }
 
-/// The header downloading strategy
-#[async_trait]
-pub trait Downloader: Sync + Send + Debug {
-    /// Download the headers
-    async fn download(
-        &self,
-        latest: &HeaderLocked,
-        tip: H256,
-    ) -> Result<Vec<HeaderLocked>, DownloadError>;
-}
-
-/// The downloader error type
+/// The header stage error
 #[derive(Error, Debug)]
-pub enum DownloadError {
-    /// Header validation failed
-    #[error("Failed to validate header {hash}. Details: {details}.")]
-    HeaderValidation {
-        /// Hash of header failing validation
-        hash: H256,
-        /// The details of validation failure
-        details: String,
-    },
-    /// No headers reponse received
-    #[error("Failed to get headers for request {request_id}.")]
-    NoHeaderResponse {
-        /// The last request ID
-        request_id: u64,
-    },
-    /// The stage encountered an internal error.
-    #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+pub enum HeaderStageError {
+    #[error("no cannonical hash for block #{number}")]
+    NoCannonicalHash { number: BlockNumber },
+    #[error("no cannonical hash for block #{number}")]
+    NoCannonicalHeader { number: BlockNumber },
+    #[error("no header for block #{number} ({hash})")]
+    NoHeader { number: BlockNumber, hash: H256 },
 }
 
-impl DownloadError {
-    /// Returns bool indicating whether this error is retryable or fatal
-    pub fn is_retryable(&self) -> bool {
-        matches!(self, DownloadError::NoHeaderResponse { .. })
+impl Into<StageError> for HeaderStageError {
+    fn into(self) -> StageError {
+        StageError::Internal(anyhow::Error::new(self))
     }
 }
 
 #[async_trait]
-impl<'db, E> Stage<'db, E> for HeaderStage
+impl<'db, E, D: Downloader> Stage<'db, E> for HeaderStage<D>
 where
     E: mdbx::EnvironmentKind,
 {
@@ -90,14 +69,23 @@ where
 
         // download the headers
         // TODO: check if some upper block constraint is necessary
-        let last_hash = tx.get::<tables::CanonicalHeaders>(last_block_num)?.unwrap();
-        let last_header: Header =
-            tx.get::<tables::Headers>((last_block_num, last_hash).into())?.unwrap();
+        let last_hash =
+            tx.get::<tables::CanonicalHeaders>(last_block_num)?.ok_or_else(|| -> StageError {
+                HeaderStageError::NoCannonicalHash { number: last_block_num }.into()
+            })?;
+        let last_header = tx
+            .get::<tables::Headers>((last_block_num, last_hash).into())?
+            .ok_or_else(|| -> StageError {
+                HeaderStageError::NoHeader { number: last_block_num, hash: last_hash }.into()
+            })?;
         let head = HeaderLocked::new(last_header, last_hash);
 
-        let forkchoice_state = self.next_forkchoice_state(&head.hash()).await;
-
-        let headers = match self.downloader.download(&head, forkchoice_state).await {
+        let forkchoice = self.next_forkchoice_state(&head.hash()).await;
+        let headers = match self
+            .downloader
+            .download(self.client.clone(), self.consensus.clone(), &head, &forkchoice)
+            .await
+        {
             Ok(res) => res,
             Err(e) => match e {
                 DownloadError::NoHeaderResponse { request_id } => {
@@ -112,7 +100,6 @@ where
                     warn!("validation error for header {hash}: {details}");
                     return Err(StageError::Validation { block: last_block_num })
                 }
-                DownloadError::Internal(e) => return Err(StageError::Internal(e)),
             },
         };
 
@@ -125,7 +112,7 @@ where
         &mut self,
         tx: &mut Tx<'tx, mdbx::RW, E>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, anyhow::Error> {
         if let Some(bad_block) = input.bad_block {
             todo!()
         }
@@ -170,25 +157,27 @@ where
     }
 }
 
-impl HeaderStage {
+impl<D: Downloader> HeaderStage<D> {
     async fn update_head<'tx, E: mdbx::EnvironmentKind>(
         &self,
         tx: &'tx mut Tx<'_, mdbx::RW, E>,
         height: BlockNumber,
     ) -> Result<(), StageError> {
-        let hash = tx.get::<tables::CanonicalHeaders>(height)?.unwrap();
-        let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap();
+        let hash = tx.get::<tables::CanonicalHeaders>(height)?.ok_or_else(|| -> StageError {
+            HeaderStageError::NoCannonicalHeader { number: height }.into()
+        })?;
+        let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
         Ok(())
     }
 
-    async fn next_forkchoice_state(&self, head: &H256) -> H256 {
+    async fn next_forkchoice_state(&self, head: &H256) -> ForkchoiceState {
         let mut state_rcv = self.consensus.forkchoice_state();
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
             if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
-                return forkchoice.head_block_hash
+                return forkchoice.clone()
             }
         }
     }
@@ -223,7 +212,7 @@ impl HeaderStage {
             cursor_canonical.put(key.0 .0, key.0 .1, Some(WriteFlags::APPEND))?;
             cursor_td.put(
                 key,
-                H256::from_uint(&td).as_bytes().to_vec(),
+                H256::from_uint(&td).as_bytes().to_vec(), // TODO:
                 Some(WriteFlags::APPEND),
             )?;
         }
@@ -234,15 +223,78 @@ impl HeaderStage {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    pub(crate) mod utils {
+    use super::*;
+    use crate::util::db::TxContainer;
+    use assert_matches::assert_matches;
+    use reth_db::{
+        kv::{test_utils as test_db_utils, EnvKind},
+        mdbx,
+    };
+    use tokio::sync::{broadcast, mpsc};
+
+    #[tokio::test]
+    async fn headers_stage_empty_db() {
+        let (req_tx, _req_rx) = mpsc::channel(1);
+        let (_res_tx, res_rx) = broadcast::channel(1);
+
+        let mut stage = HeaderStage {
+            client: Arc::new(test_utils::TestHeaderClient::new(req_tx, res_rx)),
+            consensus: Arc::new(test_utils::TestConsensus::new()),
+            downloader: test_utils::TestDownloader::new(Ok(vec![])),
+        };
+
+        let mut db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let mut tx = TxContainer::new(&mut db).unwrap();
+
+        let input = ExecInput { previous_stage: None, stage_progress: None };
+        assert_matches!(
+            stage.execute(tx.get_mut(), input).await,
+            Err(StageError::Internal(err))
+                if matches!(
+                    err.downcast_ref::<HeaderStageError>(),
+                    Some(HeaderStageError::NoCannonicalHeader { .. }
+                )
+            )
+        );
+    }
+
+    #[tokio::test]
+    // TODO:
+    async fn headers_stage_() {
+        let (req_tx, _req_rx) = mpsc::channel(1);
+        let (_res_tx, res_rx) = broadcast::channel(1);
+
+        let mut stage = HeaderStage {
+            client: Arc::new(test_utils::TestHeaderClient::new(req_tx, res_rx)),
+            consensus: Arc::new(test_utils::TestConsensus::new()),
+            downloader: test_utils::TestDownloader::new(Ok(vec![])),
+        };
+
+        let mut db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let mut tx = TxContainer::new(&mut db).unwrap();
+
+        let input = ExecInput { previous_stage: None, stage_progress: None };
+        assert_matches!(
+            stage.execute(tx.get_mut(), input).await,
+            Err(StageError::Internal(err))
+                if matches!(
+                    err.downcast_ref::<HeaderStageError>(),
+                    Some(HeaderStageError::NoCannonicalHeader { .. }
+                )
+            )
+        );
+    }
+
+    pub(crate) mod test_utils {
+        use super::super::{DownloadError, Downloader};
         use async_trait::async_trait;
         use reth_interfaces::{
             consensus::{self, Consensus},
             stages::{HeaderRequest, HeadersClient, MessageStream},
         };
-        use reth_primitives::{Header, H256, H512};
+        use reth_primitives::{Header, HeaderLocked, H256, H512};
         use reth_rpc_types::engine::ForkchoiceState;
-        use std::collections::HashSet;
+        use std::{collections::HashSet, sync::Arc};
         use tokio::sync::{broadcast, mpsc::Sender, watch};
         use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
@@ -340,6 +392,34 @@ pub(crate) mod tests {
                 } else {
                     Ok(())
                 }
+            }
+        }
+
+        #[derive(Debug)]
+        pub(crate) struct TestDownloader {
+            result: Result<Vec<HeaderLocked>, DownloadError>,
+        }
+
+        impl TestDownloader {
+            pub(crate) fn new(result: Result<Vec<HeaderLocked>, DownloadError>) -> Self {
+                Self { result }
+            }
+        }
+
+        #[async_trait]
+        impl Downloader for TestDownloader {
+            fn timeout(&self) -> u64 {
+                1
+            }
+
+            async fn download(
+                &self,
+                _: Arc<dyn HeadersClient>,
+                _: Arc<dyn Consensus>,
+                _: &HeaderLocked,
+                _: &ForkchoiceState,
+            ) -> Result<Vec<HeaderLocked>, DownloadError> {
+                self.result.clone()
             }
         }
     }

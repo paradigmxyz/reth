@@ -10,18 +10,24 @@ description = "Staged syncing primitives used in reth."
 [dependencies]
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
+reth-rpc-types = { path = "../net/rpc-types" }
 reth-db = { path = "../db" }
-thiserror = "1.0.37"
 tracing = "0.1.36"
 tracing-futures = "0.2.5"
 tokio = { version = "1.21.2", features = ["sync"] }
 rand = "0.8" # TODO:
 tokio-stream = "0.1.11"
+pin-project = "1.0.12"
+pin-project-lite = "0.2"
 aquamarine = "0.1.12"
 
 # async/futures
 async-trait = "0.1.57"
 futures = "0.3"
+
+# error handling
+thiserror = "1.0.37"
+anyhow = "1.0.65"
 
 [dev-dependencies]
 tokio = { version = "*", features = ["rt", "sync", "macros"] }

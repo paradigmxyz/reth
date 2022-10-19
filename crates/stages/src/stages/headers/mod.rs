@@ -1,5 +1,9 @@
 /// The headers stage implementation
 pub mod stage;
 
-/// The downloading strategies
+/// The downloader trait
+pub mod downloader;
+/// The linear downloading strategy
 pub mod linear;
+/// The parallel downloading strategy
+pub mod parallel;

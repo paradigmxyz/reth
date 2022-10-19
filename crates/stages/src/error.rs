@@ -1,4 +1,4 @@
-use crate::pipeline::PipelineEvent;
+use crate::{pipeline::PipelineEvent, Stage};
 use reth_db::kv::KVError;
 use reth_primitives::BlockNumber;
 use thiserror::Error;
@@ -20,7 +20,7 @@ pub enum StageError {
     Database(#[from] KVError),
     /// The stage encountered an internal error.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] anyhow::Error),
 }
 
 /// A pipeline execution error.
@@ -37,5 +37,5 @@ pub enum PipelineError {
     Channel(#[from] SendError<PipelineEvent>),
     /// The stage encountered an internal error.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] anyhow::Error),
 }

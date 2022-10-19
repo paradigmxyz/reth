@@ -74,7 +74,7 @@ where
         &mut self,
         tx: &mut Tx<'tx, mdbx::RW, E>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<UnwindOutput, anyhow::Error>
     where
         'db: 'tx;
 }

@@ -749,7 +749,7 @@ mod tests {
         pub(crate) struct TestStage {
             id: StageId,
             exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-            unwind_outputs: VecDeque<Result<UnwindOutput, Box<dyn Error + Send + Sync>>>,
+            unwind_outputs: VecDeque<Result<UnwindOutput, anyhow::Error>>,
         }
 
         impl TestStage {
@@ -764,7 +764,7 @@ mod tests {
 
             pub(crate) fn add_unwind(
                 mut self,
-                output: Result<UnwindOutput, Box<dyn Error + Send + Sync>>,
+                output: Result<UnwindOutput, anyhow::Error>,
             ) -> Self {
                 self.unwind_outputs.push_back(output);
                 self
@@ -797,7 +797,7 @@ mod tests {
                 &mut self,
                 _: &mut Tx<'tx, mdbx::RW, E>,
                 _: UnwindInput,
-            ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
+            ) -> Result<UnwindOutput, anyhow::Error>
             where
                 'db: 'tx,
             {
