@@ -80,4 +80,5 @@ jobs:
       - name: Upload coverage data to codecov
         uses: codecov/codecov-action@v3
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
