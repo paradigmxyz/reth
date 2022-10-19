@@ -4,9 +4,15 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+// TODO remove later
+#![allow(dead_code)]
 
 //! Reth RPC implementation
 //!
 //! Provides the implementation of all RPC interfaces.
 
-pub mod eth;
+mod eth;
+
+pub use eth::EthApi;
+
+pub(crate) mod result;
