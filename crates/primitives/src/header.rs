@@ -7,7 +7,7 @@ use std::ops::Deref;
 
 /// Block header
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.
@@ -174,7 +174,7 @@ impl Decodable for Header {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 /// HeaderLocked that has precalculated hash, use unlock if you want to modify header.
 pub struct HeaderLocked {
     /// Locked Header fields.
@@ -213,7 +213,7 @@ impl HeaderLocked {
 mod tests {
     use crate::Address;
 
-    use super::{Decodable, Encodable, Header, H160, H256};
+    use super::{Decodable, Encodable, Header, H256};
     use ethers_core::{
         types::Bytes,
         utils::hex::{self, FromHex},
