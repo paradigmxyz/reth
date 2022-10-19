@@ -34,7 +34,6 @@ impl Signature {
     /// Encodes the `v` value with EIP-155 support, using the specified chain ID.
     pub(crate) fn encode_eip155_inner(&self, out: &mut dyn reth_rlp::BufMut, chain_id: u64) {
         // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-        // assumes y_parity is 0 or 1
         let v = chain_id * 2 + 35 + self.odd_y_parity as u64;
         v.encode(out);
         self.r.encode(out);
@@ -45,7 +44,6 @@ impl Signature {
     /// support.
     pub(crate) fn eip155_payload_len(&self, chain_id: u64) -> usize {
         // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-        // assumes y_parity is 0 or 1
         let v = chain_id * 2 + 35 + self.odd_y_parity as u64;
         v.length() + self.r.length() + self.s.length()
     }
