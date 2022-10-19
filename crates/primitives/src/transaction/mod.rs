@@ -181,59 +181,21 @@ impl Transaction {
         }
     }
 
-    /// Encodes individual transaction fields into the desired buffer, without a RLP header or
-    /// EIP-155 fields.
+    /// Encodes individual transaction fields into the desired buffer, without a RLP header.
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Transaction::Legacy { chain_id: _, nonce, gas_price, gas_limit, to, value, input } => {
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-            }
-            Transaction::Eip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            } => {
+            Transaction::Legacy { .. } => self.encode_fields(out),
+            Transaction::Eip2930 { .. } => {
                 out.put_u8(1);
-                chain_id.encode(out);
-                nonce.encode(out);
-                gas_price.encode(out);
-                gas_limit.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
+                let list_header = Header { list: true, payload_length: self.fields_len() };
+                list_header.encode(out);
+                self.encode_fields(out);
             }
-            Transaction::Eip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                input,
-                access_list,
-            } => {
+            Transaction::Eip1559 { .. } => {
                 out.put_u8(2);
-                chain_id.encode(out);
-                nonce.encode(out);
-                gas_limit.encode(out);
-                max_fee_per_gas.encode(out);
-                max_priority_fee_per_gas.encode(out);
-                to.encode(out);
-                value.encode(out);
-                input.0.encode(out);
-                access_list.encode(out);
+                let list_header = Header { list: true, payload_length: self.fields_len() };
+                list_header.encode(out);
+                self.encode_fields(out);
             }
         }
     }
@@ -266,8 +228,23 @@ impl Transaction {
     }
 
     /// Outputs the length of the transaction payload without the length of the RLP header or
-    /// EIP-155 fields.
+    /// eip155 fields.
     pub(crate) fn payload_len(&self) -> usize {
+        match self {
+            Transaction::Legacy { .. } => self.fields_len(),
+            _ => {
+                let mut len = self.fields_len();
+                // add list header length
+                len += length_of_length(len);
+                // add transaction type byte length
+                len + 1
+            }
+        }
+    }
+
+    /// Outputs the length of the transaction's fields, without a RLP header or length of the
+    /// eip155 fields.
+    pub(crate) fn fields_len(&self) -> usize {
         match self {
             Transaction::Legacy { chain_id: _, nonce, gas_price, gas_limit, to, value, input } => {
                 let mut len = 0;
@@ -298,8 +275,7 @@ impl Transaction {
                 len += value.length();
                 len += input.0.length();
                 len += access_list.length();
-                // add 1 for the transaction type
-                len + 1
+                len
             }
             Transaction::Eip1559 {
                 chain_id,
@@ -315,15 +291,68 @@ impl Transaction {
                 let mut len = 0;
                 len += chain_id.length();
                 len += nonce.length();
-                len += gas_limit.length();
-                len += max_fee_per_gas.length();
                 len += max_priority_fee_per_gas.length();
+                len += max_fee_per_gas.length();
+                len += gas_limit.length();
                 len += to.length();
                 len += value.length();
                 len += input.0.length();
                 len += access_list.length();
-                // add 1 for the transaction type
-                len + 1
+                len
+            }
+        }
+    }
+
+    /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
+    pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
+        match self {
+            Transaction::Legacy { chain_id: _, nonce, gas_price, gas_limit, to, value, input } => {
+                nonce.encode(out);
+                gas_price.encode(out);
+                gas_limit.encode(out);
+                to.encode(out);
+                value.encode(out);
+                input.0.encode(out);
+            }
+            Transaction::Eip2930 {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+            } => {
+                chain_id.encode(out);
+                nonce.encode(out);
+                gas_price.encode(out);
+                gas_limit.encode(out);
+                to.encode(out);
+                value.encode(out);
+                input.0.encode(out);
+                access_list.encode(out);
+            }
+            Transaction::Eip1559 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                input,
+                access_list,
+            } => {
+                chain_id.encode(out);
+                nonce.encode(out);
+                max_priority_fee_per_gas.encode(out);
+                max_fee_per_gas.encode(out);
+                gas_limit.encode(out);
+                to.encode(out);
+                value.encode(out);
+                input.0.encode(out);
+                access_list.encode(out);
             }
         }
     }
@@ -333,14 +362,28 @@ impl Transaction {
 /// intended for signing.
 impl Encodable for Transaction {
     fn length(&self) -> usize {
-        let len = self.payload_len() + self.eip155_fields_len();
+        // TODO: fix
+        let len = self.payload_len();
         len + length_of_length(len)
     }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        let header = Header { list: true, payload_length: self.length() };
-        header.encode(out);
-        self.encode_inner(out);
-        self.encode_eip155_fields(out);
+        match self {
+            Transaction::Legacy { .. } => {
+                let header = Header {
+                    list: true,
+                    payload_length: self.payload_len() + self.eip155_fields_len(),
+                };
+                header.encode(out);
+                self.encode_inner(out);
+                self.encode_eip155_fields(out);
+            }
+            Transaction::Eip2930 { .. } => {
+                self.encode_inner(out);
+            }
+            Transaction::Eip1559 { .. } => {
+                self.encode_inner(out);
+            }
+        }
     }
 }
 
@@ -357,13 +400,13 @@ impl Encodable for TransactionKind {
     fn length(&self) -> usize {
         match self {
             TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => EMPTY_STRING_CODE.length(),
+            TransactionKind::Create => 1, // EMPTY_STRING_CODE is a single byte
         }
     }
     fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
-            TransactionKind::Create => EMPTY_STRING_CODE.encode(out),
+            TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
         }
     }
 }
@@ -408,44 +451,46 @@ impl Deref for TransactionSigned {
 
 impl Encodable for TransactionSigned {
     fn length(&self) -> usize {
-        let mut len = self.transaction.payload_len();
-        if let Transaction::Legacy { chain_id: None, .. } = self.transaction {
-            // if the transaction has no chain id then it is a pre-EIP-155 transaction
-            len += self.signature.payload_len();
-        } else {
-            let id = match self.transaction {
-                Transaction::Legacy { chain_id: Some(id), .. } => id,
-                Transaction::Eip2930 { chain_id, .. } => chain_id,
-                Transaction::Eip1559 { chain_id, .. } => chain_id,
-                // we handled this case above
-                _ => unreachable!(
-                    "legacy transaction without chain id should have been handled above"
-                ),
-            };
-            len += self.signature.eip155_payload_len(id);
-        }
+        let len = self.payload_len();
 
         // add the length of the RLP header
         len + length_of_length(len)
     }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        let header = Header { list: true, payload_length: self.length() };
-        header.encode(out);
-        self.transaction.encode_inner(out);
-        if let Transaction::Legacy { chain_id: None, .. } = self.transaction {
-            // if the transaction has no chain id then it is a pre-EIP-155 transaction
-            self.signature.encode_inner(out);
+        if let Transaction::Legacy { chain_id, .. } = self.transaction {
+            let header = Header { list: true, payload_length: self.payload_len() };
+            header.encode(out);
+            self.transaction.encode_fields(out);
+
+            if let Some(id) = chain_id {
+                self.signature.encode_eip155_inner(out, id);
+            } else {
+                // if the transaction has no chain id then it is a pre-EIP-155 transaction
+                self.signature.encode_inner_legacy(out);
+            }
         } else {
-            let id = match self.transaction {
-                Transaction::Legacy { chain_id: Some(id), .. } => id,
-                Transaction::Eip2930 { chain_id, .. } => chain_id,
-                Transaction::Eip1559 { chain_id, .. } => chain_id,
-                // we handled this case above
-                _ => unreachable!(
-                    "legacy transaction without chain id should have been handled above"
-                ),
-            };
-            self.signature.encode_eip155_inner(out, id);
+            let header = Header { list: false, payload_length: self.payload_len() };
+            header.encode(out);
+            match self.transaction {
+                Transaction::Eip2930 { .. } => {
+                    out.put_u8(1);
+                    let list_header = Header { list: true, payload_length: self.inner_tx_len() };
+                    list_header.encode(out);
+                }
+                Transaction::Eip1559 { .. } => {
+                    out.put_u8(2);
+                    let list_header = Header { list: true, payload_length: self.inner_tx_len() };
+                    list_header.encode(out);
+                }
+                Transaction::Legacy { .. } => {
+                    unreachable!("Legacy transaction should be handled above")
+                }
+            }
+
+            self.transaction.encode_fields(out);
+            self.signature.odd_y_parity.encode(out);
+            self.signature.r.encode(out);
+            self.signature.s.encode(out);
         }
     }
 }
@@ -463,6 +508,12 @@ impl Decodable for TransactionSigned {
                 .first()
                 .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
             buf.advance(1);
+            // decode the list header for the rest of the transaction
+            let header = Header::decode(buf)?;
+            if !header.list {
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+            }
+
             // decode common fields
             let transaction = match tx_type {
                 1 => Transaction::Eip2930 {
@@ -478,17 +529,22 @@ impl Decodable for TransactionSigned {
                 2 => Transaction::Eip1559 {
                     chain_id: Decodable::decode(buf)?,
                     nonce: Decodable::decode(buf)?,
+                    max_priority_fee_per_gas: Decodable::decode(buf)?,
+                    max_fee_per_gas: Decodable::decode(buf)?,
                     gas_limit: Decodable::decode(buf)?,
                     to: Decodable::decode(buf)?,
                     value: Decodable::decode(buf)?,
                     input: Bytes(Decodable::decode(buf)?),
                     access_list: Decodable::decode(buf)?,
-                    max_fee_per_gas: Decodable::decode(buf)?,
-                    max_priority_fee_per_gas: Decodable::decode(buf)?,
                 },
                 _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
             };
-            let (signature, _) = Signature::decode_eip155_inner(buf)?;
+
+            let signature = Signature {
+                odd_y_parity: Decodable::decode(buf)?,
+                r: Decodable::decode(buf)?,
+                s: Decodable::decode(buf)?,
+            };
             let hash = keccak256(original_encoding).into();
             Ok(TransactionSigned { transaction, hash, signature })
         } else {
@@ -505,6 +561,7 @@ impl Decodable for TransactionSigned {
             if let Some(id) = extracted_id {
                 transaction.set_chain_id(id);
             }
+
             let hash = keccak256(original_encoding).into();
             Ok(TransactionSigned { transaction, hash, signature })
         }
@@ -530,5 +587,248 @@ impl TransactionSigned {
         initial_tx.encode(&mut buf);
         initial_tx.hash = keccak256(&buf).into();
         initial_tx
+    }
+
+    /// Output the length of the inner transaction and signature fields.
+    pub(crate) fn inner_tx_len(&self) -> usize {
+        let mut len = self.transaction.fields_len();
+        if let Transaction::Legacy { chain_id, .. } = self.transaction {
+            if let Some(id) = chain_id {
+                len += self.signature.eip155_payload_len(id);
+            } else {
+                // if the transaction has no chain id then it is a pre-EIP-155 transaction
+                len += self.signature.payload_len_legacy();
+            }
+        } else {
+            len += self.signature.odd_y_parity.length();
+            len += self.signature.r.length();
+            len += self.signature.s.length();
+        }
+        len
+    }
+
+    /// Output the length of the signed transaction's rlp payload without a rlp header.
+    pub(crate) fn payload_len(&self) -> usize {
+        let mut len = self.inner_tx_len();
+        if let Transaction::Legacy { .. } = self.transaction {
+            len
+        } else {
+            // length of the list header
+            len += Header { list: true, payload_length: len }.length();
+            // add type byte
+            len + 1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use crate::{
+        transaction::{signature::Signature, TransactionKind},
+        Address, Transaction, TransactionSigned, H256, U256,
+    };
+    use bytes::BytesMut;
+    use ethers_core::{types::Bytes, utils::hex};
+    use reth_rlp::{Decodable, Encodable};
+
+    #[test]
+    fn test_decode_create() {
+        // panic!("not implemented");
+        // tests that a contract creation tx encodes and decodes properly
+        let request = Transaction::Eip2930 {
+            chain_id: 1u64,
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 2,
+            to: TransactionKind::Create,
+            value: U256::from(3),
+            input: Bytes::from(vec![1, 2]),
+            access_list: Default::default(),
+        };
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
+        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
+
+        let mut encoded = BytesMut::new();
+        tx.encode(&mut encoded);
+
+        let decoded = TransactionSigned::decode(&mut &*encoded).unwrap();
+        assert_eq!(decoded, tx);
+    }
+
+    #[test]
+    fn test_decode_create_goerli() {
+        // test that an example create tx from goerli decodes properly
+        let tx_bytes =
+              hex::decode("b901f202f901ee05228459682f008459682f11830209bf8080b90195608060405234801561001057600080fd5b50610175806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c80630c49c36c14610030575b600080fd5b61003861004e565b604051610045919061011d565b60405180910390f35b60606020600052600f6020527f68656c6c6f2073746174656d696e64000000000000000000000000000000000060405260406000f35b600081519050919050565b600082825260208201905092915050565b60005b838110156100be5780820151818401526020810190506100a3565b838111156100cd576000848401525b50505050565b6000601f19601f8301169050919050565b60006100ef82610084565b6100f9818561008f565b93506101098185602086016100a0565b610112816100d3565b840191505092915050565b6000602082019050818103600083015261013781846100e4565b90509291505056fea264697066735822122051449585839a4ea5ac23cae4552ef8a96b64ff59d0668f76bfac3796b2bdbb3664736f6c63430008090033c080a0136ebffaa8fc8b9fda9124de9ccb0b1f64e90fbd44251b4c4ac2501e60b104f9a07eb2999eec6d185ef57e91ed099afb0a926c5b536f0155dd67e537c7476e1471")
+                  .unwrap();
+        let _decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+    }
+
+    #[test]
+    fn test_decode_call() {
+        let request = Transaction::Eip2930 {
+            chain_id: 1u64,
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 2,
+            to: TransactionKind::Call(Address::default()),
+            value: U256::from(3),
+            input: Bytes::from(vec![1, 2]),
+            access_list: Default::default(),
+        };
+
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
+
+        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
+
+        let mut encoded = BytesMut::new();
+        tx.encode(&mut encoded);
+
+        let decoded = TransactionSigned::decode(&mut &*encoded).unwrap();
+        assert_eq!(decoded, tx);
+    }
+
+    #[test]
+    fn decode_transaction_consumes_buffer() {
+        let bytes = &mut &hex::decode("b87502f872041a8459682f008459682f0d8252089461815774383099e24810ab832a5b2a5425c154d58829a2241af62c000080c001a059e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafda0016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469").unwrap()[..];
+        let _transaction_res = TransactionSigned::decode(bytes).unwrap();
+        assert_eq!(
+            bytes.len(),
+            0,
+            "did not consume all bytes in the buffer, {:?} remaining",
+            bytes.len()
+        );
+    }
+
+    #[test]
+    fn decode_multiple_network_txs() {
+        let bytes_first = &mut &hex::decode("f86b02843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba00eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5aea03a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18").unwrap()[..];
+        let expected_request = Transaction::Legacy {
+            chain_id: Some(4u64),
+            nonce: 2,
+            gas_price: 1000000000,
+            gas_limit: 100000,
+            to: TransactionKind::Call(
+                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
+            ),
+            value: U256::from(1000000000000000u64),
+            input: Bytes::default(),
+        };
+        let expected_signature = Signature {
+            odd_y_parity: false,
+            r: U256::from_str("eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
+                .unwrap(),
+            s: U256::from_str("3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
+                .unwrap(),
+        };
+        let expected =
+            TransactionSigned::from_transaction_and_signature(expected_request, expected_signature);
+        assert_eq!(expected, TransactionSigned::decode(bytes_first).unwrap());
+        assert_eq!(
+            expected.hash,
+            H256::from_str("0xa517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34")
+                .unwrap()
+        );
+
+        let bytes_second = &mut &hex::decode("f86b01843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac3960468702769bb01b2a00802ba0e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0aa05406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da").unwrap()[..];
+        let expected_request = Transaction::Legacy {
+            chain_id: Some(4),
+            nonce: 1u64,
+            gas_price: 1000000000u64,
+            gas_limit: 100000u64,
+            to: TransactionKind::Call(Address::from_slice(
+                &hex::decode("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap()[..],
+            )),
+            value: 693361000000000u64.into(),
+            input: Default::default(),
+        };
+        let expected_signature = Signature {
+            odd_y_parity: false,
+            r: U256::from_str("e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a")
+                .unwrap(),
+            s: U256::from_str("5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
+                .unwrap(),
+        };
+
+        let expected =
+            TransactionSigned::from_transaction_and_signature(expected_request, expected_signature);
+        assert_eq!(expected, TransactionSigned::decode(bytes_second).unwrap());
+
+        let bytes_third = &mut &hex::decode("f86b0384773594008398968094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba0ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071a03ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88").unwrap()[..];
+        let expected_request = Transaction::Legacy {
+            chain_id: Some(4),
+            nonce: 3,
+            gas_price: 2000000000,
+            gas_limit: 10000000,
+            to: TransactionKind::Call(Address::from_slice(
+                &hex::decode("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap()[..],
+            )),
+            value: 1000000000000000u64.into(),
+            input: Bytes::default(),
+        };
+
+        let expected_signature = Signature {
+            odd_y_parity: false,
+            r: U256::from_str("ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071")
+                .unwrap(),
+            s: U256::from_str("3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
+                .unwrap(),
+        };
+
+        let expected =
+            TransactionSigned::from_transaction_and_signature(expected_request, expected_signature);
+        assert_eq!(expected, TransactionSigned::decode(bytes_third).unwrap());
+
+        let bytes_fourth = &mut &hex::decode("b87502f872041a8459682f008459682f0d8252089461815774383099e24810ab832a5b2a5425c154d58829a2241af62c000080c001a059e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafda0016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469").unwrap()[..];
+        let expected = Transaction::Eip1559 {
+            chain_id: 4,
+            nonce: 26,
+            max_priority_fee_per_gas: 1500000000,
+            max_fee_per_gas: 1500000013,
+            gas_limit: 21000,
+            to: TransactionKind::Call(Address::from_slice(
+                &hex::decode("61815774383099e24810ab832a5b2a5425c154d5").unwrap()[..],
+            )),
+            value: 3000000000000000000u64.into(),
+            input: Default::default(),
+            access_list: Default::default(),
+        };
+
+        let expected_signature = Signature {
+            odd_y_parity: true,
+            r: U256::from_str("59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd")
+                .unwrap(),
+            s: U256::from_str("016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")
+                .unwrap(),
+        };
+
+        let expected =
+            TransactionSigned::from_transaction_and_signature(expected, expected_signature);
+        assert_eq!(expected, TransactionSigned::decode(bytes_fourth).unwrap());
+
+        let bytes_fifth = &mut &hex::decode("f8650f84832156008287fb94cf7f9e66af820a19257a2108375b180b0ec491678204d2802ca035b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981a0612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860").unwrap()[..];
+        let expected = Transaction::Legacy {
+            chain_id: Some(4),
+            nonce: 15,
+            gas_price: 2200000000,
+            gas_limit: 34811,
+            to: TransactionKind::Call(Address::from_slice(
+                &hex::decode("cf7f9e66af820a19257a2108375b180b0ec49167").unwrap()[..],
+            )),
+            value: 1234u64.into(),
+            input: Bytes::default(),
+        };
+        let signature = Signature {
+            odd_y_parity: true,
+            r: U256::from_str("35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981")
+                .unwrap(),
+            s: U256::from_str("612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
+                .unwrap(),
+        };
+
+        let expected = TransactionSigned::from_transaction_and_signature(expected, signature);
+        assert_eq!(expected, TransactionSigned::decode(bytes_fifth).unwrap());
     }
 }
