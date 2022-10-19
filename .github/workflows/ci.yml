@@ -5,6 +5,7 @@ on:
   pull_request:
 
 env:
+  RUSTFLAGS: -D warnings
   NEXTEST_EXPERIMENTAL_FILTER_EXPR: 1
   CARGO_TERM_COLOR: always
 
@@ -60,9 +61,6 @@ jobs:
     # nightly rust might break from time to time
     continue-on-error: true
     needs: [test]
-    env:
-      RUSTFLAGS: -D warnings
-      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
@@ -76,7 +74,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Collect coverage data
-        run: cargo llvm-cov nextest --lcov --output-path lcov.info -- --locked --workspace --all-features
+        run: cargo llvm-cov nextest --lcov --output-path lcov.info --locked --workspace --all-features
       - name: Upload coverage data to codecov
         uses: codecov/codecov-action@v3
         with:
