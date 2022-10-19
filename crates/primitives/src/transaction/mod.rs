@@ -413,9 +413,7 @@ impl Encodable for TransactionKind {
 
 impl Decodable for TransactionKind {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        println!("buf: {:x?}", buf);
         if let Some(&first) = buf.first() {
-            println!("first: {:x?}", first);
             if first == EMPTY_STRING_CODE {
                 buf.advance(1);
                 Ok(TransactionKind::Create)
@@ -503,17 +501,13 @@ impl Decodable for TransactionSigned {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *buf;
 
-        println!("!encoding: {:x?}", buf);
         let header = Header::decode(buf)?;
-        println!("header: {:?}", header);
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
-            println!("typed tx");
             let tx_type = *buf
                 .first()
                 .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
             buf.advance(1);
-            println!("tx_type: {:x?}", tx_type);
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
             if !header.list {
@@ -569,7 +563,6 @@ impl Decodable for TransactionSigned {
             }
 
             let hash = keccak256(original_encoding).into();
-            println!("hash: {:x?}", hash);
             Ok(TransactionSigned { transaction, hash, signature })
         }
     }
@@ -592,8 +585,6 @@ impl TransactionSigned {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
         let mut buf = Vec::new();
         initial_tx.encode(&mut buf);
-        println!("tx: {:x?}", initial_tx);
-        println!("?encoding: {:x?}", buf);
         initial_tx.hash = keccak256(&buf).into();
         initial_tx
     }
@@ -811,7 +802,6 @@ mod tests {
         let expected =
             TransactionSigned::from_transaction_and_signature(expected, expected_signature);
         assert_eq!(expected, TransactionSigned::decode(bytes_fourth).unwrap());
-        println!("{:?}", expected.hash);
 
         let bytes_fifth = &mut &hex::decode("f8650f84832156008287fb94cf7f9e66af820a19257a2108375b180b0ec491678204d2802ca035b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981a0612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860").unwrap()[..];
         let expected = Transaction::Legacy {
@@ -835,6 +825,5 @@ mod tests {
 
         let expected = TransactionSigned::from_transaction_and_signature(expected, signature);
         assert_eq!(expected, TransactionSigned::decode(bytes_fifth).unwrap());
-        println!("{:?}", expected.hash);
     }
 }
