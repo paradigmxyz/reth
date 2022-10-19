@@ -53,7 +53,7 @@ jobs:
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1
         with:
-          args: --all --all-features -- -D warnings
+          args: --all --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
 
   coverage:
