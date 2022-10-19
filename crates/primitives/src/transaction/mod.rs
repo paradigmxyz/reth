@@ -7,7 +7,7 @@ pub use access_list::{AccessList, AccessListItem};
 use bytes::Buf;
 use ethers_core::utils::keccak256;
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
-use signature::Signature;
+pub use signature::Signature;
 use std::ops::Deref;
 pub use tx_type::TxType;
 
