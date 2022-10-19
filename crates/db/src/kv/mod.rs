@@ -135,7 +135,7 @@ mod tests {
     use libmdbx::{NoWriteMap, WriteMap};
     use reth_interfaces::db::{
         tables::{Headers, PlainState},
-        Database,
+        Database, DbTxMut, DbTx,
     };
     use reth_primitives::{Account, Address, Header, H256, U256};
     use std::str::FromStr;

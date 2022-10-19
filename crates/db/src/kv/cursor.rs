@@ -1,7 +1,7 @@
 //! Cursor wrapper for libmdbx-sys.
 
 use crate::utils::*;
-use libmdbx::{self, TransactionKind, RO, RW};
+use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 use reth_interfaces::db::{
     DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode, Error, Table,
     Walker,
@@ -78,19 +78,6 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     }
 }
 
-impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
-    fn put(
-        &mut self,
-        k: <T as Table>::Key,
-        v: <T as Table>::Value, /* , f: Option<WriteFlags> */
-    ) -> Result<(), Error> {
-        // TODO writeFlag
-        self.inner
-            .put(k.encode().as_ref(), v.encode().as_ref(), Default::default())
-            .map_err(|e| Error::Internal(e.into()))
-    }
-}
-
 impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
@@ -123,15 +110,38 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     }
 }
 
+impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
+    /// Database operation that will update an existing row if a specified value already
+    /// exists in a table, and insert a new row if the specified value doesn't already exist
+    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+        Ok(self
+            .inner
+            .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::UPSERT)
+            .map_err(|e| Error::Internal(e.into()))?)
+    }
+
+    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+        Ok(self
+            .inner
+            .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::APPEND)
+            .map_err(|e| Error::Internal(e.into()))?)
+    }
+
+    fn delete_current(&mut self) -> Result<(), Error> {
+        self.inner.del(WriteFlags::CURRENT).map_err(|e| Error::Internal(e.into()))?;
+        Ok(())
+    }
+}
+
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
-    fn put(
-        &mut self,
-        k: <T>::Key,
-        v: <T>::Value, /* , f: Option<WriteFlags> */
-    ) -> Result<(), Error> {
-        // TODO writeFlag
-        self.inner
-            .put(k.encode().as_ref(), v.encode().as_ref(), Default::default())
-            .map_err(|e| Error::Internal(e.into()))
+    fn delete_current_duplicates(&mut self) -> Result<(), Error> {
+        Ok(self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| Error::Internal(e.into()))?)
+    }
+
+    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+        Ok(self
+            .inner
+            .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::APPEND_DUP)
+            .map_err(|e| Error::Internal(e.into()))?)
     }
 }

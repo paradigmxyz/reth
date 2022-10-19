@@ -79,10 +79,11 @@ pub trait DbTxMut<'a>: DbTx<'a> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
     /// Delete value from database
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error>;
+    /// Clears database.
+    fn clear<T: Table>(&self) -> Result<(), Error>;
     /// Cursor mut
     fn cursor_mut<T: Table>(&self) -> Result<Self::CursorMut<T>, Error>;
     /// DupCursor mut.
-    /// NOTE: check if this is needed.
     fn cursor_dup_mut<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, Error>;
 }
 
@@ -93,7 +94,7 @@ pub type IterPairResult<T> = Option<Result<(<T as Table>::Key, <T as Table>::Val
 /// Alias type for a value result coming from a cursor without its key.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, Error>;
 
-/// Read only cursor over table
+/// Read only cursor over table.
 pub trait DbCursorRO<'tx, T: Table> {
     /// First item in table
     fn first(&mut self) -> PairResult<T>;
@@ -121,18 +122,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     fn walk(&'tx mut self, start_key: T::Key) -> Result<Walker<'tx, T>, Error>;
 }
 
-/// Read only cursor over table
-pub trait DbCursorRW<'tx, T: Table>: DbCursorRO<'tx, T> {
-    /// Put change.
-    /// TODO implement write flags
-    fn put(
-        &mut self,
-        k: T::Key,
-        v: T::Value, /* , f: Option<WriteFlags> */
-    ) -> Result<(), Error>;
-}
-
-/// DupSort Transaction
+/// Read only curor over DupSort table.
 pub trait DbDupCursorRO<'tx, T: DupSort>: DbCursorRO<'tx, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T>;
@@ -148,15 +138,25 @@ pub trait DbDupCursorRO<'tx, T: DupSort>: DbCursorRO<'tx, T> {
     fn walk_dup(&'tx mut self, key: T::Key, subkey: T::SubKey) -> Result<DupWalker<'tx, T>, Error>;
 }
 
-/// Read Write Cursor over DupSorted table
-pub trait DbDupCursorRW<'tx, T: DupSort>: DbCursorRO<'tx, T> {
-    //
-    /// TODO implement write flags
-    fn put(
-        &mut self,
-        k: T::Key,
-        v: T::Value, /* , f: Option<WriteFlags> */
-    ) -> Result<(), Error>;
+/// Read write cursor over table.
+pub trait DbCursorRW<'tx, T: Table>: DbCursorRO<'tx, T> {
+    /// Database operation that will update an existing row if a specified value already
+    /// exists in a table, and insert a new row if the specified value doesn't already exist
+    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
+
+    /// Append value to next cursor item
+    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
+
+    /// Delete current value that cursor points to
+    fn delete_current(&mut self) -> Result<(), Error>;
+}
+
+/// Read Write Cursor over DupSorted table.
+pub trait DbDupCursorRW<'tx, T: DupSort>: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T> {
+    /// Append value to next cursor item
+    fn delete_current_duplicates(&mut self) -> Result<(), Error>;
+    /// Append duplicate value
+    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.

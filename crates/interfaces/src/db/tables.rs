@@ -1,6 +1,5 @@
 //! Declaration of all Database tables.
 
-use super::Table;
 use crate::db::models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock};
 use reth_primitives::{Account, Address, BlockNumber, Header, Receipt};
 

@@ -1,6 +1,5 @@
 use super::Error;
 use bytes::Bytes;
-use reth_primitives::{Address, U256};
 use std::{
     fmt::Debug,
     marker::{Send, Sync},
@@ -55,91 +54,3 @@ pub trait DupSort: Table {
     /// Sorting should be taken into account when encoding this.
     type SubKey: Object;
 }
-
-// impl Encode for Vec<u8> {
-//     type Encoded = Self;
-
-//     fn encode(self) -> Self::Encoded {
-//         self
-//     }
-// }
-
-// impl Decode for Vec<u8> {
-//     fn decode(value: &[u8]) -> Result<Self, Error> {
-//         Ok(value.to_vec())
-//     }
-// }
-
-// impl Encode for Bytes {
-//     type Encoded = Self;
-
-//     fn encode(self) -> Self::Encoded {
-//         self
-//     }
-// }
-
-// impl Decode for Bytes {
-//     fn decode(value: &[u8]) -> Result<Self, Error> {
-//         Ok(value.to_vec().into())
-//     }
-// }
-
-// impl Encode for Address {
-//     type Encoded = [u8; 20];
-
-//     fn encode(self) -> Self::Encoded {
-//         self.0
-//     }
-// }
-
-// impl Decode for Address {
-//     fn decode(value: &[u8]) -> Result<Self, Error> {
-//         Ok(Address::from_slice(value))
-//     }
-// }
-
-// impl Encode for u16 {
-//     type Encoded = [u8; 2];
-
-//     fn encode(self) -> Self::Encoded {
-//         self.to_be_bytes()
-//     }
-// }
-
-// impl Decode for u16 {
-//     fn decode(value: &[u8]) -> Result<Self, Error> {
-//         unsafe { Ok(u16::from_be_bytes(*(value.as_ptr() as *const [_; 2]))) }
-//     }
-// }
-
-// impl Encode for u64 {
-//     type Encoded = [u8; 8];
-
-//     fn encode(self) -> Self::Encoded {
-//         self.to_be_bytes()
-//     }
-// }
-
-// impl Decode for u64 {
-//     fn decode(value: &[u8]) -> Result<Self, Error> {
-//         unsafe { Ok(u64::from_be_bytes(*(value.as_ptr() as *const [_; 8]))) }
-//     }
-// }
-
-// impl Encode for U256 {
-//     type Encoded = [u8; 32];
-
-//     fn encode(self) -> Self::Encoded {
-//         let mut result = [0; 32];
-//         self.to_big_endian(&mut result);
-//         result
-//     }
-// }
-
-// impl Decode for U256 {
-//     fn decode(value: &[u8]) -> Result<Self, Error> {
-//         let mut result = [0; 32];
-//         result.copy_from_slice(value);
-//         Ok(Self::from_big_endian(&result))
-//     }
-// }
