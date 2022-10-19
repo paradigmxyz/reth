@@ -456,18 +456,13 @@ impl Decodable for TransactionSigned {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *buf;
 
-        println!("buf: {:x?}", buf);
-        println!("len: {:?}", buf.len());
         let header = Header::decode(buf)?;
-        println!("header: {:?}", header);
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
-            println!("tx is a str");
             let tx_type = *buf
                 .first()
                 .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
             buf.advance(1);
-            println!("tx type is {}", tx_type);
             // decode common fields
             let transaction = match tx_type {
                 1 => Transaction::Eip2930 {
@@ -493,12 +488,10 @@ impl Decodable for TransactionSigned {
                 },
                 _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
             };
-            println!("decoded tx");
             let (signature, _) = Signature::decode_eip155_inner(buf)?;
             let hash = keccak256(original_encoding).into();
             Ok(TransactionSigned { transaction, hash, signature })
         } else {
-            println!("tx is a list");
             let mut transaction = Transaction::Legacy {
                 nonce: Decodable::decode(buf)?,
                 gas_price: Decodable::decode(buf)?,

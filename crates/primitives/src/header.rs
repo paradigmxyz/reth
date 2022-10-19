@@ -213,7 +213,7 @@ impl HeaderLocked {
 mod tests {
     use crate::Address;
 
-    use super::{Decodable, Encodable, Header, H160, H256};
+    use super::{Decodable, Encodable, Header, H256};
     use ethers_core::{
         types::Bytes,
         utils::hex::{self, FromHex},
