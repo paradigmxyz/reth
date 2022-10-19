@@ -67,7 +67,7 @@ use crate::{
     error::PoolResult,
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
-    traits::{NewTransactionEvent, PoolTransaction},
+    traits::{NewTransactionEvent, PoolStatus, PoolTransaction, TransactionOrigin},
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
@@ -84,6 +84,7 @@ mod events;
 mod listener;
 mod parked;
 mod pending;
+pub(crate) mod size;
 pub(crate) mod state;
 mod transaction;
 pub mod txpool;
@@ -126,6 +127,11 @@ where
         }
     }
 
+    /// Returns stats about the pool.
+    pub(crate) fn status(&self) -> PoolStatus {
+        self.pool.read().status()
+    }
+
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
@@ -166,6 +172,7 @@ where
     /// Add a single validated transaction into the pool.
     fn add_transaction(
         &self,
+        origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
@@ -178,8 +185,8 @@ where
                     transaction,
                     transaction_id,
                     propagate: false,
-                    is_local: false,
                     timestamp: Instant::now(),
+                    origin,
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;
@@ -208,11 +215,12 @@ where
     /// Adds all transactions in the iterator to the pool, returning a list of results.
     pub fn add_transactions(
         &self,
+        origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
     ) -> Vec<PoolResult<TxHash>> {
         // TODO check pool limits
 
-        transactions.into_iter().map(|tx| self.add_transaction(tx)).collect::<Vec<_>>()
+        transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>()
     }
 
     /// Notify all listeners about a new pending transaction.

@@ -1,4 +1,6 @@
-use crate::{identifier::TransactionId, PoolTransaction, ValidPoolTransaction};
+use crate::{
+    identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, ValidPoolTransaction,
+};
 use fnv::FnvHashMap;
 use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 
@@ -15,6 +17,10 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
     /// All transactions sorted by their priority function.
     best: BTreeSet<ParkedPoolTransaction<T>>,
+    /// Keeps track of the size of this pool.
+    ///
+    /// See also [`PoolTransaction::size`].
+    size_of: SizeTracker,
 }
 
 // === impl QueuedPool ===
@@ -30,6 +36,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert!(!self.by_id.contains_key(&id), "transaction already included");
         let submission_id = self.next_id();
 
+        // keep track of size
+        self.size_of += tx.size();
+
         let transaction = ParkedPoolTransaction { submission_id, transaction: tx.into() };
 
         self.by_id.insert(id, transaction.clone());
@@ -41,8 +50,13 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        // remove from queues
         let tx = self.by_id.remove(id)?;
         self.best.remove(&tx);
+
+        // keep track of size
+        self.size_of -= tx.transaction.size();
+
         Some(tx.transaction.into())
     }
 
@@ -50,6 +64,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
+    }
+
+    /// The reported size of all transactions in this pool.
+    pub(crate) fn size(&self) -> usize {
+        self.size_of.into()
     }
 
     /// Number of transactions in the entire pool
@@ -65,7 +84,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
 impl<T: ParkedOrd> Default for ParkedPool<T> {
     fn default() -> Self {
-        Self { submission_id: 0, by_id: Default::default(), best: Default::default() }
+        Self {
+            submission_id: 0,
+            by_id: Default::default(),
+            best: Default::default(),
+            size_of: Default::default(),
+        }
     }
 }
 

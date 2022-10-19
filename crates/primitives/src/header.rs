@@ -1,7 +1,9 @@
-use std::ops::Deref;
-
-use crate::{BlockNumber, H160, H256, U256};
+use crate::{BlockNumber, Bloom, H160, H256, U256};
+use bytes::{BufMut, BytesMut};
+use ethers_core::{types::H64, utils::keccak256};
 use reth_codecs::main_codec;
+use reth_rlp::{length_of_length, Decodable, Encodable};
+use std::ops::Deref;
 
 /// Block header
 #[main_codec]
@@ -29,7 +31,7 @@ pub struct Header {
     /// The Bloom filter composed from indexable information (logger address and log topics)
     /// contained in each log entry from the receipt of each transaction in the transactions list;
     /// formally Hb.
-    pub logs_bloom: H256, // change to Bloom
+    pub logs_bloom: Bloom,
     /// A scalar value corresponding to the difficulty level of this block. This can be calculated
     /// from the previous block’s difficulty level and the timestamp; formally Hd.
     pub difficulty: U256,
@@ -66,13 +68,109 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use lock, HeaderLocked and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> H256 {
-        todo!()
+        let mut out = BytesMut::new();
+        self.encode(&mut out);
+        H256::from_slice(keccak256(&out).as_slice())
     }
 
     /// Calculate hash and lock the Header so that it can't be changed.
     pub fn lock(self) -> HeaderLocked {
         let hash = self.hash_slow();
         HeaderLocked { header: self, hash }
+    }
+
+    fn header_payload_length(&self) -> usize {
+        let mut length = 0;
+        length += self.parent_hash.length();
+        length += self.ommers_hash.length();
+        length += self.beneficiary.length();
+        length += self.state_root.length();
+        length += self.transactions_root.length();
+        length += self.receipts_root.length();
+        length += self.logs_bloom.length();
+        length += self.difficulty.length();
+        length += U256::from(self.number).length();
+        length += U256::from(self.gas_limit).length();
+        length += U256::from(self.gas_used).length();
+        length += self.timestamp.length();
+        length += self.extra_data.length();
+        length += self.mix_hash.length();
+        length += H64::from_low_u64_be(self.nonce).length();
+        length += self.base_fee_per_gas.map(|fee| U256::from(fee).length()).unwrap_or_default();
+        length
+    }
+}
+
+impl Encodable for Header {
+    fn encode(&self, out: &mut dyn BufMut) {
+        let list_header =
+            reth_rlp::Header { list: true, payload_length: self.header_payload_length() };
+        list_header.encode(out);
+        self.parent_hash.encode(out);
+        self.ommers_hash.encode(out);
+        self.beneficiary.encode(out);
+        self.state_root.encode(out);
+        self.transactions_root.encode(out);
+        self.receipts_root.encode(out);
+        self.logs_bloom.encode(out);
+        self.difficulty.encode(out);
+        U256::from(self.number).encode(out);
+        U256::from(self.gas_limit).encode(out);
+        U256::from(self.gas_used).encode(out);
+        self.timestamp.encode(out);
+        self.extra_data.encode(out);
+        self.mix_hash.encode(out);
+        H64::from_low_u64_be(self.nonce).encode(out);
+        if let Some(ref base_fee) = self.base_fee_per_gas {
+            U256::from(*base_fee).encode(out);
+        }
+    }
+
+    fn length(&self) -> usize {
+        let mut length = 0;
+        length += self.header_payload_length();
+        length += length_of_length(length);
+        length
+    }
+}
+
+impl Decodable for Header {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+        let rlp_head = reth_rlp::Header::decode(buf)?;
+        if !rlp_head.list {
+            return Err(reth_rlp::DecodeError::UnexpectedString)
+        }
+        let started_len = buf.len();
+        let mut this = Self {
+            parent_hash: Decodable::decode(buf)?,
+            ommers_hash: Decodable::decode(buf)?,
+            beneficiary: Decodable::decode(buf)?,
+            state_root: Decodable::decode(buf)?,
+            transactions_root: Decodable::decode(buf)?,
+            receipts_root: Decodable::decode(buf)?,
+            logs_bloom: Decodable::decode(buf)?,
+            difficulty: Decodable::decode(buf)?,
+            number: U256::decode(buf)?.as_u64(),
+            gas_limit: U256::decode(buf)?.as_u64(),
+            gas_used: U256::decode(buf)?.as_u64(),
+            timestamp: Decodable::decode(buf)?,
+            extra_data: Decodable::decode(buf)?,
+            mix_hash: Decodable::decode(buf)?,
+            nonce: H64::decode(buf)?.to_low_u64_be(),
+            base_fee_per_gas: None,
+        };
+        let consumed = started_len - buf.len();
+        if consumed < rlp_head.payload_length {
+            this.base_fee_per_gas = Some(U256::decode(buf)?.as_u64());
+        }
+        let consumed = started_len - buf.len();
+        if consumed != rlp_head.payload_length {
+            return Err(reth_rlp::DecodeError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+        Ok(this)
     }
 }
 
@@ -108,5 +206,80 @@ impl HeaderLocked {
     /// Return header/block hash.
     pub fn hash(&self) -> H256 {
         self.hash
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Address;
+
+    use super::{Decodable, Encodable, Header, H160, H256};
+    use ethers_core::{
+        types::Bytes,
+        utils::hex::{self, FromHex},
+    };
+    use std::str::FromStr;
+
+    #[test]
+    // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    fn test_encode_block_header() {
+        let expected = hex::decode("f901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000").unwrap();
+        let header = Header {
+            difficulty: 0x8ae_u64.into(),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap().0,
+            ..Default::default()
+        };
+        let mut data = vec![];
+        header.encode(&mut data);
+        assert_eq!(hex::encode(&data), hex::encode(expected));
+        assert_eq!(header.length(), data.len());
+    }
+
+    #[test]
+    // Test vector from: https://github.com/ethereum/tests/blob/f47bbef4da376a49c8fc3166f09ab8a6d182f765/BlockchainTests/ValidBlocks/bcEIP1559/baseFee.json#L15-L36
+    fn test_eip1559_block_header_hash() {
+        let expected_hash =
+            H256::from_str("6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f")
+                .unwrap();
+        let header = Header {
+            parent_hash: H256::from_str("e0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a").unwrap(),
+            ommers_hash: H256::from_str("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").unwrap(),
+            beneficiary: Address::from_str("ba5e000000000000000000000000000000000000").unwrap(),
+            state_root: H256::from_str("ec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7").unwrap(),
+            transactions_root: H256::from_str("50f738580ed699f0469702c7ccc63ed2e51bc034be9479b7bff4e68dee84accf").unwrap(),
+            receipts_root: H256::from_str("29b0562f7140574dd0d50dee8a271b22e1a0a7b78fca58f7c60370d8317ba2a9").unwrap(),
+            logs_bloom: <[u8; 256]>::from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
+            difficulty: 0x020000.into(),
+            number: 0x01_u64.into(),
+            gas_limit: 0x016345785d8a0000_u64.into(),
+            gas_used: 0x015534_u64.into(),
+            timestamp: 0x079e,
+            extra_data: Bytes::from_str("42").unwrap().0,
+            mix_hash: H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            nonce: 0,
+            base_fee_per_gas: Some(0x036b_u64.into()),
+        };
+        assert_eq!(header.hash_slow(), expected_hash);
+    }
+
+    #[test]
+    // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    fn test_decode_block_header() {
+        let data = hex::decode("f901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000").unwrap();
+        let expected = Header {
+            difficulty: 0x8aeu64.into(),
+            number: 0xd05u64.into(),
+            gas_limit: 0x115cu64.into(),
+            gas_used: 0x15b3u64.into(),
+            timestamp: 0x1a0au64,
+            extra_data: Bytes::from_str("7788").unwrap().0,
+            ..Default::default()
+        };
+        let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
+        assert_eq!(header, expected);
     }
 }

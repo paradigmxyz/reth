@@ -13,6 +13,9 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
+    /// Returns stats about the pool.
+    fn status(&self) -> PoolStatus;
+
     /// Event listener for when a new block was mined.
     ///
     /// Implementers need to update the pool accordingly.
@@ -23,7 +26,11 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash>;
+    async fn add_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> PoolResult<TxHash>;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -32,6 +39,7 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Consumer: RPC
     async fn add_transactions(
         &self,
+        origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
@@ -91,6 +99,30 @@ pub struct NewTransactionEvent<T: PoolTransaction> {
 impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     fn clone(&self) -> Self {
         Self { subpool: self.subpool, transaction: self.transaction.clone() }
+    }
+}
+
+/// Where the transaction originates from.
+///
+/// Depending on where the transaction was picked up, it affects how the transaction is handled
+/// internally, e.g. limits for simultaneous transaction of one sender.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum TransactionOrigin {
+    /// Transaction is coming from a local source.
+    Local,
+    /// Transaction has been received externally.
+    ///
+    /// This is usually considered an "untrusted" source, for example received from another in the
+    /// network.
+    External,
+}
+
+// === impl TransactionOrigin ===
+
+impl TransactionOrigin {
+    /// Whether the transaction originates from a local source.
+    pub fn is_local(&self) -> bool {
+        matches!(self, TransactionOrigin::Local)
     }
 }
 
@@ -159,4 +191,24 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<U256>;
+
+    /// Returns a measurement of the heap usage of this type and all its internals.
+    fn size(&self) -> usize;
+}
+
+/// Represents the current status of the pool.
+#[derive(Debug, Clone)]
+pub struct PoolStatus {
+    /// Number of transactions in the _pending_ sub-pool.
+    pub pending: usize,
+    /// Reported size of transactions in the _pending_ sub-pool.
+    pub pending_size: usize,
+    /// Number of transactions in the _basefee_ pool.
+    pub basefee: usize,
+    /// Reported size of transactions in the _basefee_ sub-pool.
+    pub basefee_size: usize,
+    /// Number of transactions in the _queued_ sub-pool.
+    pub queued: usize,
+    /// Reported size of transactions in the _queued_ sub-pool.
+    pub queued_size: usize,
 }

@@ -3,7 +3,7 @@
 use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
-    traits::PoolTransaction,
+    traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{rpc::Address, BlockID, TxHash, U256};
 use std::{fmt, time::Instant};
@@ -38,6 +38,7 @@ pub trait TransactionValidator: Send + Sync + 'static {
     /// transactions for the sender.
     async fn validate_transaction(
         &self,
+        origin: TransactionOrigin,
         _transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
 }
@@ -50,12 +51,12 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
-    /// Whether the tx is from a local source.
-    pub is_local: bool,
     /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`.
     pub cost: U256,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,
+    /// Where this transaction originated from.
+    pub origin: TransactionOrigin,
 }
 
 // === impl ValidPoolTransaction ===
@@ -100,6 +101,16 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
         self.transaction.effective_gas_price() <= other.transaction.effective_gas_price()
     }
+
+    /// Whether the transaction originated locally.
+    pub(crate) fn is_local(&self) -> bool {
+        self.origin.is_local()
+    }
+
+    /// The heap allocated size of this transaction.
+    pub(crate) fn size(&self) -> usize {
+        self.transaction.size()
+    }
 }
 
 #[cfg(test)]
@@ -109,9 +120,9 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             transaction: self.transaction.clone(),
             transaction_id: self.transaction_id,
             propagate: self.propagate,
-            is_local: self.is_local,
             cost: self.cost,
             timestamp: self.timestamp,
+            origin: self.origin,
         }
     }
 }

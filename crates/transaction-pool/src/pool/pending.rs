@@ -1,6 +1,7 @@
 use crate::{
-    identifier::TransactionId, pool::best::BestTransactions, TransactionOrdering,
-    ValidPoolTransaction,
+    identifier::TransactionId,
+    pool::{best::BestTransactions, size::SizeTracker},
+    TransactionOrdering, ValidPoolTransaction,
 };
 use reth_primitives::rpc::TxHash;
 use std::{
@@ -33,6 +34,10 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     ///
     /// Sorted by their scoring value.
     independent_transactions: BTreeSet<PendingTransactionRef<T>>,
+    /// Keeps track of the size of this pool.
+    ///
+    /// See also [`PoolTransaction::size`].
+    size_of: SizeTracker,
 }
 
 // === impl PendingPool ===
@@ -45,6 +50,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             submission_id: 0,
             by_id: Default::default(),
             independent_transactions: Default::default(),
+            size_of: Default::default(),
         }
     }
 
@@ -95,6 +101,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let priority = self.ordering.priority(&tx.transaction);
 
+        // keep track of size
+        self.size_of += tx.size();
+
         let transaction = PendingTransactionRef { submission_id, transaction: tx, priority };
 
         // If there's __no__ ancestor in the pool, then this transaction is independent, this is
@@ -113,6 +122,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// If the transactions has a descendant transaction it will advance it to the best queue.
     pub(crate) fn remove_mined(&mut self, id: &TransactionId) {
         if let Some(tx) = self.by_id.remove(id) {
+            // keep track of size
+            self.size_of -= tx.transaction.transaction.size();
             self.independent_transactions.remove(&tx.transaction);
 
             // mark the next as independent if it exists
@@ -141,6 +152,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns the transaction for the id if it's in the pool but not yet mined.
     pub(crate) fn get(&self, id: &TransactionId) -> Option<Arc<PendingTransaction<T>>> {
         self.by_id.get(id).cloned()
+    }
+
+    /// The reported size of all transactions in this pool.
+    pub(crate) fn size(&self) -> usize {
+        self.size_of.into()
     }
 
     /// Number of transactions in the entire pool
