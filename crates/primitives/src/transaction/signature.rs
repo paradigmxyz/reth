@@ -12,21 +12,22 @@ pub struct Signature {
     /// The S field of the signature; the point on the curve.
     pub s: U256,
     /// yParity: Signature Y parity; formally Ty
-    pub y_parity: u8,
+    pub odd_y_parity: bool,
 }
 
 impl Signature {
     /// Encode the `v`, `r`, `s` values without a RLP header.
-    /// Encodes the `v` value without EIP-155.
-    pub(crate) fn encode_inner(&self, out: &mut dyn reth_rlp::BufMut) {
-        (self.y_parity + 27).encode(out);
+    /// Encodes the `v` value using the legacy scheme without EIP-155.
+    pub(crate) fn encode_inner_legacy(&self, out: &mut dyn reth_rlp::BufMut) {
+        (self.odd_y_parity as u8 + 27).encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
 
-    /// Output the length of the signature without the length of the RLP header, without EIP-155.
-    pub(crate) fn payload_len(&self) -> usize {
-        (self.y_parity + 27).length() + self.r.length() + self.s.length()
+    /// Output the length of the signature without the length of the RLP header, using the legacy
+    /// scheme without EIP-155.
+    pub(crate) fn payload_len_legacy(&self) -> usize {
+        (self.odd_y_parity as u8 + 27).length() + self.r.length() + self.s.length()
     }
 
     /// Encode the `v`, `r`, `s` values without a RLP header.
@@ -34,7 +35,7 @@ impl Signature {
     pub(crate) fn encode_eip155_inner(&self, out: &mut dyn reth_rlp::BufMut, chain_id: u64) {
         // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
         // assumes y_parity is 0 or 1
-        let v = chain_id * 2 + 35 + self.y_parity as u64;
+        let v = chain_id * 2 + 35 + self.odd_y_parity as u64;
         v.encode(out);
         self.r.encode(out);
         self.s.encode(out);
@@ -45,7 +46,7 @@ impl Signature {
     pub(crate) fn eip155_payload_len(&self, chain_id: u64) -> usize {
         // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
         // assumes y_parity is 0 or 1
-        let v = chain_id * 2 + 35 + self.y_parity as u64;
+        let v = chain_id * 2 + 35 + self.odd_y_parity as u64;
         v.length() + self.r.length() + self.s.length()
     }
 
@@ -57,11 +58,13 @@ impl Signature {
         let s = Decodable::decode(buf)?;
         if v >= 35 {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let y_parity = ((v - 35) % 2) as u8;
+            let y_parity = ((v - 35) % 2) != 0;
             let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, y_parity }, Some(chain_id)))
+            Ok((Signature { r, s, odd_y_parity: y_parity }, Some(chain_id)))
         } else {
-            Ok((Signature { r, s, y_parity: (v % 2) as u8 }, None))
+            // non-EIP-155 legacy scheme
+            let y_parity = (v - 27) != 0;
+            Ok((Signature { r, s, odd_y_parity: y_parity }, None))
         }
     }
 }
