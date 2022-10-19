@@ -27,8 +27,8 @@ tempfile = { version = "3.3.0", optional = true }
 tempfile = "3.3.0"
 serde = "1.0"
 test-fuzz = "3.0.4"
-criterion = "*"
-iai = "*"
+criterion = "0.4.0"
+iai = "0.1.1"
 
 [features]
 test-utils = ["tempfile"]
