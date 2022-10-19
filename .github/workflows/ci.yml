@@ -31,27 +31,6 @@ jobs:
         with:
           command: nextest
           args: run --locked --workspace --all-features
-  
-  benchmarks:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-
-      - name: bench codecs
-        run: |
-          sudo apt install -y valgrind
-          cargo bench --package reth-db --features bench
-          cargo bench --package reth-db --features bench-postcard
 
   lint:
     runs-on: ubuntu-latest
