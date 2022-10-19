@@ -2,11 +2,6 @@
 
 use jsonrpsee::core::{Error as RpcError, RpcResult};
 
-/// Helper trait to easily convert errors to `RpcErrors`
-pub(crate) trait ToRcError {
-    fn into_rpc_error(self, msg: impl Into<String>) -> RpcError;
-}
-
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
     /// Converts this type into an [`RpcResult`]
