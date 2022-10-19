@@ -37,11 +37,11 @@ impl<E: EnvironmentKind> Database for Env<E> {
     type TXMut<'a> = tx::Tx<'a, RW, E>;
 
     fn tx(&self) -> Result<Self::TX<'_>, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().unwrap()))
+        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::Internal(e.into()))?))
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().unwrap()))
+        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::Internal(e.into()))?))
     }
 }
 

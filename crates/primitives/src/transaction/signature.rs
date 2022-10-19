@@ -15,6 +15,7 @@ pub struct Signature {
     pub y_parity: u8,
 }
 
+#[allow(dead_code)]
 impl Signature {
     /// Encode the `v`, `r`, `s` values without a RLP header.
     /// Encodes the `v` value without EIP-155.
