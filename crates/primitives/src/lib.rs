@@ -23,7 +23,9 @@ pub use header::{Header, HeaderLocked};
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
-pub use transaction::{AccessList, AccessListItem, Transaction, TransactionSigned, TxType};
+pub use transaction::{
+    AccessList, AccessListItem, Transaction, TransactionKind, TransactionSigned, TxType,
+};
 
 /// Block hash.
 pub type BlockHash = H256;
