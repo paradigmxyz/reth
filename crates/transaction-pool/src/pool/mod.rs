@@ -67,7 +67,7 @@ use crate::{
     error::PoolResult,
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
-    traits::{NewTransactionEvent, PoolTransaction, TransactionOrigin},
+    traits::{NewTransactionEvent, PoolStatus, PoolTransaction, TransactionOrigin},
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
@@ -84,6 +84,7 @@ mod events;
 mod listener;
 mod parked;
 mod pending;
+pub(crate) mod size;
 pub(crate) mod state;
 mod transaction;
 pub mod txpool;
@@ -124,6 +125,11 @@ where
             transaction_listener: Default::default(),
             config,
         }
+    }
+
+    /// Returns stats about the pool.
+    pub(crate) fn status(&self) -> PoolStatus {
+        self.pool.read().status()
     }
 
     /// Returns the internal `SenderId` for this address

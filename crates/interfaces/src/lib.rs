@@ -15,3 +15,10 @@ pub mod consensus;
 
 /// Database traits.
 pub mod db;
+/// Traits that provide chain access.
+pub mod provider;
+
+/// Possible errors when interacting with the chain.
+mod error;
+
+pub use error::{Error, Result};

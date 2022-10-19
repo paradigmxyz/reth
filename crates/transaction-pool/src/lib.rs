@@ -84,7 +84,7 @@ pub use crate::{
 use crate::{
     error::PoolResult,
     pool::PoolInner,
-    traits::{NewTransactionEvent, TransactionOrigin},
+    traits::{NewTransactionEvent, PoolStatus, TransactionOrigin},
     validate::ValidPoolTransaction,
 };
 use futures::channel::mpsc::Receiver;
@@ -173,6 +173,10 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     type Transaction = T::Transaction;
+
+    fn status(&self) -> PoolStatus {
+        self.pool.status()
+    }
 
     async fn on_new_block(&self, _event: NewBlockEvent) {
         // TODO perform maintenance: update pool accordingly
