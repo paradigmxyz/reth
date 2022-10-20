@@ -8,6 +8,7 @@ use tokio::sync::watch::Receiver;
 /// Consensus is a protocol that chooses canonical chain.
 /// We are checking validity of block header here.
 #[async_trait]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait Consensus: Sync + Send + Debug {
     /// Get a receiver for the fork choice state
     fn forkchoice_state(&self) -> Receiver<ForkchoiceState>;
