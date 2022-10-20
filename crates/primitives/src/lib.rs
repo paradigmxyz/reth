@@ -57,3 +57,9 @@ mod __reexport {
 
 // Useful reexports
 pub use __reexport::*;
+
+/// Returns the keccak256 hash for the given data.
+pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
+    use sha3::Digest;
+    H256::from_slice(sha3::Keccak256::digest(data.as_ref()).as_slice())
+}
