@@ -501,9 +501,9 @@ impl Decodable for TransactionSigned {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *buf;
 
-        let header = Header::decode(buf)?;
+        let first_header = Header::decode(buf)?;
         // if the transaction is encoded as a string then it is a typed transaction
-        if !header.list {
+        if !first_header.list {
             let tx_type = *buf
                 .first()
                 .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
@@ -545,8 +545,15 @@ impl Decodable for TransactionSigned {
                 r: Decodable::decode(buf)?,
                 s: Decodable::decode(buf)?,
             };
-            let hash = keccak256(original_encoding).into();
-            Ok(TransactionSigned { transaction, hash, signature })
+
+            let mut signed = TransactionSigned {
+                transaction,
+                hash: Default::default(),
+                signature,
+            };
+            let tx_length = first_header.payload_length + first_header.length();
+            signed.hash = keccak256(&original_encoding[..tx_length]).into();
+            Ok(signed)
         } else {
             let mut transaction = Transaction::Legacy {
                 nonce: Decodable::decode(buf)?,
@@ -562,8 +569,14 @@ impl Decodable for TransactionSigned {
                 transaction.set_chain_id(id);
             }
 
-            let hash = keccak256(original_encoding).into();
-            Ok(TransactionSigned { transaction, hash, signature })
+            let mut signed = TransactionSigned {
+                transaction,
+                hash: Default::default(),
+                signature,
+            };
+            let tx_length = first_header.payload_length + first_header.length();
+            signed.hash = keccak256(&original_encoding[..tx_length]).into();
+            Ok(signed)
         }
     }
 }
