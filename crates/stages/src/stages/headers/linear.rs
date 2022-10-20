@@ -24,7 +24,8 @@ use tokio_stream::Stream;
 
 /// Download headers in batches
 #[derive(Debug)]
-pub struct LinearDownloader {
+pub struct LinearDownloader<'a, C: Consensus> {
+    consensus: &'a C,
     /// The batch size per one request
     pub batch_size: u64,
     /// A single request timeout
@@ -35,7 +36,13 @@ pub struct LinearDownloader {
 
 type HeaderIter = Box<dyn Iterator<Item = HeaderLocked> + Send>;
 #[async_trait]
-impl Downloader for LinearDownloader {
+impl<'a, C: Consensus> Downloader for LinearDownloader<'a, C> {
+    type Consensus = C;
+
+    fn consensus(&self) -> &Self::Consensus {
+        self.consensus
+    }
+
     /// The request timeout
     fn timeout(&self) -> u64 {
         self.request_timeout
@@ -46,7 +53,6 @@ impl Downloader for LinearDownloader {
     async fn download(
         &self,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         head: &HeaderLocked,
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError> {
@@ -57,14 +63,7 @@ impl Downloader for LinearDownloader {
         let mut out = (Box::new(std::iter::empty()) as HeaderIter).peekable();
         loop {
             let result = self
-                .download_batch(
-                    &mut stream,
-                    client.clone(),
-                    consensus.clone(),
-                    forkchoice,
-                    head,
-                    out.peek(),
-                )
+                .download_batch(&mut stream, client.clone(), forkchoice, head, out.peek())
                 .await;
             match result {
                 Ok(result) => match result {
@@ -97,12 +96,11 @@ pub enum LinearDownloadResult {
     Ignore,
 }
 
-impl LinearDownloader {
-    async fn download_batch<'a>(
+impl<'a, C: Consensus> LinearDownloader<'a, C> {
+    async fn download_batch(
         &'a self,
         stream: &'a mut MessageStream<(u64, Vec<Header>)>,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         forkchoice: &'a ForkchoiceState,
         head: &'a HeaderLocked,
         earliest: Option<&HeaderLocked>,
@@ -125,7 +123,7 @@ impl LinearDownloader {
             }
 
             match out.first().or(earliest) {
-                Some(header) if !self.validate(consensus.clone(), header, &parent)? => {
+                Some(header) if !self.validate(header, &parent)? => {
                     return Ok(LinearDownloadResult::Ignore)
                 }
                 // The buffer is empty and the first header does not match the tip, discard
@@ -147,13 +145,13 @@ mod linear_stream {
     use super::*;
 
     pin_project_lite! {
-        pub(crate) struct LinearDownloadStream<'a, S: Stream<Item = (u64, Vec<Header>)>> {
+        pub(crate) struct LinearDownloadStream<'a, S: Stream<Item = (u64, Vec<Header>)>, C: Consensus> {
             #[pin]
             stream: &'a mut S,
             #[pin]
             state: LinearStreamState<'a>,
             client: &'a Arc<dyn HeadersClient>,
-            consensus: &'a Arc<dyn Consensus>,
+            consensus: &'a C,
             tip: H256,
             head: H256,
             earliest: Option<HeaderLocked>,
@@ -161,11 +159,13 @@ mod linear_stream {
         }
     }
 
-    impl<'a, S: Stream<Item = (u64, Vec<Header>)> + Unpin> LinearDownloadStream<'a, S> {
+    impl<'a, C: Consensus, S: Stream<Item = (u64, Vec<Header>)> + Unpin>
+        LinearDownloadStream<'a, S, C>
+    {
         pub(crate) fn new(
             stream: &'a mut S,
             client: &'a Arc<dyn HeadersClient>,
-            consensus: &'a Arc<dyn Consensus>,
+            consensus: &'a C,
             tip: H256,
             head: H256,
             retries: usize,
@@ -190,8 +190,8 @@ mod linear_stream {
         Done,
     }
 
-    impl<'a, S: Stream<Item = (u64, Vec<Header>)> + Unpin + Send> Stream
-        for LinearDownloadStream<'a, S>
+    impl<'a, C: Consensus, S: Stream<Item = (u64, Vec<Header>)> + Unpin + Send> Stream
+        for LinearDownloadStream<'a, S, C>
     {
         type Item = Result<Vec<HeaderLocked>, DownloadError>;
 
