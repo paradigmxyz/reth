@@ -24,7 +24,7 @@ pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
 pub use transaction::{
-    AccessList, AccessListItem, Transaction, TransactionKind, TransactionSigned, TxType,
+    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
 };
 
 /// Block hash.

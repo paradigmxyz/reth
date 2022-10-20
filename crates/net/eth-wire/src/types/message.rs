@@ -1,5 +1,9 @@
 #![allow(missing_docs)]
-use super::{broadcast::NewBlockHashes, Status};
+use super::{
+    broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
+    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, Status, Transactions,
+};
 use bytes::Buf;
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::fmt::Debug;
@@ -22,52 +26,51 @@ impl ProtocolMessage {
             EthMessageID::NewBlockHashes => {
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
-            _ => unimplemented!(),
-            // EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
-            // EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
-            // EthMessageID::NewPooledTransactionHashes => {
-            //     EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes::decode(buf)?)
-            // }
-            // EthMessageID::GetBlockHeaders => {
-            //     let request_pair = RequestPair::<GetBlockHeaders>::decode(buf)?;
-            //     EthMessage::GetBlockHeaders(request_pair)
-            // }
-            // EthMessageID::BlockHeaders => {
-            //     let request_pair = RequestPair::<BlockHeaders>::decode(buf)?;
-            //     EthMessage::BlockHeaders(request_pair)
-            // }
-            // EthMessageID::GetBlockBodies => {
-            //     let request_pair = RequestPair::<GetBlockBodies>::decode(buf)?;
-            //     EthMessage::GetBlockBodies(request_pair)
-            // }
-            // EthMessageID::BlockBodies => {
-            //     let request_pair = RequestPair::<BlockBodies>::decode(buf)?;
-            //     EthMessage::BlockBodies(request_pair)
-            // }
-            // EthMessageID::GetPooledTransactions => {
-            //     let request_pair = RequestPair::<GetPooledTransactions>::decode(buf)?;
-            //     EthMessage::GetPooledTransactions(request_pair)
-            // }
-            // EthMessageID::PooledTransactions => {
-            //     let request_pair = RequestPair::<PooledTransactions>::decode(buf)?;
-            //     EthMessage::PooledTransactions(request_pair)
-            // }
-            // EthMessageID::GetNodeData => {
-            //     let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
-            //     EthMessage::GetNodeData(request_pair)
-            // }
-            // EthMessageID::NodeData => {
-            //     let request_pair = RequestPair::<NodeData>::decode(buf)?;
-            //     EthMessage::NodeData(request_pair)
-            // }
-            // EthMessageID::GetReceipts => {
-            //     let request_pair = RequestPair::<GetReceipts>::decode(buf)?;
-            //     EthMessage::GetReceipts(request_pair)
-            // }
-            // EthMessageID::Receipts => {
-            //     let request_pair = RequestPair::<Receipts>::decode(buf)?;
-            //     EthMessage::Receipts(request_pair)
-            // }
+            EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
+            EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
+            EthMessageID::NewPooledTransactionHashes => {
+                EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes::decode(buf)?)
+            }
+            EthMessageID::GetBlockHeaders => {
+                let request_pair = RequestPair::<GetBlockHeaders>::decode(buf)?;
+                EthMessage::GetBlockHeaders(request_pair)
+            }
+            EthMessageID::BlockHeaders => {
+                let request_pair = RequestPair::<BlockHeaders>::decode(buf)?;
+                EthMessage::BlockHeaders(request_pair)
+            }
+            EthMessageID::GetBlockBodies => {
+                let request_pair = RequestPair::<GetBlockBodies>::decode(buf)?;
+                EthMessage::GetBlockBodies(request_pair)
+            }
+            EthMessageID::BlockBodies => {
+                let request_pair = RequestPair::<BlockBodies>::decode(buf)?;
+                EthMessage::BlockBodies(request_pair)
+            }
+            EthMessageID::GetPooledTransactions => {
+                let request_pair = RequestPair::<GetPooledTransactions>::decode(buf)?;
+                EthMessage::GetPooledTransactions(request_pair)
+            }
+            EthMessageID::PooledTransactions => {
+                let request_pair = RequestPair::<PooledTransactions>::decode(buf)?;
+                EthMessage::PooledTransactions(request_pair)
+            }
+            EthMessageID::GetNodeData => {
+                let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
+                EthMessage::GetNodeData(request_pair)
+            }
+            EthMessageID::NodeData => {
+                let request_pair = RequestPair::<NodeData>::decode(buf)?;
+                EthMessage::NodeData(request_pair)
+            }
+            EthMessageID::GetReceipts => {
+                let request_pair = RequestPair::<GetReceipts>::decode(buf)?;
+                EthMessage::GetReceipts(request_pair)
+            }
+            EthMessageID::Receipts => {
+                let request_pair = RequestPair::<Receipts>::decode(buf)?;
+                EthMessage::Receipts(request_pair)
+            }
         };
         Ok(ProtocolMessage { message_type, message })
     }
@@ -116,23 +119,23 @@ impl From<EthMessage> for ProtocolMessage {
 pub enum EthMessage {
     // Status is required for the protocol handshake
     Status(Status),
-    // // The following messages are broadcast to the network
+    // The following messages are broadcast to the network
     NewBlockHashes(NewBlockHashes),
-    // NewBlock(Box<NewBlock>),
-    // Transactions(Transactions),
-    // NewPooledTransactionHashes(NewPooledTransactionHashes),
+    NewBlock(Box<NewBlock>),
+    Transactions(Transactions),
+    NewPooledTransactionHashes(NewPooledTransactionHashes),
 
-    // // The following messages are request-response message pairs
-    // GetBlockHeaders(RequestPair<GetBlockHeaders>),
-    // BlockHeaders(RequestPair<BlockHeaders>),
-    // GetBlockBodies(RequestPair<GetBlockBodies>),
-    // BlockBodies(RequestPair<BlockBodies>),
-    // GetPooledTransactions(RequestPair<GetPooledTransactions>),
-    // PooledTransactions(RequestPair<PooledTransactions>),
-    // GetNodeData(RequestPair<GetNodeData>),
-    // NodeData(RequestPair<NodeData>),
-    // GetReceipts(RequestPair<GetReceipts>),
-    // Receipts(RequestPair<Receipts>),
+    // The following messages are request-response message pairs
+    GetBlockHeaders(RequestPair<GetBlockHeaders>),
+    BlockHeaders(RequestPair<BlockHeaders>),
+    GetBlockBodies(RequestPair<GetBlockBodies>),
+    BlockBodies(RequestPair<BlockBodies>),
+    GetPooledTransactions(RequestPair<GetPooledTransactions>),
+    PooledTransactions(RequestPair<PooledTransactions>),
+    GetNodeData(RequestPair<GetNodeData>),
+    NodeData(RequestPair<NodeData>),
+    GetReceipts(RequestPair<GetReceipts>),
+    Receipts(RequestPair<Receipts>),
 }
 
 impl EthMessage {
@@ -141,20 +144,19 @@ impl EthMessage {
         match self {
             EthMessage::Status(_) => EthMessageID::Status,
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
-            // EthMessage::NewBlock(_) => EthMessageID::NewBlock,
-            // EthMessage::Transactions(_) => EthMessageID::Transactions,
-            // EthMessage::NewPooledTransactionHashes(_) =>
-            // EthMessageID::NewPooledTransactionHashes, EthMessage::GetBlockHeaders(_)
-            // => EthMessageID::GetBlockHeaders, EthMessage::BlockHeaders(_) =>
-            // EthMessageID::BlockHeaders, EthMessage::GetBlockBodies(_) =>
-            // EthMessageID::GetBlockBodies, EthMessage::BlockBodies(_) =>
-            // EthMessageID::BlockBodies, EthMessage::GetPooledTransactions(_) =>
-            // EthMessageID::GetPooledTransactions, EthMessage::PooledTransactions(_) =>
-            // EthMessageID::PooledTransactions, EthMessage::GetNodeData(_) =>
-            // EthMessageID::GetNodeData, EthMessage::NodeData(_) =>
-            // EthMessageID::NodeData, EthMessage::GetReceipts(_) =>
-            // EthMessageID::GetReceipts, EthMessage::Receipts(_) =>
-            // EthMessageID::Receipts,
+            EthMessage::NewBlock(_) => EthMessageID::NewBlock,
+            EthMessage::Transactions(_) => EthMessageID::Transactions,
+            EthMessage::NewPooledTransactionHashes(_) => EthMessageID::NewPooledTransactionHashes,
+            EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
+            EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
+            EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
+            EthMessage::BlockBodies(_) => EthMessageID::BlockBodies,
+            EthMessage::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
+            EthMessage::PooledTransactions(_) => EthMessageID::PooledTransactions,
+            EthMessage::GetNodeData(_) => EthMessageID::GetNodeData,
+            EthMessage::NodeData(_) => EthMessageID::NodeData,
+            EthMessage::GetReceipts(_) => EthMessageID::GetReceipts,
+            EthMessage::Receipts(_) => EthMessageID::Receipts,
         }
     }
 }
@@ -164,38 +166,38 @@ impl Encodable for EthMessage {
         match self {
             EthMessage::Status(status) => status.length(),
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
-            // EthMessage::NewBlock(new_block) => new_block.length(),
-            // EthMessage::Transactions(transactions) => transactions.length(),
-            // EthMessage::NewPooledTransactionHashes(hashes) => hashes.length(),
-            // EthMessage::GetBlockHeaders(request) => request.length(),
-            // EthMessage::BlockHeaders(headers) => headers.length(),
-            // EthMessage::GetBlockBodies(request) => request.length(),
-            // EthMessage::BlockBodies(bodies) => bodies.length(),
-            // EthMessage::GetPooledTransactions(request) => request.length(),
-            // EthMessage::PooledTransactions(transactions) => transactions.length(),
-            // EthMessage::GetNodeData(request) => request.length(),
-            // EthMessage::NodeData(data) => data.length(),
-            // EthMessage::GetReceipts(request) => request.length(),
-            // EthMessage::Receipts(receipts) => receipts.length(),
+            EthMessage::NewBlock(new_block) => new_block.length(),
+            EthMessage::Transactions(transactions) => transactions.length(),
+            EthMessage::NewPooledTransactionHashes(hashes) => hashes.length(),
+            EthMessage::GetBlockHeaders(request) => request.length(),
+            EthMessage::BlockHeaders(headers) => headers.length(),
+            EthMessage::GetBlockBodies(request) => request.length(),
+            EthMessage::BlockBodies(bodies) => bodies.length(),
+            EthMessage::GetPooledTransactions(request) => request.length(),
+            EthMessage::PooledTransactions(transactions) => transactions.length(),
+            EthMessage::GetNodeData(request) => request.length(),
+            EthMessage::NodeData(data) => data.length(),
+            EthMessage::GetReceipts(request) => request.length(),
+            EthMessage::Receipts(receipts) => receipts.length(),
         }
     }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             EthMessage::Status(status) => status.encode(out),
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
-            // EthMessage::NewBlock(new_block) => new_block.encode(out),
-            // EthMessage::Transactions(transactions) => transactions.encode(out),
-            // EthMessage::NewPooledTransactionHashes(hashes) => hashes.encode(out),
-            // EthMessage::GetBlockHeaders(request) => request.encode(out),
-            // EthMessage::BlockHeaders(headers) => headers.encode(out),
-            // EthMessage::GetBlockBodies(request) => request.encode(out),
-            // EthMessage::BlockBodies(bodies) => bodies.encode(out),
-            // EthMessage::GetPooledTransactions(request) => request.encode(out),
-            // EthMessage::PooledTransactions(transactions) => transactions.encode(out),
-            // EthMessage::GetNodeData(request) => request.encode(out),
-            // EthMessage::NodeData(data) => data.encode(out),
-            // EthMessage::GetReceipts(request) => request.encode(out),
-            // EthMessage::Receipts(receipts) => receipts.encode(out),
+            EthMessage::NewBlock(new_block) => new_block.encode(out),
+            EthMessage::Transactions(transactions) => transactions.encode(out),
+            EthMessage::NewPooledTransactionHashes(hashes) => hashes.encode(out),
+            EthMessage::GetBlockHeaders(request) => request.encode(out),
+            EthMessage::BlockHeaders(headers) => headers.encode(out),
+            EthMessage::GetBlockBodies(request) => request.encode(out),
+            EthMessage::BlockBodies(bodies) => bodies.encode(out),
+            EthMessage::GetPooledTransactions(request) => request.encode(out),
+            EthMessage::PooledTransactions(transactions) => transactions.encode(out),
+            EthMessage::GetNodeData(request) => request.encode(out),
+            EthMessage::NodeData(data) => data.encode(out),
+            EthMessage::GetReceipts(request) => request.encode(out),
+            EthMessage::Receipts(receipts) => receipts.encode(out),
         }
     }
 }
