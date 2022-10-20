@@ -17,4 +17,8 @@ pub enum PoolError {
     /// Thrown when the number of unique transactions of a sender exceeded the slot capacity.
     #[error("{0:?} identified as spammer. Transaction {1:?} rejected.")]
     SpammerExceededCapacity(Address, TxHash),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the size limits of the pool.
+    #[error("[{0:?}] Transaction discarded outright due to pool size constraints.")]
+    DiscardedOnInsert(TxHash),
 }

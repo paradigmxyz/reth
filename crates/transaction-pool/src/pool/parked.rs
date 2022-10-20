@@ -15,7 +15,7 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
-    /// All transactions sorted by their priority function.
+    /// All transactions sorted by their order function.
     best: BTreeSet<ParkedPoolTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
@@ -58,6 +58,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.size_of -= tx.transaction.size();
 
         Some(tx.transaction.into())
+    }
+
+    /// Removes the worst transaction from this pool.
+    pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let worst = self.best.iter().next_back().map(|tx| *tx.transaction.id())?;
+        self.remove_transaction(&worst)
     }
 
     fn next_id(&mut self) -> u64 {

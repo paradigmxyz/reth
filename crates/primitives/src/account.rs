@@ -3,7 +3,7 @@ use reth_codecs::main_codec;
 
 /// Account saved in database
 #[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Account {
     /// Nonce.
     pub nonce: u64,
