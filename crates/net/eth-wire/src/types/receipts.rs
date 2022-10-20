@@ -1,3 +1,4 @@
+//! Implements the `GetReceipts` and `Receipts` message types.
 use reth_primitives::{Receipt, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 

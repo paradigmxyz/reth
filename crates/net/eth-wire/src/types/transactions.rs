@@ -1,3 +1,4 @@
+//! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 use reth_primitives::TransactionSigned as TypedTransaction;
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 

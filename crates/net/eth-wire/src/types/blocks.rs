@@ -1,3 +1,4 @@
+//! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message types.
 use reth_primitives::{Header, TransactionSigned};
 use reth_rlp::{
     Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,

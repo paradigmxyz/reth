@@ -66,7 +66,7 @@ where
         let msg = self
             .next()
             .await
-            .ok_or_else(|| EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
+            .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
 
         // TODO: Add any missing checks
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89

@@ -1,3 +1,4 @@
+//! Implements the `GetNodeData` and `NodeData` message types.
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 /// A request for state tree nodes corresponding to the given hashes.
