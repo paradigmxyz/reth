@@ -1,8 +1,6 @@
 use super::downloader::{DownloadError, Downloader};
 use async_trait::async_trait;
 use futures::{future::BoxFuture, stream::BoxStream, Future, FutureExt};
-use pin_project::pin_project;
-use pin_project_lite::pin_project as pin_project_lite;
 use rand::Rng;
 use reth_interfaces::{
     consensus::Consensus,
@@ -24,7 +22,8 @@ use tokio_stream::Stream;
 
 /// Download headers in batches
 #[derive(Debug)]
-pub struct LinearDownloader {
+pub struct LinearDownloader<'a, C: Consensus> {
+    consensus: &'a C,
     /// The batch size per one request
     pub batch_size: u64,
     /// A single request timeout
@@ -34,7 +33,13 @@ pub struct LinearDownloader {
 }
 
 #[async_trait]
-impl Downloader for LinearDownloader {
+impl<'a, C: Consensus> Downloader for LinearDownloader<'a, C> {
+    type Consensus = C;
+
+    fn consensus(&self) -> &Self::Consensus {
+        self.consensus
+    }
+
     /// The request timeout
     fn timeout(&self) -> u64 {
         self.request_timeout
@@ -45,7 +50,6 @@ impl Downloader for LinearDownloader {
     async fn download(
         &self,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         head: &HeaderLocked,
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError> {
@@ -56,14 +60,7 @@ impl Downloader for LinearDownloader {
         let mut out = vec![];
         loop {
             let result = self
-                .download_batch(
-                    &mut stream,
-                    client.clone(),
-                    consensus.clone(),
-                    forkchoice,
-                    head,
-                    out.get(0),
-                )
+                .download_batch(&mut stream, client.clone(), forkchoice, head, out.get(0))
                 .await;
             match result {
                 Ok(result) => match result {
@@ -102,12 +99,11 @@ pub enum LinearDownloadResult {
     Ignore,
 }
 
-impl LinearDownloader {
-    async fn download_batch<'a>(
+impl<'a, C: Consensus> LinearDownloader<'a, C> {
+    async fn download_batch(
         &'a self,
         stream: &'a mut MessageStream<(u64, Vec<Header>)>,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         forkchoice: &'a ForkchoiceState,
         head: &'a HeaderLocked,
         earliest: Option<&HeaderLocked>,
@@ -130,7 +126,7 @@ impl LinearDownloader {
             }
 
             match out.first().or(earliest) {
-                Some(header) if !self.validate(consensus.clone(), header, &parent)? => {
+                Some(header) if !self.validate(header, &parent)? => {
                     return Ok(LinearDownloadResult::Ignore)
                 }
                 // The buffer is empty and the first header does not match the tip, discard
@@ -148,130 +144,6 @@ impl LinearDownloader {
     }
 }
 
-mod linear_stream {
-    use super::*;
-
-    pin_project_lite! {
-        pub(crate) struct LinearDownloadStream<'a, S: Stream<Item = (u64, Vec<Header>)>> {
-            #[pin]
-            stream: &'a mut S,
-            #[pin]
-            state: LinearStreamState<'a>,
-            client: &'a Arc<dyn HeadersClient>,
-            consensus: &'a Arc<dyn Consensus>,
-            tip: H256,
-            head: H256,
-            earliest: Option<HeaderLocked>,
-            retries: usize,
-        }
-    }
-
-    impl<'a, S: Stream<Item = (u64, Vec<Header>)> + Unpin> LinearDownloadStream<'a, S> {
-        pub(crate) fn new(
-            stream: &'a mut S,
-            client: &'a Arc<dyn HeadersClient>,
-            consensus: &'a Arc<dyn Consensus>,
-            tip: H256,
-            head: H256,
-            retries: usize,
-        ) -> Self {
-            Self {
-                stream,
-                state: LinearStreamState::Prepare,
-                tip,
-                head,
-                client,
-                consensus,
-                earliest: None,
-                retries,
-            }
-        }
-    }
-
-    enum LinearStreamState<'a> {
-        Prepare,
-        PollRequest(u64, BoxFuture<'a, HashSet<H512>>),
-        PollHeaders(u64),
-        Done,
-    }
-
-    impl<'a, S: Stream<Item = (u64, Vec<Header>)> + Unpin + Send> Stream
-        for LinearDownloadStream<'a, S>
-    {
-        type Item = Result<Vec<HeaderLocked>, DownloadError>;
-
-        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            let mut this = self.project();
-            match *this.state {
-                LinearStreamState::Prepare => {
-                    let request_id = rand::thread_rng().gen();
-                    let request =
-                        HeaderRequest { start: BlockId::Hash(*this.tip), limit: 1, reverse: true };
-                    this.state.set(LinearStreamState::PollRequest(
-                        request_id,
-                        this.client.send_header_request(request_id, request),
-                    ));
-                    Poll::Pending
-                }
-                LinearStreamState::PollRequest(req_id, ref mut fut) => match fut.poll_unpin(cx) {
-                    Poll::Ready(_peers) => {
-                        this.state.set(LinearStreamState::PollHeaders(req_id));
-                        Poll::Pending
-                    }
-                    Poll::Pending => Poll::Pending,
-                },
-                LinearStreamState::PollHeaders(req_id) => match this.stream.poll_next(cx) {
-                    Poll::Ready(Some((id, mut headers))) if id == req_id && !headers.is_empty() => {
-                        headers.sort_unstable_by_key(|h| h.number);
-
-                        this.state.set(LinearStreamState::Prepare);
-                        let mut out = Vec::with_capacity(headers.len());
-                        for parent in headers.into_iter().rev() {
-                            let parent = parent.lock();
-                            if *this.head == parent.hash() {
-                                this.state.set(LinearStreamState::Done);
-                                break
-                            }
-
-                            match out.first().or(this.earliest.as_ref()) {
-                                Some(header) => {
-                                    if !(parent.hash() == header.parent_hash &&
-                                        parent.number + 1 == header.number)
-                                    {
-                                        return Poll::Pending
-                                    }
-
-                                    if let Err(e) = this.consensus.validate_header(&header, &parent)
-                                    {
-                                        return Poll::Ready(Some(Err(
-                                            DownloadError::HeaderValidation {
-                                                hash: parent.hash(),
-                                                details: e.to_string(),
-                                            },
-                                        )))
-                                    }
-                                }
-                                None if parent.hash() != *this.tip => return Poll::Pending,
-                                _ => (),
-                            };
-
-                            out.insert(0, parent);
-                        }
-                        *this.earliest = Some(out.first().unwrap().clone());
-                        Poll::Ready(Some(Ok(out)))
-                    }
-                    _ => Poll::Pending,
-                },
-                LinearStreamState::Done => Poll::Ready(None),
-            }
-        }
-
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            (1, None)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{super::stage::tests::test_utils, DownloadError, Downloader, LinearDownloader};
@@ -283,6 +155,16 @@ mod tests {
     use tokio::sync::{broadcast, mpsc, oneshot::error::TryRecvError};
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
+    use once_cell::sync::Lazy;
+    use test_utils::TestConsensus;
+
+    static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::new());
+    static CONSENSUS_FAIL: Lazy<TestConsensus> = Lazy::new(|| {
+        let mut consensus = TestConsensus::new();
+        consensus.set_fail_validation(true);
+        consensus
+    });
+
     #[tokio::test]
     async fn download_timeout() {
         let (req_tx, req_rx) = mpsc::channel(1);
@@ -291,7 +173,7 @@ mod tests {
         let runner = test_runner::LinearTestRunner::new();
         let retries = runner.retries;
         let rx = runner.run(
-            test_utils::TestConsensus::new(),
+            &*CONSENSUS,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             HeaderLocked::default(),
             H256::zero(),
@@ -310,7 +192,7 @@ mod tests {
         let runner = test_runner::LinearTestRunner::new();
         let retries = runner.retries;
         let rx = runner.run(
-            test_utils::TestConsensus::new(),
+            &*CONSENSUS,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             HeaderLocked::default(),
             H256::zero(),
@@ -355,12 +237,9 @@ mod tests {
         tip_header.parent_hash = parent_hash;
         let chain_tip = tip_header.hash_slow();
 
-        let mut consensus = test_utils::TestConsensus::new();
-        consensus.set_fail_validation(true);
-
         let runner = test_runner::LinearTestRunner::new();
         let rx = runner.run(
-            consensus,
+            &*CONSENSUS_FAIL,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             HeaderLocked::default(),
             chain_tip,
@@ -400,7 +279,7 @@ mod tests {
 
         let runner = test_runner::LinearTestRunner::new();
         let mut rx = runner.run(
-            test_utils::TestConsensus::new(),
+            &*CONSENSUS,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             tip_parent.clone().lock(),
             tip.hash_slow(),
@@ -443,9 +322,9 @@ mod tests {
                 Self { test_ch: oneshot::channel(), retries: 5 }
             }
 
-            pub(crate) fn run<'a>(
+            pub(crate) fn run<'a, C: Consensus>(
                 self,
-                consensus: impl Consensus + 'static,
+                consensus: &'static C,
                 client: impl HeadersClient + 'static,
                 head: HeaderLocked,
                 tip: H256,
@@ -454,14 +333,13 @@ mod tests {
                 let downloader = LinearDownloader {
                     request_retries: self.retries,
                     batch_size: 100,
+                    consensus,
                     request_timeout: 3,
                 };
                 tokio::spawn(async move {
                     let mut forkchoice = ForkchoiceState::default();
                     forkchoice.head_block_hash = tip;
-                    let result = downloader
-                        .download(Arc::new(client), Arc::new(consensus), &head, &forkchoice)
-                        .await;
+                    let result = downloader.download(Arc::new(client), &head, &forkchoice).await;
                     tx.send(result).expect("failed to forward download response");
                 });
                 rx

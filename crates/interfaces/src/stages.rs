@@ -20,6 +20,7 @@ pub struct HeaderRequest {
 
 /// The block headers downloader client
 #[async_trait]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: Send + Sync + Debug {
     /// Update the current node status
     async fn update_status(&self, height: u64, hash: H256, td: H256);

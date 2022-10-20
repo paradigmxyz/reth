@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 /// TODO:
 #[derive(Debug)]
-pub struct ParallelDownloader {
+pub struct ParallelDownloader<'a, C> {
+    /// The consensus engine
+    pub consensus: &'a C,
     /// The number of parallel requests
     pub par_count: usize,
     /// The batch size per one request
@@ -22,17 +24,22 @@ pub struct ParallelDownloader {
 }
 
 #[async_trait]
-impl Downloader for ParallelDownloader {
+impl<'a, C: Consensus> Downloader for ParallelDownloader<'a, C> {
+    type Consensus = C;
+
     /// The request timeout
     fn timeout(&self) -> u64 {
         self.request_timeout
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        self.consensus
     }
 
     /// Download the headers
     async fn download(
         &self,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         head: &HeaderLocked,
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError> {
@@ -77,11 +84,10 @@ enum ParallelResult {
     ReachedHead,
 }
 
-impl ParallelDownloader {
-    async fn download_batch<'a>(
+impl<'a, C: Consensus> ParallelDownloader<'a, C> {
+    async fn download_batch(
         &'a self,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         head: &'a HeaderLocked,
         forkchoice: &'a ForkchoiceState,
         stream: &'a mut MessageStream<(u64, Vec<Header>)>,
@@ -108,7 +114,7 @@ impl ParallelDownloader {
             }
 
             match out.first() {
-                Some(tail_header) if !self.validate(consensus.clone(), tail_header, &parent)? => {
+                Some(tail_header) if !self.validate(tail_header, &parent)? => {
                     // Cannot attach to the current buffer, discard
                     return Ok(ParallelResult::Discard)
                 }

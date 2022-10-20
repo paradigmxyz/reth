@@ -13,14 +13,20 @@ use tokio_stream::StreamExt;
 /// The header downloading strategy
 #[async_trait]
 pub trait Downloader: Sync + Send + Debug {
+    /// The Consensus used to verify block validity when
+    /// downloading
+    type Consensus: Consensus;
+
     /// The request timeout in seconds
     fn timeout(&self) -> u64;
+
+    /// The consensus engine
+    fn consensus(&self) -> &Self::Consensus;
 
     /// Download the headers
     async fn download(
         &self,
         client: Arc<dyn HeadersClient>,
-        consensus: Arc<dyn Consensus>,
         head: &HeaderLocked,
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError>;
@@ -51,7 +57,6 @@ pub trait Downloader: Sync + Send + Debug {
     /// Validate whether the header is valid in relation to it's parent
     fn validate(
         &self,
-        consensus: Arc<dyn Consensus>,
         header: &HeaderLocked,
         parent: &HeaderLocked,
     ) -> Result<bool, DownloadError> {
@@ -59,7 +64,7 @@ pub trait Downloader: Sync + Send + Debug {
             return Ok(false)
         }
 
-        consensus.validate_header(&header, &parent).map_err(|e| {
+        self.consensus().validate_header(&header, &parent).map_err(|e| {
             DownloadError::HeaderValidation { hash: parent.hash(), details: e.to_string() }
         })?;
         Ok(true)
