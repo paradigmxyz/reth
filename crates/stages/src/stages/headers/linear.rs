@@ -32,7 +32,6 @@ pub struct LinearDownloader<'a, C: Consensus> {
     pub request_retries: usize,
 }
 
-type HeaderIter = Box<dyn Iterator<Item = HeaderLocked> + Send>;
 #[async_trait]
 impl<'a, C: Consensus> Downloader for LinearDownloader<'a, C> {
     type Consensus = C;
@@ -58,19 +57,25 @@ impl<'a, C: Consensus> Downloader for LinearDownloader<'a, C> {
         let mut retries = self.request_retries;
 
         // Header order will be preserved during inserts
-        let mut out = (Box::new(std::iter::empty()) as HeaderIter).peekable();
+        let mut out = vec![];
         loop {
             let result = self
-                .download_batch(&mut stream, client.clone(), forkchoice, head, out.peek())
+                .download_batch(&mut stream, client.clone(), forkchoice, head, out.get(0))
                 .await;
             match result {
                 Ok(result) => match result {
                     LinearDownloadResult::Batch(headers) => {
-                        out = (Box::new(headers.into_iter().chain(out)) as HeaderIter).peekable();
+                        // TODO: Should this instead be?
+                        // headers.extend_from_slice(&out);
+                        // out = headers;
+                        out.extend_from_slice(&headers);
                     }
                     LinearDownloadResult::Finished(headers) => {
-                        out = (Box::new(headers.into_iter().chain(out)) as HeaderIter).peekable();
-                        return Ok(out.collect())
+                        // TODO: Should this instead be?
+                        // headers.extend_from_slice(&out);
+                        // out = headers;
+                        out.extend_from_slice(&headers);
+                        return Ok(out)
                     }
                     LinearDownloadResult::Ignore => (),
                 },
