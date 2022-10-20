@@ -16,6 +16,8 @@ pub trait Downloader: Sync + Send + Debug {
     /// The Consensus used to verify block validity when
     /// downloading
     type Consensus: Consensus;
+    /// The Client used to download the headers
+    type Client: HeadersClient;
 
     /// The request timeout in seconds
     fn timeout(&self) -> u64;
@@ -23,10 +25,12 @@ pub trait Downloader: Sync + Send + Debug {
     /// The consensus engine
     fn consensus(&self) -> &Self::Consensus;
 
+    /// The headers client
+    fn client(&self) -> &Self::Client;
+
     /// Download the headers
     async fn download(
         &self,
-        client: Arc<dyn HeadersClient>,
         head: &HeaderLocked,
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError>;
@@ -35,13 +39,12 @@ pub trait Downloader: Sync + Send + Debug {
     async fn download_headers(
         &self,
         stream: &mut MessageStream<(u64, Vec<Header>)>,
-        client: Arc<dyn HeadersClient>,
         start: BlockId,
         limit: u64,
     ) -> Result<Vec<Header>, DownloadError> {
         let request_id = rand::thread_rng().gen();
         let request = HeaderRequest { start, limit, reverse: true };
-        let _ = client.send_header_request(request_id, request).await;
+        let _ = self.client().send_header_request(request_id, request).await;
 
         // Filter stream by request id and non empty headers content
         let stream = stream.filter(|(id, headers)| request_id == *id && !headers.is_empty());

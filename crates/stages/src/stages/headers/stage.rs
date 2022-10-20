@@ -16,13 +16,13 @@ const HEADERS: StageId = StageId("HEADERS");
 
 /// The headers stage implementation for staged sync
 #[derive(Debug)]
-pub struct HeaderStage<D: Downloader, C: Consensus> {
+pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
     pub consensus: C,
     /// Downloader client implementation
-    pub client: Arc<dyn HeadersClient>,
+    pub client: H,
 }
 
 /// The header stage error
@@ -43,7 +43,7 @@ impl Into<StageError> for HeaderStageError {
 }
 
 #[async_trait]
-impl<'db, E, D: Downloader, C: Consensus> Stage<'db, E> for HeaderStage<D, C>
+impl<'db, E, D: Downloader, C: Consensus, H: HeadersClient> Stage<'db, E> for HeaderStage<D, C, H>
 where
     E: mdbx::EnvironmentKind,
 {
@@ -81,8 +81,7 @@ where
         let head = HeaderLocked::new(last_header, last_hash);
 
         let forkchoice = self.next_forkchoice_state(&head.hash()).await;
-        let headers = match self.downloader.download(self.client.clone(), &head, &forkchoice).await
-        {
+        let headers = match self.downloader.download(&head, &forkchoice).await {
             Ok(res) => res,
             Err(e) => match e {
                 DownloadError::NoHeaderResponse { request_id } => {
@@ -154,7 +153,7 @@ where
     }
 }
 
-impl<D: Downloader, C: Consensus> HeaderStage<D, C> {
+impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     async fn update_head<'tx, E: mdbx::EnvironmentKind>(
         &self,
         tx: &'tx mut Tx<'_, mdbx::RW, E>,
@@ -223,47 +222,24 @@ pub(crate) mod tests {
     use super::*;
     use crate::util::db::TxContainer;
     use assert_matches::assert_matches;
+    use once_cell::sync::Lazy;
     use reth_db::{
         kv::{test_utils as test_db_utils, EnvKind},
         mdbx,
     };
     use tokio::sync::{broadcast, mpsc};
 
+    static CONSENSUS: Lazy<test_utils::TestConsensus> =
+        Lazy::new(|| test_utils::TestConsensus::new());
+
+    static CLIENT: Lazy<test_utils::TestHeaderClient> =
+        Lazy::new(|| test_utils::TestHeaderClient::new());
+
     #[tokio::test]
     async fn headers_stage_empty_db() {
-        let (req_tx, _req_rx) = mpsc::channel(1);
-        let (_res_tx, res_rx) = broadcast::channel(1);
-
         let mut stage = HeaderStage {
-            client: Arc::new(test_utils::TestHeaderClient::new(req_tx, res_rx)),
-            consensus: Arc::new(test_utils::TestConsensus::new()),
-            downloader: test_utils::TestDownloader::new(Ok(vec![])),
-        };
-
-        let mut db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        let mut tx = TxContainer::new(&mut db).unwrap();
-
-        let input = ExecInput { previous_stage: None, stage_progress: None };
-        assert_matches!(
-            stage.execute(tx.get_mut(), input).await,
-            Err(StageError::Internal(err))
-                if matches!(
-                    err.downcast_ref::<HeaderStageError>(),
-                    Some(HeaderStageError::NoCannonicalHeader { .. }
-                )
-            )
-        );
-    }
-
-    #[tokio::test]
-    // TODO:
-    async fn headers_stage_() {
-        let (req_tx, _req_rx) = mpsc::channel(1);
-        let (_res_tx, res_rx) = broadcast::channel(1);
-
-        let mut stage = HeaderStage {
-            client: Arc::new(test_utils::TestHeaderClient::new(req_tx, res_rx)),
-            consensus: &test_utils::TestConsensus::new(),
+            client: &*CLIENT,
+            consensus: &*CONSENSUS,
             downloader: test_utils::TestDownloader::new(Ok(vec![])),
         };
 
@@ -291,27 +267,49 @@ pub(crate) mod tests {
         };
         use reth_primitives::{Header, HeaderLocked, H256, H512};
         use reth_rpc_types::engine::ForkchoiceState;
-        use std::{collections::HashSet, sync::Arc};
-        use tokio::sync::{broadcast, mpsc::Sender, watch};
+        use std::{
+            collections::HashSet,
+            sync::{Arc, Mutex},
+        };
+        use tokio::sync::{broadcast, mpsc, watch};
         use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
         pub(crate) type HeaderResponse = (u64, Vec<Header>);
 
         #[derive(Debug)]
         pub(crate) struct TestHeaderClient {
-            tx: Sender<(u64, HeaderRequest)>,
-            rx: broadcast::Receiver<HeaderResponse>,
+            req_tx: mpsc::Sender<(u64, HeaderRequest)>,
+            req_rx: Arc<Mutex<mpsc::Receiver<(u64, HeaderRequest)>>>,
+            res_tx: broadcast::Sender<HeaderResponse>,
+            res_rx: broadcast::Receiver<HeaderResponse>,
         }
 
         impl TestHeaderClient {
             /// Construct a new test header downloader.
-            /// `tx` is the `Sender` for header requests
-            /// `rx` is the `Receiver` of header responses
-            pub(crate) fn new(
-                tx: Sender<(u64, HeaderRequest)>,
-                rx: broadcast::Receiver<HeaderResponse>,
-            ) -> Self {
-                Self { tx, rx }
+            pub(crate) fn new() -> Self {
+                let (req_tx, req_rx) = mpsc::channel(1);
+                let (res_tx, res_rx) = broadcast::channel(1);
+                Self { req_tx, req_rx: Arc::new(Mutex::new(req_rx)), res_tx, res_rx }
+            }
+
+            pub(crate) async fn on_header_request<T, F>(&self, mut count: usize, mut f: F) -> Vec<T>
+            where
+                F: FnMut(u64, HeaderRequest) -> T,
+            {
+                let mut rx = self.req_rx.lock().unwrap();
+                let mut results = vec![];
+                while let Some((id, req)) = rx.recv().await {
+                    results.push(f(id, req));
+                    count -= 1;
+                    if count == 0 {
+                        break
+                    }
+                }
+                return results
+            }
+
+            pub(crate) fn send_header_response(&self, id: u64, headers: Vec<Header>) {
+                self.res_tx.send((id, headers)).expect("failed to send header response");
             }
         }
 
@@ -320,12 +318,12 @@ pub(crate) mod tests {
             async fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
 
             async fn send_header_request(&self, id: u64, request: HeaderRequest) -> HashSet<H512> {
-                self.tx.send((id, request)).await.expect("failed to send request");
+                self.req_tx.send((id, request)).await.expect("failed to send request");
                 HashSet::default()
             }
 
             async fn stream_headers(&self) -> MessageStream<(u64, Vec<Header>)> {
-                Box::pin(BroadcastStream::new(self.rx.resubscribe()).filter_map(|e| e.ok()))
+                Box::pin(BroadcastStream::new(self.res_rx.resubscribe()).filter_map(|e| e.ok()))
             }
         }
 
@@ -406,6 +404,7 @@ pub(crate) mod tests {
         #[async_trait]
         impl Downloader for TestDownloader {
             type Consensus = TestConsensus;
+            type Client = TestHeaderClient;
 
             fn timeout(&self) -> u64 {
                 1
@@ -415,9 +414,12 @@ pub(crate) mod tests {
                 unimplemented!()
             }
 
+            fn client(&self) -> &Self::Client {
+                unimplemented!()
+            }
+
             async fn download(
                 &self,
-                _: Arc<dyn HeadersClient>,
                 _: &HeaderLocked,
                 _: &ForkchoiceState,
             ) -> Result<Vec<HeaderLocked>, DownloadError> {

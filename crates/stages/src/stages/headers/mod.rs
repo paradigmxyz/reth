@@ -5,5 +5,3 @@ pub mod stage;
 pub mod downloader;
 /// The linear downloading strategy
 pub mod linear;
-/// The parallel downloading strategy
-pub mod parallel;

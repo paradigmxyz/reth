@@ -1,29 +1,19 @@
 use super::downloader::{DownloadError, Downloader};
 use async_trait::async_trait;
-use futures::{future::BoxFuture, stream::BoxStream, Future, FutureExt};
-use rand::Rng;
 use reth_interfaces::{
     consensus::Consensus,
-    stages::{HeaderRequest, HeadersClient, MessageStream},
+    stages::{HeadersClient, MessageStream},
 };
-use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256, H512};
+use reth_primitives::{rpc::BlockId, Header, HeaderLocked};
 use reth_rpc_types::engine::ForkchoiceState;
-use std::{
-    collections::HashSet,
-    ops::DerefMut,
-    pin::Pin,
-    process::Output,
-    sync::{Arc, Mutex},
-    task::{Context, Poll},
-    time::Duration,
-};
-use tokio::time::{Instant, Sleep};
-use tokio_stream::Stream;
 
 /// Download headers in batches
 #[derive(Debug)]
-pub struct LinearDownloader<'a, C: Consensus> {
+pub struct LinearDownloader<'a, C: Consensus, H: HeadersClient> {
+    /// The consensus client
     consensus: &'a C,
+    /// The headers client
+    client: &'a H,
     /// The batch size per one request
     pub batch_size: u64,
     /// A single request timeout
@@ -33,11 +23,16 @@ pub struct LinearDownloader<'a, C: Consensus> {
 }
 
 #[async_trait]
-impl<'a, C: Consensus> Downloader for LinearDownloader<'a, C> {
+impl<'a, C: Consensus, H: HeadersClient> Downloader for LinearDownloader<'a, C, H> {
     type Consensus = C;
+    type Client = H;
 
     fn consensus(&self) -> &Self::Consensus {
         self.consensus
+    }
+
+    fn client(&self) -> &Self::Client {
+        self.client
     }
 
     /// The request timeout
@@ -49,19 +44,16 @@ impl<'a, C: Consensus> Downloader for LinearDownloader<'a, C> {
     /// Returns the header collection in sorted ascending order
     async fn download(
         &self,
-        client: Arc<dyn HeadersClient>,
         head: &HeaderLocked,
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError> {
-        let mut stream = client.stream_headers().await;
+        let mut stream = self.client().stream_headers().await;
         let mut retries = self.request_retries;
 
         // Header order will be preserved during inserts
         let mut out = vec![];
         loop {
-            let result = self
-                .download_batch(&mut stream, client.clone(), forkchoice, head, out.get(0))
-                .await;
+            let result = self.download_batch(&mut stream, forkchoice, head, out.get(0)).await;
             match result {
                 Ok(result) => match result {
                     LinearDownloadResult::Batch(headers) => {
@@ -99,20 +91,18 @@ pub enum LinearDownloadResult {
     Ignore,
 }
 
-impl<'a, C: Consensus> LinearDownloader<'a, C> {
+impl<'a, C: Consensus, H: HeadersClient> LinearDownloader<'a, C, H> {
     async fn download_batch(
         &'a self,
         stream: &'a mut MessageStream<(u64, Vec<Header>)>,
-        client: Arc<dyn HeadersClient>,
         forkchoice: &'a ForkchoiceState,
         head: &'a HeaderLocked,
         earliest: Option<&HeaderLocked>,
     ) -> Result<LinearDownloadResult, DownloadError> {
         // Request headers starting from tip or earliest cached
         let start = earliest.map_or(forkchoice.head_block_hash, |h| h.parent_hash);
-        let mut headers = self
-            .download_headers(stream, client.clone(), BlockId::Hash(start), self.batch_size)
-            .await?;
+        let mut headers =
+            self.download_headers(stream, BlockId::Hash(start), self.batch_size).await?;
         headers.sort_unstable_by_key(|h| h.number);
 
         let mut out = Vec::with_capacity(headers.len());
@@ -146,17 +136,16 @@ impl<'a, C: Consensus> LinearDownloader<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::stage::tests::test_utils, DownloadError, Downloader, LinearDownloader};
+    use super::{
+        super::stage::tests::test_utils::{TestConsensus, TestHeaderClient},
+        DownloadError, Downloader, LinearDownloader,
+    };
     use assert_matches::assert_matches;
-    use rand::{self, Rng};
+    use once_cell::sync::Lazy;
+    use rand::Rng;
     use reth_interfaces::stages::HeaderRequest;
     use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
-    use std::sync::Arc;
-    use tokio::sync::{broadcast, mpsc, oneshot::error::TryRecvError};
-    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-
-    use once_cell::sync::Lazy;
-    use test_utils::TestConsensus;
+    use tokio::sync::oneshot::error::TryRecvError;
 
     static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::new());
     static CONSENSUS_FAIL: Lazy<TestConsensus> = Lazy::new(|| {
@@ -165,67 +154,49 @@ mod tests {
         consensus
     });
 
+    static CLIENT: Lazy<TestHeaderClient> = Lazy::new(|| TestHeaderClient::new());
+
     #[tokio::test]
     async fn download_timeout() {
-        let (req_tx, req_rx) = mpsc::channel(1);
-        let (_res_tx, res_rx) = broadcast::channel(1);
-
         let runner = test_runner::LinearTestRunner::new();
         let retries = runner.retries;
-        let rx = runner.run(
-            &*CONSENSUS,
-            test_utils::TestHeaderClient::new(req_tx, res_rx),
-            HeaderLocked::default(),
-            H256::zero(),
-        );
+        let rx = runner.run(&*CONSENSUS, &*CLIENT, HeaderLocked::default(), H256::zero());
 
-        let requests = ReceiverStream::new(req_rx).collect::<Vec<_>>().await;
+        let mut requests = vec![];
+        CLIENT
+            .on_header_request(retries, |_id, req| {
+                requests.push(req);
+            })
+            .await;
         assert_eq!(requests.len(), retries);
         assert_matches!(rx.await, Ok(Err(DownloadError::NoHeaderResponse { .. })));
     }
 
     #[tokio::test]
     async fn download_timeout_on_invalid_messages() {
-        let (req_tx, req_rx) = mpsc::channel(1);
-        let (res_tx, res_rx) = broadcast::channel(1);
-
         let runner = test_runner::LinearTestRunner::new();
         let retries = runner.retries;
-        let rx = runner.run(
-            &*CONSENSUS,
-            test_utils::TestHeaderClient::new(req_tx, res_rx),
-            HeaderLocked::default(),
-            H256::zero(),
-        );
+        let rx = runner.run(&*CONSENSUS, &*CLIENT, HeaderLocked::default(), H256::zero());
 
         let mut num_of_reqs = 0;
-        let mut last_req_id = None;
-        let mut req_stream = ReceiverStream::new(req_rx);
-        while let Some((id, _req)) = req_stream.next().await {
-            // Since the receiving channel filters by id and message length -
-            // randomize the input to the tested filter
-            res_tx.send((id.saturating_add(id % 2), vec![])).expect("failed to send response");
-            num_of_reqs += 1;
-            last_req_id = Some(id);
+        let mut last_req_id: Option<u64> = None;
 
-            if num_of_reqs == retries {
-                drop(res_tx);
-                break
-            }
-        }
+        CLIENT
+            .on_header_request(retries, |id, _req| {
+                num_of_reqs += 1;
+                last_req_id = Some(id);
+                CLIENT.send_header_response(id.saturating_add(id % 2), vec![])
+            })
+            .await;
 
         assert_eq!(num_of_reqs, retries);
         assert_matches!(
             rx.await,
-            Ok(Err(DownloadError::NoHeaderResponse { request_id })) if request_id == last_req_id.unwrap()
-        );
+            Ok(Err(DownloadError::NoHeaderResponse { request_id })) if request_id == last_req_id.unwrap());
     }
 
     #[tokio::test]
     async fn download_propagates_consensus_validation_error() {
-        let (req_tx, req_rx) = mpsc::channel(1);
-        let (res_tx, res_rx) = broadcast::channel(1);
-
         let mut tip_parent = Header::default();
         tip_parent.nonce = rand::thread_rng().gen();
         tip_parent.number = 1;
@@ -238,23 +209,19 @@ mod tests {
         let chain_tip = tip_header.hash_slow();
 
         let runner = test_runner::LinearTestRunner::new();
-        let rx = runner.run(
-            &*CONSENSUS_FAIL,
-            test_utils::TestHeaderClient::new(req_tx, res_rx),
-            HeaderLocked::default(),
-            chain_tip,
-        );
+        let rx = runner.run(&*CONSENSUS_FAIL, &*CLIENT, HeaderLocked::default(), chain_tip);
 
-        let mut stream = Box::pin(ReceiverStream::new(req_rx));
-        let request = stream.next().await;
+        let requests = CLIENT.on_header_request(1, |id, req| (id, req)).await;
+
+        let request = requests.last();
         assert_matches!(
             request,
             Some((_, HeaderRequest { start, .. }))
-                if matches!(start, BlockId::Hash(hash) if hash == chain_tip)
+                if matches!(start, BlockId::Hash(hash) if *hash == chain_tip)
         );
 
         let request = request.unwrap();
-        res_tx.send((request.0, vec![tip_header, tip_parent])).expect("failed to send header");
+        CLIENT.send_header_response(request.0, vec![tip_header, tip_parent]);
 
         assert_matches!(
             rx.await,
@@ -264,9 +231,6 @@ mod tests {
 
     #[tokio::test]
     async fn download_starts_with_chain_tip() {
-        let (req_tx, req_rx) = mpsc::channel(1);
-        let (res_tx, res_rx) = broadcast::channel(1);
-
         let mut tip_parent = Header::default();
         tip_parent.nonce = rand::thread_rng().gen();
         tip_parent.number = 1;
@@ -278,26 +242,22 @@ mod tests {
         tip.nonce = rand::thread_rng().gen();
 
         let runner = test_runner::LinearTestRunner::new();
-        let mut rx = runner.run(
-            &*CONSENSUS,
-            test_utils::TestHeaderClient::new(req_tx, res_rx),
-            tip_parent.clone().lock(),
-            tip.hash_slow(),
-        );
+        let mut rx = runner.run(&*CONSENSUS, &*CLIENT, tip_parent.clone().lock(), tip.hash_slow());
 
-        let mut stream = ReceiverStream::new(req_rx);
-        let request = stream.next().await.unwrap();
-        let mut corrupted_tip = tip.clone();
-        corrupted_tip.nonce = rand::thread_rng().gen();
-        res_tx
-            .send((request.0, vec![corrupted_tip, tip_parent.clone()]))
-            .expect("failed to send header");
+        CLIENT
+            .on_header_request(1, |id, _req| {
+                let mut corrupted_tip = tip.clone();
+                corrupted_tip.nonce = rand::thread_rng().gen();
+                CLIENT.send_header_response(id, vec![corrupted_tip, tip_parent.clone()])
+            })
+            .await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
-        let request = stream.next().await.unwrap();
-        res_tx
-            .send((request.0, vec![tip.clone(), tip_parent.clone()]))
-            .expect("failed to send header");
+        CLIENT
+            .on_header_request(1, |id, _req| {
+                CLIENT.send_header_response(id, vec![tip.clone(), tip_parent.clone()])
+            })
+            .await;
 
         let result = rx.await;
         assert_matches!(result, Ok(Ok(ref val)) if val.len() == 1);
@@ -322,24 +282,25 @@ mod tests {
                 Self { test_ch: oneshot::channel(), retries: 5 }
             }
 
-            pub(crate) fn run<'a, C: Consensus>(
+            pub(crate) fn run<'a, C: Consensus, H: HeadersClient>(
                 self,
                 consensus: &'static C,
-                client: impl HeadersClient + 'static,
+                client: &'static H,
                 head: HeaderLocked,
                 tip: H256,
             ) -> oneshot::Receiver<DownloadResult> {
                 let (tx, rx) = self.test_ch;
                 let downloader = LinearDownloader {
+                    consensus,
+                    client,
                     request_retries: self.retries,
                     batch_size: 100,
-                    consensus,
                     request_timeout: 3,
                 };
                 tokio::spawn(async move {
                     let mut forkchoice = ForkchoiceState::default();
                     forkchoice.head_block_hash = tip;
-                    let result = downloader.download(Arc::new(client), &head, &forkchoice).await;
+                    let result = downloader.download(&head, &forkchoice).await;
                     tx.send(result).expect("failed to forward download response");
                 });
                 rx
