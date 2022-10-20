@@ -546,11 +546,7 @@ impl Decodable for TransactionSigned {
                 s: Decodable::decode(buf)?,
             };
 
-            let mut signed = TransactionSigned {
-                transaction,
-                hash: Default::default(),
-                signature,
-            };
+            let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
             let tx_length = first_header.payload_length + first_header.length();
             signed.hash = keccak256(&original_encoding[..tx_length]).into();
             Ok(signed)
@@ -569,11 +565,7 @@ impl Decodable for TransactionSigned {
                 transaction.set_chain_id(id);
             }
 
-            let mut signed = TransactionSigned {
-                transaction,
-                hash: Default::default(),
-                signature,
-            };
+            let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
             let tx_length = first_header.payload_length + first_header.length();
             signed.hash = keccak256(&original_encoding[..tx_length]).into();
             Ok(signed)
