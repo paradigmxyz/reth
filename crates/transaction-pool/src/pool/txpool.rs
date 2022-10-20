@@ -10,12 +10,13 @@ use crate::{
         state::{SubPool, TxState},
         AddedPendingTransaction, AddedTransaction,
     },
+    traits::PoolStatus,
     PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -97,6 +98,19 @@ impl<T: TransactionOrdering> TxPool<T> {
             config,
         }
     }
+
+    /// Returns stats about the pool.
+    pub(crate) fn status(&self) -> PoolStatus {
+        PoolStatus {
+            pending: self.pending_pool.len(),
+            pending_size: self.pending_pool.size(),
+            basefee: self.basefee_pool.len(),
+            basefee_size: self.basefee_pool.size(),
+            queued: self.queued_pool.len(),
+            queued_size: self.queued_pool.size(),
+        }
+    }
+
     /// Updates the pool based on the changed base fee.
     ///
     /// This enforces the dynamic fee requirement.
@@ -154,7 +168,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
-        // Update sender info
+        // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
             .or_default()
@@ -187,6 +201,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap }) => {
                 Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
             }
+            Err(InsertErr::ExceededSenderTransactionsCapacity { transaction }) => {
+                Err(PoolError::SpammerExceededCapacity(*transaction.sender(), *transaction.hash()))
+            }
         }
     }
 
@@ -218,13 +235,26 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will remove the given transaction from one sub-pool and insert it in the other
     /// sub-pool.
     fn move_transaction(&mut self, from: SubPool, to: SubPool, id: &TransactionId) {
-        if let Some(tx) = self.remove_transaction(from, id) {
+        if let Some(tx) = self.remove_from_subpool(from, id) {
             self.add_transaction_to_pool(to, tx);
         }
     }
 
-    /// Removes the transaction from the given pool
+    /// Remove the transaction from the entire pool.
+    ///
+    /// This includes the total set of transaction and the subpool it currently resides in.
     fn remove_transaction(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction(id)?;
+        self.remove_from_subpool(pool, tx.id())
+    }
+
+    /// Removes the transaction from the given pool.
+    ///
+    /// Caution: this only removes the tx from the sub-pool and not from the pool itself
+    fn remove_from_subpool(
         &mut self,
         pool: SubPool,
         tx: &TransactionId,
@@ -233,6 +263,31 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+        }
+    }
+
+    /// Removes _only_ the descendants of the given transaction from the entire pool.
+    ///
+    /// All removed transactions are added to the `removed` vec.
+    fn remove_descendants(
+        &mut self,
+        tx: &TransactionId,
+        removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        let mut id = *tx;
+
+        // this will essentially pop _all_ descendant transactions one by one
+        loop {
+            let descendant =
+                self.all_transactions.descendant_txs_exclusive(&id).map(|(id, _)| *id).next();
+            if let Some(descendant) = descendant {
+                if let Some(tx) = self.remove_transaction(&descendant) {
+                    removed.push(tx)
+                }
+                id = descendant;
+            } else {
+                return
+            }
         }
     }
 
@@ -264,23 +319,48 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) {
         if let Some((replaced, replaced_pool)) = replaced {
             // Remove the replaced transaction
-            self.remove_transaction(replaced_pool, replaced.id());
+            self.remove_from_subpool(replaced_pool, replaced.id());
         }
 
         self.add_transaction_to_pool(pool, transaction)
-    }
-
-    /// Returns the current size of the entire pool
-    pub fn size_of(&self) -> usize {
-        unimplemented!()
     }
 
     /// Ensures that the transactions in the sub-pools are within the given bounds.
     ///
     /// If the current size exceeds the given bounds, the worst transactions are evicted from the
     /// pool and returned.
-    pub fn enforce_size_limits(&mut self) {
-        unimplemented!()
+    pub fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed = Vec::new();
+
+        // Helper macro that discards the worst transactions for the pools
+        macro_rules! discard_worst {
+            ($this:ident, $removed:ident,  [$($limit:ident => $pool:ident),*]  ) => {
+                $ (
+                while $this
+                        .config
+                        .$limit
+                        .is_exceeded($this.$pool.len(), $this.$pool.size())
+                    {
+                        if let Some(tx) = $this.$pool.pop_worst() {
+                            let id = tx.transaction_id;
+                            removed.push(tx);
+                            $this.remove_descendants(&id, &mut $removed);
+                        }
+                    }
+
+                )*
+            };
+        }
+
+        discard_worst!(
+            self, removed, [
+                pending_limit  => pending_pool,
+                basefee_limit  => basefee_pool,
+                queued_limit  => queued_pool
+            ]
+        );
+
+        removed
     }
 
     /// Number of transactions in the entire pool
@@ -399,6 +479,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns all transactions that _follow_ after the given id but have the same sender.
     ///
     /// NOTE: The range is _exclusive_
+    pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
+        &'a self,
+        id: &'b TransactionId,
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+        self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
+    }
+
+    /// Returns all transactions that _follow_ after the given id but have the same sender.
+    ///
+    /// NOTE: The range is _exclusive_
     pub(crate) fn descendant_txs_exclusive_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
@@ -430,21 +520,42 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
-    /// Removes a transaction from the pool after it was mined.
+    /// Removes a transaction from the set.
     ///
     /// This will _not_ trigger additional updates, because descendants without nonce gaps are
     /// already in the pending pool, and this transaction will be the first transaction of the
     /// sender in this pool.
-    pub(crate) fn remove_mined_tx(
+    pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
-    ) -> Option<Arc<ValidPoolTransaction<T>>> {
-        let tx = self.txs.remove(id)?;
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
+        let internal = self.txs.remove(id)?;
 
         // decrement the counter for the sender.
-        self.tx_decr(tx.transaction.sender_id());
+        self.tx_decr(internal.transaction.sender_id());
 
-        self.by_hash.remove(tx.transaction.hash())
+        self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool))
+    }
+
+    /// Additional checks for a new transaction.
+    ///
+    /// This will enforce all additional rules in the context of this pool, such as:
+    ///   - Spam protection: reject new non-local transaction from a sender that exhausted its slot
+    ///     capacity.
+    fn ensure_valid(
+        &self,
+        transaction: ValidPoolTransaction<T>,
+    ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
+        if !transaction.origin.is_local() {
+            let current_txs =
+                self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
+            if current_txs >= self.max_account_slots {
+                return Err(InsertErr::ExceededSenderTransactionsCapacity {
+                    transaction: Arc::new(transaction),
+                })
+            }
+        }
+        Ok(transaction)
     }
 
     /// Inserts a new transaction into the pool.
@@ -465,8 +576,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
+        let transaction = Arc::new(self.ensure_valid(transaction)?);
         let tx_id = *transaction.id();
-        let transaction = Arc::new(transaction);
         let mut state = TxState::default();
         let mut cumulative_cost = U256::zero();
         let mut updates = Vec::new();
@@ -634,6 +745,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 }
 
+#[cfg(test)]
+#[allow(missing_docs)]
+impl<T: PoolTransaction> AllTransactions<T> {
+    pub(crate) fn tx_count(&self, sender: SenderId) -> usize {
+        self.tx_counter.get(&sender).copied().unwrap_or_default()
+    }
+}
+
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
@@ -682,6 +801,10 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
     ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: U256 },
+    /// Sender currently exceeds the configured limit for max account slots.
+    ///
+    /// The sender can be considered a spammer at this point.
+    ExceededSenderTransactionsCapacity { transaction: Arc<ValidPoolTransaction<T>> },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -796,7 +919,10 @@ impl SenderInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{MockTransaction, MockTransactionFactory};
+    use crate::{
+        test_util::{MockTransaction, MockTransactionFactory},
+        traits::TransactionOrigin,
+    };
 
     #[test]
     fn test_simple_insert() {
@@ -957,5 +1083,59 @@ mod tests {
         let first_in_pool = pool.get(first.id()).unwrap();
         // has non nonce gap
         assert!(first_in_pool.state.contains(TxState::NO_NONCE_GAPS));
+    }
+
+    #[test]
+    fn rejects_spammer() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let mut tx = MockTransaction::eip1559();
+        for _ in 0..pool.max_account_slots {
+            tx = tx.next();
+            pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
+        }
+
+        assert_eq!(
+            pool.max_account_slots,
+            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+        );
+
+        let err =
+            pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+    }
+
+    #[test]
+    fn allow_local_spamming() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let mut tx = MockTransaction::eip1559();
+        for _ in 0..pool.max_account_slots {
+            tx = tx.next();
+            pool.insert_tx(
+                f.validated_with_origin(TransactionOrigin::Local, tx.clone()),
+                on_chain_balance,
+                on_chain_nonce,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            pool.max_account_slots,
+            pool.tx_count(f.ids.sender_id(&tx.get_sender()).unwrap())
+        );
+
+        pool.insert_tx(
+            f.validated_with_origin(TransactionOrigin::Local, tx.next()),
+            on_chain_balance,
+            on_chain_nonce,
+        )
+        .unwrap();
     }
 }

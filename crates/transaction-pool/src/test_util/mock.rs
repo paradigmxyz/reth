@@ -327,11 +327,15 @@ impl PoolTransaction for MockTransaction {
             }
         }
     }
+
+    fn size(&self) -> usize {
+        0
+    }
 }
 
 #[derive(Default)]
 pub struct MockTransactionFactory {
-    ids: SenderIdentifiers,
+    pub ids: SenderIdentifiers,
 }
 
 // === impl MockTransactionFactory ===
@@ -342,17 +346,24 @@ impl MockTransactionFactory {
         TransactionId::new(sender, tx.get_nonce())
     }
 
-    /// Converts the transaction into a validated transaction
     pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
+        self.validated_with_origin(TransactionOrigin::External, transaction)
+    }
+
+    /// Converts the transaction into a validated transaction
+    pub fn validated_with_origin(
+        &mut self,
+        origin: TransactionOrigin,
+        transaction: MockTransaction,
+    ) -> MockValidTx {
         let transaction_id = self.tx_id(&transaction);
         MockValidTx {
             propagate: false,
-            is_local: false,
             transaction_id,
             cost: transaction.cost(),
             transaction,
             timestamp: Instant::now(),
-            origin: TransactionOrigin::External,
+            origin,
         }
     }
 

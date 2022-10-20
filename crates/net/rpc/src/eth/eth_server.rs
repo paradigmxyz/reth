@@ -1,6 +1,9 @@
-//! Implementation for the `eth` namespace rpc request handler.
+//! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
+//! implementation for handling RPC requests for he `eth_` namespace.
 
+use crate::{eth::EthApi, result::ToRpcResult};
 use jsonrpsee::core::RpcResult as Result;
+use reth_interfaces::provider::{BlockProvider, StorageProvider};
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
     Address, BlockNumber, Bytes, Transaction, H256, H64, U256, U64,
@@ -13,25 +16,17 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
 
-/// `Eth` API implementation.
-///
-/// This type serves as the handler for RPCs for the `eth` namespace.
-#[derive(Debug, Clone)]
-pub struct EthApi<Pool> {
-    /// The transaction pool.
-    _pool: Pool,
-}
-
 #[async_trait::async_trait]
-impl<Pool> EthApiServer for EthApi<Pool>
+impl<Pool, Client> EthApiServer for EthApi<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = Transaction>,
+    Pool: TransactionPool<Transaction = Transaction> + Clone,
+    Client: BlockProvider + StorageProvider,
 {
-    async fn protocol_version(&self) -> Result<u64> {
-        todo!()
+    fn protocol_version(&self) -> Result<U64> {
+        Ok(self.protocol_version())
     }
 
-    async fn syncing(&self) -> Result<SyncStatus> {
+    fn syncing(&self) -> Result<SyncStatus> {
         todo!()
     }
 
@@ -43,8 +38,8 @@ where
         todo!()
     }
 
-    async fn block_number(&self) -> Result<U256> {
-        todo!()
+    fn block_number(&self) -> Result<U256> {
+        self.block_number().with_message("Failed to read block number")
     }
 
     async fn chain_id(&self) -> Result<Option<U64>> {

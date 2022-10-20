@@ -13,5 +13,13 @@ pub mod executor;
 /// Consensus traits.
 pub mod consensus;
 
-/// Stage sync related traits
+/// Staged sync related traits
 pub mod stages;
+
+/// Traits that provide chain access.
+pub mod provider;
+
+/// Possible errors when interacting with the chain.
+mod error;
+
+pub use error::{Error, Result};

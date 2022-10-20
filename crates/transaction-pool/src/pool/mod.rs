@@ -64,10 +64,10 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    error::PoolResult,
+    error::{PoolError, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
-    traits::{NewTransactionEvent, PoolTransaction, TransactionOrigin},
+    traits::{NewTransactionEvent, PoolStatus, PoolTransaction, TransactionOrigin},
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
@@ -76,7 +76,11 @@ pub use events::TransactionEvent;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::warn;
 
 mod best;
@@ -84,6 +88,7 @@ mod events;
 mod listener;
 mod parked;
 mod pending;
+pub(crate) mod size;
 pub(crate) mod state;
 mod transaction;
 pub mod txpool;
@@ -126,6 +131,11 @@ where
         }
     }
 
+    /// Returns stats about the pool.
+    pub(crate) fn status(&self) -> PoolStatus {
+        self.pool.read().status()
+    }
+
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
@@ -164,6 +174,9 @@ where
     }
 
     /// Add a single validated transaction into the pool.
+    ///
+    /// Note: this is only used internally by [`Self::add_transactions()`], all new transaction(s)
+    /// come in through that function, either as a batch or `std::iter::once`.
     fn add_transaction(
         &self,
         origin: TransactionOrigin,
@@ -179,7 +192,6 @@ where
                     transaction,
                     transaction_id,
                     propagate: false,
-                    is_local: false,
                     timestamp: Instant::now(),
                     origin,
                 };
@@ -213,9 +225,28 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
     ) -> Vec<PoolResult<TxHash>> {
-        // TODO check pool limits
+        let added =
+            transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>();
 
-        transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>()
+        // If at least one transaction was added successfully, then we enforce the pool size limits.
+        let discarded =
+            if added.iter().any(Result::is_ok) { self.discard_worst() } else { Default::default() };
+
+        if discarded.is_empty() {
+            return added
+        }
+
+        // It may happen that a newly added transaction is immediately discarded, so we need to
+        // adjust the result here
+        added
+            .into_iter()
+            .map(|res| match res {
+                Ok(ref hash) if discarded.contains(hash) => {
+                    Err(PoolError::DiscardedOnInsert(*hash))
+                }
+                other => other,
+            })
+            .collect()
     }
 
     /// Notify all listeners about a new pending transaction.
@@ -304,6 +335,11 @@ where
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.pool.read().is_empty()
+    }
+
+    /// Enforces the size limits of pool and returns the discarded transactions if violated.
+    pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
+        self.pool.write().discard_worst().into_iter().map(|tx| *tx.hash()).collect()
     }
 }
 

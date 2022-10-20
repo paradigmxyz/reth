@@ -47,7 +47,7 @@ impl Encode for BlockNumHash {
         let mut rnum = [0; 40];
 
         rnum[..8].copy_from_slice(&number.to_be_bytes());
-        rnum[8..].copy_from_slice(&hash.encode());
+        rnum[8..].copy_from_slice(hash.as_bytes());
         rnum
     }
 }

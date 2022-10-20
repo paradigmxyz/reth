@@ -23,7 +23,9 @@ pub use header::{Header, HeaderLocked};
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
-pub use transaction::{AccessList, AccessListItem, Transaction, TransactionSigned, TxType};
+pub use transaction::{
+    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
+};
 
 /// Block hash.
 pub type BlockHash = H256;
@@ -45,7 +47,7 @@ pub type StorageValue = H256;
 // NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
-    types::{Bloom, Bytes, H128, H160, H256, H512, H64, U256, U64},
+    types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 // For uint to hash conversion
