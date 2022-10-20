@@ -1,6 +1,6 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
-use reth_primitives::{Header, TransactionSigned};
+use reth_primitives::{Header, TransactionSigned, H256};
 use reth_rlp::{
     Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpEncodableWrapper,
@@ -12,7 +12,7 @@ use super::RawBlockBody;
 /// Either a block hash _or_ a block number
 pub enum BlockHashOrNumber {
     /// A block hash
-    Hash([u8; 32]),
+    Hash(H256),
     /// A block number
     Number(u64),
 }
@@ -43,14 +43,14 @@ impl Decodable for BlockHashOrNumber {
             // strip the first byte, parsing the rest of the string.
             // If the rest of the string fails to decode into 32 bytes, we'll bubble up the
             // decoding error.
-            let hash = <[u8; 32]>::decode(buf)?;
+            let hash = H256::decode(buf)?;
             Ok(Self::Hash(hash))
         } else {
             // a block number when encoded as bytes ranges from 0 to any number of bytes - we're
             // going to accept numbers which fit in less than 64 bytes.
             // Any data larger than this which is not caught by the Hash decoding should error and
             // is considered an invalid block number.
-            Ok(Self::Number(<u64>::decode(buf)?))
+            Ok(Self::Number(u64::decode(buf)?))
         }
     }
 }
@@ -99,11 +99,11 @@ impl From<Vec<Header>> for BlockHeaders {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
-    pub Vec<[u8; 32]>,
+    pub Vec<H256>,
 );
 
-impl From<Vec<[u8; 32]>> for GetBlockBodies {
-    fn from(hashes: Vec<[u8; 32]>) -> Self {
+impl From<Vec<H256>> for GetBlockBodies {
+    fn from(hashes: Vec<H256>) -> Self {
         GetBlockBodies(hashes)
     }
 }
@@ -162,7 +162,7 @@ mod test {
         // this is a valid 32 byte rlp string
         let rlp = hex!("a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         let decoded_number = BlockHashOrNumber::decode(&mut &rlp[..]).unwrap();
-        let full_bytes = [0xff; 32];
+        let full_bytes = [0xff; 32].into();
         let expected = BlockHashOrNumber::Hash(full_bytes);
         assert_eq!(expected, decoded_number);
     }
@@ -217,9 +217,9 @@ mod test {
         RequestPair::<GetBlockHeaders> {
             request_id: 1111,
             message: GetBlockHeaders {
-                start_block: BlockHashOrNumber::Hash(hex!(
-                    "00000000000000000000000000000000000000000000000000000000deadc0de"
-                )),
+                start_block: BlockHashOrNumber::Hash(
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                ),
                 limit: 5,
                 skip: 5,
                 reverse: false,
@@ -238,9 +238,9 @@ mod test {
         let expected = RequestPair::<GetBlockHeaders> {
             request_id: 1111,
             message: GetBlockHeaders {
-                start_block: BlockHashOrNumber::Hash(hex!(
-                    "00000000000000000000000000000000000000000000000000000000deadc0de"
-                )),
+                start_block: BlockHashOrNumber::Hash(
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                ),
                 limit: 5,
                 skip: 5,
                 reverse: false,
@@ -356,8 +356,8 @@ mod test {
         RequestPair::<GetBlockBodies> {
             request_id: 1111,
             message: GetBlockBodies(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
             ]),
         }
         .encode(&mut data);
@@ -371,8 +371,8 @@ mod test {
         let expected = RequestPair::<GetBlockBodies> {
             request_id: 1111,
             message: GetBlockBodies(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
             ]),
         };
         let result = RequestPair::decode(&mut &data[..]);

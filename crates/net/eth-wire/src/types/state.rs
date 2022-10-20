@@ -1,11 +1,12 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
+use reth_primitives::H256;
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
-pub struct GetNodeData(pub Vec<[u8; 32]>);
+pub struct GetNodeData(pub Vec<H256>);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
 /// corresponding to the requested hashes.
@@ -30,8 +31,8 @@ mod test {
         let request = RequestPair::<GetNodeData> {
             request_id: 1111,
             message: GetNodeData(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
             ]),
         };
         request.encode(&mut data);
@@ -48,8 +49,8 @@ mod test {
             RequestPair::<GetNodeData> {
                 request_id: 1111,
                 message: GetNodeData(vec![
-                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
                 ])
             }
         );

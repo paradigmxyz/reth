@@ -1,17 +1,18 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
-use reth_primitives::TransactionSigned as TypedTransaction;
+use reth_primitives::{TransactionSigned, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use thiserror::Error;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
-    pub Vec<[u8; 32]>,
+    pub Vec<H256>,
 );
 
 impl<T> From<Vec<T>> for GetPooledTransactions
 where
-    T: Into<[u8; 32]>,
+    T: Into<H256>,
 {
     fn from(hashes: Vec<T>) -> Self {
         GetPooledTransactions(hashes.into_iter().map(|h| h.into()).collect())
@@ -28,48 +29,63 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
-    pub Vec<TypedTransaction>,
+    pub Vec<TransactionSigned>,
 );
+
+/// An error that may occur while matching a [`GetPooledTransactions`] request to a
+/// [`PooledTransactions`] response.
+#[derive(Debug, Error)]
+pub enum PooledTransactionsError {
+    /// Thrown if there are transactions that do not match a requested hash.
+    #[error("one or more transactions do not match a requested hash")]
+    UnmatchedTransactions,
+}
 
 impl PooledTransactions {
     /// Given a list of hashes, split the hashes into those that match a transaction in the
     /// response, and those that do not.
     /// Assumes the transactions are in the same order as the request's hashes.
-    pub fn split_transactions_by_hashes<T: Clone + Into<[u8; 32]>>(
+    pub fn split_transactions_by_hashes<T: Clone + Into<H256>>(
         &self,
         hashes: Vec<T>,
-    ) -> (Vec<[u8; 32]>, Vec<[u8; 32]>) {
-        let mut matched_hashes = Vec::new();
+    ) -> Result<(Vec<H256>, Vec<H256>), PooledTransactionsError> {
+        // we need to loop through each transaction, skipping over hashes that we don't have a
+        // transaction for
         let mut missing_hashes = Vec::new();
-        // If a hash fails to verify, move on to the next hash but remain on the current
-        // transaction.
-        let mut txs = self.0.iter().peekable();
-        for current_hash in hashes {
-            let tx_hash = match txs.peek() {
-                Some(tx) => tx.hash().0,
-                // done verifying requested hashes - all transactions are matched
-                None => return (matched_hashes, missing_hashes),
-            };
-            if tx_hash == current_hash.into() {
-                matched_hashes.push(tx_hash);
-                txs.next();
-            } else {
-                missing_hashes.push(tx_hash);
+        let mut hash_iter = hashes.iter();
+        let (matched_transactions, unmatched_transactions): (
+            Vec<&TransactionSigned>,
+            Vec<&TransactionSigned>,
+        ) = self.0.iter().partition(|tx| {
+            for hash in &mut hash_iter {
+                let curr_hash = hash.clone().into();
+                if tx.hash() == curr_hash {
+                    return true
+                } else {
+                    missing_hashes.push(curr_hash);
+                }
             }
+            false
+        });
+
+        // this means we have been sent transactions that we did not request
+        if !unmatched_transactions.is_empty() {
+            return Err(PooledTransactionsError::UnmatchedTransactions)
         }
 
-        // TODO: return an error if there are any transactions that do not match a hash.
-        (matched_hashes, missing_hashes)
+        let matched_hashes = matched_transactions.iter().map(|tx| tx.hash()).collect::<Vec<H256>>();
+
+        Ok((matched_hashes, missing_hashes))
     }
 }
 
-impl From<Vec<TypedTransaction>> for PooledTransactions {
-    fn from(txs: Vec<TypedTransaction>) -> Self {
+impl From<Vec<TransactionSigned>> for PooledTransactions {
+    fn from(txs: Vec<TransactionSigned>) -> Self {
         PooledTransactions(txs)
     }
 }
 
-impl From<PooledTransactions> for Vec<TypedTransaction> {
+impl From<PooledTransactions> for Vec<TransactionSigned> {
     fn from(txs: PooledTransactions) -> Self {
         txs.0
     }
@@ -92,8 +108,8 @@ mod test {
         let request = RequestPair::<GetPooledTransactions> {
             request_id: 1111,
             message: GetPooledTransactions(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
             ]),
         };
         request.encode(&mut data);
@@ -110,8 +126,8 @@ mod test {
             RequestPair::<GetPooledTransactions> {
                 request_id: 1111,
                 message: GetPooledTransactions(vec![
-                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de"),
-                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef"),
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
                 ])
             }
         );

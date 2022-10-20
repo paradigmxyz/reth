@@ -1,5 +1,5 @@
 //! Types for broadcasting new data.
-use reth_primitives::{Header, TransactionSigned, U128};
+use reth_primitives::{Header, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// This informs peers of new blocks that have appeared on the network.
@@ -14,7 +14,7 @@ pub struct NewBlockHashes(
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct BlockHashNumber {
     /// The block hash
-    pub hash: reth_primitives::H256,
+    pub hash: H256,
     /// The block number
     pub number: u64,
 }
@@ -79,11 +79,11 @@ pub struct NewPooledTransactionHashes(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) message.
-    pub Vec<[u8; 32]>,
+    pub Vec<H256>,
 );
 
-impl From<Vec<[u8; 32]>> for NewPooledTransactionHashes {
-    fn from(v: Vec<[u8; 32]>) -> Self {
+impl From<Vec<H256>> for NewPooledTransactionHashes {
+    fn from(v: Vec<H256>) -> Self {
         NewPooledTransactionHashes(v)
     }
 }
