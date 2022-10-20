@@ -1,4 +1,4 @@
-use crate::kv::{Decode, Encode, KVError};
+use crate::db::{Decode, Encode, Error};
 use parity_scale_codec::decode_from_bytes;
 use reth_primitives::*;
 
@@ -23,8 +23,8 @@ impl<T> Decode for T
 where
     T: ScaleOnly + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
-    fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<T, KVError> {
-        decode_from_bytes(value.into()).map_err(|_| KVError::InvalidValue)
+    fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<T, Error> {
+        decode_from_bytes(value.into()).map_err(|e| Error::Decode(e.into()))
     }
 }
 

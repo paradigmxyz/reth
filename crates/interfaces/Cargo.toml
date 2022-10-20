@@ -11,5 +11,19 @@ reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
+eyre = "0.6.8"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
+bytes = "1.2"
+
+# codecs
+serde = { version = "1.0.*", default-features = false }
+postcard = { version = "1.0.2", features = ["alloc"] }
+heapless = "0.7.16"
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+
+[dev-dependencies]
+test-fuzz = "3.0.4"
+
+[features]
+bench = []

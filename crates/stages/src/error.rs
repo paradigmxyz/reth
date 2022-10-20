@@ -1,5 +1,5 @@
 use crate::pipeline::PipelineEvent;
-use reth_db::kv::KVError;
+use reth_interfaces::db::Error as DbError;
 use reth_primitives::BlockNumber;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -17,7 +17,7 @@ pub enum StageError {
     },
     /// The stage encountered a database error.
     #[error("A database error occurred.")]
-    Database(#[from] KVError),
+    Database(#[from] DbError),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
@@ -31,7 +31,7 @@ pub enum PipelineError {
     Stage(#[from] StageError),
     /// The pipeline encountered a database error.
     #[error("A database error occurred.")]
-    Database(#[from] KVError),
+    Database(#[from] DbError),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),
