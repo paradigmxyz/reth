@@ -2501,8 +2501,6 @@ dependencies = [
  "async-trait",
  "futures",
  "once_cell",
- "pin-project",
- "pin-project-lite",
  "rand",
  "reth-db",
  "reth-interfaces",

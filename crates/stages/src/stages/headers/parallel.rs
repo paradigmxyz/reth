@@ -11,6 +11,7 @@ use std::sync::Arc;
 /// TODO:
 #[derive(Debug)]
 pub struct ParallelDownloader<'a, C> {
+    /// The consensus engine
     pub consensus: &'a C,
     /// The number of parallel requests
     pub par_count: usize,
