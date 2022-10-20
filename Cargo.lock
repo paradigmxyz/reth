@@ -2508,6 +2508,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "pin-project",
+ "reth-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-p2p"
 version = "0.1.0"
 dependencies = [
@@ -2535,6 +2546,7 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+ "sha3",
  "thiserror",
 ]
 

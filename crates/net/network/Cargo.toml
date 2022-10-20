@@ -1,0 +1,22 @@
+[package]
+name = "reth-network"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = """
+Ethereum network support
+"""
+
+[dependencies]
+# reth
+reth-primitives = { path = "../../primitives" }
+
+# async/futures
+futures = "0.3"
+pin-project = "1.0"
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread"] }
+
+# misc
+tracing = "0.1"
