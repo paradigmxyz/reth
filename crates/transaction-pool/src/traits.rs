@@ -21,7 +21,7 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Implementers need to update the pool accordingly.
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
-    async fn on_new_block(&self, event: NewBlockEvent);
+    fn on_new_block(&self, event: NewBlockEvent<Self::Transaction>);
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
@@ -128,7 +128,7 @@ impl TransactionOrigin {
 
 /// Event fired when a new block was mined
 #[derive(Debug, Clone)]
-pub struct NewBlockEvent {
+pub struct NewBlockEvent<T: PoolTransaction> {
     /// Hash of the added block.
     pub hash: H256,
     /// EIP-1559 Base fee of the _next_ (pending) block
@@ -136,8 +136,15 @@ pub struct NewBlockEvent {
     /// The base fee of a block depends on the utilization of the last block and its base fee.
     pub pending_block_base_fee: U256,
     /// Provides a set of state changes that affected the accounts.
-    // TODO based on the account changes, we can recheck balance
-    pub state_changes: (),
+    pub state_changes: StateDiff,
+    /// All mined transactions in the block
+    pub mined_transactions: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+/// Contains a list of changed state
+#[derive(Debug, Clone)]
+pub struct StateDiff {
+    // TODO(mattsse) this could be an `Arc<revm::State>>`
 }
 
 /// An `Iterator` that only returns transactions that are ready to be executed.
