@@ -236,7 +236,7 @@ mod linear_stream {
                                         return Poll::Pending
                                     }
 
-                                    if let Err(e) = this.consensus.validate_header(&header, &parent)
+                                    if let Err(e) = this.consensus.validate_header(header, &parent)
                                     {
                                         return Poll::Ready(Some(Err(
                                             DownloadError::HeaderValidation {
@@ -278,6 +278,16 @@ mod tests {
     use tokio::sync::{broadcast, mpsc, oneshot::error::TryRecvError};
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
+    use once_cell::sync::Lazy;
+    use test_utils::TestConsensus;
+
+    static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::new());
+    static CONSENSUS_FAIL: Lazy<TestConsensus> = Lazy::new(|| {
+        let mut consensus = TestConsensus::new();
+        consensus.set_fail_validation(true);
+        consensus
+    });
+
     #[tokio::test]
     async fn download_timeout() {
         let (req_tx, req_rx) = mpsc::channel(1);
@@ -286,7 +296,7 @@ mod tests {
         let runner = test_runner::LinearTestRunner::new();
         let retries = runner.retries;
         let rx = runner.run(
-            test_utils::TestConsensus::new(),
+            &*CONSENSUS,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             HeaderLocked::default(),
             H256::zero(),
@@ -305,7 +315,7 @@ mod tests {
         let runner = test_runner::LinearTestRunner::new();
         let retries = runner.retries;
         let rx = runner.run(
-            test_utils::TestConsensus::new(),
+            &*CONSENSUS,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             HeaderLocked::default(),
             H256::zero(),
@@ -350,12 +360,9 @@ mod tests {
         tip_header.parent_hash = parent_hash;
         let chain_tip = tip_header.hash_slow();
 
-        let mut consensus = test_utils::TestConsensus::new();
-        consensus.set_fail_validation(true);
-
         let runner = test_runner::LinearTestRunner::new();
         let rx = runner.run(
-            consensus,
+            &*CONSENSUS_FAIL,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             HeaderLocked::default(),
             chain_tip,
@@ -395,7 +402,7 @@ mod tests {
 
         let runner = test_runner::LinearTestRunner::new();
         let mut rx = runner.run(
-            test_utils::TestConsensus::new(),
+            &*CONSENSUS,
             test_utils::TestHeaderClient::new(req_tx, res_rx),
             tip_parent.clone().lock(),
             tip.hash_slow(),
@@ -438,9 +445,9 @@ mod tests {
                 Self { test_ch: oneshot::channel(), retries: 5 }
             }
 
-            pub(crate) fn run<'a>(
+            pub(crate) fn run<'a, C: Consensus>(
                 self,
-                consensus: impl Consensus + 'static,
+                consensus: &'static C,
                 client: impl HeadersClient + 'static,
                 head: HeaderLocked,
                 tip: H256,
@@ -449,14 +456,13 @@ mod tests {
                 let downloader = LinearDownloader {
                     request_retries: self.retries,
                     batch_size: 100,
+                    consensus,
                     request_timeout: 3,
                 };
                 tokio::spawn(async move {
                     let mut forkchoice = ForkchoiceState::default();
                     forkchoice.head_block_hash = tip;
-                    let result = downloader
-                        .download(Arc::new(client), Arc::new(consensus), &head, &forkchoice)
-                        .await;
+                    let result = downloader.download(Arc::new(client), &head, &forkchoice).await;
                     tx.send(result).expect("failed to forward download response");
                 });
                 rx

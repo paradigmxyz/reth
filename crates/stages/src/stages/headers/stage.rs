@@ -16,11 +16,11 @@ const HEADERS: StageId = StageId("HEADERS");
 
 /// The headers stage implementation for staged sync
 #[derive(Debug)]
-pub struct HeaderStage<D: Downloader> {
+pub struct HeaderStage<D: Downloader, C: Consensus> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
-    pub consensus: Arc<dyn Consensus>,
+    pub consensus: C,
     /// Downloader client implementation
     pub client: Arc<dyn HeadersClient>,
 }
@@ -43,7 +43,7 @@ impl Into<StageError> for HeaderStageError {
 }
 
 #[async_trait]
-impl<'db, E, D: Downloader> Stage<'db, E> for HeaderStage<D>
+impl<'db, E, D: Downloader, C: Consensus> Stage<'db, E> for HeaderStage<D, C>
 where
     E: mdbx::EnvironmentKind,
 {
@@ -81,10 +81,7 @@ where
         let head = HeaderLocked::new(last_header, last_hash);
 
         let forkchoice = self.next_forkchoice_state(&head.hash()).await;
-        let headers = match self
-            .downloader
-            .download(self.client.clone(), self.consensus.clone(), &head, &forkchoice)
-            .await
+        let headers = match self.downloader.download(self.client.clone(), &head, &forkchoice).await
         {
             Ok(res) => res,
             Err(e) => match e {
@@ -157,7 +154,7 @@ where
     }
 }
 
-impl<D: Downloader> HeaderStage<D> {
+impl<D: Downloader, C: Consensus> HeaderStage<D, C> {
     async fn update_head<'tx, E: mdbx::EnvironmentKind>(
         &self,
         tx: &'tx mut Tx<'_, mdbx::RW, E>,
@@ -266,7 +263,7 @@ pub(crate) mod tests {
 
         let mut stage = HeaderStage {
             client: Arc::new(test_utils::TestHeaderClient::new(req_tx, res_rx)),
-            consensus: Arc::new(test_utils::TestConsensus::new()),
+            consensus: &test_utils::TestConsensus::new(),
             downloader: test_utils::TestDownloader::new(Ok(vec![])),
         };
 
@@ -408,14 +405,19 @@ pub(crate) mod tests {
 
         #[async_trait]
         impl Downloader for TestDownloader {
+            type Consensus = TestConsensus;
+
             fn timeout(&self) -> u64 {
                 1
+            }
+
+            fn consensus(&self) -> &Self::Consensus {
+                unimplemented!()
             }
 
             async fn download(
                 &self,
                 _: Arc<dyn HeadersClient>,
-                _: Arc<dyn Consensus>,
                 _: &HeaderLocked,
                 _: &ForkchoiceState,
             ) -> Result<Vec<HeaderLocked>, DownloadError> {

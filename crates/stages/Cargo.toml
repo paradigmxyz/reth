@@ -36,3 +36,4 @@ tempfile = "3.3.0"
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-rpc-types = { path = "../net/rpc-types" }
 assert_matches = "1.5.0"
+once_cell = "1.15.0"
