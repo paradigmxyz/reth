@@ -29,6 +29,8 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, Arc<PendingTransaction<T>>>,
+    /// _All_ transactions sorted by priority
+    all: BTreeSet<PendingTransactionRef<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
@@ -49,6 +51,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             ordering,
             submission_id: 0,
             by_id: Default::default(),
+            all: Default::default(),
             independent_transactions: Default::default(),
             size_of: Default::default(),
         }
@@ -111,6 +114,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         if self.ancestor(&tx_id).is_none() {
             self.independent_transactions.insert(transaction.clone());
         }
+        self.all.insert(transaction.clone());
 
         let transaction = Arc::new(PendingTransaction { transaction });
 
@@ -120,25 +124,28 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Removes a _mined_ transaction from the pool.
     ///
     /// If the transactions has a descendant transaction it will advance it to the best queue.
-    pub(crate) fn remove_mined(&mut self, id: &TransactionId) {
-        if let Some(tx) = self.by_id.remove(id) {
-            // keep track of size
-            self.size_of -= tx.transaction.transaction.size();
-            self.independent_transactions.remove(&tx.transaction);
-
-            // mark the next as independent if it exists
-            if let Some(unlocked) = self.by_id.get(&id.descendant()) {
-                self.independent_transactions.insert(unlocked.transaction.clone());
-            }
-        }
+    pub(crate) fn remove_mined(
+        &mut self,
+        id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        // mark the next as independent if it exists
+        if let Some(unlocked) = self.by_id.get(&id.descendant()) {
+            self.independent_transactions.insert(unlocked.transaction.clone());
+        };
+        self.remove_transaction(id)
     }
 
     /// Removes the transaction from the pool.
+    ///
+    /// Note: this only removes the given transaction.
     pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let tx = self.by_id.remove(id)?;
+        // keep track of size
+        self.size_of -= tx.transaction.transaction.size();
+        self.all.remove(&tx.transaction);
         self.independent_transactions.remove(&tx.transaction);
         Some(tx.transaction.transaction.clone())
     }
@@ -152,6 +159,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns the transaction for the id if it's in the pool but not yet mined.
     pub(crate) fn get(&self, id: &TransactionId) -> Option<Arc<PendingTransaction<T>>> {
         self.by_id.get(id).cloned()
+    }
+
+    /// Removes the worst transaction from this pool.
+    pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let worst = self.all.iter().next_back().map(|tx| *tx.transaction.id())?;
+        self.remove_transaction(&worst)
     }
 
     /// The reported size of all transactions in this pool.
