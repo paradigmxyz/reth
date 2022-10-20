@@ -49,3 +49,11 @@ pub use ethers_core::{
     types as rpc,
     types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
 };
+
+#[doc(hidden)]
+mod __reexport {
+    pub use sha3;
+}
+
+// Useful reexports
+pub use __reexport::*;

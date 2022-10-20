@@ -2535,6 +2535,7 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+ "sha3",
  "thiserror",
 ]
 
