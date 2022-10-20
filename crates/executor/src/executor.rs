@@ -4,7 +4,7 @@ use reth_interfaces::{
     executor::{BlockExecutor, Error, ExecutorDb},
 };
 use reth_primitives::BlockLocked;
-use revm::{db::EmptyDB, AnalysisKind, Env, SpecId};
+use revm::{AnalysisKind, Env, SpecId};
 
 /// Main block executor
 pub struct Executor {
@@ -31,8 +31,6 @@ impl Executor {
         env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
         revm_wrap::fill_block_env(&mut env.block, block);
-
-        let _database = revm_wrap::TempStateDb::new(EmptyDB::default());
 
         for transaction in block.body.iter() {
             revm_wrap::fill_tx_env(&mut env.tx, transaction.as_ref());
