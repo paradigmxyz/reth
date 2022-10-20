@@ -49,3 +49,18 @@ pub use ethers_core::{
     types as rpc,
     types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
 };
+
+#[doc(hidden)]
+mod __reexport {
+    pub use tiny_keccak;
+}
+
+// Useful reexports
+pub use __reexport::*;
+
+/// Returns the keccak256 hash for the given data.
+pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
+    let mut res: [u8; 32] = [0; 32];
+    tiny_keccak::keccak_256(data.as_ref(), &mut res);
+    res.into()
+}
