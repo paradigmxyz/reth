@@ -895,7 +895,7 @@ dependencies = [
  "impl-rlp",
  "impl-serde",
  "scale-info",
- "tiny-keccak",
+ "tiny-keccak 2.0.2",
 ]
 
 [[package]]
@@ -936,7 +936,7 @@ dependencies = [
  "serde_json",
  "strum",
  "thiserror",
- "tiny-keccak",
+ "tiny-keccak 2.0.2",
  "unicode-xid",
 ]
 
@@ -2536,6 +2536,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tiny-keccak 0.3.0",
 ]
 
 [[package]]
@@ -3365,6 +3366,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "tiny-keccak"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81cd8183d45872feda10001dfacfebf7e163e159922582cd919bed08732447c4"
 
 [[package]]
 name = "tiny-keccak"
