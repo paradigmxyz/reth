@@ -1,9 +1,8 @@
 //! Contains connection-oriented interfaces.
 
-use futures::{ready, Stream, TryStream};
-use pin_project::pin_project;
+use futures::{ready, Stream};
+
 use std::{
-    collections::VecDeque,
     io,
     net::SocketAddr,
     pin::Pin,

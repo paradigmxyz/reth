@@ -2515,6 +2515,7 @@ dependencies = [
  "pin-project",
  "reth-primitives",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
