@@ -177,15 +177,10 @@ impl<DB: Database> Pipeline<DB> {
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
-            let next = {
-                let tx = db.tx_mut()?;
-                let next = queued_stage
-                    .execute(state, previous_stage, &tx)
-                    .instrument(info_span!("Running", stage = %stage_id))
-                    .await?;
-                tx.commit()?;
-                next
-            };
+            let next = queued_stage
+                .execute(state, previous_stage, db)
+                .instrument(info_span!("Running", stage = %stage_id))
+                .await?;
 
             match next {
                 ControlFlow::Continue => {
@@ -281,7 +276,7 @@ impl<DB: Database> QueuedStage<DB> {
         &mut self,
         state: &mut PipelineState,
         previous_stage: Option<(StageId, BlockNumber)>,
-        tx: &DB::TXMut<'tx>,
+        db: &DB,
     ) -> Result<ControlFlow, PipelineError> {
         let stage_id = self.stage.id();
         if self.require_tip && !state.reached_tip() {
@@ -293,8 +288,10 @@ impl<DB: Database> QueuedStage<DB> {
             return Ok(ControlFlow::Continue)
         }
 
+        let mut tx = db.tx_mut()?;
+
         loop {
-            let prev_progress = stage_id.get_progress(tx)?;
+            let prev_progress = stage_id.get_progress(&tx)?;
 
             let stage_reached_max_block = prev_progress
                 .zip(state.max_block)
@@ -315,12 +312,12 @@ impl<DB: Database> QueuedStage<DB> {
 
             match self
                 .stage
-                .execute(tx, ExecInput { previous_stage, stage_progress: prev_progress })
+                .execute(&tx, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
                     debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
-                    stage_id.save_progress(tx, stage_progress)?;
+                    stage_id.save_progress(&tx, stage_progress)?;
 
                     state
                         .events_sender
@@ -328,8 +325,9 @@ impl<DB: Database> QueuedStage<DB> {
                         .await?;
 
                     // TODO: Make the commit interval configurable
-                    //TODO rakita tx.commit()?; commit consumes transction. Solution is maybe using
-                    // Database
+                    tx.commit()?;
+                    // create new mut transaction.
+                    tx = db.tx_mut()?;
 
                     state.record_progress_outliers(stage_progress);
                     state.set_reached_tip(reached_tip);
@@ -760,9 +758,8 @@ mod tests {
             async fn execute<'db>(
                 &mut self,
                 _: &DB::TXMut<'db>,
-                input: ExecInput,
+                _input: ExecInput,
             ) -> Result<ExecOutput, StageError> {
-                println!("Stage:{:?} exec input: {:?}", self.id, input);
                 self.exec_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
@@ -771,9 +768,8 @@ mod tests {
             async fn unwind<'db>(
                 &mut self,
                 _: &DB::TXMut<'db>,
-                input: UnwindInput,
+                _input: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-                println!("Stage:{:?} unwind input: {:?}", self.id, input);
                 self.unwind_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))

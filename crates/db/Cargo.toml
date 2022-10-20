@@ -31,6 +31,8 @@ test-fuzz = "3.0.4"
 criterion = "0.4.0"
 iai = "0.1.1"
 
+reth-interfaces = { path = "../interfaces",features=["bench"] }
+
 [features]
 test-utils = ["tempfile"]
 bench-postcard = ["bench"]

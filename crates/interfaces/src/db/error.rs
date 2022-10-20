@@ -1,5 +1,3 @@
-// TODO add thiserror
-
 /// Database Error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
