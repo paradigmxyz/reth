@@ -1,7 +1,7 @@
 #![allow(unused)]
 
-use crate::kv::{Decode, Encode, KVError};
-use postcard::{from_bytes, to_allocvec};
+use crate::db::{Decode, Encode, Error};
+use postcard::{from_bytes, to_allocvec, to_vec};
 use reth_primitives::*;
 
 // Just add `Serialize` and `Deserialize`, and set impl_heapless_postcard!(T, MaxSize(T))
@@ -28,7 +28,7 @@ macro_rules! impl_postcard {
 
             impl Decode for $name {
                 fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, KVError> {
-                    from_bytes(&value.into()).map_err(|_| KVError::InvalidValue)
+                    from_bytes(&value.into()).map_err(|e| Error::Decode(e.into()))
                 }
             }
         )+

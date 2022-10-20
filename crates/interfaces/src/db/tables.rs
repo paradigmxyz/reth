@@ -1,10 +1,16 @@
-//! Declaration of all MDBX tables.
-use crate::{
-    kv::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
-    utils::TableType,
-};
+//! Declaration of all Database tables.
+
+use crate::db::models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock};
 use reth_primitives::{Account, Address, BlockNumber, Header, Receipt};
 
+/// Enum for the type of table present in libmdbx.
+#[derive(Debug)]
+pub enum TableType {
+    /// key value table
+    Table,
+    /// Duplicate key value table
+    DupSort,
+}
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 18] = [
     (TableType::Table, CanonicalHeaders::const_name()),
@@ -35,7 +41,7 @@ macro_rules! table {
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $name;
 
-        impl $crate::kv::table::Table for $name {
+        impl $crate::db::table::Table for $name {
             const NAME: &'static str = $name::const_name();
             type Key = $key;
             type Value = $value;

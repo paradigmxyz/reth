@@ -1,9 +1,8 @@
 use crate::{
-    error::*,
-    util::{db::TxContainer, opt::MaybeSender},
-    ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput,
 };
-use reth_db::{kv::Env, mdbx};
+use reth_interfaces::db::{Database, DbTx};
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::mpsc::Sender;
@@ -70,37 +69,24 @@ use state::*;
 ///
 /// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
 /// priorities are unwound first.
-pub struct Pipeline<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
-    stages: Vec<QueuedStage<'db, E>>,
+pub struct Pipeline<DB: Database> {
+    stages: Vec<QueuedStage<DB>>,
     max_block: Option<BlockNumber>,
     events_sender: MaybeSender<PipelineEvent>,
 }
 
-impl<'db, E> Default for Pipeline<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
+impl<DB: Database> Default for Pipeline<DB> {
     fn default() -> Self {
         Self { stages: Vec::new(), max_block: None, events_sender: MaybeSender::new(None) }
     }
 }
-
-impl<'db, E> Debug for Pipeline<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
+impl<DB: Database> Debug for Pipeline<DB> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline").field("max_block", &self.max_block).finish()
     }
 }
 
-impl<'db, E> Pipeline<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
+impl<DB: Database> Pipeline<DB> {
     /// Create a new pipeline.
     pub fn new() -> Self {
         Default::default()
@@ -118,7 +104,7 @@ where
     /// The unwind priority is set to 0.
     pub fn push<S>(self, stage: S, require_tip: bool) -> Self
     where
-        S: Stage<'db, E> + 'static,
+        S: Stage<DB> + 'static,
     {
         self.push_with_unwind_priority(stage, require_tip, 0)
     }
@@ -131,7 +117,7 @@ where
         unwind_priority: usize,
     ) -> Self
     where
-        S: Stage<'db, E> + 'static,
+        S: Stage<DB> + 'static,
     {
         self.stages.push(QueuedStage { stage: Box::new(stage), require_tip, unwind_priority });
         self
@@ -153,7 +139,7 @@ where
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self, db: &'db Env<E>) -> Result<(), PipelineError> {
+    pub async fn run(&mut self, db: &DB) -> Result<(), PipelineError> {
         loop {
             let mut state = PipelineState {
                 events_sender: self.events_sender.clone(),
@@ -162,8 +148,7 @@ where
                 minimum_progress: None,
                 reached_tip: true,
             };
-            let mut tx = TxContainer::new(db)?;
-            let next_action = self.run_loop(&mut state, &mut tx).await?;
+            let next_action = self.run_loop(&mut state, db).await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -184,32 +169,29 @@ where
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
-    async fn run_loop<'tx>(
+    async fn run_loop(
         &mut self,
         state: &mut PipelineState,
-        tx: &mut TxContainer<'db, 'tx, E>,
-    ) -> Result<ControlFlow, PipelineError>
-    where
-        'db: 'tx,
-    {
+        db: &DB,
+    ) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
             let next = queued_stage
-                .execute(state, previous_stage, tx)
+                .execute(state, previous_stage, db)
                 .instrument(info_span!("Running", stage = %stage_id))
                 .await?;
 
             match next {
                 ControlFlow::Continue => {
+                    let tx = db.tx()?;
                     previous_stage =
-                        Some((stage_id, stage_id.get_progress(tx.get())?.unwrap_or_default()));
+                        Some((stage_id, stage_id.get_progress(&tx)?.unwrap_or_default()));
+                    tx.commit()?;
                 }
                 ControlFlow::Unwind { target, bad_block } => {
-                    // TODO: Note on close
-                    tx.close();
-                    self.unwind(tx.db, target, bad_block).await?;
-                    tx.open()?;
+                    self.unwind(db, target, bad_block).await?;
+
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -223,7 +205,7 @@ where
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
-        db: &'db Env<E>,
+        db: &DB,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
@@ -236,7 +218,7 @@ where
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut tx = db.begin_mut_tx()?;
+        let tx = db.tx_mut()?;
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
@@ -254,7 +236,7 @@ where
                 let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
                 self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                let output = stage.unwind(&mut tx, input).await;
+                let output = stage.unwind(&tx, input).await;
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
@@ -278,12 +260,9 @@ where
 }
 
 /// A container for a queued stage.
-struct QueuedStage<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
+struct QueuedStage<DB: Database> {
     /// The actual stage to execute.
-    stage: Box<dyn Stage<'db, E>>,
+    stage: Box<dyn Stage<DB>>,
     /// The unwind priority of the stage.
     unwind_priority: usize,
     /// Whether or not this stage can only execute when we reach what we believe to be the tip of
@@ -291,20 +270,14 @@ where
     require_tip: bool,
 }
 
-impl<'db, E> QueuedStage<'db, E>
-where
-    E: mdbx::EnvironmentKind,
-{
+impl<DB: Database> QueuedStage<DB> {
     /// Execute the stage.
     async fn execute<'tx>(
         &mut self,
         state: &mut PipelineState,
         previous_stage: Option<(StageId, BlockNumber)>,
-        tx: &mut TxContainer<'db, 'tx, E>,
-    ) -> Result<ControlFlow, PipelineError>
-    where
-        'db: 'tx,
-    {
+        db: &DB,
+    ) -> Result<ControlFlow, PipelineError> {
         let stage_id = self.stage.id();
         if self.require_tip && !state.reached_tip() {
             info!("Tip not reached, skipping.");
@@ -315,8 +288,10 @@ where
             return Ok(ControlFlow::Continue)
         }
 
+        let mut tx = db.tx_mut()?;
+
         loop {
-            let prev_progress = stage_id.get_progress(tx.get())?;
+            let prev_progress = stage_id.get_progress(&tx)?;
 
             let stage_reached_max_block = prev_progress
                 .zip(state.max_block)
@@ -337,12 +312,12 @@ where
 
             match self
                 .stage
-                .execute(tx.get_mut(), ExecInput { previous_stage, stage_progress: prev_progress })
+                .execute(&tx, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
                     debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
-                    stage_id.save_progress(tx.get_mut(), stage_progress)?;
+                    stage_id.save_progress(&tx, stage_progress)?;
 
                     state
                         .events_sender
@@ -351,6 +326,8 @@ where
 
                     // TODO: Make the commit interval configurable
                     tx.commit()?;
+                    // create new mut transaction.
+                    tx = db.tx_mut()?;
 
                     state.record_progress_outliers(stage_progress);
                     state.set_reached_tip(reached_tip);
@@ -383,11 +360,12 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{StageId, UnwindOutput};
     use reth_db::{
-        kv::{test_utils, tx::Tx, EnvKind},
-        mdbx,
+        kv::{test_utils, Env, EnvKind},
+        mdbx::{self, WriteMap},
     };
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -401,7 +379,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<mdbx::WriteMap>::new_with_channel(tx)
+            Pipeline::<Env<WriteMap>>::new_with_channel(tx)
                 .push(
                     TestStage::new(StageId("A")).add_exec(Ok(ExecOutput {
                         stage_progress: 20,
@@ -449,7 +427,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            let mut pipeline = Pipeline::<mdbx::WriteMap>::new()
+            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>>::new()
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput {
@@ -522,7 +500,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<mdbx::WriteMap>::new()
+            Pipeline::<Env<mdbx::WriteMap>>::new()
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput {
@@ -606,7 +584,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            let mut pipeline = Pipeline::<mdbx::WriteMap>::new()
+            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>>::new()
                 .push_with_unwind_priority(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput {
@@ -689,7 +667,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<mdbx::WriteMap>::new_with_channel(tx)
+            Pipeline::<Env<mdbx::WriteMap>>::new_with_channel(tx)
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput {
@@ -772,35 +750,26 @@ mod tests {
         }
 
         #[async_trait]
-        impl<'db, E> Stage<'db, E> for TestStage
-        where
-            E: mdbx::EnvironmentKind,
-        {
+        impl<DB: Database> Stage<DB> for TestStage {
             fn id(&self) -> StageId {
                 self.id
             }
 
-            async fn execute<'tx>(
+            async fn execute<'db>(
                 &mut self,
-                _: &mut Tx<'tx, mdbx::RW, E>,
-                _: ExecInput,
-            ) -> Result<ExecOutput, StageError>
-            where
-                'db: 'tx,
-            {
+                _: &DB::TXMut<'db>,
+                _input: ExecInput,
+            ) -> Result<ExecOutput, StageError> {
                 self.exec_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
             }
 
-            async fn unwind<'tx>(
+            async fn unwind<'db>(
                 &mut self,
-                _: &mut Tx<'tx, mdbx::RW, E>,
-                _: UnwindInput,
-            ) -> Result<UnwindOutput, Box<dyn Error + Send + Sync>>
-            where
-                'db: 'tx,
-            {
+                _: &DB::TXMut<'db>,
+                _input: UnwindInput,
+            ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
                 self.unwind_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))

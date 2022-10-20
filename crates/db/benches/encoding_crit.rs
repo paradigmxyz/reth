@@ -7,10 +7,11 @@ macro_rules! impl_criterion_encoding_benchmark {
             let mut size = 0;
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
-                    let encoded_size = reth_db::kv::codecs::fuzz::Header::encode_and_decode(
-                        black_box(reth_primitives::Header::default()),
-                    )
-                    .0;
+                    let encoded_size =
+                        reth_interfaces::db::codecs::fuzz::Header::encode_and_decode(black_box(
+                            reth_primitives::Header::default(),
+                        ))
+                        .0;
 
                     if size == 0 {
                         size = encoded_size;

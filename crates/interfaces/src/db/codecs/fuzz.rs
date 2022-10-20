@@ -10,7 +10,7 @@ macro_rules! impl_fuzzer {
             #[cfg(any(test, feature = "bench"))]
             pub mod $name {
                 use reth_primitives::$name;
-                use crate::kv::table;
+                use crate::db::table;
 
                 /// Encodes and decodes table types returning its encoded size and the decoded object.
                 pub fn encode_and_decode(obj: $name) -> (usize, $name) {

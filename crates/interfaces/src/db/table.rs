@@ -1,11 +1,10 @@
-//! Table traits.
-
-use super::KVError;
+use super::Error;
 use bytes::Bytes;
 use std::{
     fmt::Debug,
     marker::{Send, Sync},
 };
+
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
@@ -18,7 +17,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, KVError>;
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
 }
 
 /// Generic trait that enforces the database value to implement [`Encode`] and [`Decode`].
@@ -40,11 +39,11 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.
-    type Key: Encode;
+    type Key: Object;
     /// Value element of `Table`.
     type Value: Object;
     /// Seek Key element of `Table`.
-    type SeekKey: Encode;
+    type SeekKey: Object;
 }
 
 /// DupSort allows for keys not to be repeated in the database,

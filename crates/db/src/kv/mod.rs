@@ -1,31 +1,20 @@
 //! Module that interacts with MDBX.
 
-use crate::utils::{default_page_size, TableType};
+use crate::utils::default_page_size;
 use libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
+use reth_interfaces::db::{
+    tables::{TableType, TABLES},
+    Database, Error,
+};
 use std::{ops::Deref, path::Path};
-
-pub mod table;
-use table::{Decode, DupSort, Encode, Table};
-
-pub mod tables;
-use tables::TABLES;
 
 pub mod cursor;
 
-pub mod models;
-pub use models::*;
-
 pub mod tx;
 use tx::Tx;
-
-mod error;
-pub use error::KVError;
-
-// Made public so `benches` can access it.
-pub mod codecs;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -43,11 +32,24 @@ pub struct Env<E: EnvironmentKind> {
     pub inner: Environment<E>,
 }
 
+impl<E: EnvironmentKind> Database for Env<E> {
+    type TX<'a> = tx::Tx<'a, RO, E>;
+    type TXMut<'a> = tx::Tx<'a, RW, E>;
+
+    fn tx(&self) -> Result<Self::TX<'_>, Error> {
+        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::Internal(e.into()))?))
+    }
+
+    fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error> {
+        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::Internal(e.into()))?))
+    }
+}
+
 impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`create_tables`].
-    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, KVError> {
+    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, Error> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
@@ -69,15 +71,15 @@ impl<E: EnvironmentKind> Env<E> {
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(KVError::DatabaseLocation)?,
+                .map_err(|e| Error::Internal(e.into()))?,
         };
 
         Ok(env)
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), KVError> {
-        let tx = self.inner.begin_rw_txn().map_err(KVError::InitTransaction)?;
+    pub fn create_tables(&self) -> Result<(), Error> {
+        let tx = self.inner.begin_rw_txn().map_err(|e| Error::Initialization(e.into()))?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -85,53 +87,12 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(KVError::TableCreation)?;
+            tx.create_db(Some(table), flags).map_err(|e| Error::Initialization(e.into()))?;
         }
 
-        tx.commit()?;
+        tx.commit().map_err(|e| Error::Initialization(e.into()))?;
 
         Ok(())
-    }
-}
-
-impl<E: EnvironmentKind> Env<E> {
-    /// Initiates a read-only transaction. It should be committed or rolled back in the end, so it
-    /// frees up pages.
-    pub fn begin_tx(&self) -> Result<Tx<'_, RO, E>, KVError> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(KVError::InitTransaction)?))
-    }
-
-    /// Initiates a read-write transaction. It should be committed or rolled back in the end.
-    pub fn begin_mut_tx(&self) -> Result<Tx<'_, RW, E>, KVError> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(KVError::InitTransaction)?))
-    }
-
-    /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
-    /// end of the execution.
-    pub fn view<T, F>(&self, f: F) -> Result<T, KVError>
-    where
-        F: Fn(&Tx<'_, RO, E>) -> T,
-    {
-        let tx = self.begin_tx()?;
-
-        let res = f(&tx);
-        tx.commit()?;
-
-        Ok(res)
-    }
-
-    /// Takes a function and passes a write-read transaction into it, making sure it's committed in
-    /// the end of the execution.
-    pub fn update<T, F>(&self, f: F) -> Result<T, KVError>
-    where
-        F: Fn(&Tx<'_, RW, E>) -> T,
-    {
-        let tx = self.begin_mut_tx()?;
-
-        let res = f(&tx);
-        tx.commit()?;
-
-        Ok(res)
     }
 }
 
@@ -170,11 +131,12 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        tables::{Headers, PlainState},
-        test_utils, Env, EnvKind,
-    };
+    use super::{test_utils, Env, EnvKind};
     use libmdbx::{NoWriteMap, WriteMap};
+    use reth_interfaces::db::{
+        tables::{Headers, PlainState},
+        Database, DbTx, DbTxMut,
+    };
     use reth_primitives::{Account, Address, Header, H256, U256};
     use std::str::FromStr;
     use tempfile::TempDir;
@@ -200,12 +162,12 @@ mod tests {
         let key = (1u64, H256::zero());
 
         // PUT
-        let tx = env.begin_mut_tx().expect(ERROR_INIT_TX);
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
         tx.put::<Headers>(key.into(), value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // GET
-        let tx = env.begin_tx().expect(ERROR_INIT_TX);
+        let tx = env.tx().expect(ERROR_INIT_TX);
         let result = tx.get::<Headers>(key.into()).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);

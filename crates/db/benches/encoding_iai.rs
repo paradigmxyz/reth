@@ -1,10 +1,11 @@
 use iai::{black_box, main};
+use reth_interfaces::db;
 
 /// Benchmarks the encoding and decoding of `Header` using iai.
 macro_rules! impl_iai_encoding_benchmark {
     ($name:tt) => {
         fn $name() {
-            reth_db::kv::codecs::fuzz::Header::encode_and_decode(black_box(
+            db::codecs::fuzz::Header::encode_and_decode(black_box(
                 reth_primitives::Header::default(),
             ));
         }
