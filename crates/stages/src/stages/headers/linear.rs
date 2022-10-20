@@ -56,17 +56,15 @@ impl<'a, C: Consensus, H: HeadersClient> Downloader for LinearDownloader<'a, C, 
             let result = self.download_batch(&mut stream, forkchoice, head, out.get(0)).await;
             match result {
                 Ok(result) => match result {
-                    LinearDownloadResult::Batch(headers) => {
-                        // TODO: Should this instead be?
-                        // headers.extend_from_slice(&out);
-                        // out = headers;
-                        out.extend_from_slice(&headers);
+                    LinearDownloadResult::Batch(mut headers) => {
+                        // TODO: fix
+                        headers.extend_from_slice(&out);
+                        out = headers;
                     }
-                    LinearDownloadResult::Finished(headers) => {
-                        // TODO: Should this instead be?
-                        // headers.extend_from_slice(&out);
-                        // out = headers;
-                        out.extend_from_slice(&headers);
+                    LinearDownloadResult::Finished(mut headers) => {
+                        // TODO: fix
+                        headers.extend_from_slice(&out);
+                        out = headers;
                         return Ok(out)
                     }
                     LinearDownloadResult::Ignore => (),
@@ -137,14 +135,16 @@ impl<'a, C: Consensus, H: HeadersClient> LinearDownloader<'a, C, H> {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::stage::tests::test_utils::{TestConsensus, TestHeaderClient},
+        super::stage::tests::test_utils::{
+            gen_block_range, gen_random_header, TestConsensus, TestHeaderClient,
+        },
         DownloadError, Downloader, LinearDownloader,
     };
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
-    use rand::Rng;
     use reth_interfaces::stages::HeaderRequest;
-    use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
+    use reth_primitives::{rpc::BlockId, HeaderLocked, H256};
+    use test_runner::LinearTestRunner;
     use tokio::sync::oneshot::error::TryRecvError;
 
     static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::new());
@@ -158,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_timeout() {
-        let runner = test_runner::LinearTestRunner::new();
+        let runner = LinearTestRunner::new();
         let retries = runner.retries;
         let rx = runner.run(&*CONSENSUS, &*CLIENT, HeaderLocked::default(), H256::zero());
 
@@ -174,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_timeout_on_invalid_messages() {
-        let runner = test_runner::LinearTestRunner::new();
+        let runner = LinearTestRunner::new();
         let retries = runner.retries;
         let rx = runner.run(&*CONSENSUS, &*CLIENT, HeaderLocked::default(), H256::zero());
 
@@ -185,7 +185,7 @@ mod tests {
             .on_header_request(retries, |id, _req| {
                 num_of_reqs += 1;
                 last_req_id = Some(id);
-                CLIENT.send_header_response(id.saturating_add(id % 2), vec![])
+                CLIENT.send_header_response(id.saturating_add(id % 2), vec![]);
             })
             .await;
 
@@ -197,71 +197,95 @@ mod tests {
 
     #[tokio::test]
     async fn download_propagates_consensus_validation_error() {
-        let mut tip_parent = Header::default();
-        tip_parent.nonce = rand::thread_rng().gen();
-        tip_parent.number = 1;
-        let parent_hash = tip_parent.hash_slow();
+        let tip_parent = gen_random_header(1, None);
+        let tip = gen_random_header(2, Some(tip_parent.hash()));
 
-        let mut tip_header = Header::default();
-        tip_header.number = 2;
-        tip_header.nonce = rand::thread_rng().gen();
-        tip_header.parent_hash = parent_hash;
-        let chain_tip = tip_header.hash_slow();
-
-        let runner = test_runner::LinearTestRunner::new();
-        let rx = runner.run(&*CONSENSUS_FAIL, &*CLIENT, HeaderLocked::default(), chain_tip);
+        let rx = LinearTestRunner::new().run(
+            &*CONSENSUS_FAIL,
+            &*CLIENT,
+            HeaderLocked::default(),
+            tip.hash(),
+        );
 
         let requests = CLIENT.on_header_request(1, |id, req| (id, req)).await;
-
         let request = requests.last();
         assert_matches!(
             request,
             Some((_, HeaderRequest { start, .. }))
-                if matches!(start, BlockId::Hash(hash) if *hash == chain_tip)
+                if matches!(start, BlockId::Hash(hash) if *hash == tip.hash())
         );
 
         let request = request.unwrap();
-        CLIENT.send_header_response(request.0, vec![tip_header, tip_parent]);
+        CLIENT.send_header_response(
+            request.0,
+            vec![tip_parent.clone().unlock(), tip.clone().unlock()],
+        );
 
         assert_matches!(
             rx.await,
-            Ok(Err(DownloadError::HeaderValidation { hash, .. })) if hash == parent_hash
+            Ok(Err(DownloadError::HeaderValidation { hash, .. })) if hash == tip_parent.hash()
         );
     }
 
     #[tokio::test]
     async fn download_starts_with_chain_tip() {
-        let mut tip_parent = Header::default();
-        tip_parent.nonce = rand::thread_rng().gen();
-        tip_parent.number = 1;
-        let parent_hash = tip_parent.hash_slow();
+        let head = gen_random_header(1, None);
+        let tip = gen_random_header(2, Some(head.hash()));
 
-        let mut tip = Header::default();
-        tip.parent_hash = parent_hash;
-        tip.number = 2;
-        tip.nonce = rand::thread_rng().gen();
-
-        let runner = test_runner::LinearTestRunner::new();
-        let mut rx = runner.run(&*CONSENSUS, &*CLIENT, tip_parent.clone().lock(), tip.hash_slow());
+        let mut rx = LinearTestRunner::new().run(&*CONSENSUS, &*CLIENT, head.clone(), tip.hash());
 
         CLIENT
             .on_header_request(1, |id, _req| {
-                let mut corrupted_tip = tip.clone();
-                corrupted_tip.nonce = rand::thread_rng().gen();
-                CLIENT.send_header_response(id, vec![corrupted_tip, tip_parent.clone()])
+                let mut corrupted_tip = tip.clone().unlock();
+                corrupted_tip.nonce = rand::random();
+                CLIENT.send_header_response(id, vec![corrupted_tip, head.clone().unlock()])
             })
             .await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         CLIENT
             .on_header_request(1, |id, _req| {
-                CLIENT.send_header_response(id, vec![tip.clone(), tip_parent.clone()])
+                CLIENT.send_header_response(id, vec![tip.clone().unlock(), head.clone().unlock()])
             })
             .await;
 
         let result = rx.await;
         assert_matches!(result, Ok(Ok(ref val)) if val.len() == 1);
-        assert_eq!(*result.unwrap().unwrap().first().unwrap(), tip.lock());
+        assert_eq!(*result.unwrap().unwrap().first().unwrap(), tip);
+    }
+
+    #[tokio::test]
+    async fn download_returns_headers_asc() {
+        let (start, end) = (100, 200);
+        let head = gen_random_header(start, None);
+        let headers = gen_block_range(start + 1..end, head.hash());
+        let tip = headers.last().unwrap();
+
+        let rx = LinearTestRunner::new().run(&*CONSENSUS, &*CLIENT, head.clone(), tip.hash());
+
+        let mut idx = 0;
+        let chunk_size = 10;
+        let chunk_iter = headers.clone().into_iter().rev();
+        // `usize::div_ceil` is unstable. ref: https://github.com/rust-lang/rust/issues/88581
+        let count = (headers.len() + chunk_size - 1) / chunk_size;
+        CLIENT
+            .on_header_request(count + 1, |id, _req| {
+                let mut chunk =
+                    chunk_iter.clone().skip(chunk_size * idx).take(chunk_size).peekable();
+                idx += 1;
+                if chunk.peek().is_some() {
+                    let headers: Vec<_> = chunk.map(|h| h.unlock()).collect();
+                    CLIENT.send_header_response(id, headers);
+                } else {
+                    CLIENT.send_header_response(id, vec![head.clone().unlock()])
+                }
+            })
+            .await;
+
+        let result = rx.await;
+        assert_matches!(result, Ok(Ok(_)));
+        let result = result.unwrap().unwrap();
+        assert_eq!(result, headers);
     }
 
     mod test_runner {

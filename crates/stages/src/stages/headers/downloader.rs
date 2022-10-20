@@ -1,12 +1,11 @@
 use async_trait::async_trait;
-use rand::Rng;
 use reth_interfaces::{
     consensus::Consensus,
     stages::{HeaderRequest, HeadersClient, MessageStream},
 };
 use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
 use reth_rpc_types::engine::ForkchoiceState;
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::{fmt::Debug, time::Duration};
 use thiserror::Error;
 use tokio_stream::StreamExt;
 
@@ -42,7 +41,7 @@ pub trait Downloader: Sync + Send + Debug {
         start: BlockId,
         limit: u64,
     ) -> Result<Vec<Header>, DownloadError> {
-        let request_id = rand::thread_rng().gen();
+        let request_id = rand::random();
         let request = HeaderRequest { start, limit, reverse: true };
         let _ = self.client().send_header_request(request_id, request).await;
 

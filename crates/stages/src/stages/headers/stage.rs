@@ -227,7 +227,7 @@ pub(crate) mod tests {
         kv::{test_utils as test_db_utils, EnvKind},
         mdbx,
     };
-    use tokio::sync::{broadcast, mpsc};
+    use tokio::sync::mpsc;
 
     static CONSENSUS: Lazy<test_utils::TestConsensus> =
         Lazy::new(|| test_utils::TestConsensus::new());
@@ -269,10 +269,30 @@ pub(crate) mod tests {
         use reth_rpc_types::engine::ForkchoiceState;
         use std::{
             collections::HashSet,
+            ops::Range,
             sync::{Arc, Mutex},
         };
         use tokio::sync::{broadcast, mpsc, watch};
         use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+
+        pub(crate) fn gen_block_range(rng: Range<u64>, head: H256) -> Vec<HeaderLocked> {
+            let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
+            for idx in rng {
+                headers.push(gen_random_header(
+                    idx,
+                    Some(headers.last().map(|h: &HeaderLocked| h.hash()).unwrap_or(head)),
+                ));
+            }
+            headers
+        }
+
+        pub(crate) fn gen_random_header(number: u64, parent: Option<H256>) -> HeaderLocked {
+            let mut header = Header::default();
+            header.number = number;
+            header.nonce = rand::random();
+            header.parent_hash = parent.unwrap_or_default();
+            header.lock()
+        }
 
         pub(crate) type HeaderResponse = (u64, Vec<Header>);
 
