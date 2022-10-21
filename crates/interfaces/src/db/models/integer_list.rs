@@ -1,4 +1,4 @@
-//! Block related models and types.
+//! Implements [`Encode`] and [`Decode`] for [`IntegerList`]
 
 use crate::db::{
     error::Error,
