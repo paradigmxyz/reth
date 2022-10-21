@@ -13,8 +13,6 @@ use url::{Host, Url};
 
 pub type RequestId = u64;
 
-pub const MAX_PACKET_SIZE: usize = 1280;
-
 pub const UPNP_INTERVAL: Duration = Duration::from_secs(60);
 pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
 pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);

@@ -17,6 +17,11 @@ reth-rlp-derive = { path = "../../common/rlp-derive" }
 
 # ethereum
 discv5 = "0.1"
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # async/futures
 futures = "0.3"

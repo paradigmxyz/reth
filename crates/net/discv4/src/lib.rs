@@ -94,7 +94,9 @@ impl Discv4 {
             None,
         );
 
-        let disc = Discv4 {
+        
+
+        Discv4 {
             local_address,
             local_enr,
             socket,
@@ -103,9 +105,7 @@ impl Discv4 {
             ingress: ingress_rx,
             egress: egress_tx,
             pending_events: Default::default(),
-        };
-
-        disc
+        }
     }
 
     /// Polls the socket and advances the state.

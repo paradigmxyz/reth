@@ -1,8 +1,87 @@
-use crate::{node::NodeRecord, NodeId};
-use bytes::{Buf, BufMut};
+use crate::{MAX_PACKET_SIZE, node::NodeRecord, NodeId};
+use bytes::{Buf, BufMut, BytesMut};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use std::net::{IpAddr, Ipv6Addr};
+use reth_primitives::{H256, keccak256};
+use secp256k1::{
+    ecdsa::{RecoverableSignature}, SecretKey, SECP256K1,
+};
+
+// Note: this is adapted from https://github.com/vorot93/discv4
+
+/// Id for message variants.
+#[repr(u8)]
+pub enum MessageId {
+    Ping = 1,
+    Pong = 2,
+    FindNode = 3,
+    Neighbours = 4,
+}
+
+/// All message variants
+pub enum Message {
+    Ping(Ping),
+    Pong(Pong),
+    FindNode(FindNode),
+    Neighbours(Neighbours),
+}
+
+// === impl Message ===
+
+impl Message {
+
+    /// Encodes the UDP datagram, See <https://github.com/ethereum/devp2p/blob/master/discv4.md#wire-protocol>
+    ///
+    /// The datagram is `header || payload`
+    /// where header is `hash || signature || packet-type`
+    pub fn encode(&self, secret_key: &SecretKey) -> BytesMut {
+
+        // allocate max packet size
+        let mut datagram = BytesMut::with_capacity(MAX_PACKET_SIZE);
+
+        // since signature has fixed len, we can split and fill the datagram buffer at fixed positions, this way we can encode the message directly in the datagram buffer
+        let mut sig_bytes = datagram.split_off(H256::len_bytes());
+        let mut payload =
+            sig_bytes.split_off(secp256k1::constants::COMPACT_SIGNATURE_SIZE + 1);
+
+        match self {
+            Message::Ping(message) => {
+                payload.put_u8(1);
+                message.encode(&mut payload);
+            }
+            Message::Pong(message) => {
+                payload.put_u8(2);
+                message.encode(&mut payload);
+            }
+            Message::FindNode(message) => {
+                payload.put_u8(3);
+                message.encode(&mut payload);
+            }
+            Message::Neighbours(message) => {
+                payload.put_u8(4);
+                message.encode(&mut payload);
+            }
+        }
+
+        let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
+            &secp256k1::Message::from_slice(keccak256(&payload).as_ref()).expect("is correct MESSAGE_SIZE; qed"),
+            secret_key,
+        );
+
+        let (rec, sig) = signature.serialize_compact();
+        sig_bytes.extend_from_slice(&sig);
+        sig_bytes.put_u8(rec.to_i32() as u8);
+        sig_bytes.unsplit(payload);
+
+        let hash = keccak256(&sig_bytes);
+        datagram.extend_from_slice(hash.as_bytes());
+
+        datagram.unsplit(sig_bytes);
+
+        datagram
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Endpoint {
@@ -101,25 +180,25 @@ impl From<NodeRecord> for Endpoint {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
-pub struct FindNodeMessage {
+pub struct FindNode {
     pub id: NodeId,
     pub expire: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
-pub struct NeighboursMessage {
+pub struct Neighbours {
     pub nodes: Vec<NodeRecord>,
     pub expire: u64,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct PingMessage {
+pub struct Ping {
     pub from: Endpoint,
     pub to: Endpoint,
     pub expire: u64,
 }
 
-impl Encodable for PingMessage {
+impl Encodable for Ping {
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct V4PingMessage<'a> {
@@ -138,7 +217,7 @@ impl Encodable for PingMessage {
     }
 }
 
-impl Decodable for PingMessage {
+impl Decodable for Ping {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         #[derive(RlpDecodable)]
         struct V4PingMessage {
@@ -150,8 +229,15 @@ impl Decodable for PingMessage {
 
         let ping = V4PingMessage::decode(buf)?;
 
-        Ok(PingMessage { from: ping.from, to: ping.to, expire: ping.expire })
+        Ok(Ping { from: ping.from, to: ping.to, expire: ping.expire })
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+pub struct Pong {
+    pub to: Endpoint,
+    pub echo: H256,
+    pub expire: u64,
 }
 
 #[cfg(test)]
@@ -220,12 +306,12 @@ mod tests {
             let mut ip = [0u8; 16];
             rng.fill_bytes(&mut ip);
             let msg =
-                PingMessage { from: rng_endpoint(&mut rng), to: rng_endpoint(&mut rng), expire: 0 };
+                Ping { from: rng_endpoint(&mut rng), to: rng_endpoint(&mut rng), expire: 0 };
 
             let mut buf = BytesMut::new();
             msg.encode(&mut buf);
 
-            let decoded = PingMessage::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
             assert_eq!(msg, decoded);
         }
     }

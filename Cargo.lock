@@ -2796,6 +2796,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
+ "secp256k1",
  "thiserror",
  "tokio",
  "tokio-stream",
