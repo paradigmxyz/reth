@@ -2,7 +2,7 @@
 name = "reth-discv4"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 description = """
@@ -23,4 +23,9 @@ tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-threa
 tokio-stream = "0.1"
 
 # misc
+arrayvec = "0.7"
 tracing = "0.1"
+
+[dev-dependencies]
+quickcheck = "1.0"
+rand = "0.8"

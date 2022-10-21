@@ -21,7 +21,7 @@ use tokio::{net::UdpSocket, sync::mpsc, task::JoinSet};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::warn;
 
-mod kad;
+mod kbucket;
 
 type Enr = enr::Enr<enr::CombinedKey>;
 
@@ -60,10 +60,10 @@ pub struct Discv4 {
 
 impl Discv4 {
     /// Create a new instance for a bound [`UdpSocket`].
-    pub(crate) fn new(socket: UdpSocket, local_address: SocketAddr) -> io::Result<Self> {
+    pub(crate) fn new(socket: UdpSocket, _local_address: SocketAddr) -> io::Result<Self> {
         let socket = Arc::new(socket);
-        let (ingress_tx, ingress_rx) = mpsc::channel(1024);
-        let (egress_tx, egress_rx) = mpsc::channel(1024);
+        let (ingress_tx, _ingress_rx) = mpsc::channel(1024);
+        let (_egress_tx, egress_rx) = mpsc::channel(1024);
         let mut tasks = JoinSet::<()>::new();
 
         let udp = Arc::clone(&socket);
@@ -72,16 +72,17 @@ impl Discv4 {
         let udp = Arc::clone(&socket);
         tasks.spawn(async move { send_loop(udp, egress_rx).await });
 
-        let disc = Discv4 {
-            local_address,
-            socket,
-            tasks,
-            ingress: ingress_rx,
-            egress: egress_tx,
-            pending_events: Default::default(),
-        };
+        // let disc = Discv4 {
+        //     local_address,
+        //     socket,
+        //     tasks,
+        //     ingress: ingress_rx,
+        //     egress: egress_tx,
+        //     pending_events: Default::default(),
+        // };
 
-        Ok(disc)
+        todo!()
+        // Ok(disc)
     }
 
     /// Polls the socket and advances the state.
@@ -171,3 +172,11 @@ pub(crate) enum BadPacketKind {
     HashMismatch,
 }
 
+/// How we connected to the node.
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+pub enum ConnectionDirection {
+    /// The node contacted us.
+    Incoming,
+    /// We contacted the node.
+    Outgoing,
+}
