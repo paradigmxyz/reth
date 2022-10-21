@@ -24,7 +24,7 @@ impl IntegerList {
     /// Creates an IntegerList from a list of integers. `usize` is safe to use since
     /// [`sucds::EliasFano`] restricts its compilation to 64bits.
     ///
-    /// List should be pre-sorted.
+    /// List should be pre-sorted and not empty.
     pub fn new<T: AsRef<[usize]>>(list: T) -> Result<Self, Error> {
         Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| Error::InvalidInput)?))
     }
