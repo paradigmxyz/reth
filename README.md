@@ -3,6 +3,7 @@
 *Blazing-fast implementation of the Ethereum protocol*
 
 ![Github Actions](https://github.com/foundry-rs/reth/workflows/ci/badge.svg)
+![Codecov](https://img.shields.io/codecov/c/github/foundry-rs/reth?token=c24SDcMImE)
 
 # Build
 
