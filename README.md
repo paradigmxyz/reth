@@ -3,7 +3,7 @@
 *Blazing-fast implementation of the Ethereum protocol*
 
 ![Github Actions](https://github.com/foundry-rs/reth/workflows/ci/badge.svg)
-![Codecov](https://img.shields.io/codecov/c/github/foundry-rs/reth?token=c24SDcMImE)
+[![Codecov](https://img.shields.io/codecov/c/github/foundry-rs/reth?token=c24SDcMImE)][codecov]
 
 # Build
 
@@ -12,3 +12,5 @@ To build this project we are currently using rust nightly for GAT support, that 
 ## Docs
 
 Contributor docs can be found [here](./docs).
+
+[codecov]: https://app.codecov.io/gh/foundry-rs/reth
