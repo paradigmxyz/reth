@@ -27,6 +27,7 @@ secp256k1 = { version = "0.24.0", features = ["global-context", "rand-std", "rec
 tokio-util = { version = "0.7.4", features = ["io"] }
 pin-project = "1.0"
 tracing = "0.1.37"
+snap = "1.0.5"
 
 [dev-dependencies]
 hex-literal = "0.3"

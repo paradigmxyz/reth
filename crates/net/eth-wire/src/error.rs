@@ -37,3 +37,31 @@ pub enum HandshakeError {
     #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]
     MismatchedChain { expected: Chain, got: Chain },
 }
+
+/// Errors when sending/receiving p2p messages. These should result in kicking the peer.
+#[derive(thiserror::Error, Debug)]
+pub enum P2PStreamError {
+    #[error(transparent)]
+    Rlp(#[from] reth_rlp::DecodeError),
+    #[error(transparent)]
+    HandshakeError(#[from] P2PHandshakeError),
+    #[error("message size ({0}) exceeds max length (16MB)")]
+    MessageTooBig(usize),
+    #[error("unknown reserved p2p message id: {0}")]
+    UnknownReservedMessageId(u8),
+    #[error("empty protocol message received")]
+    EmptyProtocolMessage,
+}
+
+/// Errors when conducting a p2p handshake
+#[derive(thiserror::Error, Debug)]
+pub enum P2PHandshakeError {
+    #[error("hello message can only be recv/sent in handshake")]
+    HelloNotInHandshake,
+    #[error("received non-hello message when trying to handshake")]
+    NonHelloMessageInHandshake,
+    #[error("no response received when sending out handshake")]
+    NoResponse,
+    #[error("handshake timed out")]
+    Timeout,
+}

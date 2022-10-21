@@ -3120,6 +3120,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "secp256k1",
+ "snap",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3893,6 +3894,12 @@ name = "smol_str"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7475118a28b7e3a2e157ce0131ba8c5526ea96e90ee601d9f6bb2e286a35ab44"
+
+[[package]]
+name = "snap"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45456094d1983e2ee2a18fdfebce3189fa451699d0502cb8e3b49dba5ba41451"
 
 [[package]]
 name = "socket2"

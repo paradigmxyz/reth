@@ -10,8 +10,9 @@ pub use tokio_util::codec::{
     LengthDelimitedCodec as PassthroughCodec, LengthDelimitedCodecError as PassthroughCodecError,
 };
 pub mod error;
-mod stream;
+mod ethstream;
+mod p2pstream;
 pub mod types;
 pub use types::*;
 
-pub use stream::EthStream;
+pub use ethstream::EthStream;
