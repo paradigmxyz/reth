@@ -1,5 +1,5 @@
 use bytes::{Bytes, BytesMut};
-use futures::{Sink, SinkExt, StreamExt};
+use futures::{Sink, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
@@ -25,6 +25,8 @@ const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
 /// [`MAX_P2P_MESSAGE_ID`] is the maximum message ID in use for the `p2p` subprotocol.
 const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
 
+/// [`HANDSHAKE_TIMEOUT`] determines the amount of time to wait before determining that a `p2p`
+/// handshake has timed out.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_TIMEOUT: Duration = Duration::from_secs(15);
 const PING_INTERVAL: Duration = Duration::from_secs(60);
@@ -176,6 +178,7 @@ impl TryFrom<u8> for P2PMessageID {
 // TODO: determine what snappy::encode(disconnectreason) comes out to
 // TODO: determine what snappy::encode(ping) and snappy::encode(pong) come out to (they both encode
 // 0x80 i think)
+// ANSWER:
 // snappy::encode(ping): [0x01, 0x00, 0x80]
 // snappy::encode(pong): [0x01, 0x00, 0x80]
 // snappy::encode(reason): [0x01, 0x00, reason as u8]
