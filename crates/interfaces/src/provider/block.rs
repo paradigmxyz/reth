@@ -22,6 +22,8 @@ pub trait BlockProvider: Send + Sync + 'static {
             BlockNumber::Earliest => 0,
             BlockNumber::Pending => return Ok(None),
             BlockNumber::Number(num) => num.as_u64(),
+            BlockNumber::Finalized => return Ok(self.chain_info()?.last_finalized),
+            BlockNumber::Safe => return Ok(self.chain_info()?.safe_finalized),
         };
         Ok(Some(num))
     }
@@ -68,4 +70,8 @@ pub struct ChainInfo {
     pub best_hash: H256,
     /// Best block number.
     pub best_number: reth_primitives::BlockNumber,
+    /// Last block that was finalized.
+    pub last_finalized: Option<reth_primitives::BlockNumber>,
+    /// Safe block
+    pub safe_finalized: Option<reth_primitives::BlockNumber>,
 }
