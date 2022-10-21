@@ -25,6 +25,8 @@ maplit = "1"
 bytes = "1.2"
 serde = "1.0"
 thiserror = "1"
+sucds = "0.5.0"
+arbitrary = { version = "1.1.7", features = ["derive"] }
 
 [dev-dependencies]
 serde_json = "1.0"
