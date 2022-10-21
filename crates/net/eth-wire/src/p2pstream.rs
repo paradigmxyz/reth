@@ -1,4 +1,4 @@
-#![allow(dead_code, unreachable_pub, missing_docs)]
+#![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, StreamExt};
 use pin_project::pin_project;
