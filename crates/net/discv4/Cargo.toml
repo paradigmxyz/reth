@@ -15,6 +15,9 @@ reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp" }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
 
+# ethereum
+discv5 = "0.1"
+
 # async/futures
 futures = "0.3"
 pin-project = "1.0"
@@ -23,6 +26,7 @@ tokio-stream = "0.1"
 
 # misc
 arrayvec = "0.7"
+generic-array = "0.14"
 tracing = "0.1"
 bytes = "1.2"
 rand = "0.8"

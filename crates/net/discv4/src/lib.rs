@@ -17,16 +17,16 @@ use std::{
     net::SocketAddr,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinSet};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::warn;
 
 mod config;
-mod kbucket;
 mod node;
 mod proto;
-use crate::node::NodeRecord;
+use crate::node::{NodeKey, NodeRecord};
 pub use config::Discv4Config;
 
 /// Identifier for nodes.
@@ -54,7 +54,7 @@ pub struct Discv4 {
     /// The UDP socket for sending and receiving messages.
     socket: Arc<UdpSocket>,
     /// The routing table.
-    kbuckets: KBucketsTable<NodeId, NodeRecord>,
+    kbuckets: KBucketsTable<NodeKey, NodeRecord>,
     /// The spawned UDP tasks.
     ///
     /// Note: If dropped, the spawned tasks are aborted.
@@ -71,13 +71,13 @@ impl Discv4 {
     /// Create a new instance for a bound [`UdpSocket`].
     pub(crate) fn new(
         socket: UdpSocket,
-        _local_address: SocketAddr,
-        _local_enr: NodeRecord,
-        _config: Discv4Config,
+        local_address: SocketAddr,
+        local_enr: NodeRecord,
+        config: Discv4Config,
     ) -> io::Result<Self> {
         let socket = Arc::new(socket);
-        let (ingress_tx, _ingress_rx) = mpsc::channel(1024);
-        let (_egress_tx, egress_rx) = mpsc::channel(1024);
+        let (ingress_tx, ingress_rx) = mpsc::channel(1024);
+        let (egress_tx, egress_rx) = mpsc::channel(1024);
         let mut tasks = JoinSet::<()>::new();
 
         let udp = Arc::clone(&socket);
@@ -86,34 +86,24 @@ impl Discv4 {
         let udp = Arc::clone(&socket);
         tasks.spawn(async move { send_loop(udp, egress_rx).await });
 
-        // NOTE: Currently we don't expose custom filter support in the configuration. Users can
-        // optionally use the IP filter via the ip_limit configuration parameter. In the future, we
-        // may expose this functionality to the users if there is demand for it.
-        // let (table_filter, bucket_filter) = if config.ip_limit {
-        //     (
-        //         Some(Box::new(kbucket::IpTableFilter) as Box<dyn kbucket::Filter<NodeRecord>>),
-        //         Some(Box::new(kbucket::IpBucketFilter) as Box<dyn kbucket::Filter<NodeRecord>>),
-        //     )
-        // } else {
-        //     (None, None)
-        // };
+        let kbuckets = KBucketsTable::new(
+            local_enr.key(),
+            Duration::from_secs(60),
+            config.incoming_bucket_limit,
+            None,
+            None,
+        );
 
-        // KBucketsTable::new(
-        //     ,
-        //     Duration::from_secs(60),
-        //     config.incoming_bucket_limit,
-        //     None,
-        //     None,
-        // );
-
-        // let disc = Discv4 {
-        //     local_address,
-        //     socket,
-        //     tasks,
-        //     ingress: ingress_rx,
-        //     egress: egress_tx,
-        //     pending_events: Default::default(),
-        // };
+        let disc = Discv4 {
+            local_address,
+            local_enr,
+            socket,
+            kbuckets,
+            tasks,
+            ingress: ingress_rx,
+            egress: egress_tx,
+            pending_events: Default::default(),
+        };
 
         todo!()
         // Ok(disc)

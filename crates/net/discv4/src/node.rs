@@ -1,5 +1,7 @@
 use crate::{proto::Octets, NodeId};
 use bytes::BufMut;
+use generic_array::GenericArray;
+use reth_primitives::keccak256;
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use std::{
@@ -21,6 +23,24 @@ pub const FIND_NODE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const QUERY_AWAIT_PING_TIME: Duration = Duration::from_secs(2);
 pub const NEIGHBOURS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The key type for the table.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub(crate) struct NodeKey(pub(crate) NodeId);
+
+impl From<NodeId> for NodeKey {
+    fn from(value: NodeId) -> Self {
+        NodeKey(value)
+    }
+}
+
+impl From<NodeKey> for discv5::Key<NodeKey> {
+    fn from(value: NodeKey) -> Self {
+        let hash = keccak256(value.0.as_bytes());
+        let hash = *GenericArray::from_slice(hash.as_bytes());
+        discv5::Key::new_raw(value, hash)
+    }
+}
+
 fn ping_expiry() -> u64 {
     (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + PING_TIMEOUT).as_secs()
 }
@@ -32,6 +52,7 @@ fn find_node_expiry() -> u64 {
 /// The alpha value of discv4
 pub const ALPHA: usize = 3;
 
+/// Represents a ENR in discv4
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NodeRecord {
     pub address: IpAddr,
@@ -53,10 +74,11 @@ impl NodeRecord {
         SocketAddr::new(self.address, self.udp_port)
     }
 
-    /// The identifier of this node
+    /// Returns the key type for the kademlia table
     #[must_use]
-    pub fn node_id(&self) -> NodeId {
-        self.id
+    #[inline]
+    pub(crate) fn key(&self) -> discv5::Key<NodeKey> {
+        NodeKey(self.id).into()
     }
 }
 
