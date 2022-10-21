@@ -47,7 +47,7 @@ pub type StorageValue = H256;
 // NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
-    types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64, BigEndianHash},
 };
 
 #[doc(hidden)]

@@ -9,7 +9,8 @@
 
 //! discv4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 
-use reth_primitives::{keccak256, H256};
+use discv5::kbucket::KBucketsTable;
+use reth_primitives::{keccak256, H256, H512};
 use std::{
     collections::VecDeque,
     io,
@@ -21,9 +22,15 @@ use tokio::{net::UdpSocket, sync::mpsc, task::JoinSet};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::warn;
 
+mod config;
 mod kbucket;
+mod node;
+mod proto;
+use crate::node::NodeRecord;
+pub use config::Discv4Config;
 
-type Enr = enr::Enr<enr::CombinedKey>;
+/// Identifier for nodes.
+pub type NodeId = H512;
 
 /// The maximum size of any packet is 1280 bytes.
 const MAX_PACKET_SIZE: usize = 1280;
@@ -43,9 +50,11 @@ pub struct Discv4 {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
     /// Local ENR of the server.
-    local_enr: Enr,
+    local_enr: NodeRecord,
     /// The UDP socket for sending and receiving messages.
     socket: Arc<UdpSocket>,
+    /// The routing table.
+    kbuckets: KBucketsTable<NodeId, NodeRecord>,
     /// The spawned UDP tasks.
     ///
     /// Note: If dropped, the spawned tasks are aborted.
@@ -60,7 +69,12 @@ pub struct Discv4 {
 
 impl Discv4 {
     /// Create a new instance for a bound [`UdpSocket`].
-    pub(crate) fn new(socket: UdpSocket, _local_address: SocketAddr) -> io::Result<Self> {
+    pub(crate) fn new(
+        socket: UdpSocket,
+        _local_address: SocketAddr,
+        _local_enr: NodeRecord,
+        _config: Discv4Config,
+    ) -> io::Result<Self> {
         let socket = Arc::new(socket);
         let (ingress_tx, _ingress_rx) = mpsc::channel(1024);
         let (_egress_tx, egress_rx) = mpsc::channel(1024);
@@ -71,6 +85,26 @@ impl Discv4 {
 
         let udp = Arc::clone(&socket);
         tasks.spawn(async move { send_loop(udp, egress_rx).await });
+
+        // NOTE: Currently we don't expose custom filter support in the configuration. Users can
+        // optionally use the IP filter via the ip_limit configuration parameter. In the future, we
+        // may expose this functionality to the users if there is demand for it.
+        // let (table_filter, bucket_filter) = if config.ip_limit {
+        //     (
+        //         Some(Box::new(kbucket::IpTableFilter) as Box<dyn kbucket::Filter<NodeRecord>>),
+        //         Some(Box::new(kbucket::IpBucketFilter) as Box<dyn kbucket::Filter<NodeRecord>>),
+        //     )
+        // } else {
+        //     (None, None)
+        // };
+
+        // KBucketsTable::new(
+        //     ,
+        //     Duration::from_secs(60),
+        //     config.incoming_bucket_limit,
+        //     None,
+        //     None,
+        // );
 
         // let disc = Discv4 {
         //     local_address,

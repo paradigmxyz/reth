@@ -147,10 +147,6 @@ pub struct KBucket<TNodeId, TVal: Eq> {
     /// in the meantime.
     pending_timeout: Duration,
 
-    /// An optional filter that filters new entries given an iterator over current entries in
-    /// the bucket.
-    filter: Option<Box<dyn Filter<TVal>>>,
-
     /// The maximum number of incoming connections allowed per bucket. Setting this to
     /// MAX_NODES_PER_BUCKET means there is no restriction on incoming nodes.
     max_incoming: usize,
@@ -173,8 +169,6 @@ pub enum InsertResult<TNodeId> {
         /// re-established, the corresponding entry should be updated with a connected status.
         disconnected: Key<TNodeId>,
     },
-    /// The attempted entry failed to pass the filter.
-    FailedFilter,
     /// There were too many incoming nodes for this bucket.
     TooManyIncoming,
     /// The entry was not inserted because the relevant bucket is full.
@@ -211,10 +205,6 @@ impl UpdateResult {
 pub enum FailureReason {
     /// Too many incoming nodes already in the bucket.
     TooManyIncoming,
-    /// The node didn't pass the bucket filter.
-    BucketFilter,
-    /// The node didn't pass the table filter.
-    TableFilter,
     /// The node didn't exist.
     KeyNonExistant,
     /// The bucket was full.
@@ -240,17 +230,12 @@ where
     TVal: Eq,
 {
     /// Creates a new `KBucket` with the given timeout for pending entries.
-    pub fn new(
-        pending_timeout: Duration,
-        max_incoming: usize,
-        filter: Option<Box<dyn Filter<TVal>>>,
-    ) -> Self {
+    pub fn new(pending_timeout: Duration, max_incoming: usize) -> Self {
         KBucket {
             nodes: ArrayVec::new(),
             first_connected_pos: None,
             pending: None,
             pending_timeout,
-            filter,
             max_incoming,
         }
     }
@@ -292,16 +277,6 @@ where
                     if self.nodes[0].status.is_connected() {
                         // The bucket is full with connected nodes. Drop the pending node.
                         return None
-                    }
-                    // Check the custom filter
-                    if let Some(filter) = self.filter.as_ref() {
-                        if !filter
-                            .filter(&pending.node.value, &mut self.iter().map(|node| &node.value))
-                        {
-                            // The pending node doesn't satisfy the bucket filter. Drop the pending
-                            // node.
-                            return None
-                        }
                     }
                     // Check the incoming node restriction
                     if pending.status().is_connected() && pending.status().is_incoming() {
@@ -351,7 +326,6 @@ where
                         InsertResult::Pending { .. } | InsertResult::NodeExists => {
                             error!("Bucket is not full or double node")
                         }
-                        InsertResult::FailedFilter => debug!("Pending node failed filter"),
                         InsertResult::TooManyIncoming => {
                             debug!("Pending node failed incoming filter")
                         }
@@ -438,12 +412,6 @@ where
                 InsertResult::TooManyIncoming => {
                     UpdateResult::Failed(FailureReason::TooManyIncoming)
                 }
-                // Node could not be inserted. None of these should be possible.
-                InsertResult::FailedFilter => {
-                    // If the filter is non-deterministic, potentially a re-insertion of the same
-                    // node can fail the filter.
-                    UpdateResult::Failed(FailureReason::BucketFilter)
-                }
                 InsertResult::NodeExists => {
                     unreachable!("The node was removed and shouldn't already exist")
                 }
@@ -483,15 +451,6 @@ where
                 self.nodes.insert(pos, node);
                 UpdateResult::NotModified
             } else {
-                // Check bucket filter
-                if let Some(filter) = self.filter.as_ref() {
-                    if !filter.filter(&value, &mut self.iter().map(|node| &node.value)) {
-                        // Node is removed, update the `first_connected_pos` accordingly.
-                        self.update_first_connected_pos_for_removal(pos);
-
-                        return UpdateResult::Failed(FailureReason::BucketFilter)
-                    }
-                }
                 node.value = value;
                 self.nodes.insert(pos, node);
                 UpdateResult::Updated
@@ -533,13 +492,6 @@ where
         // Prevent inserting duplicate nodes.
         if self.position(&node.key).is_some() {
             return InsertResult::NodeExists
-        }
-
-        // check bucket filter
-        if let Some(filter) = self.filter.as_ref() {
-            if !filter.filter(&node.value, &mut self.iter().map(|node| &node.value)) {
-                return InsertResult::FailedFilter
-            }
         }
 
         let inserting_pending =
@@ -691,7 +643,6 @@ impl<TNodeId: std::fmt::Debug, TVal: Eq + std::fmt::Debug> std::fmt::Debug
             .field("first_connected_pos", &self.first_connected_pos)
             .field("pending", &self.pending)
             .field("pending_timeout", &self.pending_timeout)
-            .field("filter", &self.filter.is_some())
             .field("max_incoming", &self.max_incoming)
             .finish()
     }
@@ -709,13 +660,10 @@ impl std::fmt::Display for ConnectionDirection {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use enr::NodeId;
+    use crate::NodeId;
     use quickcheck::*;
-    use rand::{thread_rng, Rng, RngCore};
-    use std::{
-        collections::{HashSet, VecDeque},
-        hash::Hash,
-    };
+    use rand::{thread_rng, Rng};
+    use std::collections::VecDeque;
 
     fn connected_state() -> NodeStatus {
         NodeStatus { state: ConnectionState::Connected, direction: ConnectionDirection::Outgoing }
@@ -729,9 +677,7 @@ pub mod tests {
     }
 
     pub fn arbitrary_node_id(_g: &mut Gen) -> NodeId {
-        let mut node_id = [0u8; 32];
-        thread_rng().fill_bytes(&mut node_id);
-        NodeId::new(&node_id)
+        NodeId::random()
     }
 
     impl<V> KBucket<NodeId, V>
@@ -775,7 +721,7 @@ pub mod tests {
     {
         fn arbitrary(g: &mut Gen) -> KBucket<NodeId, V> {
             let timeout = Duration::from_secs(thread_rng().gen_range(1..(g.size() as u64)));
-            let mut bucket = KBucket::<NodeId, V>::new(timeout, MAX_NODES_PER_BUCKET, None);
+            let mut bucket = KBucket::<NodeId, V>::new(timeout, MAX_NODES_PER_BUCKET);
             let num_nodes = thread_rng().gen_range(1..(MAX_NODES_PER_BUCKET + 1));
             for _ in 0..num_nodes {
                 loop {
@@ -842,21 +788,6 @@ pub mod tests {
         }
     }
 
-    /// Filter for testing that returns true if the value is in `self.set`.
-    #[derive(Debug, Clone)]
-    pub struct SetFilter<T> {
-        set: HashSet<T>,
-    }
-
-    impl<T> Filter<T> for SetFilter<T>
-    where
-        T: Clone + Hash + Eq + Send + Sync + 'static,
-    {
-        fn filter(&self, value: &T, _: &mut dyn Iterator<Item = &T>) -> bool {
-            self.set.contains(value)
-        }
-    }
-
     /// Enum encoding mutable method calls on KBucket, implements Arbitrary.
     #[derive(Debug, Clone)]
     pub enum Action<TVal>
@@ -895,7 +826,6 @@ pub mod tests {
         fn apply_action(&mut self, action: Action<V>) -> Result<(), FailureReason> {
             match action {
                 Action::Insert(node) => match self.insert(node) {
-                    InsertResult::FailedFilter => Err(FailureReason::BucketFilter),
                     InsertResult::TooManyIncoming => Err(FailureReason::TooManyIncoming),
                     InsertResult::Full => Err(FailureReason::BucketFull),
                     _ => Ok(()),
@@ -953,7 +883,7 @@ pub mod tests {
     fn ordering() {
         fn prop(status: Vec<NodeStatus>) -> bool {
             let mut bucket =
-                KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET, None);
+                KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET);
 
             // The expected lists of connected and disconnected nodes.
             let mut connected = VecDeque::new();
@@ -993,8 +923,7 @@ pub mod tests {
 
     #[test]
     fn full_bucket() {
-        let mut bucket =
-            KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET, None);
+        let mut bucket = KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET);
 
         let disconnected_status = NodeStatus {
             state: ConnectionState::Disconnected,
@@ -1063,8 +992,7 @@ pub mod tests {
 
     #[test]
     fn full_bucket_discard_pending() {
-        let mut bucket =
-            KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET, None);
+        let mut bucket = KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET);
         fill_bucket(&mut bucket, disconnected_state());
         let first = bucket.iter().next().unwrap();
         let first_disconnected = first.clone();
@@ -1103,8 +1031,7 @@ pub mod tests {
     #[test]
     fn full_bucket_applied_no_duplicates() {
         // First fill the bucket with connected nodes.
-        let mut bucket =
-            KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET, None);
+        let mut bucket = KBucket::<NodeId, ()>::new(Duration::from_secs(1), MAX_NODES_PER_BUCKET);
         fill_bucket(&mut bucket, connected_state());
 
         let first = bucket.iter().next().unwrap().clone();
@@ -1187,81 +1114,9 @@ pub mod tests {
     }
 
     #[test]
-    fn bucket_update_value_with_filtering() {
-        fn prop(
-            mut bucket: KBucket<NodeId, u8>,
-            pos: Position,
-            value: u8,
-            value_matches_filter: bool,
-        ) -> bool {
-            // Initialise filter.
-            let filter =
-                SetFilter { set: value_matches_filter.then_some(value).into_iter().collect() };
-            bucket.filter = Some(Box::new(filter));
-
-            let num_nodes = bucket.num_entries();
-
-            // Capture position and key of the random node to update.
-            let pos = pos.0 % num_nodes;
-            let key = bucket.nodes[pos].key.clone();
-
-            // Record the (ordered) list of values of all nodes in the bucket.
-            let mut expected = bucket.iter().map(|n| (n.key.clone(), n.value)).collect::<Vec<_>>();
-
-            // Update the node in the bucket.
-            let _ = bucket.update_value(&key, value);
-
-            bucket.check_invariants();
-
-            // Check that the bucket now contains the node with the new value, or that the node
-            // has been removed.
-            if value_matches_filter || expected[pos].1 == value {
-                expected[pos].1 = value;
-            } else {
-                expected.remove(pos);
-            }
-            let actual = bucket.iter().map(|n| (n.key.clone(), n.value)).collect::<Vec<_>>();
-            expected == actual
-        }
-
-        quickcheck(prop as fn(_, _, _, _) -> _);
-    }
-
-    /// Hammer a bucket with random mutations to ensure invariants are always maintained.
-    #[test]
-    fn random_actions_with_filtering() {
-        fn prop(
-            initial_nodes: Vec<Node<NodeId, u8>>,
-            pending_timeout_millis: u8,
-            max_incoming: usize,
-            filter_set: HashSet<u8>,
-            actions: Vec<Action<u8>>,
-        ) -> bool {
-            let filter = SetFilter { set: filter_set };
-            let pending_timeout = Duration::from_millis(pending_timeout_millis as u64);
-            let mut kbucket =
-                KBucket::<NodeId, u8>::new(pending_timeout, max_incoming, Some(Box::new(filter)));
-            for node in initial_nodes {
-                let _ = kbucket.insert(node);
-            }
-
-            for action in actions {
-                // Throwing random nodes into a bucket will likely cause some actions to fail as
-                // they don't pass the filter. We ignore these errors and rely on the
-                // `check_invariants()` to ensure the insert/update action failed appropriately.
-                let _ = kbucket.apply_action(action);
-                kbucket.check_invariants();
-            }
-            true
-        }
-
-        quickcheck(prop as fn(_, _, _, _, _) -> _);
-    }
-
-    #[test]
     fn table_update_status_connection() {
         let max_incoming = 7;
-        let mut bucket = KBucket::<NodeId, ()>::new(Duration::from_secs(1), max_incoming, None);
+        let mut bucket = KBucket::<NodeId, ()>::new(Duration::from_secs(1), max_incoming);
 
         let mut incoming_connected = 0;
         let mut keys = Vec::new();
@@ -1311,8 +1166,7 @@ pub mod tests {
     fn bucket_max_incoming_nodes() {
         fn prop(status: Vec<NodeStatus>) -> bool {
             let max_incoming_nodes = 5;
-            let mut bucket =
-                KBucket::<NodeId, ()>::new(Duration::from_secs(1), max_incoming_nodes, None);
+            let mut bucket = KBucket::<NodeId, ()>::new(Duration::from_secs(1), max_incoming_nodes);
 
             // The expected lists of connected and disconnected nodes.
             let mut connected = VecDeque::new();
@@ -1323,6 +1177,7 @@ pub mod tests {
                 let key = Key::from(NodeId::random());
                 let node = Node { key: key.clone(), value: (), status };
                 let full = bucket.num_entries() == MAX_NODES_PER_BUCKET;
+                #[allow(clippy::single_match)]
                 match bucket.insert(node) {
                     InsertResult::Inserted => {
                         let vec =
@@ -1332,7 +1187,6 @@ pub mod tests {
                         }
                         vec.push_back((status, key.clone()));
                     }
-                    InsertResult::FailedFilter => break,
                     _ => {}
                 }
             }

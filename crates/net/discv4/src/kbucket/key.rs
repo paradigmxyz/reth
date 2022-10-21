@@ -20,11 +20,8 @@
 
 // This basis of this file has been taken from the discv5 codebase: <https://github.com/emhane/discv5/> which is adapted from the rust-libp2p codebase: https://github.com/libp2p/rust-libp2p
 
-use enr::{
-    k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
-    NodeId,
-};
-use reth_primitives::U256;
+use crate::NodeId;
+use reth_primitives::{keccak256, U256};
 
 /// A `Key` is a cryptographic hash, identifying both the nodes participating in
 /// the Kademlia DHT, and records stored in the DHT.
@@ -38,7 +35,7 @@ use reth_primitives::U256;
 #[derive(Clone, Debug)]
 pub struct Key<T> {
     preimage: T,
-    hash: GenericArray<u8, U32>,
+    hash: [u8; 32],
 }
 
 impl<T> PartialEq for Key<T> {
@@ -56,11 +53,6 @@ impl<TPeerId> AsRef<Key<TPeerId>> for Key<TPeerId> {
 }
 
 impl<T> Key<T> {
-    /// Construct a new `Key` by providing the raw 32 byte hash.
-    pub fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Key<T> {
-        Key { preimage, hash }
-    }
-
     /// Borrows the preimage of the key.
     pub fn preimage(&self) -> &T {
         &self.preimage
@@ -94,7 +86,8 @@ impl<T> Key<T> {
 
 impl From<NodeId> for Key<NodeId> {
     fn from(node_id: NodeId) -> Self {
-        Key { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+        let hash = keccak256(node_id.as_ref());
+        Key { preimage: node_id, hash: hash.0 }
     }
 }
 
