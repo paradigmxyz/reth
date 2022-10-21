@@ -74,7 +74,7 @@ impl Discv4 {
         local_address: SocketAddr,
         local_enr: NodeRecord,
         config: Discv4Config,
-    ) -> io::Result<Self> {
+    ) -> Self {
         let socket = Arc::new(socket);
         let (ingress_tx, ingress_rx) = mpsc::channel(1024);
         let (egress_tx, egress_rx) = mpsc::channel(1024);
@@ -105,8 +105,7 @@ impl Discv4 {
             pending_events: Default::default(),
         };
 
-        todo!()
-        // Ok(disc)
+        disc
     }
 
     /// Polls the socket and advances the state.

@@ -1,6 +1,5 @@
 use crate::{node::NodeRecord, NodeId};
 use bytes::{Buf, BufMut};
-
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use std::net::{IpAddr, Ipv6Addr};
@@ -101,19 +100,19 @@ impl From<NodeRecord> for Endpoint {
     }
 }
 
-#[derive(Clone, Copy, Debug, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct FindNodeMessage {
     pub id: NodeId,
     pub expire: u64,
 }
 
-#[derive(Clone, Debug, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct NeighboursMessage {
     pub nodes: Vec<NodeRecord>,
     pub expire: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PingMessage {
     pub from: Endpoint,
     pub to: Endpoint,
@@ -152,5 +151,82 @@ impl Decodable for PingMessage {
         let ping = V4PingMessage::decode(buf)?;
 
         Ok(PingMessage { from: ping.from, to: ping.to, expire: ping.expire })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+    use rand::{thread_rng, Rng, RngCore};
+
+    fn rng_endpoint(rng: &mut impl Rng) -> Endpoint {
+        let address = if rng.gen() {
+            let mut ip = [0u8; 4];
+            rng.fill_bytes(&mut ip);
+            IpAddr::V4(ip.into())
+        } else {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            IpAddr::V6(ip.into())
+        };
+        Endpoint { address, tcp_port: rng.gen(), udp_port: rng.gen() }
+    }
+
+    #[test]
+    fn test_endpoint_ipv_v4() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 4];
+            rng.fill_bytes(&mut ip);
+            let msg = Endpoint {
+                address: IpAddr::V4(ip.into()),
+                tcp_port: rng.gen(),
+                udp_port: rng.gen(),
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Endpoint::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_endpoint_ipv_64() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Endpoint {
+                address: IpAddr::V6(ip.into()),
+                tcp_port: rng.gen(),
+                udp_port: rng.gen(),
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Endpoint::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_ping_message() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg =
+                PingMessage { from: rng_endpoint(&mut rng), to: rng_endpoint(&mut rng), expire: 0 };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = PingMessage::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
     }
 }

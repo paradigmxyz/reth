@@ -145,3 +145,52 @@ struct NodeOctets {
     tcp_port: u16,
     id: NodeId,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+    use rand::{thread_rng, Rng, RngCore};
+
+    #[test]
+    fn test_noderecord_codec_ipv4() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 4];
+            rng.fill_bytes(&mut ip);
+            let record = NodeRecord {
+                address: IpAddr::V4(ip.into()),
+                tcp_port: rng.gen(),
+                udp_port: rng.gen(),
+                id: NodeId::random(),
+            };
+
+            let mut buf = BytesMut::new();
+            record.encode(&mut buf);
+
+            let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(record, decoded);
+        }
+    }
+
+    #[test]
+    fn test_noderecord_codec_ipv6() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let record = NodeRecord {
+                address: IpAddr::V6(ip.into()),
+                tcp_port: rng.gen(),
+                udp_port: rng.gen(),
+                id: NodeId::random(),
+            };
+
+            let mut buf = BytesMut::new();
+            record.encode(&mut buf);
+
+            let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(record, decoded);
+        }
+    }
+}
