@@ -1,12 +1,14 @@
+//! Blockchain is used as utility structure to chain multiple blocks into one block
 use crate::revm_wrap::{State, SubState};
 use crate::Config;
 use eyre::eyre;
+use reth_interfaces::executor::ExecutorDb;
 use reth_primitives::{Block, BlockID, BlockLocked, BlockNumber, Header};
 use std::cmp::max;
 use std::collections::HashMap;
 
 /// Blockchain interface
-pub struct Blockchain<'a> {
+pub struct Blockchain {
     /// Genesis block.
     genesis: Header,
     /// Best block number.
@@ -15,29 +17,22 @@ pub struct Blockchain<'a> {
     blocks: HashMap<BlockID, BlockLocked>,
     /// Canonical chain mapping BlockNumber with Block hash.
     chain: HashMap<BlockNumber, BlockID>,
-    /// State
-    state: SubState<'a>,
     /// Config
     config: Config,
 }
 
-impl<'a> Blockchain<'a> {
+impl Blockchain {
     /// Create new blockchain.
-    pub fn new(genesis: Header, config: Config, state: State<'a>) -> Self {
+    pub fn new(genesis: Header, config: Config) -> Self {
         Self {
             genesis,
             chain_heigh: 0,
             blocks: HashMap::new(),
             chain: HashMap::new(),
-            state: SubState::new(state),
             config,
         }
     }
 
-    /// Expose internal state
-    pub fn substate(&mut self) -> &mut SubState<'a> {
-        &mut self.state
-    }
 
     /// Push block on the chain without checks
     pub fn push_unchecked_block(&mut self, block: BlockLocked) {

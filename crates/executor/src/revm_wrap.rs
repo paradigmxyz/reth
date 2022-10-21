@@ -7,12 +7,35 @@ use revm::{
 use std::convert::Infallible;
 
 /// SubState of database. Uses revm internal cache with binding to reth DbExecutor trait.
-pub type SubState<'a> = CacheDB<State<'a>>;
+pub type SubState<DB> = CacheDB<State<DB>>;
 
 /// Wrapper around ExeuctorDb that implements revm database trait
-pub struct State<'a>(&'a dyn ExecutorDb);
+pub struct State<DB: ExecutorDb>(DB);
 
-impl<'a> DatabaseRef for State<'a> {
+impl<DB: ExecutorDb> State<DB> {
+    /// Create new State with generic ExecutorDb.
+    pub fn new(db: DB) -> Self {
+        Self(db)
+    }
+
+    /// Return inner state reference
+    pub fn state(&self) -> &DB {
+        &self.0
+    }
+
+    /// Return inner state mutable reference
+    pub fn state_mut(&mut self) -> &mut DB {
+        &mut self.0
+    }
+
+    /// Consume State and return inner DbExecutable.
+    pub fn unwrap(self) -> DB {
+        self.0
+    }
+
+}
+
+impl<DB: ExecutorDb> DatabaseRef for State<DB> {
     type Error = Infallible;
 
     fn basic(&self, address: H160) -> Result<Option<revm::AccountInfo>, Self::Error> {

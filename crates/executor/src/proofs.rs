@@ -1,10 +1,10 @@
 use reth_primitives::{Bytes, Header, Receipt, TransactionSigned, H256, Log};
 use hash_db::Hasher;
 use plain_hasher::PlainHasher;
-
 use rlp::RlpStream;
 use sha3::{Digest, Keccak256};
 use triehash::sec_trie_root;
+use reth_rlp::Encodable;
 
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -15,6 +15,7 @@ impl Hasher for KeccakHasher {
     const LENGTH: usize = 32;
     fn hash(x: &[u8]) -> Self::Out {
         let out = Keccak256::digest(x);
+        // TODO make more performant, H256 from slice is not good enought.
         H256::from_slice(out.as_slice())
     }
 }
@@ -28,11 +29,14 @@ pub fn calculate_transaction_root<'a>(
             .into_iter()
             .enumerate()
             .map(|(index, tx)| {
+                // TODO replace with reth-rlp
                 let mut stream = RlpStream::new();
                 stream.append(&index);
-                (stream.out().freeze().into(), tx.encoded().clone())
+                let mut bytes = Vec::new();
+                tx.encode(&mut bytes);
+                (stream.out().freeze().into(), bytes)
             })
-            .collect::<Vec<(Bytes, Bytes)>>(),
+            .collect::<Vec<(Bytes, Vec<u8>)>>(),
     )
 }
 
@@ -45,9 +49,11 @@ pub fn calculate_receipt_root<'a>(receipts: impl IntoIterator<Item = &'a Receipt
             .map(|(index, receipt)| {
                 let mut stream = RlpStream::new();
                 stream.append(&index);
-                (stream.out().freeze().into(), receipt.encoded().clone())
+                let mut bytes = Vec::new();
+                receipt.encode(&mut bytes);
+                (stream.out().freeze().into(), bytes)
             })
-            .collect::<Vec<(Bytes, Bytes)>>(),
+            .collect::<Vec<(Bytes, Vec<u8>)>>(),
     )
 }
 
@@ -61,7 +67,7 @@ pub fn calculate_log_root<'a>(logs: impl IntoIterator<Item = &'a Log>) -> H256 {
         stream.begin_list(3);
         stream.append(&log.address);
         stream.append_list(&log.topics);
-        stream.append(&log.data.0);
+        stream.append(&log.data);
     }
     stream.finalize_unbounded_list();
     let out = stream.out().freeze();

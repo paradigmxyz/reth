@@ -2508,6 +2508,7 @@ dependencies = [
  "plain_hasher",
  "reth-interfaces",
  "reth-primitives",
+ "reth-rlp",
  "revm",
  "rlp",
  "sha3",
