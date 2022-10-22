@@ -19,11 +19,13 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+use secp256k1::SecretKey;
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinSet};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::warn;
 
 mod config;
+pub mod error;
 mod node;
 mod proto;
 use crate::node::{NodeKey, NodeRecord};
@@ -51,6 +53,8 @@ pub struct Discv4 {
     local_address: SocketAddr,
     /// Local ENR of the server.
     local_enr: NodeRecord,
+    /// The
+    secret_key: SecretKey,
     /// The UDP socket for sending and receiving messages.
     socket: Arc<UdpSocket>,
     /// The routing table.
@@ -93,8 +97,6 @@ impl Discv4 {
             None,
             None,
         );
-
-        
 
         Discv4 {
             local_address,
