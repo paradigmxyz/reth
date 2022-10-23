@@ -197,7 +197,7 @@ impl Discv4Service {
         local_address: SocketAddr,
         local_enr: NodeRecord,
         secret_key: SecretKey,
-        config: Discv4Config,
+        _config: Discv4Config,
         commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     ) -> Self {
         let socket = Arc::new(socket);
@@ -214,7 +214,7 @@ impl Discv4Service {
         let kbuckets = KBucketsTable::new(
             local_enr.key(),
             Duration::from_secs(60),
-            config.incoming_bucket_limit,
+            MAX_NODES_PER_BUCKET,
             None,
             None,
         );
