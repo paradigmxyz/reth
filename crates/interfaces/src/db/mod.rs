@@ -9,6 +9,8 @@ pub mod tables;
 pub use error::Error;
 pub use table::*;
 
+pub use container::DBContainer;
+
 // Sealed trait helper to prevent misuse of the API.
 mod sealed {
     pub trait Sealed: Sized {}
