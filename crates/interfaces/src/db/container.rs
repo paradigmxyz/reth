@@ -72,7 +72,6 @@ where
 mod tests {
     use super::*;
     use crate::db::mock::DatabaseMock;
-    use std::{future::Future, pin::Pin};
 
     #[async_trait::async_trait]
     trait Stage<DB: Database> {
