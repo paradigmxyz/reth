@@ -24,6 +24,7 @@ parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 [dev-dependencies]
 test-fuzz = "3.0.4"
+tokio = { version = "1.21.2", features = ["full"] }
 
 [features]
 bench = []

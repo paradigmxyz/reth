@@ -81,8 +81,8 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
     }
 
-    struct MyStage<DB>(DB);
-    impl<DB: Database> Stage<DB> for MyStage<DB> {
+    struct MyStage<'a, DB>(&'a DB);
+    impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
         fn run<'a, 'b: 'a>(
             &'a mut self,
             db: &'b mut DBContainer<'b, DB>,
@@ -92,5 +92,16 @@ mod tests {
                 ()
             })
         }
+    }
+
+    #[test]
+    #[should_panic] // no tokio runtime configured
+    fn can_spawn() {
+        tokio::spawn(async move {
+            let db = DatabaseMock::default();
+            let mut container = DBContainer::new(&db).unwrap();
+            let mut stage = MyStage(&db);
+            stage.run(&mut container);
+        });
     }
 }
