@@ -2511,12 +2511,14 @@ dependencies = [
  "heapless",
  "parity-scale-codec",
  "postcard",
+ "rand",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
  "test-fuzz",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

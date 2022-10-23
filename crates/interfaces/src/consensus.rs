@@ -12,9 +12,7 @@ pub trait Consensus {
     fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
 
     /// Validate if header is correct and follows consensus specification
-    fn validate_header(&self, _header: &Header) -> Result<(), Error> {
-        Ok(())
-    }
+    fn validate_header(&self, header: &Header, parent: &Header) -> Result<(), Error>;
 }
 
 /// Consensus errors (TODO)

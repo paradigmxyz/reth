@@ -46,5 +46,5 @@ pub trait HeadersClient: Send + Sync + Debug {
     async fn send_header_request(&self, id: u64, request: HeadersRequest) -> HashSet<H512>;
 
     /// Stream the header response messages
-    async fn stream_headers(&self) -> MessageStream<(u64, Vec<Header>)>;
+    async fn stream_headers(&self) -> HeadersStream;
 }
