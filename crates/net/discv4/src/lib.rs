@@ -1,14 +1,20 @@
 #![warn(missing_docs)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![deny(unused_must_use, rust_2018_idioms, unused_extern_crates)]
 #![doc(test(
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO remove later
-#![allow(dead_code)]
 
 //! discv4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 
+use crate::{
+    error::{DecodePacketError, Discv4Error},
+    node::{kad_key, NodeKey, NodeRecord},
+    proto::{
+        find_node_expiry, ping_expiry, send_neighbours_expiry, FindNode, Message, Neighbours,
+        Packet, Ping, Pong, FIND_NODE_TIMEOUT, MAX_DATAGRAM_NEIGHBOUR_RECORDS, PING_TIMEOUT,
+    },
+};
 use bytes::Bytes;
 use discv5::{
     kbucket::{Entry as BucketEntry, KBucketsTable, NodeStatus, MAX_NODES_PER_BUCKET},
@@ -27,6 +33,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
+    macros::support::poll_fn,
     net::UdpSocket,
     sync::{mpsc, oneshot, oneshot::Sender as OneshotSender},
     task::JoinSet,
@@ -39,14 +46,7 @@ mod config;
 pub mod error;
 mod node;
 mod proto;
-use crate::{
-    error::{DecodePacketError, Discv4Error},
-    node::{kad_key, NodeKey, NodeRecord},
-    proto::{
-        find_node_expiry, ping_expiry, send_neighbours_expiry, FindNode, Message, Neighbours,
-        Packet, Ping, Pong, FIND_NODE_TIMEOUT, MAX_DATAGRAM_NEIGHBOUR_RECORDS, PING_TIMEOUT,
-    },
-};
+
 pub use config::Discv4Config;
 
 /// Identifier for nodes.
@@ -79,8 +79,51 @@ type NodeRecordSender = OneshotSender<Vec<NodeRecord>>;
 /// The Discv4 frontend
 #[derive(Debug, Clone)]
 pub struct Discv4 {
+    /// The address of the udp socket
+    local_addr: SocketAddr,
     /// channel to send commands over to the service
     to_service: mpsc::Sender<Discv4Command>,
+}
+
+// === impl Discv4 ===
+
+impl Discv4 {
+    /// Sames as [`Self::bind`] but also spawns the service onto a new task.
+    pub async fn spawn(
+        local_address: SocketAddr,
+        local_enr: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+    ) -> io::Result<Self> {
+        let (discv4, mut service) =
+            Self::bind(local_address, local_enr, secret_key, config).await?;
+
+        tokio::task::spawn(async move { poll_fn(|cx| service.poll(cx)).await });
+
+        Ok(discv4)
+    }
+
+    /// Binds a new UdpSocket and creates the service
+    pub async fn bind(
+        local_address: SocketAddr,
+        local_enr: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+    ) -> io::Result<(Self, Discv4Service)> {
+        let socket = UdpSocket::bind(local_address).await?;
+        let local_addr = socket.local_addr()?;
+
+        let (to_service, rx) = mpsc::channel(128);
+        let service =
+            Discv4Service::new(socket, local_addr, local_enr, secret_key, config, Some(rx));
+        let discv4 = Discv4 { local_addr, to_service };
+        Ok((discv4, service))
+    }
+
+    /// Returns the address of the UDP socket.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
 }
 
 impl Discv4 {
@@ -108,6 +151,7 @@ impl Discv4 {
 
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
+#[allow(unused)]
 pub struct Discv4Service {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
@@ -131,10 +175,6 @@ pub struct Discv4Service {
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
     egress: EgressSender,
-    /// Buffered events produced ready to return
-    pending_events: VecDeque<IngressEvent>,
-    /// Currently active pings
-    pending_pings: HashMap<H256, Vec<OneshotSender<()>>>,
     /// Buffered pending pings to apply backpressure.
     adding_nodes: VecDeque<(NodeRecord, PingReason)>,
     /// Currently active pings to specific nodes.
@@ -191,8 +231,6 @@ impl Discv4Service {
             tasks,
             ingress: ingress_rx,
             egress: egress_tx,
-            pending_events: Default::default(),
-            pending_pings: Default::default(),
             adding_nodes: Default::default(),
             in_flight_pings: Default::default(),
             in_flight_find_nodes: Default::default(),
@@ -715,6 +753,9 @@ impl NodeRecordResponse {
         }
     }
 }
+
+unsafe impl Send for NodeRecordResponse {}
+unsafe impl Sync for NodeRecordResponse {}
 
 #[derive(Debug)]
 struct NodeRecordResponseInner {

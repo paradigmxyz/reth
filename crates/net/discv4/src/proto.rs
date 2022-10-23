@@ -10,16 +10,13 @@ use secp256k1::{
     SecretKey, SECP256K1,
 };
 use std::{
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-pub type RequestId = u64;
-
 pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
-pub const PING_INTERVAL: Duration = Duration::from_secs(10);
+// pub const PING_INTERVAL: Duration = Duration::from_secs(10);
 pub const FIND_NODE_TIMEOUT: Duration = Duration::from_secs(10);
-pub const NEIGHBOURS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 pub const NEIGHBOURS_EXPIRY_TIME: Duration = Duration::from_secs(30);
 
 /// The size of the datagram is limited, so we chunk here the max number that fit in the datagram is
@@ -190,14 +187,6 @@ pub struct NodeEndpoint {
     pub tcp_port: u16,
 }
 
-impl NodeEndpoint {
-    /// The UDP socket address of this node
-    #[must_use]
-    pub fn udp_addr(&self) -> SocketAddr {
-        SocketAddr::new(self.address, self.udp_port)
-    }
-}
-
 impl Decodable for NodeEndpoint {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         let Point { octets, udp_port, tcp_port } = Point::decode(buf)?;
@@ -249,10 +238,10 @@ impl Encodable for Ping {
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct V4PingMessage<'a> {
-            pub version: u32,
-            pub from: &'a NodeEndpoint,
-            pub to: &'a NodeEndpoint,
-            pub expire: u64,
+            version: u32,
+            from: &'a NodeEndpoint,
+            to: &'a NodeEndpoint,
+            expire: u64,
         }
         V4PingMessage {
             version: 4, // version 4
@@ -268,10 +257,10 @@ impl Decodable for Ping {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         #[derive(RlpDecodable)]
         struct V4PingMessage {
-            pub version: u32,
-            pub from: NodeEndpoint,
-            pub to: NodeEndpoint,
-            pub expire: u64,
+            _version: u32,
+            from: NodeEndpoint,
+            to: NodeEndpoint,
+            expire: u64,
         }
 
         let ping = V4PingMessage::decode(buf)?;

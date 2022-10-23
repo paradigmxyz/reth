@@ -96,6 +96,13 @@ pub struct Discv4Config {
     pub ban_duration: Option<Duration>,
 }
 
+impl Discv4Config {
+    /// Returns a new default builder isntance
+    pub fn builder() -> Discv4ConfigBuilder {
+        Default::default()
+    }
+}
+
 impl Default for Discv4Config {
     fn default() -> Self {
         // This is only applicable if enable_packet_filter is set.
