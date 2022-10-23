@@ -36,11 +36,7 @@ pub mod test_utils {
             downloader::{DownloadError, Downloader},
         },
     };
-    use std::{
-        collections::HashSet,
-        sync::{Arc, Mutex},
-        time::Duration,
-    };
+    use std::{collections::HashSet, sync::Arc, time::Duration};
 
     use reth_primitives::{Header, HeaderLocked, H256, H512};
     use reth_rpc_types::engine::ForkchoiceState;
