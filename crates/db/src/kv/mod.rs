@@ -7,7 +7,7 @@ use libmdbx::{
 };
 use reth_interfaces::db::{
     tables::{TableType, TABLES},
-    Database, Error,
+    Database, DatabaseGAT, Error,
 };
 use std::{ops::Deref, path::Path};
 
@@ -32,15 +32,17 @@ pub struct Env<E: EnvironmentKind> {
     pub inner: Environment<E>,
 }
 
-impl<E: EnvironmentKind> Database for Env<E> {
-    type TX<'a> = tx::Tx<'a, RO, E>;
-    type TXMut<'a> = tx::Tx<'a, RW, E>;
+impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
+    type TX = tx::Tx<'a, RO, E>;
+    type TXMut = tx::Tx<'a, RW, E>;
+}
 
-    fn tx(&self) -> Result<Self::TX<'_>, Error> {
+impl<E: EnvironmentKind> Database for Env<E> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
         Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::Internal(e.into()))?))
     }
 
-    fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
         Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::Internal(e.into()))?))
     }
 }
