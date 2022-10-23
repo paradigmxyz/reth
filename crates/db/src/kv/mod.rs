@@ -223,7 +223,7 @@ mod gat_tests {
     #[async_trait::async_trait]
     impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
         async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
-            let _tx = db.open().unwrap();
+            let _tx = db.commit().unwrap();
             ()
         }
     }

@@ -74,23 +74,18 @@ mod tests {
     use crate::db::mock::DatabaseMock;
     use std::{future::Future, pin::Pin};
 
+    #[async_trait::async_trait]
     trait Stage<DB: Database> {
-        fn run<'a, 'b: 'a>(
-            &'a mut self,
-            db: &'b mut DBContainer<'b, DB>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> ();
     }
 
     struct MyStage<'a, DB>(&'a DB);
-    impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
-        fn run<'a, 'b: 'a>(
-            &'a mut self,
-            db: &'b mut DBContainer<'b, DB>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-            Box::pin(async move {
-                let _tx = db.open().unwrap();
-                ()
-            })
+
+    #[async_trait::async_trait]
+    impl<'a, DB: Database> Stage<DB> for MyStage<'a, DB> {
+        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
+            let _tx = db.commit().unwrap();
+            ()
         }
     }
 
@@ -101,34 +96,7 @@ mod tests {
         tokio::spawn(async move {
             let mut container = DBContainer::new(&db).unwrap();
             let mut stage = MyStage(&db);
-            stage.run(&mut container);
+            let _ = stage.run(&mut container);
         });
     }
-
-    // REVIEW PLS:  Is this supposed to compile in any way? Or not because
-    // the tokio::spawn
-    // error[E0597]: `container` does not live long enough
-    //    --> crates/interfaces/src/db/container.rs:104:23
-    //     |
-    // 101 |         let mut container = DBContainer::new(&db).unwrap();
-    //     |             ------------- lifetime `'1` appears in the type of `container`
-    // ...
-    // 104 |             stage.run(&mut container);
-    //     |             ----------^^^^^^^^^^^^^^-
-    //     |             |         |
-    //     |             |         borrowed value does not live long enough
-    //     |             argument requires that `container` is borrowed for `'1`
-    // 105 |         });
-    //     |         - `container` dropped here while still borrowed
-    //
-    // #[test]
-    // #[should_panic] // no tokio runtime configured
-    // fn can_spawn() {
-    //     let db = DatabaseMock::default();
-    //     let mut container = DBContainer::new(&db).unwrap();
-    //     tokio::spawn(async move {
-    //         let mut stage = MyStage(&db);
-    //         stage.run(&mut container);
-    //     });
-    // }
 }
