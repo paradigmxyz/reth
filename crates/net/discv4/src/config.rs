@@ -7,7 +7,7 @@ use discv5::{
 use std::time::Duration;
 
 /// Configuration parameters that define the performance of the discovery network.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
@@ -36,19 +36,6 @@ pub struct Discv4Config {
 
     /// The maximum number of established sessions to maintain. Default: 1000.
     pub session_cache_capacity: usize,
-
-    /// Updates the local ENR IP and port based on PONG responses from peers. Default: true.
-    pub enr_update: bool,
-
-    /// The maximum number of nodes we return to a find nodes request. The default is 16.
-    pub max_nodes_response: usize,
-
-    /// The minimum number of peer's who agree on an external IP port before updating the
-    /// local ENR. Default: 10.
-    pub enr_peer_update_min: usize,
-
-    /// The number of peers to request in parallel in a single query. Default: 3.
-    pub query_parallelism: usize,
 
     /// Limits the number of IP addresses from the same
     /// /24 subnet in the kbuckets table. This is to mitigate eclipse attacks. Default: false.
@@ -124,10 +111,6 @@ impl Default for Discv4Config {
             request_retries: 1,
             session_timeout: Duration::from_secs(86400),
             session_cache_capacity: 1000,
-            enr_update: true,
-            max_nodes_response: 16,
-            enr_peer_update_min: 10,
-            query_parallelism: 3,
             ip_limit: false,
             incoming_bucket_limit: MAX_NODES_PER_BUCKET,
             ping_interval: Duration::from_secs(300),
@@ -199,46 +182,10 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Disables the auto-update of the local ENR IP and port based on PONG responses from peers.
-    pub fn disable_enr_update(&mut self) -> &mut Self {
-        self.config.enr_update = false;
-        self
-    }
-
-    /// The maximum number of nodes we response to a find nodes request.
-    pub fn max_nodes_response(&mut self, max: usize) -> &mut Self {
-        self.config.max_nodes_response = max;
-        self
-    }
-
-    /// The minimum number of peer's who agree on an external IP port before updating the
-    /// local ENR.
-    pub fn enr_peer_update_min(&mut self, min: usize) -> &mut Self {
-        if min < 2 {
-            panic!("Setting enr_peer_update_min to a value less than 2 will cause issues with discovery with peers behind NAT");
-        }
-        self.config.enr_peer_update_min = min;
-        self
-    }
-
-    /// The number of peers to request in parallel in a single query.
-    pub fn query_parallelism(&mut self, parallelism: usize) -> &mut Self {
-        self.config.query_parallelism = parallelism;
-        self
-    }
-
     /// Limits the number of IP addresses from the same
     /// /24 subnet in the kbuckets table. This is to mitigate eclipse attacks.
     pub fn ip_limit(&mut self) -> &mut Self {
         self.config.ip_limit = true;
-        self
-    }
-
-    /// Sets a maximum limit to the number of  incoming nodes (nodes that have dialed us) to exist
-    /// per-bucket. This cannot be larger than the bucket size (16). By default, half of every
-    /// bucket (8 positions) is the largest number of nodes that we accept that dial us.
-    pub fn incoming_bucket_limit(&mut self, limit: usize) -> &mut Self {
-        self.config.incoming_bucket_limit = limit;
         self
     }
 
@@ -300,30 +247,5 @@ impl Discv4ConfigBuilder {
         assert!(self.config.incoming_bucket_limit <= MAX_NODES_PER_BUCKET);
 
         self.config.clone()
-    }
-}
-
-impl std::fmt::Debug for Discv4Config {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("discv4Config")
-            .field("filter_enabled", &self.enable_packet_filter)
-            .field("request_timeout", &self.request_timeout)
-            .field("vote_duration", &self.vote_duration)
-            .field("query_timeout", &self.query_timeout)
-            .field("query_peer_timeout", &self.query_peer_timeout)
-            .field("request_retries", &self.request_retries)
-            .field("session_timeout", &self.session_timeout)
-            .field("session_cache_capacity", &self.session_cache_capacity)
-            .field("enr_update", &self.enr_update)
-            .field("query_parallelism", &self.query_parallelism)
-            .field("report_discovered_peers", &self.report_discovered_peers)
-            .field("ip_limit", &self.ip_limit)
-            .field("filter_max_nodes_per_ip", &self.filter_max_nodes_per_ip)
-            .field("filter_max_bans_per_ip", &self.filter_max_bans_per_ip)
-            .field("ip_limit", &self.ip_limit)
-            .field("incoming_bucket_limit", &self.incoming_bucket_limit)
-            .field("ping_interval", &self.ping_interval)
-            .field("ban_duration", &self.ban_duration)
-            .finish()
     }
 }
