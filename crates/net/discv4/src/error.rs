@@ -2,6 +2,7 @@
 
 /// Error thrown when decoding a UDP packet.
 #[derive(Debug, thiserror::Error)]
+#[allow(missing_docs)]
 pub enum DecodePacketError {
     #[error("Failed to rlp decode: {0:?}")]
     Rlp(#[from] reth_rlp::DecodeError),

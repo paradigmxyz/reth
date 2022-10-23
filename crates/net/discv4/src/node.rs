@@ -7,19 +7,8 @@ use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use url::{Host, Url};
-
-pub type RequestId = u64;
-
-pub const UPNP_INTERVAL: Duration = Duration::from_secs(60);
-pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
-pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
-pub const PING_INTERVAL: Duration = Duration::from_secs(10);
-pub const FIND_NODE_TIMEOUT: Duration = Duration::from_secs(10);
-pub const QUERY_AWAIT_PING_TIME: Duration = Duration::from_secs(2);
-pub const NEIGHBOURS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The key type for the table.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -39,16 +28,11 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
     }
 }
 
-fn ping_expiry() -> u64 {
-    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + PING_TIMEOUT).as_secs()
+/// Converts a `NodeId` into the required `Key` type for the table
+#[inline]
+pub(crate) fn kad_key(node: NodeId) -> discv5::Key<NodeKey> {
+    discv5::kbucket::Key::from(NodeKey::from(node))
 }
-
-fn find_node_expiry() -> u64 {
-    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + FIND_NODE_TIMEOUT).as_secs()
-}
-
-/// The alpha value of discv4
-pub const ALPHA: usize = 3;
 
 /// Represents a ENR in discv4
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

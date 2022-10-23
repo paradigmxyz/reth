@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use crate::{error::DecodePacketError, node::NodeRecord, NodeId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use reth_primitives::{keccak256, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
@@ -9,7 +9,32 @@ use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     SecretKey, SECP256K1,
 };
-use std::net::{IpAddr, Ipv6Addr};
+use std::{
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+pub type RequestId = u64;
+
+pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
+pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
+pub const PING_INTERVAL: Duration = Duration::from_secs(10);
+pub const FIND_NODE_TIMEOUT: Duration = Duration::from_secs(10);
+pub const QUERY_AWAIT_PING_TIME: Duration = Duration::from_secs(2);
+pub const NEIGHBOURS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+pub const NEIGHBOURS_EXPIRY_TIME: Duration = Duration::from_secs(30);
+
+pub(crate) fn ping_expiry() -> u64 {
+    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + PING_TIMEOUT).as_secs()
+}
+
+pub(crate) fn find_node_expiry() -> u64 {
+    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + FIND_NODE_TIMEOUT).as_secs()
+}
+
+pub(crate) fn send_neighbours_expiry() -> u64 {
+    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + NEIGHBOURS_EXPIRY_TIME).as_secs()
+}
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
@@ -52,7 +77,7 @@ impl Message {
     ///
     /// The datagram is `header || payload`
     /// where header is `hash || signature || packet-type`
-    pub fn encode(&self, secret_key: &SecretKey) -> BytesMut {
+    pub fn encode(&self, secret_key: &SecretKey) -> (Bytes, H256) {
         // allocate max packet size
         let mut datagram = BytesMut::with_capacity(MAX_PACKET_SIZE);
 
@@ -96,13 +121,13 @@ impl Message {
 
         datagram.unsplit(sig_bytes);
 
-        datagram
+        (datagram.freeze(), hash)
     }
 
     /// Decodes the [`Message`] from the given buffer.
     ///
     /// Returns the decoded message and the public key of the sender.
-    pub fn decode(packet: &[u8]) -> Result<(Self, NodeId), DecodePacketError> {
+    pub fn decode(packet: &[u8]) -> Result<Packet, DecodePacketError> {
         if packet.len() < MIN_PACKET_SIZE {
             return Err(DecodePacketError::PacketTooShort)
         }
@@ -142,19 +167,35 @@ impl Message {
             return Err(DecodeError::UnexpectedLength.into())
         }
 
-        Ok((msg, node_id))
+        Ok(Packet { msg, node_id, hash: header_hash })
     }
+}
+
+/// Decoded packet
+#[derive(Debug)]
+pub struct Packet {
+    pub msg: Message,
+    pub node_id: NodeId,
+    pub hash: H256,
 }
 
 /// Represents the `from`, `to` fields in the packets
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Endpoint {
+pub struct NodeEndpoint {
     pub address: IpAddr,
     pub udp_port: u16,
     pub tcp_port: u16,
 }
 
-impl Decodable for Endpoint {
+impl NodeEndpoint {
+    /// The UDP socket address of this node
+    #[must_use]
+    pub fn udp_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.address, self.udp_port)
+    }
+}
+
+impl Decodable for NodeEndpoint {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         let Point { octets, udp_port, tcp_port } = Point::decode(buf)?;
 
@@ -162,7 +203,7 @@ impl Decodable for Endpoint {
     }
 }
 
-impl Encodable for Endpoint {
+impl Encodable for NodeEndpoint {
     fn encode(&self, out: &mut dyn BufMut) {
         let octets = match self.address {
             IpAddr::V4(addr) => Octets::V4(addr.octets()),
@@ -173,7 +214,7 @@ impl Encodable for Endpoint {
     }
 }
 
-impl From<NodeRecord> for Endpoint {
+impl From<NodeRecord> for NodeEndpoint {
     fn from(NodeRecord { address, tcp_port, udp_port, .. }: NodeRecord) -> Self {
         Self { address, tcp_port, udp_port }
     }
@@ -196,8 +237,8 @@ pub struct Neighbours {
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Ping {
-    pub from: Endpoint,
-    pub to: Endpoint,
+    pub from: NodeEndpoint,
+    pub to: NodeEndpoint,
     pub expire: u64,
 }
 
@@ -206,8 +247,8 @@ impl Encodable for Ping {
         #[derive(RlpEncodable)]
         struct V4PingMessage<'a> {
             pub version: u32,
-            pub from: &'a Endpoint,
-            pub to: &'a Endpoint,
+            pub from: &'a NodeEndpoint,
+            pub to: &'a NodeEndpoint,
             pub expire: u64,
         }
         V4PingMessage {
@@ -225,8 +266,8 @@ impl Decodable for Ping {
         #[derive(RlpDecodable)]
         struct V4PingMessage {
             pub version: u32,
-            pub from: Endpoint,
-            pub to: Endpoint,
+            pub from: NodeEndpoint,
+            pub to: NodeEndpoint,
             pub expire: u64,
         }
 
@@ -239,7 +280,7 @@ impl Decodable for Ping {
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct Pong {
-    pub to: Endpoint,
+    pub to: NodeEndpoint,
     pub echo: H256,
     pub expire: u64,
 }
@@ -315,7 +356,7 @@ mod tests {
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
 
-    fn rng_endpoint(rng: &mut impl Rng) -> Endpoint {
+    fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
         let address = if rng.gen() {
             let mut ip = [0u8; 4];
             rng.fill_bytes(&mut ip);
@@ -325,11 +366,11 @@ mod tests {
             rng.fill_bytes(&mut ip);
             IpAddr::V6(ip.into())
         };
-        Endpoint { address, tcp_port: rng.gen(), udp_port: rng.gen() }
+        NodeEndpoint { address, tcp_port: rng.gen(), udp_port: rng.gen() }
     }
 
     fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
-        let Endpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
+        let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
         NodeRecord { address, tcp_port, udp_port, id: NodeId::random() }
     }
 
@@ -347,7 +388,7 @@ mod tests {
             }),
             3 => Message::FindNode(FindNode { id: NodeId::random(), expire: rng.gen() }),
             4 => {
-                let num: usize = rng.gen_range(1..=10);
+                let num: usize = rng.gen_range(1..=13);
                 Message::Neighbours(Neighbours {
                     nodes: std::iter::repeat_with(|| rng_record(rng)).take(num).collect(),
                     expire: rng.gen(),
@@ -363,7 +404,7 @@ mod tests {
         for _ in 0..100 {
             let mut ip = [0u8; 4];
             rng.fill_bytes(&mut ip);
-            let msg = Endpoint {
+            let msg = NodeEndpoint {
                 address: IpAddr::V4(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
@@ -372,7 +413,7 @@ mod tests {
             let mut buf = BytesMut::new();
             msg.encode(&mut buf);
 
-            let decoded = Endpoint::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeEndpoint::decode(&mut buf.as_ref()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -383,7 +424,7 @@ mod tests {
         for _ in 0..100 {
             let mut ip = [0u8; 16];
             rng.fill_bytes(&mut ip);
-            let msg = Endpoint {
+            let msg = NodeEndpoint {
                 address: IpAddr::V6(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
@@ -392,7 +433,7 @@ mod tests {
             let mut buf = BytesMut::new();
             msg.encode(&mut buf);
 
-            let decoded = Endpoint::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeEndpoint::decode(&mut buf.as_ref()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -418,7 +459,8 @@ mod tests {
         let mut rng = thread_rng();
         let msg = rng_message(&mut rng);
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
-        let mut buf = msg.encode(&secret_key);
+        let (buf, _) = msg.encode(&secret_key);
+        let mut buf = BytesMut::from(buf.as_ref());
         buf.put_u8(0);
         match Message::decode(buf.as_ref()).unwrap_err() {
             DecodePacketError::HashMismatch => {}
@@ -491,12 +533,12 @@ mod tests {
             let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
             let sender_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
 
-            let buf = msg.encode(&secret_key);
+            let (buf, _) = msg.encode(&secret_key);
 
-            let (decoded_msg, id) = Message::decode(buf.as_ref()).unwrap();
+            let packet = Message::decode(buf.as_ref()).unwrap();
 
-            assert_eq!(msg, decoded_msg);
-            assert_eq!(sender_id, id);
+            assert_eq!(msg, packet.msg);
+            assert_eq!(sender_id, packet.node_id);
         }
     }
 }
