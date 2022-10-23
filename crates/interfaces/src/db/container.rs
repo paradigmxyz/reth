@@ -75,17 +75,17 @@ mod tests {
     use std::{future::Future, pin::Pin};
 
     trait Stage<DB: Database> {
-        fn run<'a>(
+        fn run<'a, 'b: 'a>(
             &'a mut self,
-            db: &mut DBContainer<'_, DB>,
+            db: &'b mut DBContainer<'b, DB>,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
     }
 
     struct MyStage<DB>(DB);
     impl<DB: Database> Stage<DB> for MyStage<DB> {
-        fn run<'a>(
+        fn run<'a, 'b: 'a>(
             &'a mut self,
-            db: &mut DBContainer<'_, DB>,
+            db: &'b mut DBContainer<'b, DB>,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {
                 let tx = db.open().unwrap();
