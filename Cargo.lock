@@ -2507,6 +2507,7 @@ dependencies = [
  "auto_impl",
  "bytes",
  "eyre",
+ "futures",
  "heapless",
  "parity-scale-codec",
  "postcard",
