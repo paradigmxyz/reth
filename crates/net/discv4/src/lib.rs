@@ -14,14 +14,12 @@ use discv5::{
     kbucket::{InsertResult, KBucketsTable, NodeStatus},
     ConnectionDirection, ConnectionState,
 };
-use lru::LruCache;
 use reth_primitives::{H256, H512};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     io,
     net::SocketAddr,
-    num::NonZeroUsize,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -45,7 +43,7 @@ use crate::{
     error::DecodePacketError,
     node::{kad_key, NodeKey, NodeRecord},
     proto::{
-        ping_expiry, send_neighbours_expiry, FindNode, Message, Neighbours, NodeEndpoint, Packet,
+        ping_expiry, send_neighbours_expiry, FindNode, Message, Neighbours, Packet,
         Ping, Pong,
     },
 };
@@ -63,11 +61,10 @@ const MIN_PACKET_SIZE: usize = 32 + 65 + 1;
 
 const ALPHA: usize = 3; // Denoted by \alpha in [Kademlia]. Number of concurrent FindNode requests.
 
+const MAX_NODES_PING: usize = 32; // Max nodes to add/ping at once
+
 /// The timeout used to identify expired nodes
 const NODE_LAST_SEEN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// Max number of nodes to record
-const OBSERVED_NODES_MAX_SIZE: usize = 10_000;
 
 type EgressSender = mpsc::Sender<(Bytes, SocketAddr)>;
 type EgressReceiver = mpsc::Receiver<(Bytes, SocketAddr)>;
@@ -92,9 +89,6 @@ pub struct Discv4 {
     kbuckets: KBucketsTable<NodeKey, NodeEntry>,
     /// Whether to respect timestamps
     check_timestamps: bool,
-    /// Cached nodes not added to the table, that we still want to keep track of to avoid excessive
-    /// pinging.
-    other_observed_nodes: LruCache<NodeId, (NodeEndpoint, Instant)>,
     /// The spawned UDP tasks.
     ///
     /// Note: If dropped, the spawned tasks are aborted.
@@ -109,8 +103,11 @@ pub struct Discv4 {
     active_requests: HashMap<(NodeId, RequestId), NodeRecordRequest>,
     /// Currently active pings
     pending_pings: HashMap<H256, Vec<OneshotSender<()>>>,
+    /// Buffered pending pings to apply backpressure.
+    adding_nodes: VecDeque<(NodeRecord, PingReason)>,
     /// Currently active pings to specific nodes.
     in_flight_pings: HashMap<NodeId, PingRequest>,
+    in_flight_find_nodes: HashMap<NodeId, FindNodeRequest>,
 }
 
 impl Discv4 {
@@ -153,11 +150,10 @@ impl Discv4 {
             pending_events: Default::default(),
             active_requests: Default::default(),
             pending_pings: Default::default(),
+            adding_nodes: Default::default(),
             in_flight_pings: Default::default(),
+            in_flight_find_nodes: Default::default(),
             check_timestamps: false,
-            other_observed_nodes: LruCache::new(
-                NonZeroUsize::new(OBSERVED_NODES_MAX_SIZE).unwrap(),
-            ),
         }
     }
 
@@ -235,8 +231,27 @@ impl Discv4 {
         self.send_packet(msg, remote_addr);
     }
 
+    // Guarding function for [`Self::send_ping`] that applies pre-checks
+    fn try_ping(&mut self, node: NodeRecord, reason: PingReason) {
+        if self.in_flight_pings.contains_key(&node.id) ||
+            self.in_flight_find_nodes.contains_key(&node.id)
+        {
+            return
+        }
+
+        if self.adding_nodes.iter().any(|(n,_)| n.id == node.id) {
+            return
+        }
+
+        if self.in_flight_pings.len() < MAX_NODES_PING {
+            self.send_ping(node, reason)
+        } else {
+            self.adding_nodes.push_back((node, reason))
+        }
+    }
+
     /// Sends a ping message to the node's UDP address.
-    fn ping(&mut self, node: NodeRecord, reason: PingReason) {
+    fn send_ping(&mut self, node: NodeRecord, reason: PingReason) {
         let remote_addr = node.udp_addr();
         let id = node.id;
         let msg = Message::Ping(Ping {
@@ -271,10 +286,18 @@ impl Discv4 {
         };
 
         match reason {
-            PingReason::Default => {
+            PingReason::Normal => {
                 self.update_node(node);
             }
-            PingReason::DiscoveryRequest(target) => {
+            PingReason::FindNode(target, status) => {
+                // update the status of the node
+                match status {
+                    NodeEntryStatus::Expired | NodeEntryStatus::Valid => {
+                        // update node in the table
+                        self.update_node(node)
+                    }
+                    NodeEntryStatus::IsLocal | NodeEntryStatus::Unknown => {}
+                }
                 // Received a pong for a discovery request
                 self.respond_nearest(target, remote_addr);
             }
@@ -287,14 +310,17 @@ impl Discv4 {
             NodeEntryStatus::IsLocal => {
                 // received address from self
             }
-            NodeEntryStatus::Unknown | NodeEntryStatus::Expired => {
-                // try to ping again
-                // self.try_ping(
-                //                 node,
-                //                 PingReason::FromDiscoveryRequest(target, invalidity_reason),
-                //             )
-            }
             NodeEntryStatus::Valid => self.respond_nearest(msg.id, remote_addr),
+            status => {
+                // try to ping again
+                let node = NodeRecord {
+                    address: remote_addr.ip(),
+                    tcp_port: remote_addr.port(),
+                    udp_port: remote_addr.port(),
+                    id: node_id,
+                };
+                self.try_ping(node, PingReason::FindNode(msg.id, status))
+            }
         }
     }
 
@@ -325,8 +351,9 @@ impl Discv4 {
 
         // Determines the status of the node based on the given address and the last observed
         // timestamp
-        let get_status = |timestamp: Instant, node_addr: SocketAddr| -> NodeEntryStatus {
-            match (timestamp.elapsed() > NODE_LAST_SEEN_TIMEOUT, node_addr == addr) {
+
+        if let Some(node) = self.kbuckets.get_bucket(&key).and_then(|bucket| bucket.get(&key)) {
+            match (node.value.is_expired(), node.value.record.udp_addr() == addr) {
                 (false, true) => {
                     // valid node
                     NodeEntryStatus::Valid
@@ -337,17 +364,8 @@ impl Discv4 {
                 }
                 _ => NodeEntryStatus::Unknown,
             }
-        };
-
-        if let Some(node) = self.kbuckets.get_bucket(&key).and_then(|bucket| bucket.get(&key)) {
-            get_status(node.value.last_seen, node.value.record.udp_addr())
         } else {
-            // check cached nodes
-            if let Some((endpoint, timestamp)) = self.other_observed_nodes.get(&node) {
-                get_status(*timestamp, endpoint.udp_addr())
-            } else {
-                NodeEntryStatus::Unknown
-            }
+            NodeEntryStatus::Unknown
         }
     }
 
@@ -471,6 +489,16 @@ struct PingRequest {
     reason: PingReason,
 }
 
+#[derive(Debug)]
+struct FindNodeRequest {
+    // Timestamp when the request was sent.
+    sent_at: Instant,
+    // Number of items sent by the node
+    response_count: usize,
+    // Whether the request has been answered yet.
+    answered: bool,
+}
+
 /// Stored node info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct NodeEntry {
@@ -481,7 +509,7 @@ struct NodeEntry {
 }
 
 /// The status ofs a specific node
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NodeEntryStatus {
     /// Node is the local node, ourselves
     IsLocal,
@@ -502,8 +530,14 @@ impl NodeEntry {
     }
 }
 
+/// Represents why a ping is issued
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PingReason {
-    Default,
-    DiscoveryRequest(NodeId),
+    /// Standard ping
+    Normal,
+    /// Ping issued to adhere to endpoint proof procedure
+    ///
+    /// Once the expected PONG is received, the endpoint proof is complete and the find node can be
+    /// answered.
+    FindNode(NodeId, NodeEntryStatus),
 }
