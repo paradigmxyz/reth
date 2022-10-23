@@ -17,7 +17,10 @@ use crate::{
 };
 use bytes::Bytes;
 use discv5::{
-    kbucket::{Distance, Entry as BucketEntry, KBucketsTable, NodeStatus, MAX_NODES_PER_BUCKET},
+    kbucket::{
+        Distance, Entry as BucketEntry, InsertResult, KBucketsTable, NodeStatus,
+        MAX_NODES_PER_BUCKET,
+    },
     ConnectionDirection, ConnectionState,
 };
 use reth_primitives::{H256, H512};
@@ -25,17 +28,18 @@ use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
+    future::Future,
     io,
     net::SocketAddr,
+    pin::Pin,
     rc::Rc,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    macros::support::poll_fn,
     net::UdpSocket,
-    sync::{mpsc, oneshot, oneshot::Sender as OneshotSender},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
     task::JoinSet,
     time::Interval,
 };
@@ -96,10 +100,9 @@ impl Discv4 {
         secret_key: SecretKey,
         config: Discv4Config,
     ) -> io::Result<Self> {
-        let (discv4, mut service) =
-            Self::bind(local_address, local_enr, secret_key, config).await?;
+        let (discv4, service) = Self::bind(local_address, local_enr, secret_key, config).await?;
 
-        tokio::task::spawn(async move { poll_fn(|cx| service.poll(cx)).await });
+        tokio::task::spawn(async move { service.await });
 
         Ok(discv4)
     }
@@ -125,9 +128,7 @@ impl Discv4 {
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
-}
 
-impl Discv4 {
     /// Starts a `FindNode` recursive lookup that locates the closest nodes to the given node id. See also: <https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup>
     ///
     /// The lookup initiator starts by picking α closest nodes to the target it knows of. The
@@ -145,6 +146,14 @@ impl Discv4 {
     pub async fn lookup(&self, node_id: NodeId) -> Result<Vec<NodeRecord>, Discv4Error> {
         let (tx, rx) = oneshot::channel();
         let cmd = Discv4Command::Lookup { node_id, tx };
+        self.to_service.send(cmd).await?;
+        Ok(rx.await?)
+    }
+
+    /// Returns the receiver half of new listener channel that streams [`TableUpdate`]s.
+    pub async fn update_stream(&self) -> Result<mpsc::Receiver<TableUpdate>, Discv4Error> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Discv4Command::Updates(tx);
         self.to_service.send(cmd).await?;
         Ok(rx.await?)
     }
@@ -184,6 +193,8 @@ pub struct Discv4Service {
     pending_find_nodes: HashMap<NodeId, FindNodeRequest>,
     /// Commands listener
     commands_rx: Option<mpsc::Receiver<Discv4Command>>,
+    /// All subscribers for table updates
+    update_listeners: Vec<mpsc::Sender<TableUpdate>>,
     /// The interval when to trigger self lookup
     self_lookup_interval: Interval,
     /// Interval when to recheck active requests
@@ -238,9 +249,17 @@ impl Discv4Service {
             check_timestamps: false,
             bootstrap_nodes: Default::default(),
             commands_rx,
+            update_listeners: Vec::with_capacity(1),
             self_lookup_interval,
             evict_expired_requests_interval,
         }
+    }
+
+    /// Creates a new channel for [`TableUpdate`]s
+    pub fn update_stream(&mut self) -> mpsc::Receiver<TableUpdate> {
+        let (tx, rx) = mpsc::channel(512);
+        self.update_listeners.push(tx);
+        rx
     }
 
     /// Looks up the local node itself.
@@ -292,13 +311,28 @@ impl Discv4Service {
         self.kbuckets.buckets_iter().fold(0, |count, bucket| count + bucket.num_connected())
     }
 
+    /// Notifies all listeners
+    fn notify(&mut self, update: TableUpdate) {
+        self.update_listeners.retain_mut(|listener| match listener.try_send(update.clone()) {
+            Ok(()) => true,
+            Err(err) => match err {
+                TrySendError::Full(_) => true,
+                TrySendError::Closed(_) => false,
+            },
+        });
+    }
+
     /// Removes a `node_id` from the routing table.
     ///
     /// This allows applications, for whatever reason, to remove nodes from the local routing
     /// table. Returns `true` if the node was in the table and `false` otherwise.
     pub fn remove_node(&mut self, node_id: NodeId) -> bool {
         let key = kad_key(node_id);
-        self.kbuckets.remove(&key)
+        let removed = self.kbuckets.remove(&key);
+        if removed {
+            self.notify(TableUpdate::Removed(node_id));
+        }
+        removed
     }
 
     /// Updates the node entry
@@ -309,14 +343,20 @@ impl Discv4Service {
         let key = kad_key(record.id);
         let entry = NodeEntry { record, last_seen: Instant::now() };
 
-        let _ = self.kbuckets.insert_or_update(
+        #[allow(clippy::single_match)]
+        match self.kbuckets.insert_or_update(
             &key,
             entry,
             NodeStatus {
                 state: ConnectionState::Connected,
                 direction: ConnectionDirection::Incoming,
             },
-        );
+        ) {
+            InsertResult::Inserted => {
+                self.notify(TableUpdate::Added(record));
+            }
+            _ => {}
+        }
     }
 
     /// If the node's not in the table yet, this will start a ping to get it added on ping.
@@ -632,6 +672,10 @@ impl Discv4Service {
                         Discv4Command::Lookup { node_id, tx } => {
                             self.lookup_with(node_id, Some(tx));
                         }
+                        Discv4Command::Updates(tx) => {
+                            let rx = self.update_stream();
+                            let _ = tx.send(rx);
+                        }
                     }
                 } else {
                     is_done = true;
@@ -669,6 +713,15 @@ impl Discv4Service {
         self.ping_buffered();
 
         Poll::Pending
+    }
+}
+
+/// Endless future impl
+impl Future for Discv4Service {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.get_mut().poll(cx)
     }
 }
 
@@ -716,6 +769,7 @@ async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: NodeId) 
 /// The commands sent from the frontend to the service
 enum Discv4Command {
     Lookup { node_id: NodeId, tx: NodeRecordSender },
+    Updates(OneshotSender<mpsc::Receiver<TableUpdate>>),
 }
 
 /// Event type receiver produces
@@ -913,4 +967,15 @@ enum PingReason {
     FindNode(NodeId, NodeEntryStatus),
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),
+}
+
+/// Represents state changes in the underlying node table
+#[derive(Debug, Clone)]
+pub enum TableUpdate {
+    /// A new node was inserted to the table.
+    Added(NodeRecord),
+    /// Nodes was removed from the table
+    Removed(NodeId),
+    /// A series of updates
+    Batch(Vec<TableUpdate>),
 }
