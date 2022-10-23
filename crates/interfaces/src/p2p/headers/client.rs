@@ -8,20 +8,27 @@ use std::{collections::HashSet, fmt::Debug};
 /// Each peer returns a list of headers and the request id corresponding
 /// to these headers. This allows clients to make multiple requests in parallel
 /// and multiplex the responses accordingly.
-pub type HeadersStream = MessageStream<HeadersStreamItem>;
+pub type HeadersStream = MessageStream<HeadersResponse>;
 
 /// The item contained in each [`MessageStream`] when used to fetch [`Header`]s via
 /// [`HeadersClient`].
-pub struct HeadersStreamItem {
+#[derive(Clone, Debug)]
+pub struct HeadersResponse {
     /// The request id associated with this response.
     pub id: u64,
     /// The headers the peer replied with.
     pub headers: Vec<Header>,
 }
 
+impl From<(u64, Vec<Header>)> for HeadersResponse {
+    fn from((id, headers): (u64, Vec<Header>)) -> Self {
+        HeadersResponse { id, headers }
+    }
+}
+
 /// The header request struct to be sent to connected peers, which
 /// will proceed to ask them to stream the requested headers to us.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct HeadersRequest {
     /// The starting block
     pub start: BlockId,
