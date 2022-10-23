@@ -179,9 +179,9 @@ pub struct Discv4Service {
     /// Buffered pending pings to apply backpressure.
     adding_nodes: VecDeque<(NodeRecord, PingReason)>,
     /// Currently active pings to specific nodes.
-    in_flight_pings: HashMap<NodeId, PingRequest>,
+    pending_pings: HashMap<NodeId, PingRequest>,
     /// Currently active FindNode requests
-    in_flight_find_nodes: HashMap<NodeId, FindNodeRequest>,
+    pending_find_nodes: HashMap<NodeId, FindNodeRequest>,
     /// Commands listener
     commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     /// The interval when to trigger self lookup
@@ -233,8 +233,8 @@ impl Discv4Service {
             ingress: ingress_rx,
             egress: egress_tx,
             adding_nodes: Default::default(),
-            in_flight_pings: Default::default(),
-            in_flight_find_nodes: Default::default(),
+            pending_pings: Default::default(),
+            pending_find_nodes: Default::default(),
             check_timestamps: false,
             bootstrap_nodes: Default::default(),
             commands_rx,
@@ -286,8 +286,7 @@ impl Discv4Service {
         debug_assert!(concurrency_num < ALPHA, "MAX allowed concurrency is 3");
         let msg = Message::FindNode(FindNode { id: target, expire: find_node_expiry() });
         self.send_packet(msg, node.record.udp_addr());
-        self.in_flight_find_nodes
-            .insert(node.record.id, FindNodeRequest::new(concurrency_num, resp));
+        self.pending_find_nodes.insert(node.record.id, FindNodeRequest::new(concurrency_num, resp));
     }
 
     /// Gets the number of entries that are considered connected.
@@ -361,8 +360,8 @@ impl Discv4Service {
 
     // Guarding function for [`Self::send_ping`] that applies pre-checks
     fn try_ping(&mut self, node: NodeRecord, reason: PingReason) {
-        if self.in_flight_pings.contains_key(&node.id) ||
-            self.in_flight_find_nodes.contains_key(&node.id)
+        if self.pending_pings.contains_key(&node.id) ||
+            self.pending_find_nodes.contains_key(&node.id)
         {
             return
         }
@@ -371,7 +370,7 @@ impl Discv4Service {
             return
         }
 
-        if self.in_flight_pings.len() < MAX_NODES_PING {
+        if self.pending_pings.len() < MAX_NODES_PING {
             self.send_ping(node, reason)
         } else {
             self.adding_nodes.push_back((node, reason))
@@ -389,7 +388,7 @@ impl Discv4Service {
         });
         let echo_hash = self.send_packet(msg, remote_addr);
 
-        self.in_flight_pings
+        self.pending_pings
             .insert(id, PingRequest { sent_at: Instant::now(), node, echo_hash, reason });
     }
 
@@ -399,7 +398,7 @@ impl Discv4Service {
             return
         }
 
-        let PingRequest { node, reason, .. } = match self.in_flight_pings.entry(remote_id) {
+        let PingRequest { node, reason, .. } = match self.pending_pings.entry(remote_id) {
             Entry::Occupied(entry) => {
                 {
                     let request = entry.get();
@@ -455,7 +454,7 @@ impl Discv4Service {
     /// Handler for incoming `Neighbours` message
     fn on_neighbours(&mut self, msg: Neighbours, remote_addr: SocketAddr, node_id: NodeId) {
         // check if this request was expected
-        let is_response = match self.in_flight_find_nodes.entry(node_id) {
+        let is_response = match self.pending_find_nodes.entry(node_id) {
             Entry::Occupied(mut entry) => {
                 let expected = {
                     let request = entry.get_mut();
@@ -543,14 +542,14 @@ impl Discv4Service {
 
     fn evict_expired_requests(&mut self, now: Instant) {
         let mut nodes_to_expire = Vec::new();
-        self.in_flight_pings.retain(|node_id, ping_request| {
+        self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > PING_TIMEOUT {
                 nodes_to_expire.push(*node_id);
                 return false
             }
             true
         });
-        self.in_flight_find_nodes.retain(|node_id, find_node_request| {
+        self.pending_find_nodes.retain(|node_id, find_node_request| {
             if now.duration_since(find_node_request.sent_at) > FIND_NODE_TIMEOUT {
                 if !find_node_request.answered {
                     nodes_to_expire.push(*node_id);
@@ -587,7 +586,7 @@ impl Discv4Service {
 
     /// Pops buffered ping requests and sends them.
     fn ping_buffered(&mut self) {
-        while self.in_flight_pings.len() < MAX_NODES_PING {
+        while self.pending_pings.len() < MAX_NODES_PING {
             match self.adding_nodes.pop_front() {
                 Some((next, reason)) => self.try_ping(next, reason),
                 None => break,
@@ -755,6 +754,7 @@ impl NodeRecordResponse {
     }
 }
 
+// SAFETY: the shared buffer is always only accessed mutably when a response is processed
 unsafe impl Send for NodeRecordResponse {}
 unsafe impl Sync for NodeRecordResponse {}
 
