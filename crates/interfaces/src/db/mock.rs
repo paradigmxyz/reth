@@ -2,7 +2,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    Database, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DbTx, DbTxMut, DupSort, Table,
+    Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DbTx, DbTxMut,
+    DupSort, Table,
 };
 
 /// Mock database used for testing with inner BTreeMap structure
@@ -14,17 +15,19 @@ pub struct DatabaseMock {
 }
 
 impl Database for DatabaseMock {
-    type TX<'a> = TxMock;
-
-    type TXMut<'a> = TxMock;
-
-    fn tx(&self) -> Result<Self::TX<'_>, super::Error> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, super::Error> {
         Ok(TxMock::default())
     }
 
-    fn tx_mut(&self) -> Result<Self::TXMut<'_>, super::Error> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, super::Error> {
         Ok(TxMock::default())
     }
+}
+
+impl<'a> DatabaseGAT<'a> for DatabaseMock {
+    type TX = TxMock;
+
+    type TXMut = TxMock;
 }
 
 /// Mock read only tx
