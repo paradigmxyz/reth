@@ -211,20 +211,19 @@ mod tests {
 // This ensures that we can use the GATs in the downstream staged exec pipeline.
 mod gat_tests {
     use super::*;
-    use reth_interfaces::db::{mock::DatabaseMock, DBContainer, DbTx};
-    use std::{future::Future, pin::Pin};
+    use reth_interfaces::db::{mock::DatabaseMock, DBContainer};
 
     #[async_trait::async_trait]
     trait Stage<DB: Database> {
-        async fn run(&mut self, db: &<DB as DatabaseGAT<'_>>::TXMut) -> ();
+        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> ();
     }
 
     struct MyStage<'a, DB>(&'a DB);
 
     #[async_trait::async_trait]
     impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
-        async fn run(&mut self, db: &<DB as DatabaseGAT<'_>>::TXMut) -> () {
-            db.commit().unwrap();
+        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
+            let _tx = db.open().unwrap();
             ()
         }
     }
@@ -234,8 +233,9 @@ mod gat_tests {
     fn can_spawn() {
         let db = DatabaseMock::default();
         tokio::spawn(async move {
+            let mut container = DBContainer::new(&db).unwrap();
             let mut stage = MyStage(&db);
-            let _ = stage.run(&db.tx_mut().unwrap());
+            let _ = stage.run(&mut container);
         });
     }
 }
