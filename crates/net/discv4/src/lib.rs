@@ -1,5 +1,5 @@
-#![warn(missing_docs)]
-#![deny(unused_must_use, rust_2018_idioms, unused_extern_crates)]
+#![warn(missing_docs, unused_crate_dependencies)]
+#![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
@@ -58,7 +58,8 @@ const MAX_PACKET_SIZE: usize = 1280;
 /// Length of the packet-header: Hash + Signature + Packet Type
 const MIN_PACKET_SIZE: usize = 32 + 65 + 1;
 
-const ALPHA: usize = 3; // Denoted by \alpha in [Kademlia]. Number of concurrent FindNode requests.
+/// Concurrency factor for `FindNode` requests
+const ALPHA: usize = 3;
 
 const MAX_NODES_PING: usize = 32; // Max nodes to add/ping at once
 
