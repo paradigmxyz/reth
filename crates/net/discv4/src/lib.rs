@@ -814,7 +814,8 @@ impl LookupContext {
     }
 }
 
-// SAFETY: the shared buffer is always only accessed mutably when a response is processed
+// SAFETY: the shared context is only accessed mutably when a `Neighbour` response is processed,
+// meaning the context is only ever accesses mutably
 unsafe impl Send for LookupContext {}
 unsafe impl Sync for LookupContext {}
 
