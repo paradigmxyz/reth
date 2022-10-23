@@ -17,14 +17,14 @@ use crate::{
 };
 use bytes::Bytes;
 use discv5::{
-    kbucket::{Entry as BucketEntry, KBucketsTable, NodeStatus, MAX_NODES_PER_BUCKET},
+    kbucket::{Distance, Entry as BucketEntry, KBucketsTable, NodeStatus, MAX_NODES_PER_BUCKET},
     ConnectionDirection, ConnectionState,
 };
 use reth_primitives::{H256, H512};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
     io,
     net::SocketAddr,
     rc::Rc,
@@ -260,33 +260,31 @@ impl Discv4Service {
         self.lookup_with(target, None)
     }
 
-    fn lookup_with(&mut self, target: NodeId, resp: Option<NodeRecordResponse>) {
+    fn lookup_with(&mut self, target: NodeId, tx: Option<NodeRecordSender>) {
         let key = kad_key(target);
-        // This contains only verified nodes
-        #[allow(clippy::needless_collect)] // silence false clippy lint
-        let closest = self
-            .kbuckets
-            .closest_values(&key)
-            .filter(|n| !self.bootstrap_nodes.contains(&n.value.record.id))
-            .take(ALPHA)
-            .collect::<Vec<_>>();
-        for (idx, node) in closest.into_iter().enumerate() {
-            self.find_node(&node.value, target, resp.clone(), idx);
+
+        let ctx = LookupContext::with_listener(
+            target,
+            self.kbuckets
+                .closest_values(&key)
+                .filter(|n| !self.bootstrap_nodes.contains(&n.value.record.id))
+                .map(|n| (key.distance(&n.key), n.value.record)),
+            tx,
+        );
+        let closest = ctx.closest(ALPHA);
+
+        for node in closest {
+            self.find_node(&node, ctx.clone());
         }
     }
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target.
-    fn find_node(
-        &mut self,
-        node: &NodeEntry,
-        target: NodeId,
-        resp: Option<NodeRecordResponse>,
-        concurrency_num: usize,
-    ) {
-        debug_assert!(concurrency_num < ALPHA, "MAX allowed concurrency is 3");
-        let msg = Message::FindNode(FindNode { id: target, expire: find_node_expiry() });
-        self.send_packet(msg, node.record.udp_addr());
-        self.pending_find_nodes.insert(node.record.id, FindNodeRequest::new(concurrency_num, resp));
+    fn find_node(&mut self, node: &NodeRecord, ctx: LookupContext) {
+        ctx.mark_queried(node.id);
+        let id = ctx.target();
+        let msg = Message::FindNode(FindNode { id, expire: find_node_expiry() });
+        self.send_packet(msg, node.udp_addr());
+        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
     }
 
     /// Gets the number of entries that are considered connected.
@@ -428,6 +426,10 @@ impl Discv4Service {
                 // Received a pong for a discovery request
                 self.respond_closest(target, remote_addr);
             }
+            PingReason::Lookup(node, ctx) => {
+                self.update_node(node);
+                self.find_node(&node, ctx);
+            }
         }
     }
 
@@ -451,12 +453,13 @@ impl Discv4Service {
         }
     }
 
-    /// Handler for incoming `Neighbours` message
+    /// Handler for incoming `Neighbours` messages that are handled if they're responses to
+    /// `FindNode` requests
     fn on_neighbours(&mut self, msg: Neighbours, remote_addr: SocketAddr, node_id: NodeId) {
         // check if this request was expected
-        let is_response = match self.pending_find_nodes.entry(node_id) {
+        let ctx = match self.pending_find_nodes.entry(node_id) {
             Entry::Occupied(mut entry) => {
-                let expected = {
+                {
                     let request = entry.get_mut();
                     // Mark the request as answered
                     request.answered = true;
@@ -464,36 +467,46 @@ impl Discv4Service {
                     // Neighbours response is exactly 1 bucket (16 entries).
                     if total <= MAX_NODES_PER_BUCKET {
                         request.response_count = total;
-
-                        // If this response is being watched then we store the nodes.
-                        if let Some(ref resp) = request.resp {
-                            resp.extend_request(request.concurrency_num, msg.nodes.clone())
-                        }
-
-                        true
                     } else {
                         debug!(total, from=?remote_addr, target = "net::disc", "Got oversized Neighbors packet");
-                        false
+                        return
                     }
                 };
+
                 if entry.get().response_count == MAX_NODES_PER_BUCKET {
-                    entry.remove();
+                    let ctx = entry.remove().lookup_context;
+                    ctx.mark_responded(node_id);
+                    ctx
+                } else {
+                    entry.get().lookup_context.clone()
                 }
-                expected
             }
             Entry::Vacant(_) => {
                 debug!(from=?remote_addr, target = "net::disc", "Received unsolicited Neighbours");
-                false
+                return
             }
         };
 
-        if !is_response {
-            return
+        let our_key = kad_key(self.local_enr.id);
+
+        // This is the recursive lookup step where we initiate new FindNode requests for the
+        for node in msg.nodes {
+            let key = kad_key(node.id);
+            let distance = our_key.distance(&key);
+            ctx.add_node(distance, node);
         }
 
-        // add all the nodes
-        for record in msg.nodes {
-            self.add_node(record)
+        // get the next closest nodes
+        let closest = ctx.closest(ALPHA);
+
+        for closest in closest {
+            let key = kad_key(closest.id);
+            match self.kbuckets.entry(&key) {
+                BucketEntry::Absent(_) => {
+                    self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
+                }
+                _ => self.find_node(&closest, ctx.clone()),
+            }
         }
     }
 
@@ -617,7 +630,7 @@ impl Discv4Service {
                 if let Some(cmd) = cmd {
                     match cmd {
                         Discv4Command::Lookup { node_id, tx } => {
-                            self.lookup_with(node_id, Some(NodeRecordResponse::new(tx)));
+                            self.lookup_with(node_id, Some(tx));
                         }
                     }
                 } else {
@@ -716,7 +729,6 @@ pub(crate) enum IngressEvent {
 }
 
 /// Tracks a sent ping
-#[derive(Debug)]
 struct PingRequest {
     // Timestamp when the request was sent.
     sent_at: Instant,
@@ -728,80 +740,118 @@ struct PingRequest {
     reason: PingReason,
 }
 
-/// Tracks responses for 3 concurrent `FindNode` requests.
+/// Tracks lookups across multiple `FindNode` requests.
 ///
 /// If this type is dropped by all
-#[derive(Debug, Clone)]
-struct NodeRecordResponse {
-    inner: Rc<NodeRecordResponseInner>,
+#[derive(Clone)]
+struct LookupContext {
+    inner: Rc<LookupContextInner>,
 }
 
-impl NodeRecordResponse {
+impl LookupContext {
     /// Create new response buffer
-    fn new(tx: NodeRecordSender) -> Self {
-        let inner =
-            Rc::new(NodeRecordResponseInner { buffer: Rc::new(Default::default()), tx: Some(tx) });
+    fn with_listener(
+        target: NodeId,
+        nearest_nodes: impl IntoIterator<Item = (Distance, NodeRecord)>,
+        listener: Option<NodeRecordSender>,
+    ) -> Self {
+        let closest_nodes = nearest_nodes
+            .into_iter()
+            .map(|(distance, record)| {
+                (distance, QueryNode { record, queried: false, responded: false })
+            })
+            .collect();
+
+        let inner = Rc::new(LookupContextInner {
+            target,
+            closest_nodes: RefCell::new(closest_nodes),
+            listener,
+        });
         Self { inner }
     }
 
-    fn extend_request(&self, idx: usize, nodes: Vec<NodeRecord>) {
-        match idx {
-            1 => self.inner.buffer.first.borrow_mut().extend(nodes),
-            2 => self.inner.buffer.second.borrow_mut().extend(nodes),
-            3 => self.inner.buffer.third.borrow_mut().extend(nodes),
-            _ => unreachable!(),
+    /// Returns the target of this lookup
+    fn target(&self) -> NodeId {
+        self.inner.target
+    }
+
+    /// Returns an iterator over the closest nodes.
+    fn closest(&self, num: usize) -> Vec<NodeRecord> {
+        self.inner
+            .closest_nodes
+            .borrow()
+            .iter()
+            .filter(|(_, node)| !node.queried)
+            .map(|(_, n)| n.record)
+            .take(num)
+            .collect()
+    }
+
+    /// Inserts the node if it's missing
+    fn add_node(&self, distance: Distance, record: NodeRecord) {
+        let mut closest = self.inner.closest_nodes.borrow_mut();
+        if let btree_map::Entry::Vacant(entry) = closest.entry(distance) {
+            entry.insert(QueryNode { record, queried: false, responded: false });
+        }
+    }
+
+    /// Marks the node as queried
+    fn mark_queried(&self, id: NodeId) {
+        if let Some((_, node)) =
+            self.inner.closest_nodes.borrow_mut().iter_mut().find(|(_, node)| node.record.id == id)
+        {
+            node.queried = true;
+        }
+    }
+
+    /// Marks the node as responded
+    fn mark_responded(&self, id: NodeId) {
+        if let Some((_, node)) =
+            self.inner.closest_nodes.borrow_mut().iter_mut().find(|(_, node)| node.record.id == id)
+        {
+            node.responded = true;
         }
     }
 }
 
 // SAFETY: the shared buffer is always only accessed mutably when a response is processed
-unsafe impl Send for NodeRecordResponse {}
-unsafe impl Sync for NodeRecordResponse {}
+unsafe impl Send for LookupContext {}
+unsafe impl Sync for LookupContext {}
 
-#[derive(Debug)]
-struct NodeRecordResponseInner {
-    buffer: Rc<ConcurrentFindNodeBuffer>,
-    tx: Option<NodeRecordSender>,
+struct LookupContextInner {
+    target: NodeId,
+    /// The closest nodes
+    closest_nodes: RefCell<BTreeMap<Distance, QueryNode>>,
+    /// A listener for all the nodes retrieved in this lookup
+    listener: Option<NodeRecordSender>,
 }
 
-impl Drop for NodeRecordResponseInner {
+impl Drop for LookupContextInner {
     fn drop(&mut self) {
-        if let Some(tx) = self.tx.take() {
+        if let Some(tx) = self.listener.take() {
             // there's only 1 instance shared across `FindNode` requests, if this is dropped then
             // all requests finished, and we can send all results back
-            let mut nodes = self.buffer.first.take();
-            nodes.extend(self.buffer.second.take());
-            nodes.extend(self.buffer.third.take());
+            let nodes = self
+                .closest_nodes
+                .take()
+                .into_values()
+                .filter(|node| node.responded)
+                .map(|node| node.record)
+                .collect();
             let _ = tx.send(nodes);
         }
     }
 }
 
-/// A buffer for concurrent `FindNode` requests
-///
-/// The concurrency parameter ALPHA allows `3` `FindNode` requests.
-/// This will gather all responses from those 3 individual lookups.
-#[derive(Debug)]
-struct ConcurrentFindNodeBuffer {
-    first: RefCell<Vec<NodeRecord>>,
-    second: RefCell<Vec<NodeRecord>>,
-    third: RefCell<Vec<NodeRecord>>,
+/// Tracks the state of a recursive lookup step
+#[derive(Clone, Copy)]
+struct QueryNode {
+    record: NodeRecord,
+    queried: bool,
+    responded: bool,
 }
 
-impl Default for ConcurrentFindNodeBuffer {
-    fn default() -> Self {
-        Self {
-            first: RefCell::new(Vec::with_capacity(MAX_NODES_PER_BUCKET)),
-            second: RefCell::new(Vec::with_capacity(MAX_NODES_PER_BUCKET)),
-            third: RefCell::new(Vec::with_capacity(MAX_NODES_PER_BUCKET)),
-        }
-    }
-}
-
-#[derive(Debug)]
 struct FindNodeRequest {
-    /// The concurrency identifier index in a `FindNode` query, where max is `ALPHAS`
-    concurrency_num: usize,
     // Timestamp when the request was sent.
     sent_at: Instant,
     // Number of items sent by the node
@@ -809,14 +859,14 @@ struct FindNodeRequest {
     // Whether the request has been answered yet.
     answered: bool,
     /// Response buffer
-    resp: Option<NodeRecordResponse>,
+    lookup_context: LookupContext,
 }
 
 // === impl FindNodeRequest ===
 
 impl FindNodeRequest {
-    fn new(concurrency_num: usize, resp: Option<NodeRecordResponse>) -> Self {
-        Self { concurrency_num, sent_at: Instant::now(), response_count: 0, answered: false, resp }
+    fn new(resp: LookupContext) -> Self {
+        Self { sent_at: Instant::now(), response_count: 0, answered: false, lookup_context: resp }
     }
 }
 
@@ -852,7 +902,6 @@ impl NodeEntry {
 }
 
 /// Represents why a ping is issued
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PingReason {
     /// Standard ping
     Normal,
@@ -861,4 +910,6 @@ enum PingReason {
     /// Once the expected PONG is received, the endpoint proof is complete and the find node can be
     /// answered.
     FindNode(NodeId, NodeEntryStatus),
+    /// Part of a lookup to ensure endpoint is proven.
+    Lookup(NodeRecord, LookupContext),
 }
