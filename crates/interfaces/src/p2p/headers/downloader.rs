@@ -82,7 +82,11 @@ pub trait Downloader: Sync + Send + Debug {
         forkchoice: &ForkchoiceState,
     ) -> Result<Vec<HeaderLocked>, DownloadError>;
 
-    /// Perform a header request. Return the request ID
+    /// Perform a header request and returns the headers.
+    // TODO: Isn't this effectively blocking per request per downloader?
+    // Might be fine, given we can spawn multiple downloaders?
+    // TODO: Rethink this function, I don't really like the `stream: &mut HeadersStream`
+    // in the signature. Why can we not call `self.client.stream_headers()`? Gives lifetime error.
     async fn download_headers(
         &self,
         stream: &mut HeadersStream,
@@ -93,23 +97,15 @@ pub trait Downloader: Sync + Send + Debug {
         let request = HeadersRequest { start, limit, reverse: true };
         let _ = self.client().send_header_request(request_id, request).await;
 
-        // let mut stream = self.client().stream_headers();
-
         // Filter stream by request id and non empty headers content
-        let stream = stream.filter_map(|resp| {
-            if request_id == resp.id && !resp.headers.is_empty() {
-                Some(Ok(resp.headers))
-            } else {
-                Some(Err(DownloadError::NoHeaderResponse { request_id }))
-            }
-        });
-
-        let mut stream = Box::pin(stream.timeout(self.timeout()));
+        let stream = stream
+            .filter(|resp| request_id == resp.id && !resp.headers.is_empty())
+            .timeout(self.timeout());
 
         // Pop the first item.
-        match stream.next().await {
-            Some(item) => item.map_err(|_| DownloadError::Timeout { request_id })?,
-            None => return Err(DownloadError::NoHeaderResponse { request_id }),
+        match Box::pin(stream).try_next().await {
+            Ok(Some(item)) => Ok(item.headers),
+            _ => return Err(DownloadError::NoHeaderResponse { request_id }),
         }
     }
 
