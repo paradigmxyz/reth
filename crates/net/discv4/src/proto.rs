@@ -17,12 +17,15 @@ use std::{
 pub type RequestId = u64;
 
 pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
-pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 pub const PING_INTERVAL: Duration = Duration::from_secs(10);
 pub const FIND_NODE_TIMEOUT: Duration = Duration::from_secs(10);
-pub const QUERY_AWAIT_PING_TIME: Duration = Duration::from_secs(2);
 pub const NEIGHBOURS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 pub const NEIGHBOURS_EXPIRY_TIME: Duration = Duration::from_secs(30);
+
+/// The size of the datagram is limited, so we chunk here the max number that fit in the datagram is
+/// 12: (MAX_PACKET_SIZE - (header + expire + rlp overhead) / rlplength(NodeRecord). The unhappy
+/// case is all IPV6 IPS
+pub const MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = 12usize;
 
 pub(crate) fn ping_expiry() -> u64 {
     (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + PING_TIMEOUT).as_secs()
@@ -374,6 +377,20 @@ mod tests {
         NodeRecord { address, tcp_port, udp_port, id: NodeId::random() }
     }
 
+    fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
+        let mut ip = [0u8; 16];
+        rng.fill_bytes(&mut ip);
+        let address = IpAddr::V6(ip.into());
+        NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: NodeId::random() }
+    }
+
+    fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
+        let mut ip = [0u8; 4];
+        rng.fill_bytes(&mut ip);
+        let address = IpAddr::V4(ip.into());
+        NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: NodeId::random() }
+    }
+
     fn rng_message(rng: &mut impl RngCore) -> Message {
         match rng.gen_range(1..=4) {
             1 => Message::Ping(Ping {
@@ -388,7 +405,7 @@ mod tests {
             }),
             3 => Message::FindNode(FindNode { id: NodeId::random(), expire: rng.gen() }),
             4 => {
-                let num: usize = rng.gen_range(1..=13);
+                let num: usize = rng.gen_range(1..=MAX_DATAGRAM_NEIGHBOUR_RECORDS);
                 Message::Neighbours(Neighbours {
                     nodes: std::iter::repeat_with(|| rng_record(rng)).take(num).collect(),
                     expire: rng.gen(),
@@ -467,6 +484,34 @@ mod tests {
             err => {
                 unreachable!("unexpected err {}", err)
             }
+        }
+    }
+
+    #[test]
+    fn neighbours_max_nodes() {
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let msg = Message::Neighbours(Neighbours {
+                nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
+                    .take(MAX_DATAGRAM_NEIGHBOUR_RECORDS)
+                    .collect(),
+                expire: rng.gen(),
+            });
+            let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+
+            let (encoded, _) = msg.encode(&secret_key);
+            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {:?}", encoded.len(), msg);
+
+            let mut neighbours = Neighbours {
+                nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
+                    .take(MAX_DATAGRAM_NEIGHBOUR_RECORDS - 1)
+                    .collect(),
+                expire: rng.gen(),
+            };
+            neighbours.nodes.push(rng_ipv4_record(&mut rng));
+            let msg = Message::Neighbours(neighbours);
+            let (encoded, _) = msg.encode(&secret_key);
+            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {:?}", encoded.len(), msg);
         }
     }
 
