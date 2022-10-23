@@ -2,7 +2,10 @@ use super::client::{HeadersClient, HeadersRequest, HeadersStream};
 use crate::consensus::Consensus;
 
 use async_trait::async_trait;
-use reth_primitives::{rpc::BlockId, Header, HeaderLocked, H256};
+use reth_primitives::{
+    rpc::{BlockId, BlockNumber},
+    Header, HeaderLocked, H256,
+};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{fmt::Debug, time::Duration};
 use thiserror::Error;
@@ -30,6 +33,19 @@ pub enum DownloadError {
     Timeout {
         /// The request id that timed out
         request_id: u64,
+    },
+    /// Error when checking that the current [`Header`] has the parent's hash as the parent_hash
+    /// field, and that they have sequential block numbers.
+    #[error("Headers did not match, current number: {header_number} / current hash: {header_hash}, parent number: {parent_number} / parent_hash: {parent_hash}")]
+    MismatchedHeaders {
+        /// The header number being evaluated
+        header_number: BlockNumber,
+        /// The header hash being evaluated
+        header_hash: H256,
+        /// The parent number being evaluated
+        parent_number: BlockNumber,
+        /// The parent hash being evaluated
+        parent_hash: H256,
     },
 }
 
@@ -98,18 +114,21 @@ pub trait Downloader: Sync + Send + Debug {
     }
 
     /// Validate whether the header is valid in relation to it's parent
-    fn validate(
-        &self,
-        header: &HeaderLocked,
-        parent: &HeaderLocked,
-    ) -> Result<bool, DownloadError> {
+    ///
+    /// Returns Ok(false) if the
+    fn validate(&self, header: &HeaderLocked, parent: &HeaderLocked) -> Result<(), DownloadError> {
         if !(parent.hash() == header.parent_hash && parent.number + 1 == header.number) {
-            return Ok(false)
+            return Err(DownloadError::MismatchedHeaders {
+                header_number: header.number.into(),
+                parent_number: parent.number.into(),
+                header_hash: header.hash(),
+                parent_hash: parent.hash(),
+            })
         }
 
-        self.consensus().validate_header(&header, &parent).map_err(|e| {
+        self.consensus().validate_header(header, parent).map_err(|e| {
             DownloadError::HeaderValidation { hash: parent.hash(), details: e.to_string() }
         })?;
-        Ok(true)
+        Ok(())
     }
 }
