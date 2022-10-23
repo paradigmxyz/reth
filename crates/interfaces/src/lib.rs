@@ -96,12 +96,47 @@ pub mod test_utils {
 
     /// Consensus client impl for testing
     #[derive(Debug)]
-    pub struct TestConsensus;
+    pub struct TestConsensus {
+        /// Watcher over the forkchoice state
+        channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
+        /// Flag whether the header validation should purposefully fail
+        fail_validation: bool,
+    }
+
+    impl Default for TestConsensus {
+        fn default() -> Self {
+            Self {
+                channel: watch::channel(ForkchoiceState {
+                    head_block_hash: H256::zero(),
+                    finalized_block_hash: H256::zero(),
+                    safe_block_hash: H256::zero(),
+                }),
+                fail_validation: false,
+            }
+        }
+    }
+
+    impl TestConsensus {
+        /// Update the forkchoice state
+        pub fn update_tip(&mut self, tip: H256) {
+            let state = ForkchoiceState {
+                head_block_hash: tip,
+                finalized_block_hash: H256::zero(),
+                safe_block_hash: H256::zero(),
+            };
+            self.channel.0.send(state).expect("updating forkchoice state failed");
+        }
+
+        /// Update the validation flag
+        pub fn set_fail_validation(&mut self, val: bool) {
+            self.fail_validation = val;
+        }
+    }
 
     #[async_trait::async_trait]
     impl Consensus for TestConsensus {
         fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
-            unimplemented!()
+            self.channel.1.clone()
         }
 
         fn validate_header(
@@ -109,7 +144,11 @@ pub mod test_utils {
             _header: &Header,
             _parent: &Header,
         ) -> Result<(), consensus::Error> {
-            unimplemented!()
+            if self.fail_validation {
+                Err(consensus::Error::ConsensusError)
+            } else {
+                Ok(())
+            }
         }
     }
 }
