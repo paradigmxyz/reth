@@ -91,10 +91,10 @@ impl<'de> Deserialize<'de> for IntegerList {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "arbitrary"))]
 use arbitrary::{Arbitrary, Unstructured};
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "arbitrary"))]
 impl<'a> Arbitrary<'a> for IntegerList {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
         let mut nums: Vec<usize> = Vec::arbitrary(u)?;
