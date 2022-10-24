@@ -32,4 +32,4 @@ tokio-stream = { version = "0.1.11", features = ["sync"] }
 
 [features]
 bench = []
-test-helpers = ["tokio-stream/sync"]
+test-utils = ["tokio-stream/sync"]

@@ -206,7 +206,7 @@ mod tests {
     use super::*;
     use reth_interfaces::{
         p2p::headers::client::HeadersRequest,
-        test_helpers::{TestConsensus, TestHeadersClient},
+        test_utils::{TestConsensus, TestHeadersClient},
     };
     use reth_primitives::{rpc::BlockId, HeaderLocked, H256};
 
