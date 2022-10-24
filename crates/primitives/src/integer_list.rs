@@ -100,3 +100,26 @@ impl<'a> Arbitrary<'a> for IntegerList {
         Ok(Self(EliasFano::from_ints(&nums).map_err(|_| arbitrary::Error::IncorrectFormat)?))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_integer_list() {
+        let original_list = [1, 2, 3];
+
+        let ef_list = IntegerList::new(&original_list).unwrap();
+
+        assert!(ef_list.iter(0).collect::<Vec<usize>>() == original_list);
+    }
+
+    #[test]
+    fn test_integer_list_serialization() {
+        let original_list = [1, 2, 3];
+        let ef_list = IntegerList::new(&original_list).unwrap();
+
+        let blist = ef_list.to_bytes();
+        assert!(IntegerList::from_bytes(&blist).unwrap() == ef_list)
+    }
+}
