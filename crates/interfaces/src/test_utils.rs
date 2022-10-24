@@ -155,11 +155,7 @@ impl Consensus for TestConsensus {
         self.channel.1.clone()
     }
 
-    fn validate_header(
-        &self,
-        _header: &Header,
-        _parent: &Header,
-    ) -> Result<(), consensus::Error> {
+    fn validate_header(&self, _header: &Header, _parent: &Header) -> Result<(), consensus::Error> {
         if self.fail_validation {
             Err(consensus::Error::ConsensusError)
         } else {
