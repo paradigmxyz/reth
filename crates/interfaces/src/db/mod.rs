@@ -1,4 +1,5 @@
 pub mod codecs;
+mod container;
 mod error;
 pub mod mock;
 pub mod models;
@@ -8,26 +9,40 @@ pub mod tables;
 pub use error::Error;
 pub use table::*;
 
-/// Main Database trait that spawns transactions to be executed.
-pub trait Database {
+pub use container::DBContainer;
+
+// Sealed trait helper to prevent misuse of the API.
+mod sealed {
+    pub trait Sealed: Sized {}
+    pub struct Bounds<T>(T);
+    impl<T> Sealed for Bounds<T> {}
+}
+use sealed::{Bounds, Sealed};
+
+/// Implements the GAT method from:
+/// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
+///
+/// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
+pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// RO database transaction
-    type TX<'a>: DbTx<'a> + Send + Sync
-    where
-        Self: 'a;
+    type TX: DbTx<'a> + Send + Sync;
     /// RW database transaction
-    type TXMut<'a>: DbTxMut<'a> + DbTx<'a> + Send + Sync
-    where
-        Self: 'a;
+    type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;
+}
+
+/// Main Database trait that spawns transactions to be executed.
+pub trait Database: for<'a> DatabaseGAT<'a> {
     /// Create read only transaction.
-    fn tx(&self) -> Result<Self::TX<'_>, Error>;
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error>;
+
     /// Create read write transaction only possible if database is open with write access.
-    fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error>;
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error>;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
     fn view<T, F>(&self, f: F) -> Result<T, Error>
     where
-        F: Fn(&Self::TX<'_>) -> T,
+        F: Fn(&<Self as DatabaseGAT<'_>>::TX) -> T,
     {
         let tx = self.tx()?;
 
@@ -41,7 +56,7 @@ pub trait Database {
     /// the end of the execution.
     fn update<T, F>(&self, f: F) -> Result<T, Error>
     where
-        F: Fn(&Self::TXMut<'_>) -> T,
+        F: Fn(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
     {
         let tx = self.tx_mut()?;
 

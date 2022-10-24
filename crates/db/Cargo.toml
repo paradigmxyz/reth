@@ -30,8 +30,10 @@ tempfile = "3.3.0"
 test-fuzz = "3.0.4"
 criterion = "0.4.0"
 iai = "0.1.1"
+tokio = { version = "1.21.2", features = ["full"] }
 
 reth-interfaces = { path = "../interfaces",features=["bench"] }
+async-trait = "0.1.58"
 
 [features]
 test-utils = ["tempfile"]

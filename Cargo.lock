@@ -2413,6 +2413,7 @@ version = "0.1.0"
 name = "reth-db"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "criterion",
  "eyre",
@@ -2427,6 +2428,7 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@ use crate::{
     error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput,
 };
-use reth_interfaces::db::{Database, DbTx};
+use reth_interfaces::db::{DBContainer, Database, DbTx};
 use reth_primitives::BlockNumber;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::mpsc::Sender;
@@ -218,13 +218,14 @@ impl<DB: Database> Pipeline<DB> {
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let tx = db.tx_mut()?;
+        let mut db = DBContainer::new(db)?;
+
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = stage_id.get_progress(&tx)?.unwrap_or_default();
+            let mut stage_progress = stage_id.get_progress(db.get())?.unwrap_or_default();
             if stage_progress < to {
                 debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                 self.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
@@ -236,11 +237,11 @@ impl<DB: Database> Pipeline<DB> {
                 let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
                 self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                let output = stage.unwind(&tx, input).await;
+                let output = stage.unwind(&mut db, input).await;
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
-                        stage_id.save_progress(&tx, stage_progress)?;
+                        stage_id.save_progress(db.get(), stage_progress)?;
 
                         self.events_sender
                             .send(PipelineEvent::Unwound { stage_id, result: unwind_output })
@@ -254,7 +255,7 @@ impl<DB: Database> Pipeline<DB> {
             }
         }
 
-        tx.commit()?;
+        db.commit()?;
         Ok(())
     }
 }
@@ -288,10 +289,10 @@ impl<DB: Database> QueuedStage<DB> {
             return Ok(ControlFlow::Continue)
         }
 
-        let mut tx = db.tx_mut()?;
-
         loop {
-            let prev_progress = stage_id.get_progress(&tx)?;
+            let mut db = DBContainer::new(db)?;
+
+            let prev_progress = stage_id.get_progress(db.get())?;
 
             let stage_reached_max_block = prev_progress
                 .zip(state.max_block)
@@ -312,12 +313,12 @@ impl<DB: Database> QueuedStage<DB> {
 
             match self
                 .stage
-                .execute(&tx, ExecInput { previous_stage, stage_progress: prev_progress })
+                .execute(&mut db, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
                     debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
-                    stage_id.save_progress(&tx, stage_progress)?;
+                    stage_id.save_progress(db.get(), stage_progress)?;
 
                     state
                         .events_sender
@@ -325,9 +326,7 @@ impl<DB: Database> QueuedStage<DB> {
                         .await?;
 
                     // TODO: Make the commit interval configurable
-                    tx.commit()?;
-                    // create new mut transaction.
-                    tx = db.tx_mut()?;
+                    db.commit()?;
 
                     state.record_progress_outliers(stage_progress);
                     state.set_reached_tip(reached_tip);
@@ -755,9 +754,9 @@ mod tests {
                 self.id
             }
 
-            async fn execute<'db>(
+            async fn execute(
                 &mut self,
-                _: &DB::TXMut<'db>,
+                _: &mut DBContainer<'_, DB>,
                 _input: ExecInput,
             ) -> Result<ExecOutput, StageError> {
                 self.exec_outputs
@@ -765,9 +764,9 @@ mod tests {
                     .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
             }
 
-            async fn unwind<'db>(
+            async fn unwind(
                 &mut self,
-                _: &DB::TXMut<'db>,
+                _: &mut DBContainer<'_, DB>,
                 _input: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
                 self.unwind_outputs
