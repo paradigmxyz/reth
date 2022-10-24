@@ -7,6 +7,12 @@
 //! Staged syncing primitives for reth.
 //!
 //! See [Stage] and [Pipeline].
+//!
+//! # Metrics
+//!
+//! This library exposes metrics via. the [`metrics`][metrics] crate:
+//!
+//! - `stage.progress{stage}`: The block number each stage has currently reached.
 
 mod error;
 mod id;
@@ -18,3 +24,7 @@ pub use error::*;
 pub use id::*;
 pub use pipeline::*;
 pub use stage::*;
+
+// NOTE: Needed so the link in the module-level rustdoc works.
+#[allow(unused_extern_crates)]
+extern crate metrics;
