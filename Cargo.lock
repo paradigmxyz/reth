@@ -2500,6 +2500,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-headers-downloaders"
+version = "0.1.0"
+dependencies = [
+ "reth-interfaces",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0"
 dependencies = [
