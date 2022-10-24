@@ -181,7 +181,13 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT
     /// table.
-    fn walk_dup(&'tx mut self, key: T::Key, subkey: T::SubKey) -> Result<DupWalker<'tx, T>, Error>;
+    fn walk_dup<'cursor>(
+        &'cursor mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
 }
 
 /// Read write cursor over table.
@@ -230,14 +236,18 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T> + Sized> std::iter::Iter
 }
 
 /// Provides an iterator to `Cursor` when handling a `DupSort` table.
-pub struct DupWalker<'cursor, T: DupSort> {
+pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T> + Sized> {
     /// Cursor to be used to walk through the table.
-    pub cursor: &'cursor mut dyn DbDupCursorRO<'cursor, T>,
+    pub cursor: &'cursor mut CURSOR,
     /// Value where to start the walk.
     pub start: Option<Result<T::Value, Error>>,
+    /// Phantom data for 'tx.
+    pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'cursor, T: DupSort> std::iter::Iterator for DupWalker<'cursor, T> {
+impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T> + Sized> std::iter::Iterator
+    for DupWalker<'cursor, 'tx, T, CURSOR>
+{
     type Item = Result<T::Value, Error>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();

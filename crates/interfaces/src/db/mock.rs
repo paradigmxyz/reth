@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use super::{
     Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DbTx, DbTxGAT,
-    DbTxMut, DbTxMutGAT, DupSort, Error, Table, Walker,
+    DbTxMut, DbTxMutGAT, DupSort, DupWalker, Error, Table, Walker,
 };
 
 /// Mock database used for testing with inner BTreeMap structure
@@ -155,11 +155,14 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn walk_dup(
-        &'tx mut self,
+    fn walk_dup<'cursor>(
+        &'cursor mut self,
         _key: <T>::Key,
         _subkey: <T as DupSort>::SubKey,
-    ) -> Result<super::DupWalker<'tx, T>, super::Error> {
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
