@@ -14,6 +14,7 @@ mod pipeline;
 mod stage;
 mod util;
 
+pub mod stages;
 pub use error::*;
 pub use id::*;
 pub use pipeline::*;
