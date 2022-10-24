@@ -71,6 +71,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-lock"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2503,9 +2509,14 @@ dependencies = [
 name = "reth-headers-downloaders"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "async-trait",
+ "once_cell",
+ "rand",
  "reth-interfaces",
+ "reth-primitives",
  "reth-rpc-types",
+ "tokio",
 ]
 
 [[package]]
