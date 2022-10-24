@@ -14,6 +14,7 @@ mod header;
 mod jsonu256;
 mod log;
 mod receipt;
+mod storage;
 mod transaction;
 
 pub use account::Account;
@@ -23,6 +24,7 @@ pub use header::{Header, HeaderLocked};
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
+pub use storage::StorageEntry;
 pub use transaction::{
     AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
 };

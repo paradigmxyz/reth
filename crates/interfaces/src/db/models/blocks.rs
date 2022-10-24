@@ -22,7 +22,6 @@ pub type HeaderHash = H256;
 ///
 /// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
 #[derive(Debug)]
-#[allow(non_camel_case_types)]
 pub struct BlockNumHash((BlockNumber, BlockHash));
 
 impl BlockNumHash {
