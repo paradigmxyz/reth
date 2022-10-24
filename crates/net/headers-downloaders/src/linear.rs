@@ -57,18 +57,15 @@ impl<'a, C: Consensus, H: HeadersClient> Downloader for LinearDownloader<'a, C, 
         // Header order will be preserved during inserts
         let mut out = vec![];
         loop {
-            let result = self.download_batch(&mut stream, forkchoice, head, out.get(0)).await;
+            let result = self.download_batch(&mut stream, forkchoice, head, out.last()).await;
             match result {
                 Ok(result) => match result {
                     LinearDownloadResult::Batch(mut headers) => {
-                        // TODO: fix
-                        headers.extend_from_slice(&out);
-                        out = headers;
+                        out.extend(headers.into_iter().rev());
                     }
                     LinearDownloadResult::Finished(mut headers) => {
-                        // TODO: fix
-                        headers.extend_from_slice(&out);
-                        out = headers;
+                        out.extend(headers.into_iter().rev());
+                        out.reverse();
                         return Ok(out)
                     }
                     LinearDownloadResult::Ignore => (),
