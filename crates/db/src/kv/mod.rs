@@ -7,7 +7,7 @@ use libmdbx::{
 };
 use reth_interfaces::db::{
     tables::{TableType, TABLES},
-    Database, Error,
+    Database, DatabaseGAT, Error,
 };
 use std::{ops::Deref, path::Path};
 
@@ -32,15 +32,17 @@ pub struct Env<E: EnvironmentKind> {
     pub inner: Environment<E>,
 }
 
-impl<E: EnvironmentKind> Database for Env<E> {
-    type TX<'a> = tx::Tx<'a, RO, E>;
-    type TXMut<'a> = tx::Tx<'a, RW, E>;
+impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
+    type TX = tx::Tx<'a, RO, E>;
+    type TXMut = tx::Tx<'a, RW, E>;
+}
 
-    fn tx(&self) -> Result<Self::TX<'_>, Error> {
+impl<E: EnvironmentKind> Database for Env<E> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
         Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::Internal(e.into()))?))
     }
 
-    fn tx_mut(&self) -> Result<Self::TXMut<'_>, Error> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
         Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::Internal(e.into()))?))
     }
 }
@@ -202,5 +204,38 @@ mod tests {
         let result = env.view(|tx| tx.get::<PlainState>(key).expect(ERROR_GET)).expect(ERROR_GET);
 
         assert!(result == Some(value))
+    }
+}
+
+#[cfg(test)]
+// This ensures that we can use the GATs in the downstream staged exec pipeline.
+mod gat_tests {
+    use super::*;
+    use reth_interfaces::db::{mock::DatabaseMock, DBContainer};
+
+    #[async_trait::async_trait]
+    trait Stage<DB: Database> {
+        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> ();
+    }
+
+    struct MyStage<'a, DB>(&'a DB);
+
+    #[async_trait::async_trait]
+    impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
+        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
+            let _tx = db.commit().unwrap();
+            ()
+        }
+    }
+
+    #[test]
+    #[should_panic] // no tokio runtime configured
+    fn can_spawn() {
+        let db = DatabaseMock::default();
+        tokio::spawn(async move {
+            let mut container = DBContainer::new(&db).unwrap();
+            let mut stage = MyStage(&db);
+            let _ = stage.run(&mut container);
+        });
     }
 }
