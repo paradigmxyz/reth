@@ -1,7 +1,7 @@
 //! Declaration of all Database tables.
 
 use crate::db::models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock};
-use reth_primitives::{Account, Address, BlockNumber, Header, Receipt};
+use reth_primitives::{Account, Address, BlockNumber, Header, IntegerList, Receipt};
 
 /// Enum for the type of table present in libmdbx.
 #[derive(Debug)]
@@ -97,6 +97,12 @@ table!(Config => ConfigKey => ConfigValue);
 
 table!(SyncStage => StageId => BlockNumber);
 
+///
+/// Alias Types
+
+type TxNumberList = IntegerList;
+type TxNumber = u64;
+
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
@@ -107,9 +113,7 @@ type ConfigValue = Vec<u8>;
 type BlockNumHashTxNumber = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
-type TxNumber = u64; // TODO check size
 type PlainStateKey = Address; // TODO new type will have to account for address_incarna_skey as well
-type TxNumberList = Vec<u8>;
 #[allow(non_camel_case_types)]
 type Address_StorageKey = Vec<u8>;
 type AccountBeforeTx = Vec<u8>;
