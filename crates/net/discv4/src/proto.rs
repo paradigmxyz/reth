@@ -9,32 +9,7 @@ use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     SecretKey, SECP256K1,
 };
-use std::{
-    net::{IpAddr, Ipv6Addr},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
-// pub const PING_INTERVAL: Duration = Duration::from_secs(10);
-pub const FIND_NODE_TIMEOUT: Duration = Duration::from_secs(10);
-pub const NEIGHBOURS_EXPIRY_TIME: Duration = Duration::from_secs(30);
-
-/// The size of the datagram is limited, so we chunk here the max number that fit in the datagram is
-/// 12: (MAX_PACKET_SIZE - (header + expire + rlp overhead) / rlplength(NodeRecord). The unhappy
-/// case is all IPV6 IPS
-pub const MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = 12usize;
-
-pub(crate) fn ping_expiry() -> u64 {
-    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + PING_TIMEOUT).as_secs()
-}
-
-pub(crate) fn find_node_expiry() -> u64 {
-    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + FIND_NODE_TIMEOUT).as_secs()
-}
-
-pub(crate) fn send_neighbours_expiry() -> u64 {
-    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + NEIGHBOURS_EXPIRY_TIME).as_secs()
-}
+use std::net::{IpAddr, Ipv6Addr};
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
@@ -345,6 +320,7 @@ impl Decodable for Octets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS;
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
 
@@ -394,7 +370,7 @@ mod tests {
             }),
             3 => Message::FindNode(FindNode { id: NodeId::random(), expire: rng.gen() }),
             4 => {
-                let num: usize = rng.gen_range(1..=MAX_DATAGRAM_NEIGHBOUR_RECORDS);
+                let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
                 Message::Neighbours(Neighbours {
                     nodes: std::iter::repeat_with(|| rng_record(rng)).take(num).collect(),
                     expire: rng.gen(),
@@ -482,7 +458,7 @@ mod tests {
         for _ in 0..1000 {
             let msg = Message::Neighbours(Neighbours {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
-                    .take(MAX_DATAGRAM_NEIGHBOUR_RECORDS)
+                    .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS)
                     .collect(),
                 expire: rng.gen(),
             });
@@ -493,7 +469,7 @@ mod tests {
 
             let mut neighbours = Neighbours {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
-                    .take(MAX_DATAGRAM_NEIGHBOUR_RECORDS - 1)
+                    .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS - 1)
                     .collect(),
                 expire: rng.gen(),
             };
