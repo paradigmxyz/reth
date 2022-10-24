@@ -2,7 +2,7 @@
 
 use crate::{kv::cursor::Cursor, utils::decode_one};
 use libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use reth_interfaces::db::{DbTx, DbTxMut, DupSort, Encode, Error, Table};
+use reth_interfaces::db::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT, DupSort, Encode, Error, Table};
 use std::marker::PhantomData;
 
 /// Wrapper for the libmdbx transaction.
@@ -39,18 +39,24 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     }
 }
 
-impl<'env, K: TransactionKind, E: EnvironmentKind> DbTx<'env> for Tx<'env, K, E> {
-    /// Cursor GAT
-    type Cursor<T: Table> = Cursor<'env, K, T>;
-    /// DupCursor GAT
-    type DupCursor<T: DupSort> = Cursor<'env, K, T>;
-    /// Iterate over read only values in database.
-    fn cursor<T: Table>(&self) -> Result<Self::Cursor<T>, Error> {
+impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxGAT<'a> for Tx<'_, K, E> {
+    type Cursor<T: Table> = Cursor<'a, K, T>;
+    type DupCursor<T: DupSort> = Cursor<'a, K, T>;
+}
+
+impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E> {
+    type CursorMut<T: Table> = Cursor<'a, RW, T>;
+    type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
+}
+
+impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
+    // Iterate over read only values in database.
+    fn cursor<T: Table>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::Cursor<T>, Error> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup<T: DupSort>(&self) -> Result<Self::DupCursor<T>, Error> {
+    fn cursor_dup<T: DupSort>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::DupCursor<T>, Error> {
         self.new_cursor()
     }
 
@@ -70,11 +76,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> DbTx<'env> for Tx<'env, K, E>
     }
 }
 
-impl<'env, E: EnvironmentKind> DbTxMut<'env> for Tx<'env, RW, E> {
-    type CursorMut<T: Table> = Cursor<'env, RW, T>;
-
-    type DupCursorMut<T: DupSort> = Cursor<'env, RW, T>;
-
+impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(
@@ -111,11 +113,13 @@ impl<'env, E: EnvironmentKind> DbTxMut<'env> for Tx<'env, RW, E> {
         Ok(())
     }
 
-    fn cursor_mut<T: Table>(&self) -> Result<Self::CursorMut<T>, Error> {
+    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error> {
         self.new_cursor()
     }
 
-    fn cursor_dup_mut<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, Error> {
+    fn cursor_dup_mut<T: DupSort>(
+        &self,
+    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error> {
         self.new_cursor()
     }
 }
