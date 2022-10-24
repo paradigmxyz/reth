@@ -95,6 +95,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29d47fbf90d5149a107494b15a7dc8d69b351be2db3bb9691740e88ec17fd880"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,6 +114,12 @@ name = "arrayvec"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
+
+[[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
 name = "async-lock"
@@ -833,19 +848,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "data-encoding"
-version = "2.3.2"
+name = "dashmap"
+version = "5.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
-
-[[package]]
-name = "delay_map"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6716ce9729be9628979ae1ff63e8bc8b7ad53b5472a2633bf079607a55328d36"
+checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
 dependencies = [
- "futures",
- "tokio-util 0.6.10",
+ "cfg-if",
+ "hashbrown",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -859,25 +871,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_builder"
-version = "0.9.0"
+name = "derive_arbitrary"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2658621297f2cf68762a6f7dc0bb7e1ff2cfd6583daef8ee0fed6f7ec468ec0"
+checksum = "4903dff04948f22033ca30232ab8eca2c3fc4c913a8b6a34ee5199699814817f"
 dependencies = [
- "darling 0.10.2",
- "derive_builder_core",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "derive_builder_core"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2791ea3e372c8495c0bc2033991d76b512cd799d07491fbd6890124db9458bef"
-dependencies = [
- "darling 0.10.2",
  "proc-macro2",
  "quote",
  "syn",
@@ -2202,6 +2200,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b9b8653cec6897f73b519a43fba5ee3d50f62fe9af80b428accdcc093b4a849"
+dependencies = [
+ "ahash",
+ "metrics-macros",
+ "portable-atomic",
+]
+
+[[package]]
+name = "metrics-macros"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "731f8ecebd9f3a4aa847dfe75455e4757a45da40a7793d2f0b1f9b6ed18b23f3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2605,16 +2625,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "polyval"
-version = "0.5.3"
+name = "portable-atomic"
+version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8419d2b623c7c0896ff2d5d96e2cb4ede590fed28fcc34934f4c33c036e620a1"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "opaque-debug",
- "universal-hash",
-]
+checksum = "15eb2c6e362923af47e13c23ca5afb859e83d54452c55b0b9ac763b8f7c1ac16"
 
 [[package]]
 name = "postcard"
@@ -3057,6 +3071,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-headers-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "once_cell",
+ "rand",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serial_test",
+ "tokio",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0"
 dependencies = [
@@ -3064,15 +3093,18 @@ dependencies = [
  "auto_impl",
  "bytes",
  "eyre",
+ "futures",
  "heapless",
  "parity-scale-codec",
  "postcard",
+ "rand",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
  "test-fuzz",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3093,6 +3125,7 @@ dependencies = [
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "bytes",
  "crc",
  "ethers-core",
@@ -3103,6 +3136,7 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+ "sucds",
  "thiserror",
  "tiny-keccak 0.3.0",
 ]
@@ -3175,6 +3209,7 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "async-trait",
+ "metrics",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
@@ -3610,6 +3645,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial_test"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92761393ee4dc3ff8f4af487bd58f4307c9329bbedea02cac0089ad9c411e153"
+dependencies = [
+ "dashmap",
+ "futures",
+ "lazy_static",
+ "log",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b6f5d1c3087fb119617cff2966fe3808a80e5eb59a8c1601d5994d66f4346a5"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "sha-1"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3840,6 +3901,15 @@ name = "subtle"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
+
+[[package]]
+name = "sucds"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c1c7f814471a34d2355f9eb25ef3517ec491ac243612b1c83137739998c5444"
+dependencies = [
+ "anyhow",
+]
 
 [[package]]
 name = "syn"
@@ -4094,6 +4164,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

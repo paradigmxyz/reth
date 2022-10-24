@@ -198,6 +198,13 @@ impl Deref for HeaderLocked {
 }
 
 impl HeaderLocked {
+    /// Construct a new locked header.
+    /// Applicable when hash is known from
+    /// the database provided it's not corrupted.
+    pub fn new(header: Header, hash: H256) -> Self {
+        Self { header, hash }
+    }
+
     /// Extract raw header that can be modified.
     pub fn unlock(self) -> Header {
         self.header
