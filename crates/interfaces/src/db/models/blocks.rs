@@ -21,7 +21,7 @@ pub type HeaderHash = H256;
 /// element as BlockNumber, helps out with querying/sorting.
 ///
 /// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub struct BlockNumHash((BlockNumber, BlockHash));
 
@@ -58,7 +58,9 @@ impl Decode for BlockNumHash {
         let value: bytes::Bytes = value.into();
 
         let num = u64::from_be_bytes(
-            value.as_ref().try_into().map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
+            value.as_ref()[..8]
+                .try_into()
+                .map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
         );
         let hash = H256::decode(value.slice(8..))?;
 

@@ -1,5 +1,7 @@
 //! Cursor wrapper for libmdbx-sys.
 
+use std::marker::PhantomData;
+
 use crate::utils::*;
 use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 use reth_interfaces::db::{
@@ -67,14 +69,20 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         decode!(self.inner.get_current())
     }
 
-    fn walk(&'tx mut self, start_key: <T as Table>::Key) -> Result<Walker<'tx, T>, Error> {
+    fn walk<'cursor>(
+        &'cursor mut self,
+        start_key: T::Key,
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
         let start = self
             .inner
             .set_range(start_key.encode().as_ref())
             .map_err(|e| Error::Internal(e.into()))?
             .map(decoder::<T>);
 
-        Ok(Walker::<'tx, T> { cursor: self, start })
+        Ok(Walker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
     }
 }
 
@@ -99,14 +107,18 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     }
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
-    fn walk_dup(&'tx mut self, key: T::Key, subkey: T::SubKey) -> Result<DupWalker<'tx, T>, Error> {
+    fn walk_dup<'cursor>(
+        &'cursor mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error> {
         let start = self
             .inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
             .map_err(|e| Error::Internal(e.into()))?
             .map(decode_one::<T>);
 
-        Ok(DupWalker::<'tx, T> { cursor: self, start })
+        Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
     }
 }
 
