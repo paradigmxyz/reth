@@ -384,7 +384,6 @@ mod tests {
                     let headers: Vec<_> = chunk.map(|h| h.unlock()).collect();
                     CLIENT.send_header_response(id, headers);
                 } else {
-                    println!("SENDING HEAD");
                     CLIENT.send_header_response(id, vec![head.clone().unlock()])
                 }
             })
