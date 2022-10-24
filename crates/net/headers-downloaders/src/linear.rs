@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{borrow::Borrow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use reth_interfaces::{
@@ -13,11 +13,11 @@ use reth_rpc_types::engine::ForkchoiceState;
 
 /// Download headers in batches
 #[derive(Debug)]
-pub struct LinearDownloader<'a, C, H> {
+pub struct LinearDownloader<C, H> {
     /// The consensus client
-    consensus: &'a C,
+    consensus: Arc<C>,
     /// The headers client
-    client: &'a H,
+    client: Arc<H>,
     /// The batch size per one request
     pub batch_size: u64,
     /// A single request timeout
@@ -27,16 +27,16 @@ pub struct LinearDownloader<'a, C, H> {
 }
 
 #[async_trait]
-impl<'a, C: Consensus, H: HeadersClient> Downloader for LinearDownloader<'a, C, H> {
+impl<C: Consensus, H: HeadersClient> Downloader for LinearDownloader<C, H> {
     type Consensus = C;
     type Client = H;
 
     fn consensus(&self) -> &Self::Consensus {
-        self.consensus
+        self.consensus.borrow()
     }
 
     fn client(&self) -> &Self::Client {
-        self.client
+        self.client.borrow()
     }
 
     /// The request timeout
@@ -45,7 +45,8 @@ impl<'a, C: Consensus, H: HeadersClient> Downloader for LinearDownloader<'a, C, 
     }
 
     /// Download headers in batches with retries.
-    /// Returns the header collection in sorted ascending order
+    /// Returns the header collection in sorted descending
+    /// order from chain tip to local head
     async fn download(
         &self,
         head: &HeaderLocked,
@@ -61,11 +62,10 @@ impl<'a, C: Consensus, H: HeadersClient> Downloader for LinearDownloader<'a, C, 
             match result {
                 Ok(result) => match result {
                     LinearDownloadResult::Batch(mut headers) => {
-                        out.extend(headers.into_iter().rev());
+                        out.append(&mut headers);
                     }
                     LinearDownloadResult::Finished(mut headers) => {
-                        out.extend(headers.into_iter().rev());
-                        out.reverse();
+                        out.append(&mut headers);
                         return Ok(out)
                     }
                     LinearDownloadResult::Ignore => (),
@@ -90,12 +90,12 @@ pub enum LinearDownloadResult {
     Ignore,
 }
 
-impl<'a, C: Consensus, H: HeadersClient> LinearDownloader<'a, C, H> {
+impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
     async fn download_batch(
-        &'a self,
-        stream: &'a mut HeadersStream,
-        forkchoice: &'a ForkchoiceState,
-        head: &'a HeaderLocked,
+        &self,
+        stream: &mut HeadersStream,
+        forkchoice: &ForkchoiceState,
+        head: &HeaderLocked,
         earliest: Option<&HeaderLocked>,
     ) -> Result<LinearDownloadResult, DownloadError> {
         // Request headers starting from tip or earliest cached
@@ -114,7 +114,7 @@ impl<'a, C: Consensus, H: HeadersClient> LinearDownloader<'a, C, H> {
                 return Ok(LinearDownloadResult::Finished(out))
             }
 
-            match out.first().or(earliest) {
+            match out.last().or(earliest) {
                 Some(header) => {
                     match self.validate(header, &parent) {
                         // ignore mismatched headers
@@ -135,7 +135,7 @@ impl<'a, C: Consensus, H: HeadersClient> LinearDownloader<'a, C, H> {
                 _ => (),
             };
 
-            out.insert(0, parent);
+            out.push(parent);
         }
 
         Ok(LinearDownloadResult::Batch(out))
@@ -186,11 +186,11 @@ impl LinearDownloadBuilder {
 
     /// Build [LinearDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<'a, C: Consensus, H: HeadersClient>(
+    pub fn build<C: Consensus, H: HeadersClient>(
         self,
-        consensus: &'a C,
-        client: &'a H,
-    ) -> LinearDownloader<'a, C, H> {
+        consensus: Arc<C>,
+        client: Arc<H>,
+    ) -> LinearDownloader<C, H> {
         LinearDownloader {
             consensus,
             client,
@@ -215,14 +215,15 @@ mod tests {
     use serial_test::serial;
     use tokio::sync::oneshot::{self, error::TryRecvError};
 
-    static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::default());
-    static CONSENSUS_FAIL: Lazy<TestConsensus> = Lazy::new(|| {
+    static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
+    static CONSENSUS_FAIL: Lazy<Arc<TestConsensus>> = Lazy::new(|| {
         let mut consensus = TestConsensus::default();
         consensus.set_fail_validation(true);
-        consensus
+        Arc::new(consensus)
     });
 
-    static CLIENT: Lazy<TestHeadersClient> = Lazy::new(|| TestHeadersClient::default());
+    static CLIENT: Lazy<Arc<TestHeadersClient>> =
+        Lazy::new(|| Arc::new(TestHeadersClient::default()));
 
     #[tokio::test]
     #[serial]
@@ -230,8 +231,9 @@ mod tests {
         let retries = 5;
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader =
-                LinearDownloadBuilder::new().retries(retries).build(&*CONSENSUS, &*CLIENT);
+            let downloader = LinearDownloadBuilder::new()
+                .retries(retries)
+                .build(CONSENSUS.clone(), CLIENT.clone());
             let result =
                 downloader.download(&HeaderLocked::default(), &ForkchoiceState::default()).await;
             tx.send(result).expect("failed to forward download response");
@@ -253,8 +255,9 @@ mod tests {
         let retries = 5;
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader =
-                LinearDownloadBuilder::new().retries(retries).build(&*CONSENSUS, &*CLIENT);
+            let downloader = LinearDownloadBuilder::new()
+                .retries(retries)
+                .build(CONSENSUS.clone(), CLIENT.clone());
             let result =
                 downloader.download(&HeaderLocked::default(), &ForkchoiceState::default()).await;
             tx.send(result).expect("failed to forward download response");
@@ -287,7 +290,8 @@ mod tests {
 
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new().build(&*CONSENSUS_FAIL, &*CLIENT);
+            let downloader =
+                LinearDownloadBuilder::new().build(CONSENSUS_FAIL.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
             let result = downloader.download(&HeaderLocked::default(), &forkchoice).await;
             tx.send(result).expect("failed to forward download response");
@@ -323,7 +327,7 @@ mod tests {
         let chain_head = head.clone();
         let (tx, mut rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new().build(&*CONSENSUS, &*CLIENT);
+            let downloader = LinearDownloadBuilder::new().build(CONSENSUS.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
             let result = downloader.download(&chain_head, &forkchoice).await;
             tx.send(result).expect("failed to forward download response");
@@ -351,17 +355,17 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn download_returns_headers_asc() {
+    async fn download_returns_headers_desc() {
         let (start, end) = (100, 200);
         let head = gen_random_header(start, None);
-        let headers = gen_block_range(start + 1..end, head.hash());
-        let tip = headers.last().unwrap();
+        let mut headers = gen_block_range(start + 1..end, head.hash());
+        headers.reverse();
 
-        let tip_hash = tip.hash();
+        let tip_hash = headers.first().unwrap().hash();
         let chain_head = head.clone();
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new().build(&*CONSENSUS, &*CLIENT);
+            let downloader = LinearDownloadBuilder::new().build(CONSENSUS.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
             let result = downloader.download(&chain_head, &forkchoice).await;
             tx.send(result).expect("failed to forward download response");
@@ -369,13 +373,12 @@ mod tests {
 
         let mut idx = 0;
         let chunk_size = 10;
-        let chunk_iter = headers.clone().into_iter().rev();
         // `usize::div_ceil` is unstable. ref: https://github.com/rust-lang/rust/issues/88581
         let count = (headers.len() + chunk_size - 1) / chunk_size;
         CLIENT
             .on_header_request(count + 1, |id, _req| {
                 let mut chunk =
-                    chunk_iter.clone().skip(chunk_size * idx).take(chunk_size).peekable();
+                    headers.iter().skip(chunk_size * idx).take(chunk_size).cloned().peekable();
                 idx += 1;
                 if chunk.peek().is_some() {
                     let headers: Vec<_> = chunk.map(|h| h.unlock()).collect();
@@ -389,6 +392,7 @@ mod tests {
         let result = rx.await;
         assert_matches!(result, Ok(Ok(_)));
         let result = result.unwrap().unwrap();
+        assert_eq!(result.len(), headers.len());
         assert_eq!(result, headers);
     }
 
