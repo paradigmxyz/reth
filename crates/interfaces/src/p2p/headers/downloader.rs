@@ -50,15 +50,16 @@ pub enum DownloadError {
 }
 
 impl DownloadError {
-    /// Returns bool indicating whether this error is retryable or fatal
+    /// Returns bool indicating whether this error is retryable or fatal, in the cases
+    /// where the peer responds with no headers, or times out.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, DownloadError::NoHeaderResponse { .. })
+        matches!(self, DownloadError::NoHeaderResponse { .. } | DownloadError::Timeout { .. })
     }
 }
 
 /// The header downloading strategy
 #[async_trait]
-pub trait Downloader: Sync + Send + Debug {
+pub trait Downloader: Sync + Send {
     /// The Consensus used to verify block validity when
     /// downloading
     type Consensus: Consensus;
