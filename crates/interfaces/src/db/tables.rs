@@ -1,7 +1,12 @@
 //! Declaration of all Database tables.
 
-use crate::db::models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock};
-use reth_primitives::{Account, Address, BlockNumber, Header, IntegerList, Receipt};
+use crate::db::{
+    models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+    DupSort,
+};
+use reth_primitives::{
+    Account, Address, BlockNumber, Header, IntegerList, Receipt, StorageEntry, H256,
+};
 
 /// Enum for the type of table present in libmdbx.
 #[derive(Debug)]
@@ -12,7 +17,7 @@ pub enum TableType {
     DupSort,
 }
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 18] = [
+pub const TABLES: [(TableType, &str); 19] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -23,7 +28,8 @@ pub const TABLES: [(TableType, &str); 18] = [
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, Receipts::const_name()),
     (TableType::Table, Logs::const_name()),
-    (TableType::Table, PlainState::const_name()),
+    (TableType::Table, PlainAccountState::const_name()),
+    (TableType::DupSort, PlainStorageState::const_name()),
     (TableType::Table, AccountHistory::const_name()),
     (TableType::Table, StorageHistory::const_name()),
     (TableType::DupSort, AccountChangeSet::const_name()),
@@ -67,6 +73,15 @@ macro_rules! table {
     };
 }
 
+macro_rules! dupsort {
+    ($name:ident => $key:ty => [$subkey:ty] $value:ty) => {
+        table!($name => $key => $value);
+        impl DupSort for $name {
+            type SubKey = $subkey;
+        }
+    };
+}
+
 //
 //  TABLE DEFINITIONS
 //
@@ -84,7 +99,8 @@ table!(Transactions => TxNumber => RlpTxBody); // Canonical only
 table!(Receipts => TxNumber => Receipt); // Canonical only
 table!(Logs => TxNumber => Receipt); // Canonical only
 
-table!(PlainState => PlainStateKey => Account);
+table!(PlainAccountState => Address => Account);
+dupsort!(PlainStorageState => Address => [H256] StorageEntry);
 
 table!(AccountHistory => Address => TxNumberList);
 table!(StorageHistory => Address_StorageKey => TxNumberList);
@@ -113,7 +129,6 @@ type ConfigValue = Vec<u8>;
 type BlockNumHashTxNumber = Vec<u8>;
 type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
-type PlainStateKey = Address; // TODO new type will have to account for address_incarna_skey as well
 #[allow(non_camel_case_types)]
 type Address_StorageKey = Vec<u8>;
 type AccountBeforeTx = Vec<u8>;
