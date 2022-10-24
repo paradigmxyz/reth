@@ -136,10 +136,10 @@ mod tests {
     use super::{test_utils, Env, EnvKind};
     use libmdbx::{NoWriteMap, WriteMap};
     use reth_interfaces::db::{
-        tables::{Headers, PlainState},
-        Database, DbCursorRO, DbTx, DbTxMut,
+        tables::{Headers, PlainAccountState, PlainStorageState},
+        Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
     };
-    use reth_primitives::{Account, Address, Header, H256, U256};
+    use reth_primitives::{Account, Address, Header, StorageEntry, H256, U256};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -217,7 +217,7 @@ mod tests {
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainState>(key, value).expect(ERROR_PUT);
+                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
                 200
             });
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
@@ -226,9 +226,43 @@ mod tests {
         let env = Env::<WriteMap>::open(&path, EnvKind::RO).expect(ERROR_DB_CREATION);
 
         // GET
-        let result = env.view(|tx| tx.get::<PlainState>(key).expect(ERROR_GET)).expect(ERROR_GET);
+        let result =
+            env.view(|tx| tx.get::<PlainAccountState>(key).expect(ERROR_GET)).expect(ERROR_GET);
 
         assert!(result == Some(value))
+    }
+
+    #[test]
+    fn db_dup_sort() {
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value00.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT (2,2)
+        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value22.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT (1,1)
+        let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value11.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // GET DUPSORT
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+
+            // Notice that value11 and value22 have been ordered in the DB.
+            assert!(Some(value00) == cursor.next_dup_val().unwrap());
+            assert!(Some(value11) == cursor.next_dup_val().unwrap());
+            assert!(Some(value22) == cursor.next_dup_val().unwrap());
+        }
     }
 }
 
