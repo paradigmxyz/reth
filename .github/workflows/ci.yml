@@ -64,7 +64,6 @@ jobs:
     runs-on: ubuntu-latest
     # nightly rust might break from time to time
     continue-on-error: true
-    needs: [test]
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
