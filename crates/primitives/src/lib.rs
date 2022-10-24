@@ -10,7 +10,9 @@
 mod account;
 mod block;
 mod chain;
+mod error;
 mod header;
+mod integer_list;
 mod jsonu256;
 mod log;
 mod receipt;
@@ -20,6 +22,7 @@ pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
 pub use header::{Header, HeaderLocked};
+pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
