@@ -17,8 +17,18 @@ name: deny
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Check
         uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check ${{ matrix.checks }}
