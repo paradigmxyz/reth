@@ -25,7 +25,7 @@ pub struct ExecutionPayload {
 }
 
 /// This structure encapsulates the fork choice state
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkchoiceState {
     pub head_block_hash: H256,
