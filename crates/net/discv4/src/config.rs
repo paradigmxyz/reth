@@ -1,7 +1,9 @@
+use crate::node::NodeRecord;
 use discv5::PermitBanList;
 ///! A set of configuration parameters to tune the discovery protocol.
-// This basis of this file has been taken from the discv4 codebase:
-// https://github.com/sigp/discv4
+// This basis of this file has been taken from the discv5 codebase:
+// https://github.com/sigp/discv5
+use std::collections::HashSet;
 use std::time::Duration;
 
 /// Configuration parameters that define the performance of the discovery network.
@@ -27,6 +29,8 @@ pub struct Discv4Config {
     /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
     /// the filter will last indefinitely. Default is 1 hour.
     pub ban_duration: Option<Duration>,
+    /// Nodes to boot from.
+    pub bootstrap_nodes: HashSet<NodeRecord>,
 }
 
 impl Discv4Config {
@@ -47,6 +51,7 @@ impl Default for Discv4Config {
             neighbours_timeout: Duration::from_secs(30),
             permit_ban_list: PermitBanList::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
+            bootstrap_nodes: Default::default(),
         }
     }
 }
@@ -93,6 +98,18 @@ impl Discv4ConfigBuilder {
     /// the filter will last indefinitely. Default is 1 hour.
     pub fn ban_duration(&mut self, ban_duration: Option<Duration>) -> &mut Self {
         self.config.ban_duration = ban_duration;
+        self
+    }
+
+    /// Adds a boot node
+    pub fn add_boot_node(&mut self, node: NodeRecord) -> &mut Self {
+        self.config.bootstrap_nodes.insert(node);
+        self
+    }
+
+    /// Adds multiple boot nodes
+    pub fn add_boot_nodes(&mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> &mut Self {
+        self.config.bootstrap_nodes.extend(nodes);
         self
     }
 

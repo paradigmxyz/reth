@@ -1,9 +1,9 @@
 use crate::{proto::Octets, NodeId};
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 use generic_array::GenericArray;
 use reth_primitives::keccak256;
 use reth_rlp::{Decodable, DecodeError, Encodable};
-use reth_rlp_derive::{RlpDecodable, RlpEncodable};
+use reth_rlp_derive::RlpEncodable;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
@@ -35,7 +35,7 @@ pub(crate) fn kad_key(node: NodeId) -> discv5::Key<NodeKey> {
 }
 
 /// Represents a ENR in discv4
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NodeRecord {
     pub address: IpAddr,
     pub tcp_port: u16,
@@ -44,6 +44,12 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
+    /// Creates a new record
+    #[allow(unused)]
+    pub(crate) fn new(addr: SocketAddr, id: NodeId) -> Self {
+        Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
+    }
+
     /// The TCP socket address of this node
     #[must_use]
     pub fn tcp_addr(&self) -> SocketAddr {
@@ -103,29 +109,52 @@ impl FromStr for NodeRecord {
 
 impl Encodable for NodeRecord {
     fn encode(&self, out: &mut dyn BufMut) {
+        #[derive(RlpEncodable)]
+        struct EncodeNode {
+            octets: Octets,
+            udp_port: u16,
+            tcp_port: u16,
+            id: NodeId,
+        }
+
         let octets = match self.address {
             IpAddr::V4(addr) => Octets::V4(addr.octets()),
             IpAddr::V6(addr) => Octets::V6(addr.octets()),
         };
         let node =
-            NodeOctets { octets, udp_port: self.udp_port, tcp_port: self.tcp_port, id: self.id };
+            EncodeNode { octets, udp_port: self.udp_port, tcp_port: self.tcp_port, id: self.id };
         node.encode(out)
     }
 }
 
 impl Decodable for NodeRecord {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let NodeOctets { octets, udp_port, tcp_port, id } = NodeOctets::decode(buf)?;
-        Ok(Self { address: octets.into(), tcp_port, udp_port, id })
+        let b = &mut &**buf;
+        let rlp_head = reth_rlp::Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString)
+        }
+        let started_len = b.len();
+        let octets = Octets::decode(b)?;
+        let this = Self {
+            address: octets.into(),
+            udp_port: Decodable::decode(b)?,
+            tcp_port: Decodable::decode(b)?,
+            id: Decodable::decode(b)?,
+        };
+        // the ENR record can contain additional entries that we skip
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(DecodeError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+        Ok(this)
     }
-}
-
-#[derive(RlpDecodable, RlpEncodable)]
-struct NodeOctets {
-    octets: Octets,
-    udp_port: u16,
-    tcp_port: u16,
-    id: NodeId,
 }
 
 #[cfg(test)]

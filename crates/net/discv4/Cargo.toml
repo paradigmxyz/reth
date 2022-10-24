@@ -33,7 +33,10 @@ tracing = "0.1"
 bytes = "1.2"
 thiserror = "1.0"
 url = "2.3"
+hex = "0.4"
+public-ip = "0.2"
 
 [dev-dependencies]
 rand = "0.8"
 tokio = { version = "1", features = ["full"] }
+tracing-test = "0.2"

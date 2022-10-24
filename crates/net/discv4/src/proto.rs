@@ -14,6 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 // Note: this is adapted from https://github.com/vorot93/discv4
 
 /// Id for message variants.
+#[derive(Debug)]
 #[repr(u8)]
 pub enum MessageId {
     Ping = 1,
@@ -48,6 +49,16 @@ pub enum Message {
 // === impl Message ===
 
 impl Message {
+    /// Returns the id for this type
+    pub fn msg_type(&self) -> MessageId {
+        match self {
+            Message::Ping(_) => MessageId::Ping,
+            Message::Pong(_) => MessageId::Pong,
+            Message::FindNode(_) => MessageId::FindNode,
+            Message::Neighbours(_) => MessageId::Neighbours,
+        }
+    }
+
     /// Encodes the UDP datagram, See <https://github.com/ethereum/devp2p/blob/master/discv4.md#wire-protocol>
     ///
     /// The datagram is `header || payload`
@@ -95,7 +106,6 @@ impl Message {
         datagram.extend_from_slice(hash.as_bytes());
 
         datagram.unsplit(sig_bytes);
-
         (datagram.freeze(), hash)
     }
 
@@ -138,10 +148,6 @@ impl Message {
             MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
         };
 
-        if !payload.is_empty() {
-            return Err(DecodeError::UnexpectedLength.into())
-        }
-
         Ok(Packet { msg, node_id, hash: header_hash })
     }
 }
@@ -161,22 +167,49 @@ pub struct NodeEndpoint {
     pub udp_port: u16,
     pub tcp_port: u16,
 }
-
 impl Decodable for NodeEndpoint {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let Point { octets, udp_port, tcp_port } = Point::decode(buf)?;
-
-        Ok(Self { address: octets.into(), udp_port, tcp_port })
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString)
+        }
+        let started_len = b.len();
+        let octets = Octets::decode(b)?;
+        let this = Self {
+            address: octets.into(),
+            udp_port: Decodable::decode(b)?,
+            tcp_port: Decodable::decode(b)?,
+        };
+        // the ENR record can contain additional entries that we skip
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(DecodeError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+        Ok(this)
     }
 }
 
 impl Encodable for NodeEndpoint {
     fn encode(&self, out: &mut dyn BufMut) {
+        #[derive(RlpEncodable)]
+        struct RlpEndpoint {
+            octets: Octets,
+            udp_port: u16,
+            tcp_port: u16,
+        }
+
         let octets = match self.address {
             IpAddr::V4(addr) => Octets::V4(addr.octets()),
             IpAddr::V6(addr) => Octets::V6(addr.octets()),
         };
-        let p = Point { octets, udp_port: self.udp_port, tcp_port: self.tcp_port };
+        let p = RlpEndpoint { octets, udp_port: self.udp_port, tcp_port: self.tcp_port };
         p.encode(out)
     }
 }
@@ -230,37 +263,70 @@ impl Encodable for Ping {
 
 impl Decodable for Ping {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        #[derive(RlpDecodable)]
-        struct V4PingMessage {
-            _version: u32,
-            from: NodeEndpoint,
-            to: NodeEndpoint,
-            expire: u64,
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString)
         }
-
-        let ping = V4PingMessage::decode(buf)?;
-
-        Ok(Ping { from: ping.from, to: ping.to, expire: ping.expire })
+        let started_len = b.len();
+        let _version = u32::decode(b)?;
+        let this = Self {
+            from: Decodable::decode(b)?,
+            to: Decodable::decode(b)?,
+            expire: Decodable::decode(b)?,
+        };
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(DecodeError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+        Ok(this)
     }
 }
 
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+// #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct Pong {
     pub to: NodeEndpoint,
     pub echo: H256,
     pub expire: u64,
 }
 
-/// Helper type for rlp codec
-#[derive(RlpDecodable, RlpEncodable)]
-struct Point {
-    octets: Octets,
-    udp_port: u16,
-    tcp_port: u16,
+impl Decodable for Pong {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString)
+        }
+        let started_len = b.len();
+        let this = Self {
+            to: Decodable::decode(b)?,
+            echo: Decodable::decode(b)?,
+            expire: Decodable::decode(b)?,
+        };
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(DecodeError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+        Ok(this)
+    }
 }
 
 /// IpAddr octets
+#[derive(Debug, Copy, Clone)]
 pub(crate) enum Octets {
     V4([u8; 4]),
     V6([u8; 16]),
@@ -480,61 +546,6 @@ mod tests {
         }
     }
 
-    // tests that additional data is considered an error
-    #[test]
-    fn test_too_big_packet() {
-        let mut rng = thread_rng();
-        let msg = rng_message(&mut rng);
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
-
-        let mut datagram = BytesMut::with_capacity(MAX_PACKET_SIZE);
-        let mut sig_bytes = datagram.split_off(H256::len_bytes());
-        let mut payload = sig_bytes.split_off(secp256k1::constants::COMPACT_SIGNATURE_SIZE + 1);
-
-        match msg {
-            Message::Ping(message) => {
-                payload.put_u8(1);
-                message.encode(&mut payload);
-            }
-            Message::Pong(message) => {
-                payload.put_u8(2);
-                message.encode(&mut payload);
-            }
-            Message::FindNode(message) => {
-                payload.put_u8(3);
-                message.encode(&mut payload);
-            }
-            Message::Neighbours(message) => {
-                payload.put_u8(4);
-                message.encode(&mut payload);
-            }
-        }
-        payload.put_u8(42);
-
-        let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
-            &secp256k1::Message::from_slice(keccak256(&payload).as_ref())
-                .expect("is correct MESSAGE_SIZE; qed"),
-            &secret_key,
-        );
-
-        let (rec, sig) = signature.serialize_compact();
-        sig_bytes.extend_from_slice(&sig);
-        sig_bytes.put_u8(rec.to_i32() as u8);
-        sig_bytes.unsplit(payload);
-
-        let hash = keccak256(&sig_bytes);
-        datagram.extend_from_slice(hash.as_bytes());
-
-        datagram.unsplit(sig_bytes);
-
-        match Message::decode(datagram.as_ref()).unwrap_err() {
-            DecodePacketError::Rlp(DecodeError::UnexpectedLength) => {}
-            err => {
-                unreachable!("unexpected err {}", err)
-            }
-        }
-    }
-
     #[test]
     fn test_encode_decode_message() {
         let mut rng = thread_rng();
@@ -550,5 +561,18 @@ mod tests {
             assert_eq!(msg, packet.msg);
             assert_eq!(sender_id, packet.node_id);
         }
+    }
+
+    #[test]
+    fn decode_pong_packet() {
+        let packet = "2ad84c37327a06c2522cf7bc039621da89f68907441b755935bb308dc4cd17d6fe550e90329ad6a516ca7db18e08900067928a0dfa3b5c75d55a42c984497373698d98616662c048983ea85895ea2da765eabeb15525478384e106337bfd8ed50002f3c9843ed8cae682fd1c80a008ad4dead0922211df47593e7d837b2b23d13954285871ca23250ea594993ded84635690e5829670";
+        let data = hex::decode(packet).unwrap();
+        Message::decode(&data).unwrap();
+    }
+    #[test]
+    fn decode_ping_packet() {
+        let packet = "05ae5bf922cf2a93f97632a4ab0943dc252a0dab0c42d86dd62e5d91e1a0966e9b628fbf4763fdfbb928540460b797e6be2e7058a82f6083f6d2e7391bb021741459976d4152aa16bbee0c3609dcfac6668db1ef78b7ee9f8b4ced10dd5ae2900101df04cb8403d12d4f82765f82765fc9843ed8cae6828aa6808463569916829670";
+        let data = hex::decode(packet).unwrap();
+        Message::decode(&data).unwrap();
     }
 }
