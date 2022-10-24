@@ -28,7 +28,7 @@ pub use error::{Error, Result};
 
 #[cfg(any(test, feature = "test-helpers"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
-pub mod test_utils {
+pub mod test_helpers {
     use crate::{
         consensus::{self, Consensus},
         p2p::headers::{
