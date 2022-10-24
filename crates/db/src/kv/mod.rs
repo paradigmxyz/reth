@@ -215,24 +215,18 @@ mod tests {
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-
-        let tx = env.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<PlainStorageState>(key.into(), value00.clone()).expect(ERROR_PUT);
-        tx.commit().expect(ERROR_COMMIT);
+        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value00.clone()).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT (2,2)
         let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
-
-        let tx = env.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<PlainStorageState>(key.into(), value22.clone()).expect(ERROR_PUT);
-        tx.commit().expect(ERROR_COMMIT);
+        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value22.clone()).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT (1,1)
         let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
-
-        let tx = env.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<PlainStorageState>(key.into(), value11.clone()).expect(ERROR_PUT);
-        tx.commit().expect(ERROR_COMMIT);
+        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value11.clone()).expect(ERROR_PUT))
+            .unwrap();
 
         // GET DUPSORT
         {
