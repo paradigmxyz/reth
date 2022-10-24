@@ -18,7 +18,14 @@ pub mod db;
 /// Traits that provide chain access.
 pub mod provider;
 
+/// P2P traits.
+pub mod p2p;
+
 /// Possible errors when interacting with the chain.
 mod error;
 
 pub use error::{Error, Result};
+
+#[cfg(any(test, feature = "test-utils"))]
+/// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
+pub mod test_utils;
