@@ -5,4 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! <reth crate template>
+//! Implements Header Downloader algorithms
+
+/// A Linear downloader implementation.
+pub mod linear;

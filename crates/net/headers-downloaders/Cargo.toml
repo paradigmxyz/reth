@@ -8,7 +8,9 @@ readme = "README.md"
 description = "Implementations of various header downloader"
 
 [dependencies]
+async-trait = "0.1.58"
 reth-interfaces = { path = "../../interfaces" }
+reth-rpc-types = { path = "../rpc-types" }
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-helpers"] }

@@ -2503,7 +2503,9 @@ dependencies = [
 name = "reth-headers-downloaders"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "reth-interfaces",
+ "reth-rpc-types",
 ]
 
 [[package]]
