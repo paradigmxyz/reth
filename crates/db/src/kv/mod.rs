@@ -137,7 +137,7 @@ mod tests {
     use libmdbx::{NoWriteMap, WriteMap};
     use reth_interfaces::db::{
         tables::{Headers, PlainState},
-        Database, DbTx, DbTxMut,DbCursorRO,
+        Database, DbCursorRO, DbTx, DbTxMut,
     };
     use reth_primitives::{Account, Address, Header, H256, U256};
     use std::str::FromStr;
@@ -173,7 +173,6 @@ mod tests {
         let result = tx.get::<Headers>(key.into()).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);
-
     }
 
     #[test]
@@ -183,11 +182,22 @@ mod tests {
         let value = Header::default();
         let key = (1u64, H256::zero());
 
-        // Cursor Walk
+        // PUT
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<Headers>(key.into(), value.clone()).expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        // Cursor
         let tx = env.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor::<Headers>().unwrap();
-        let _walker = cursor.walk(key.into());
 
+        let first = cursor.first().unwrap();
+        assert!(first.is_some(), "First should be our put");
+
+        // Walk
+        let walk = cursor.walk(key.into()).unwrap();
+        let first = walk.into_iter().next().unwrap().unwrap();
+        assert_eq!(first.1, value, "First next should be put value");
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! Cursor wrapper for libmdbx-sys.
 
+use std::marker::PhantomData;
+
 use crate::utils::*;
 use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 use reth_interfaces::db::{
@@ -67,14 +69,20 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         decode!(self.inner.get_current())
     }
 
-    fn walk(&'tx mut self, start_key: <T as Table>::Key) -> Result<Walker<'tx, T>, Error> {
+    fn walk<'cursor>(
+        &'cursor mut self,
+        start_key: T::Key,
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
         let start = self
             .inner
             .set_range(start_key.encode().as_ref())
             .map_err(|e| Error::Internal(e.into()))?
             .map(decoder::<T>);
 
-        Ok(Walker::<'tx, T> { cursor: self, start })
+        Ok(Walker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
     }
 }
 
