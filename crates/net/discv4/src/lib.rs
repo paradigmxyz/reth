@@ -83,13 +83,10 @@ const MAX_NODES_PING: usize = 32;
 /// The size of the datagram is limited, so we chunk here the max number that fit in the datagram is
 /// 12: (MAX_PACKET_SIZE - (header + expire + rlp overhead) / rlplength(NodeRecord). The unhappy
 /// case is all IPV6 IPS
-pub const SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = 12usize;
+const SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = 12usize;
 
 /// The timeout used to identify expired nodes
 const NODE_LAST_SEEN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// The interval to use for rediscovery.
-pub const LOOKUP_INTERVAL: Duration = Duration::from_secs(20);
 
 type EgressSender = mpsc::Sender<(Bytes, SocketAddr)>;
 type EgressReceiver = mpsc::Receiver<(Bytes, SocketAddr)>;
@@ -215,7 +212,12 @@ pub struct Discv4Service {
     /// Sender for sending outgoing messages
     egress: EgressSender,
     /// Buffered pending pings to apply backpressure.
-    adding_nodes: VecDeque<(NodeRecord, PingReason)>,
+    ///
+    /// Lookups behave like bursts of requests: Endpoint proof followed by `FindNode` request. [Recursive lookups](https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup) can trigger multiple followup Pings+FindNode requests.
+    /// A cap on concurrent `Ping` prevents escalation where: A large number of new nodes
+    /// discovered via `FindNode` in a recursive lookup triggers a large number of `Ping`s, and
+    /// followup `FindNode` requests.... Buffering them effectively prevents high `Ping` peaks.
+    queued_pings: VecDeque<(NodeRecord, PingReason)>,
     /// Currently active pings to specific nodes.
     pending_pings: HashMap<NodeId, PingRequest>,
     /// Currently active FindNode requests
@@ -224,16 +226,16 @@ pub struct Discv4Service {
     commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     /// All subscribers for table updates
     update_listeners: Vec<mpsc::Sender<TableUpdate>>,
-    /// The interval when to trigger self lookup
-    self_lookup_interval: Interval,
+    /// The interval when to trigger lookups
+    lookup_interval: Interval,
+    /// Used to rotate targets to lookup
+    lookup_rotator: LookupRotator,
     /// Interval when to recheck active requests
     evict_expired_requests_interval: Interval,
     /// Interval when to resend pings.
     ping_interval: Interval,
     /// How this services is configured
     config: Discv4Config,
-    /// Used to rotate targets to lookup
-    lookup_rotator: LookupRotator,
 }
 
 impl Discv4Service {
@@ -269,7 +271,7 @@ impl Discv4Service {
         // entries first
         let self_lookup_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + config.ping_timeout / 2,
-            LOOKUP_INTERVAL,
+            config.lookup_interval,
         );
 
         let ping_interval = tokio::time::interval(config.ping_interval);
@@ -287,14 +289,14 @@ impl Discv4Service {
             tasks,
             ingress: ingress_rx,
             egress: egress_tx,
-            adding_nodes: Default::default(),
+            queued_pings: Default::default(),
             pending_pings: Default::default(),
             pending_find_nodes: Default::default(),
             check_timestamps: false,
             bootstrap_node_ids,
             commands_rx,
             update_listeners: Vec::with_capacity(1),
-            self_lookup_interval,
+            lookup_interval: self_lookup_interval,
             ping_interval,
             evict_expired_requests_interval,
             config,
@@ -307,9 +309,15 @@ impl Discv4Service {
         self.local_address
     }
 
-    /// This will bootstrap lookups by connecting to the configured boot nodes.
+    /// Bootstraps the local node to join the DHT.
     ///
-    /// This is equivalent to adding all bootnodes via
+    /// Bootstrapping is a multi-step operation that starts with a lookup of the local node's
+    /// own ID in the DHT. This introduces the local node to the other nodes
+    /// in the DHT and populates its routing table with the closest proven neighbours.
+    ///
+    /// This is equivalent to adding all bootnodes via [`Self::add_node()`].
+    ///
+    /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
         for node in self.config.bootstrap_nodes.clone() {
             debug!(?node, target = "net::disc", "Adding bootstrap node");
@@ -357,6 +365,7 @@ impl Discv4Service {
         let key = kad_key(target);
 
         let ctx = if target == self.local_enr.id {
+            // TODO(mattsse): The discv5 currently does not support local key lookups: https://github.com/sigp/discv5/pull/142
             LookupContext::with_listener(
                 target,
                 self.config
@@ -498,14 +507,14 @@ impl Discv4Service {
             return
         }
 
-        if self.adding_nodes.iter().any(|(n, _)| n.id == node.id) {
+        if self.queued_pings.iter().any(|(n, _)| n.id == node.id) {
             return
         }
 
         if self.pending_pings.len() < MAX_NODES_PING {
             self.send_ping(node, reason)
         } else {
-            self.adding_nodes.push_back((node, reason))
+            self.queued_pings.push_back((node, reason))
         }
     }
 
@@ -741,7 +750,7 @@ impl Discv4Service {
     /// Pops buffered ping requests and sends them.
     fn ping_buffered(&mut self) {
         while self.pending_pings.len() < MAX_NODES_PING {
-            match self.adding_nodes.pop_front() {
+            match self.queued_pings.pop_front() {
                 Some((next, reason)) => self.try_ping(next, reason),
                 None => break,
             }
@@ -769,7 +778,7 @@ impl Discv4Service {
     /// if it has sent a valid Pong response with matching ping hash within the last 12 hours.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         // trigger self lookup
-        if self.self_lookup_interval.poll_tick(cx).is_ready() {
+        if self.lookup_interval.poll_tick(cx).is_ready() {
             let target = self.lookup_rotator.next(&self.local_enr.id);
             self.lookup_with(target, None);
         }
@@ -1195,8 +1204,18 @@ mod tests {
 
         let _handle = service.spawn();
 
+        let mut table = HashMap::new();
         while let Some(update) = updates.next().await {
-            dbg!(update);
+            match update {
+                TableUpdate::Added(record) => {
+                    table.insert(record.id, record);
+                }
+                TableUpdate::Removed(id) => {
+                    table.remove(&id);
+                }
+                TableUpdate::Batch(_) => {}
+            }
+            dbg!(table.len());
         }
     }
 }

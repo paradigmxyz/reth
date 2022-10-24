@@ -18,6 +18,8 @@ pub struct Discv4Config {
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_timeout: Duration,
+    /// The rate at which lookups should be triggered.
+    pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
     pub find_node_timeout: Duration,
     /// The duration we set for neighbours responses
@@ -49,6 +51,7 @@ impl Default for Discv4Config {
             ping_timeout: Duration::from_secs(5),
             find_node_timeout: Duration::from_secs(2),
             neighbours_timeout: Duration::from_secs(30),
+            lookup_interval: Duration::from_secs(20),
             permit_ban_list: PermitBanList::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
@@ -90,6 +93,12 @@ impl Discv4ConfigBuilder {
     /// `crate::PermitBanList`.
     pub fn permit_ban_list(&mut self, list: PermitBanList) -> &mut Self {
         self.config.permit_ban_list = list;
+        self
+    }
+
+    /// Sets the lookup interval duration.
+    pub fn lookup_interval(&mut self, lookup_interval: Duration) -> &mut Self {
+        self.config.lookup_interval = lookup_interval;
         self
     }
 
