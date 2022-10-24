@@ -71,6 +71,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-lock"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -728,6 +734,19 @@ dependencies = [
  "darling_core",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
+dependencies = [
+ "cfg-if",
+ "hashbrown",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -2500,6 +2519,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-headers-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "once_cell",
+ "rand",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serial_test",
+ "tokio",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0"
 dependencies = [
@@ -2507,15 +2541,18 @@ dependencies = [
  "auto_impl",
  "bytes",
  "eyre",
+ "futures",
  "heapless",
  "parity-scale-codec",
  "postcard",
+ "rand",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
  "test-fuzz",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3053,6 +3090,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial_test"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92761393ee4dc3ff8f4af487bd58f4307c9329bbedea02cac0089ad9c411e153"
+dependencies = [
+ "dashmap",
+ "futures",
+ "lazy_static",
+ "log",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b6f5d1c3087fb119617cff2966fe3808a80e5eb59a8c1601d5994d66f4346a5"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "sha-1"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3455,6 +3518,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

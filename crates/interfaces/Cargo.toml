@@ -21,10 +21,15 @@ serde = { version = "1.0.*", default-features = false }
 postcard = { version = "1.0.2", features = ["alloc"] }
 heapless = "0.7.16"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+futures = "0.3.25"
+tokio-stream = "0.1.11"
+rand = "0.8.5"
 
 [dev-dependencies]
 test-fuzz = "3.0.4"
 tokio = { version = "1.21.2", features = ["full"] }
+tokio-stream = { version = "0.1.11", features = ["sync"] }
 
 [features]
 bench = []
+test-utils = ["tokio-stream/sync"]
