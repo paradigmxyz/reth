@@ -1,7 +1,10 @@
 //! Declaration of all Database tables.
 
 use crate::db::{
-    models::blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+    models::{
+        accounts::AccountBeforeTx,
+        blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+    },
     DupSort,
 };
 use reth_primitives::{
@@ -105,7 +108,7 @@ dupsort!(PlainStorageState => Address => [H256] StorageEntry);
 table!(AccountHistory => Address => TxNumberList);
 table!(StorageHistory => Address_StorageKey => TxNumberList);
 
-table!(AccountChangeSet => TxNumber => AccountBeforeTx);
+dupsort!(AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
 table!(StorageChangeSet => TxNumber => StorageKeyBeforeTx);
 
 table!(TxSenders => TxNumber => Address); // Is it necessary?
@@ -131,6 +134,5 @@ type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
 #[allow(non_camel_case_types)]
 type Address_StorageKey = Vec<u8>;
-type AccountBeforeTx = Vec<u8>;
 type StorageKeyBeforeTx = Vec<u8>;
 type StageId = Vec<u8>;

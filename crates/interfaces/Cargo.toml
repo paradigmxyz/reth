@@ -7,6 +7,7 @@ repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 
 [dependencies]
+reth-codecs = { path = "../codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
 async-trait = "0.1.57"
