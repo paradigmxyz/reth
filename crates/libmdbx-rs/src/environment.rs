@@ -28,8 +28,8 @@ mod private {
 
     pub trait Sealed {}
 
-    impl<'env> Sealed for NoWriteMap {}
-    impl<'env> Sealed for WriteMap {}
+    impl Sealed for NoWriteMap {}
+    impl Sealed for WriteMap {}
 }
 
 pub trait EnvironmentKind: private::Sealed + Debug + 'static {

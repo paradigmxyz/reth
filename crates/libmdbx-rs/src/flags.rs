@@ -189,14 +189,14 @@ bitflags! {
     #[doc="Database options."]
     #[derive(Default)]
     pub struct DatabaseFlags: c_uint {
-        const REVERSE_KEY = MDBX_REVERSEKEY as u32;
-        const DUP_SORT = MDBX_DUPSORT as u32;
-        const INTEGER_KEY = MDBX_INTEGERKEY as u32;
-        const DUP_FIXED = MDBX_DUPFIXED as u32;
-        const INTEGER_DUP = MDBX_INTEGERDUP as u32;
-        const REVERSE_DUP = MDBX_REVERSEDUP as u32;
-        const CREATE = MDBX_CREATE as u32;
-        const ACCEDE = MDBX_DB_ACCEDE as u32;
+        const REVERSE_KEY = MDBX_REVERSEKEY;
+        const DUP_SORT = MDBX_DUPSORT;
+        const INTEGER_KEY = MDBX_INTEGERKEY;
+        const DUP_FIXED = MDBX_DUPFIXED;
+        const INTEGER_DUP = MDBX_INTEGERDUP;
+        const REVERSE_DUP = MDBX_REVERSEDUP;
+        const CREATE = MDBX_CREATE;
+        const ACCEDE = MDBX_DB_ACCEDE;
     }
 }
 
@@ -204,14 +204,14 @@ bitflags! {
     #[doc="Write options."]
     #[derive(Default)]
     pub struct WriteFlags: c_uint {
-        const UPSERT = MDBX_UPSERT as u32;
-        const NO_OVERWRITE = MDBX_NOOVERWRITE as u32;
-        const NO_DUP_DATA = MDBX_NODUPDATA as u32;
-        const CURRENT = MDBX_CURRENT as u32;
-        const ALLDUPS = MDBX_ALLDUPS as u32;
-        const RESERVE = MDBX_RESERVE as u32;
-        const APPEND = MDBX_APPEND as u32;
-        const APPEND_DUP = MDBX_APPENDDUP as u32;
-        const MULTIPLE = MDBX_MULTIPLE as u32;
+        const UPSERT = MDBX_UPSERT;
+        const NO_OVERWRITE = MDBX_NOOVERWRITE;
+        const NO_DUP_DATA = MDBX_NODUPDATA;
+        const CURRENT = MDBX_CURRENT;
+        const ALLDUPS = MDBX_ALLDUPS;
+        const RESERVE = MDBX_RESERVE;
+        const APPEND = MDBX_APPEND;
+        const APPEND_DUP = MDBX_APPENDDUP;
+        const MULTIPLE = MDBX_MULTIPLE;
     }
 }

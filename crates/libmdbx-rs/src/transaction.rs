@@ -23,8 +23,8 @@ mod private {
 
     pub trait Sealed {}
 
-    impl<'env> Sealed for RO {}
-    impl<'env> Sealed for RW {}
+    impl Sealed for RO {}
+    impl Sealed for RW {}
 }
 
 pub trait TransactionKind: private::Sealed + Debug + 'static {
