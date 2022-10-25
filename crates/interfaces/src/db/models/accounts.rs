@@ -1,13 +1,17 @@
 //! Account related models and types.
 
-use crate::db::{
-    table::{Decode, Encode},
-    Error,
+use crate::{
+    db::{
+        table::{Decode, Encode},
+        Error,
+    },
+    impl_fixed_arbitrary,
 };
 use bytes::Bytes;
 use eyre::eyre;
 use reth_codecs::main_codec;
 use reth_primitives::{Account, Address, TxNumber};
+use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
 #[main_codec]
@@ -22,7 +26,7 @@ pub struct AccountBeforeTx {
 /// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TxNumberAddress(pub (TxNumber, Address));
 
 impl TxNumberAddress {
@@ -65,5 +69,39 @@ impl Decode for TxNumberAddress {
         let hash = Address::decode(value.slice(8..))?;
 
         Ok(TxNumberAddress((num, hash)))
+    }
+}
+
+impl_fixed_arbitrary!(TxNumberAddress, 28);
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rand::{thread_rng, Rng};
+    use std::str::FromStr;
+
+    #[test]
+    fn test_tx_number_address() {
+        let num = 1u64;
+        let hash = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
+        let key = TxNumberAddress((num, hash));
+
+        let mut bytes = [0u8; 28];
+        bytes[..8].copy_from_slice(&num.to_be_bytes());
+        bytes[8..].copy_from_slice(&hash.0);
+
+        let encoded = Encode::encode(key.clone());
+        assert!(encoded == bytes);
+
+        let decoded: TxNumberAddress = Decode::decode(encoded.to_vec()).unwrap();
+        assert!(decoded == key);
+    }
+
+    #[test]
+    fn test_tx_number_address_rand() {
+        let mut bytes = [0u8; 28];
+        thread_rng().fill(bytes.as_mut_slice());
+        let key = TxNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+        assert!(bytes == Encode::encode(key));
     }
 }

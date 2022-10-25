@@ -1,8 +1,11 @@
 //! Block related models and types.
 
-use crate::db::{
-    table::{Decode, Encode},
-    Error,
+use crate::{
+    db::{
+        table::{Decode, Encode},
+        Error,
+    },
+    impl_fixed_arbitrary,
 };
 use bytes::Bytes;
 use eyre::eyre;
@@ -68,18 +71,7 @@ impl Decode for BlockNumHash {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-use arbitrary::{Arbitrary, Unstructured};
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> Arbitrary<'a> for BlockNumHash {
-    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
-        let mut buffer = vec![0; 40];
-        u.fill_buffer(buffer.as_mut_slice())?;
-
-        Decode::decode(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
-    }
-}
+impl_fixed_arbitrary!(BlockNumHash, 40);
 
 #[cfg(test)]
 mod test {
