@@ -1,4 +1,4 @@
-use libmdbx::{Environment, NoWriteMap, WriteFlags};
+use reth_libmdbx::{Environment, NoWriteMap, WriteFlags};
 use tempfile::{tempdir, TempDir};
 
 pub fn get_key(n: u32) -> String {

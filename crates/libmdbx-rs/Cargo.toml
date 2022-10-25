@@ -1,21 +1,14 @@
 [package]
-name = "libmdbx"
+name = "reth-libmdbx"
 version = "0.1.6"
 edition = "2021"
 license = "Apache-2.0"
-description = "Idiomatic and safe MDBX wrapper."
-documentation = "https://docs.rs/libmdbx"
-homepage = "https://github.com/vorot93/libmdbx-rs"
-repository = "https://github.com/vorot93/libmdbx-rs"
+description = "Idiomatic and safe MDBX wrapper with good licence"
+repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
-keywords = ["LMDB", "MDBX", "database", "storage-engine", "bindings"]
-categories = ["database"]
 
 [lib]
-name = "libmdbx"
-
-[workspace]
-members = ["mdbx-sys"]
+name = "reth_libmdbx"
 
 [dependencies]
 bitflags = "1"
@@ -26,12 +19,12 @@ libc = "0.2"
 parking_lot = "0.12"
 thiserror = "1"
 
-ffi = { package = "mdbx-sys", version = "=0.11.8-0", path = "./mdbx-sys" }
+ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 
 lifetimed-bytes = { version = "0.1", optional = true }
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.4"
 rand = "0.8"
 rand_xorshift = "0.3"
 tempfile = "3"

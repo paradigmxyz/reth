@@ -26,7 +26,7 @@
 #ifndef MDBX_TRUST_RTC_AUTO
 #cmakedefine01 MDBX_TRUST_RTC
 #endif
-#cmakedefine01 MDBX_DISABLE_PAGECHECKS
+#cmakedefine01 MDBX_DISABLE_VALIDATION
 
 /* Windows */
 #cmakedefine01 MDBX_WITHOUT_MSVC_CRT

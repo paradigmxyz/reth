@@ -1,8 +1,8 @@
 use byteorder::{ByteOrder, LittleEndian};
-use libmdbx::*;
+use reth_libmdbx::*;
 use tempfile::tempdir;
 
-type Environment = libmdbx::Environment<NoWriteMap>;
+type Environment = reth_libmdbx::Environment<NoWriteMap>;
 
 #[test]
 fn test_open() {
