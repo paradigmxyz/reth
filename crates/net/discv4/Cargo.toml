@@ -1,0 +1,42 @@
+[package]
+name = "reth-discv4"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = """
+Ethereum network support
+"""
+
+[dependencies]
+# reth
+reth-primitives = { path = "../../primitives" }
+reth-rlp = { path = "../../common/rlp" }
+reth-rlp-derive = { path = "../../common/rlp-derive" }
+
+# ethereum
+discv5 = { git = "https://github.com/sigp/discv5" }
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
+# async/futures
+tokio = { version = "1", features = ["io-util", "net", "time"] }
+tokio-stream = "0.1"
+
+# misc
+generic-array = "0.14"
+tracing = "0.1"
+bytes = "1.2"
+thiserror = "1.0"
+url = "2.3"
+hex = "0.4"
+public-ip = "0.2"
+
+[dev-dependencies]
+rand = "0.8"
+tokio = { version = "1", features = ["full"] }
+tracing-test = "0.2"
