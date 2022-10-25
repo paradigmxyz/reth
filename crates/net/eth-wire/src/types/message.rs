@@ -353,7 +353,7 @@ mod test {
         // 05: 5 (message)
         let expected = hex!("c5820539c105");
         let got = encode(request_pair);
-        assert_eq!(expected[..], got, "expected: {:X?}, got: {:X?}", expected, got,);
+        assert_eq!(expected[..], got, "expected: {expected:X?}, got: {got:X?}",);
     }
 
     #[test]

@@ -104,6 +104,6 @@ impl<'a> Deserialize<'a> for Params {
 
         serde_json::from_value(v)
             .map(|f| Params::Logs(Box::new(f)))
-            .map_err(|e| D::Error::custom(format!("Invalid Pub-Sub parameters: {}", e)))
+            .map_err(|e| D::Error::custom(format!("Invalid Pub-Sub parameters: {e}")))
     }
 }
