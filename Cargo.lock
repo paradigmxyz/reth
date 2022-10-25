@@ -2709,7 +2709,6 @@ dependencies = [
  "async-trait",
  "metrics",
  "once_cell",
- "rand",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
