@@ -96,7 +96,7 @@ impl FromStr for NodeRecord {
                 Ipv4Addr::from_str(ip)
                     .map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?,
             ),
-            _ => return Err(NodeRecordParseError::InvalidUrl(format!("invalid host: {:?}", url))),
+            _ => return Err(NodeRecordParseError::InvalidUrl(format!("invalid host: {url:?}"))),
         };
         let port = url
             .port()
