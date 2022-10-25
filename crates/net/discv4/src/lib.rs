@@ -44,7 +44,6 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
@@ -229,7 +228,7 @@ pub struct Discv4Service {
     /// The interval when to trigger lookups
     lookup_interval: Interval,
     /// Used to rotate targets to lookup
-    lookup_rotator: LookupRotator,
+    lookup_rotator: LookupTargetRotator,
     /// Interval when to recheck active requests
     evict_expired_requests_interval: Interval,
     /// Interval when to resend pings.
@@ -364,25 +363,14 @@ impl Discv4Service {
         trace!("Starting lookup");
         let key = kad_key(target);
 
-        let ctx = if target == self.local_enr.id {
-            // TODO(mattsse): The discv5 currently does not support local key lookups: https://github.com/sigp/discv5/pull/142
-            LookupContext::with_listener(
-                target,
-                self.config
-                    .bootstrap_nodes
-                    .iter()
-                    .copied()
-                    .take(MAX_NODES_PING)
-                    .map(|boot| (key.distance(&kad_key(boot.id)), boot)),
-                tx,
-            )
-        } else {
-            LookupContext::with_listener(
-                target,
-                self.kbuckets.closest_values(&key).map(|n| (key.distance(&n.key), n.value.record)),
-                tx,
-            )
-        };
+        let ctx = LookupContext::new(
+            target,
+            self.kbuckets
+                .closest_values(&key)
+                .take(MAX_NODES_PER_BUCKET)
+                .map(|n| (key.distance(&n.key), n.value.record)),
+            tx,
+        );
 
         let closest = ctx.closest(ALPHA);
 
@@ -937,15 +925,16 @@ struct PingRequest {
     reason: PingReason,
 }
 
-/// Rotates the key we want to lookup
-/// This will essentially select different ALPHA peers on lookup
+/// Rotates the NodeId that is periodically looked up.
+///
+/// By selecting different targets, the lookups will be seeded with different ALPHA seed nodes.
 #[derive(Debug)]
-struct LookupRotator {
+struct LookupTargetRotator {
     interval: usize,
     counter: usize,
 }
 
-impl Default for LookupRotator {
+impl Default for LookupTargetRotator {
     fn default() -> Self {
         Self {
             // every 4th lookup is our own node
@@ -955,7 +944,7 @@ impl Default for LookupRotator {
     }
 }
 
-impl LookupRotator {
+impl LookupTargetRotator {
     /// this will return the next node id to lookup
     fn next(&mut self, local: &NodeId) -> NodeId {
         self.counter += 1;
@@ -976,8 +965,8 @@ struct LookupContext {
 }
 
 impl LookupContext {
-    /// Create new response buffer
-    fn with_listener(
+    /// Create new context for a recursive lookup
+    fn new(
         target: NodeId,
         nearest_nodes: impl IntoIterator<Item = (Distance, NodeRecord)>,
         listener: Option<NodeRecordSender>,
@@ -1168,12 +1157,16 @@ mod tests {
 
     async fn create_with_config(config: Discv4Config) -> (Discv4, Discv4Service) {
         let mut rng = thread_rng();
-        let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
+        let socket = SocketAddr::from_str("0.0.0.0:30303").unwrap();
         let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
         let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
-        let local_enr = NodeRecord::new(socket, id);
-        // let external_ip = public_ip::addr().await.expect("Failed to get external IP");
-        // local_enr.address = external_ip;
+        let external_addr = public_ip::addr().await.unwrap_or_else(|| socket.ip());
+        let local_enr = NodeRecord {
+            address: external_addr,
+            tcp_port: socket.port(),
+            udp_port: socket.port(),
+            id,
+        };
         Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
     }
 
@@ -1215,7 +1208,7 @@ mod tests {
                 }
                 TableUpdate::Batch(_) => {}
             }
-            dbg!(table.len());
+            println!("total peers {}", table.len());
         }
     }
 }
