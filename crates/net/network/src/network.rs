@@ -1,20 +1,18 @@
-//! High level network management.
-//!
-//! The [`Network`] contains the state of the network as a whole. It controls how connections are
-//! handled and keeps track of connections to peers.
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{
-    connections::Connections, discovery::Discovery, listener::ConnectionListener, peers::PeerSet,
-};
-
-/// Manages the entire state of the network.
-pub struct Network {
-    /// Listens for new incoming connections.
-    incoming: ConnectionListener,
-    /// Active connections
-    connections: Connections,
-    /// Ethereum peer discovery related network IO.
-    discover: Discovery,
-    /// Manages lists of peers and address to reject.
-    peer_set: PeerSet,
+/// A _shareable_ network frontend. Used to interact with the network.
+///
+/// See also [`NetworkManager`](crate::NetworkManager).
+#[derive(Clone)]
+pub struct NetworkHandle {
+    inner: Arc<NetworkInner>,
 }
+
+struct NetworkInner {
+    /// Sender half of the message channel to the [`NetworkManager`].
+    to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+}
+
+/// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
+pub(crate) enum NetworkHandleMessage {}

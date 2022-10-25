@@ -12,6 +12,7 @@ Ethereum network support
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
+reth-discv4 = { path = "../discv4" }
 
 # async/futures
 futures = "0.3"

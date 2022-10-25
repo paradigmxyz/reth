@@ -7,15 +7,15 @@
 // TODO remove later
 #![allow(dead_code)]
 
-//! <reth crate template>
+//! reth network management.
 
+mod config;
 mod connections;
-mod discovery;
 mod listener;
+mod manager;
 mod network;
 mod peers;
+mod swarm;
 
-/// Identifier for a peer.
-pub use reth_primitives::H512 as PeerId;
-
-pub use network::Network;
+pub use manager::NetworkManager;
+pub use network::NetworkHandle;

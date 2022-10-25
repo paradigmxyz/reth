@@ -1,4 +1,4 @@
-use crate::PeerId;
+use reth_discv4::NodeId;
 use std::{
     collections::HashSet,
     net::{IpAddr, SocketAddr},
@@ -10,7 +10,7 @@ pub(crate) struct PeerSet {
     /// List of node IP addresses for which incoming connections should be rejected.
     banned_addresses: HashSet<IpAddr>,
     /// List of peers for which connections should be rejected.
-    banned_peers: HashSet<PeerId>,
+    banned_peers: HashSet<NodeId>,
 }
 
 impl PeerSet {
@@ -19,8 +19,8 @@ impl PeerSet {
         self.banned_addresses.contains(&remote.ip())
     }
 
-    /// Returns true if the given `PeerId` is banned
-    pub fn is_banned_peer(&self, peer_id: &PeerId) -> bool {
+    /// Returns true if the given `NodeId` is banned
+    pub fn is_banned_peer(&self, peer_id: &NodeId) -> bool {
         self.banned_peers.contains(peer_id)
     }
 }

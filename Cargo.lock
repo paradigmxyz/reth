@@ -3179,6 +3179,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "pin-project",
+ "reth-discv4",
  "reth-primitives",
  "tokio",
  "tokio-stream",
