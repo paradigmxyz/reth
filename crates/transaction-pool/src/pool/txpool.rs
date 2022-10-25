@@ -8,14 +8,17 @@ use crate::{
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
+        update::{Destination, PoolUpdate},
         AddedPendingTransaction, AddedTransaction,
     },
-    traits::PoolStatus,
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    traits::{PoolStatus, StateDiff},
+    NewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
+    ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::TxHash;
 use std::{
+    cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
     fmt,
     ops::Bound::{Excluded, Unbounded},
@@ -143,6 +146,25 @@ impl<T: TransactionOrdering> TxPool<T> {
         txs: impl IntoIterator<Item = TxHash> + 'a,
     ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + 'a {
         txs.into_iter().filter_map(|tx| self.get(&tx))
+    }
+
+    /// Updates the entire pool after a new block was mined.
+    ///
+    /// This removes all mined transactions, updates according to the new base fee and rechecks
+    /// sender allowance.
+    pub(crate) fn on_new_block(&mut self, block: NewBlockEvent<T::Transaction>) {
+        // Remove all transaction that were included in the block
+        for mined in &block.mined_transactions {
+            self.all_transactions.remove_transaction(mined.id());
+            self.pending_pool.remove_transaction(mined.id());
+        }
+
+        // Apply the state changes to the total set of transactions which triggers sub-pool updates.
+        let updates =
+            self.all_transactions.update(block.pending_block_base_fee, &block.state_changes);
+
+        // Process the sub-pool updates
+        self.process_updates(updates);
     }
 
     /// Adds the transaction into the pool.
@@ -452,6 +474,139 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
     }
 
+    /// Rechecks all transactions in the pool against the changes.
+    ///
+    /// Possible changes are:
+    ///
+    /// For all transactions:
+    ///   - decreased basefee: promotes from `basefee` to `pending` sub-pool.
+    ///   - increased basefee: demotes from `pending` to `basefee` sub-pool.
+    /// Individually:
+    ///   - decreased sender allowance: demote from (`basefee`|`pending`) to `queued`.
+    ///   - increased sender allowance: promote from `queued` to
+    ///       - `pending` if basefee condition is met.
+    ///       - `basefee` if basefee condition is _not_ met.
+    ///
+    /// Additionally, this will also update the `cumulative_gas_used` for transactions of a sender
+    /// that got transaction included in the block.
+    pub(crate) fn update(
+        &mut self,
+        pending_block_base_fee: U256,
+        state_diffs: &StateDiff,
+    ) -> Vec<PoolUpdate> {
+        // update new basefee
+        self.pending_basefee = pending_block_base_fee;
+
+        // TODO(mattsse): probably good idea to allocate some capacity here.
+        let mut updates = Vec::new();
+
+        let mut iter = self.txs.iter_mut().peekable();
+
+        // Loop over all individual senders and update all affected transactions.
+        // One sender may have up to `max_account_slots` transactions here, which means, worst case
+        // `max_accounts_slots` need to be updated, for example if the first transaction is blocked
+        // due to too low base fee.
+        // However, we don't have to necessarily check every transaction of a sender. If no updates
+        // are possible (nonce gap) then we can skip to the next sender.
+
+        // The `unique_sender` loop will process the first transaction of all senders, update its
+        // state and internally update all consecutive transactions
+        'unique_sender: while let Some((id, tx)) = iter.next() {
+            // Advances the iterator to the next sender
+            macro_rules! next_sender {
+                ($iter:ident) => {
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
+                        }
+                        iter.next();
+                    }
+                };
+            }
+            // If there's a nonce gap, we can shortcircuit, because there's nothing to update.
+            if tx.state.has_nonce_gap() {
+                next_sender!(iter);
+                continue
+            }
+
+            // TODO(mattsse): if account has balance changes or mined transactions the balance needs
+            // to be checked here
+
+            // Since this is the first transaction of the sender, it has no parked ancestors
+            tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+
+            // Update the first transaction of this sender.
+            Self::update_base_fee(&pending_block_base_fee, tx);
+            // Track if the transaction's sub-pool changed.
+            Self::record_subpool_update(&mut updates, tx);
+
+            // Track blocking transactions.
+            let mut has_parked_ancestor = !tx.state.is_pending();
+
+            // Update all consecutive transaction of this sender
+            while let Some((peek, ref mut tx)) = iter.peek_mut() {
+                if peek.sender != id.sender {
+                    // Found the next sender
+                    continue 'unique_sender
+                }
+
+                if tx.state.has_nonce_gap() {
+                    next_sender!(iter);
+                    continue 'unique_sender
+                }
+
+                // Update ancestor condition.
+                if has_parked_ancestor {
+                    tx.state.remove(TxState::NO_PARKED_ANCESTORS);
+                } else {
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                }
+                has_parked_ancestor = !tx.state.is_pending();
+
+                // Update and record sub-pool changes.
+                Self::update_base_fee(&pending_block_base_fee, tx);
+                Self::record_subpool_update(&mut updates, tx);
+
+                // Advance iterator
+                iter.next();
+            }
+        }
+
+        updates
+    }
+
+    /// This will update the transaction's `subpool` based on its state.
+    ///
+    /// If the sub-pool derived from the state differs from the current pool, it will record a
+    /// `PoolUpdate` for this transaction to move it to the new sub-pool.
+    fn record_subpool_update(updates: &mut Vec<PoolUpdate>, tx: &mut PoolInternalTransaction<T>) {
+        let current_pool = tx.subpool;
+        tx.subpool = tx.state.into();
+        if current_pool != tx.subpool {
+            updates.push(PoolUpdate {
+                id: *tx.transaction.id(),
+                hash: *tx.transaction.hash(),
+                current: current_pool,
+                destination: Destination::Pool(tx.subpool),
+            })
+        }
+    }
+
+    /// Rechecks the transaction's dynamic fee condition.
+    fn update_base_fee(pending_block_base_fee: &U256, tx: &mut PoolInternalTransaction<T>) {
+        // Recheck dynamic fee condition.
+        if let Some(fee_cap) = tx.transaction.max_fee_per_gas() {
+            match fee_cap.cmp(pending_block_base_fee) {
+                Ordering::Greater | Ordering::Equal => {
+                    tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                }
+                Ordering::Less => {
+                    tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+                }
+            }
+        }
+    }
+
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
     #[cfg(test)]
@@ -729,11 +884,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(InsertOk { transaction, move_to: state.into(), state, replaced_tx, updates })
     }
 
-    /// Rechecks the transaction of the given sender and returns a set of updates.
-    pub(crate) fn on_mined(&mut self, _sender: &SenderId, _new_balance: U256, _old_balance: U256) {
-        todo!("ideally we want to process updates in bulk")
-    }
-
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
         self.txs.len()
@@ -765,28 +915,6 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             tx_counter: Default::default(),
         }
     }
-}
-
-/// Where to move an existing transaction.
-#[derive(Debug)]
-pub(crate) enum Destination {
-    /// Discard the transaction.
-    Discard,
-    /// Move transaction to pool
-    Pool(SubPool),
-}
-
-/// A change of the transaction's location
-///
-/// NOTE: this guarantees that `current` and `destination` differ.
-#[derive(Debug)]
-pub(crate) struct PoolUpdate {
-    pub(crate) id: TransactionId,
-    pub(crate) hash: TxHash,
-    /// Where the transaction is currently held.
-    pub(crate) current: SubPool,
-    /// Where to move the transaction to
-    pub(crate) destination: Destination,
 }
 
 /// Result type for inserting a transaction
@@ -826,17 +954,17 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
 /// determining the current state of the transaction.
 pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
-    transaction: Arc<ValidPoolTransaction<T>>,
+    pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
-    subpool: SubPool,
+    pub(crate) subpool: SubPool,
     /// Keeps track of the current state of the transaction and therefor in which subpool it should
     /// reside
-    state: TxState,
+    pub(crate) state: TxState,
     /// The total cost all transactions before this transaction.
     ///
     /// This is the combined `cost` of all transactions from the same sender that currently
     /// come before this transaction.
-    cumulative_cost: U256,
+    pub(crate) cumulative_cost: U256,
 }
 
 // === impl PoolInternalTransaction ===

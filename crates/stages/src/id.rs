@@ -1,7 +1,5 @@
-use reth_db::{
-    kv::{tables::SyncStage, tx::Tx, KVError},
-    mdbx,
-};
+use metrics::counter;
+use reth_interfaces::db::{tables::SyncStage, DbTx, DbTxMut, Error as DbError};
 use reth_primitives::BlockNumber;
 use std::fmt::Display;
 
@@ -19,26 +17,17 @@ impl Display for StageId {
 
 impl StageId {
     /// Get the last committed progress of this stage.
-    pub fn get_progress<'db, K, E>(
-        &self,
-        tx: &Tx<'db, K, E>,
-    ) -> Result<Option<BlockNumber>, KVError>
-    where
-        K: mdbx::TransactionKind,
-        E: mdbx::EnvironmentKind,
-    {
+    pub fn get_progress<'db>(&self, tx: &impl DbTx<'db>) -> Result<Option<BlockNumber>, DbError> {
         tx.get::<SyncStage>(self.0.as_bytes().to_vec())
     }
 
     /// Save the progress of this stage.
-    pub fn save_progress<'db, E>(
+    pub fn save_progress<'db>(
         &self,
-        tx: &Tx<'db, mdbx::RW, E>,
+        tx: &impl DbTxMut<'db>,
         block: BlockNumber,
-    ) -> Result<(), KVError>
-    where
-        E: mdbx::EnvironmentKind,
-    {
+    ) -> Result<(), DbError> {
+        counter!("stage.progress", block, "stage" => self.0);
         tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
     }
 }

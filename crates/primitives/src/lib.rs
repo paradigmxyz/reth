@@ -10,19 +10,24 @@
 mod account;
 mod block;
 mod chain;
+mod error;
 mod header;
+mod integer_list;
 mod jsonu256;
 mod log;
 mod receipt;
+mod storage;
 mod transaction;
 
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
 pub use header::{Header, HeaderLocked};
+pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
+pub use storage::StorageEntry;
 pub use transaction::{
     AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
 };
@@ -37,6 +42,8 @@ pub type Address = H160;
 pub type BlockID = H256;
 /// TxHash is Kecack hash of rlp encoded signed transaction
 pub type TxHash = H256;
+/// TxNumber is sequence number of all existing transactions
+pub type TxNumber = u64;
 
 /// Storage Key
 pub type StorageKey = H256;
@@ -47,11 +54,12 @@ pub type StorageValue = H256;
 // NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
-    types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 #[doc(hidden)]
 mod __reexport {
+    pub use hex;
     pub use tiny_keccak;
 }
 
@@ -60,7 +68,10 @@ pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    let mut res: [u8; 32] = [0; 32];
-    tiny_keccak::keccak_256(data.as_ref(), &mut res);
-    res.into()
+    use tiny_keccak::{Hasher, Keccak};
+    let mut keccak = Keccak::v256();
+    let mut output = [0; 32];
+    keccak.update(data.as_ref());
+    keccak.finalize(&mut output);
+    output.into()
 }
