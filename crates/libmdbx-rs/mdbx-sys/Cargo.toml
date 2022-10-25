@@ -1,0 +1,22 @@
+[package]
+name = "mdbx-sys"
+version = "0.11.8-0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Rust bindings for libmdbx."
+documentation = "https://docs.rs/mdbx-sys"
+homepage = "https://github.com/vorot93/libmdbx-rs"
+repository = "https://github.com/vorot93/libmdbx-rs"
+readme = "../README.md"
+keywords = ["MDBX", "database", "storage-engine", "bindings", "library"]
+categories = ["database", "external-ffi-bindings"]
+
+[lib]
+name = "mdbx_sys"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1.0"
+bindgen = { version = "0.60", default-features = false, features = ["runtime"] }
