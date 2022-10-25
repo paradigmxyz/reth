@@ -2568,6 +2568,7 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "async-trait",
  "auto_impl",
  "bytes",

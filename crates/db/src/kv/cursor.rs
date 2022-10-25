@@ -126,6 +126,7 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+        // Default `WriteFlags` is UPSERT
         self.inner
             .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::UPSERT)
             .map_err(|e| Error::Internal(e.into()))

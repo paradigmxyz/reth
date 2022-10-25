@@ -240,17 +240,17 @@ mod tests {
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value00.clone()).expect(ERROR_PUT))
+        env.update(|tx| tx.put::<PlainStorageState>(key, value00.clone()).expect(ERROR_PUT))
             .unwrap();
 
         // PUT (2,2)
         let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value22.clone()).expect(ERROR_PUT))
+        env.update(|tx| tx.put::<PlainStorageState>(key, value22.clone()).expect(ERROR_PUT))
             .unwrap();
 
         // PUT (1,1)
         let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value11.clone()).expect(ERROR_PUT))
+        env.update(|tx| tx.put::<PlainStorageState>(key, value11.clone()).expect(ERROR_PUT))
             .unwrap();
 
         // GET DUPSORT
@@ -283,7 +283,6 @@ mod gat_tests {
     impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
         async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
             let _tx = db.commit().unwrap();
-            ()
         }
     }
 
