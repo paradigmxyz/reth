@@ -1,0 +1,45 @@
+[package]
+name = "libmdbx"
+version = "0.1.6"
+edition = "2021"
+license = "Apache-2.0"
+description = "Idiomatic and safe MDBX wrapper."
+documentation = "https://docs.rs/libmdbx"
+homepage = "https://github.com/vorot93/libmdbx-rs"
+repository = "https://github.com/vorot93/libmdbx-rs"
+readme = "README.md"
+keywords = ["LMDB", "MDBX", "database", "storage-engine", "bindings"]
+categories = ["database"]
+
+[lib]
+name = "libmdbx"
+
+[workspace]
+members = ["mdbx-sys"]
+
+[dependencies]
+bitflags = "1"
+byteorder = "1"
+derive_more = "0.99"
+indexmap = "1"
+libc = "0.2"
+parking_lot = "0.12"
+thiserror = "1"
+
+ffi = { package = "mdbx-sys", version = "=0.11.8-0", path = "./mdbx-sys" }
+
+lifetimed-bytes = { version = "0.1", optional = true }
+
+[dev-dependencies]
+criterion = "0.3"
+rand = "0.8"
+rand_xorshift = "0.3"
+tempfile = "3"
+
+[[bench]]
+name = "cursor"
+harness = false
+
+[[bench]]
+name = "transaction"
+harness = false
