@@ -7,6 +7,7 @@ repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 
 [dependencies]
+reth-codecs = { path = "../codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
 async-trait = "0.1.57"
@@ -27,6 +28,7 @@ rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true}
 
 [dev-dependencies]
+reth-db = { path = "../db", features = ["test-utils"] }
 test-fuzz = "3.0.4"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }

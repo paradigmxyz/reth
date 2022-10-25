@@ -260,3 +260,22 @@ impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterato
         self.cursor.next_dup_val().transpose()
     }
 }
+
+#[macro_export]
+/// Implements the [`arbitrary::Arbitrary`] trait for types with fixed array types.
+macro_rules! impl_fixed_arbitrary {
+    ($name:tt, $size:tt) => {
+        #[cfg(any(test, feature = "arbitrary"))]
+        use arbitrary::{Arbitrary, Unstructured};
+
+        #[cfg(any(test, feature = "arbitrary"))]
+        impl<'a> Arbitrary<'a> for $name {
+            fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
+                let mut buffer = vec![0; $size];
+                u.fill_buffer(buffer.as_mut_slice())?;
+
+                Decode::decode(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
+            }
+        }
+    };
+}

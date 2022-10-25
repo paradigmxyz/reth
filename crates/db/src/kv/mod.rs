@@ -253,15 +253,29 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value11.clone()).expect(ERROR_PUT))
             .unwrap();
 
-        // GET DUPSORT
+        // Iterate with cursor
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert!(Some(value00) == cursor.next_dup_val().unwrap());
-            assert!(Some(value11) == cursor.next_dup_val().unwrap());
+            assert!(Some(value11.clone()) == cursor.next_dup_val().unwrap());
             assert!(Some(value22) == cursor.next_dup_val().unwrap());
+        }
+
+        // Seek value with subkey
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut walker = cursor.walk_dup(key.into(), H256::from_low_u64_be(1)).unwrap();
+            assert_eq!(
+                value11,
+                walker
+                    .next()
+                    .expect("element should exist.")
+                    .expect("should be able to retrieve it.")
+            );
         }
     }
 }

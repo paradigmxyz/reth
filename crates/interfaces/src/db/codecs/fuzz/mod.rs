@@ -64,6 +64,6 @@ macro_rules! impl_fuzzer {
     };
 }
 
-impl_fuzzer!(Header, Account, BlockNumHash);
+impl_fuzzer!(Header, Account, BlockNumHash, TxNumberAddress);
 
 impl_fuzzer_with_input!((IntegerList, IntegerListInput));

@@ -1,8 +1,11 @@
 //! Block related models and types.
 
-use crate::db::{
-    table::{Decode, Encode},
-    Error,
+use crate::{
+    db::{
+        table::{Decode, Encode},
+        Error,
+    },
+    impl_fixed_arbitrary,
 };
 use bytes::Bytes;
 use eyre::eyre;
@@ -68,18 +71,7 @@ impl Decode for BlockNumHash {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-use arbitrary::{Arbitrary, Unstructured};
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> Arbitrary<'a> for BlockNumHash {
-    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
-        let mut buffer = vec![0; 40];
-        u.fill_buffer(buffer.as_mut_slice())?;
-
-        Decode::decode(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
-    }
-}
+impl_fixed_arbitrary!(BlockNumHash, 40);
 
 #[cfg(test)]
 mod test {
@@ -97,10 +89,10 @@ mod test {
         bytes[8..].copy_from_slice(&hash.0);
 
         let encoded = Encode::encode(key.clone());
-        assert!(encoded == bytes);
+        assert_eq!(encoded, bytes);
 
         let decoded: BlockNumHash = Decode::decode(encoded.to_vec()).unwrap();
-        assert!(decoded == key);
+        assert_eq!(decoded, key);
     }
 
     #[test]
@@ -108,6 +100,6 @@ mod test {
         let mut bytes = [0u8; 40];
         thread_rng().fill(bytes.as_mut_slice());
         let key = BlockNumHash::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        assert!(bytes == Encode::encode(key));
+        assert_eq!(bytes, Encode::encode(key));
     }
 }
