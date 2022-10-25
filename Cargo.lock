@@ -2625,6 +2625,7 @@ dependencies = [
  "bytes",
  "crc",
  "ethers-core",
+ "hex",
  "hex-literal",
  "maplit",
  "parity-scale-codec",

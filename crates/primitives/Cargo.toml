@@ -27,6 +27,7 @@ serde = "1.0"
 thiserror = "1"
 sucds = "0.5.0"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true}
+hex = "0.4"
 
 [dev-dependencies]
 arbitrary = { version = "1.1.7", features = ["derive"]}
