@@ -3,9 +3,9 @@ mod utils;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ffi::*;
 use libc::size_t;
-use reth_libmdbx::{ObjectLength, WriteFlags};
 use rand::{prelude::SliceRandom, SeedableRng};
 use rand_xorshift::XorShiftRng;
+use reth_libmdbx::{ObjectLength, WriteFlags};
 use std::ptr;
 use utils::*;
 
@@ -22,10 +22,7 @@ fn bench_get_rand(c: &mut Criterion) {
         b.iter(|| {
             let mut i = 0usize;
             for key in &keys {
-                i += *txn
-                    .get::<ObjectLength>(&db, key.as_bytes())
-                    .unwrap()
-                    .unwrap();
+                i += *txn.get::<ObjectLength>(&db, key.as_bytes()).unwrap().unwrap();
             }
             black_box(i);
         })
@@ -44,14 +41,8 @@ fn bench_get_rand_raw(c: &mut Criterion) {
     let dbi = db.dbi();
     let txn = _txn.txn();
 
-    let mut key_val: MDBX_val = MDBX_val {
-        iov_len: 0,
-        iov_base: ptr::null_mut(),
-    };
-    let mut data_val: MDBX_val = MDBX_val {
-        iov_len: 0,
-        iov_base: ptr::null_mut(),
-    };
+    let mut key_val: MDBX_val = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+    let mut data_val: MDBX_val = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
 
     c.bench_function("bench_get_rand_raw", |b| {
         b.iter(|| unsafe {
@@ -101,14 +92,8 @@ fn bench_put_rand_raw(c: &mut Criterion) {
     let dbi = _env.begin_ro_txn().unwrap().open_db(None).unwrap().dbi();
     let env = _env.env();
 
-    let mut key_val: MDBX_val = MDBX_val {
-        iov_len: 0,
-        iov_base: ptr::null_mut(),
-    };
-    let mut data_val: MDBX_val = MDBX_val {
-        iov_len: 0,
-        iov_base: ptr::null_mut(),
-    };
+    let mut key_val: MDBX_val = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+    let mut data_val: MDBX_val = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
 
     c.bench_function("bench_put_rand_raw", |b| {
         b.iter(|| unsafe {
@@ -130,11 +115,5 @@ fn bench_put_rand_raw(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    bench_get_rand,
-    bench_get_rand_raw,
-    bench_put_rand,
-    bench_put_rand_raw
-);
+criterion_group!(benches, bench_get_rand, bench_get_rand_raw, bench_put_rand, bench_put_rand_raw);
 criterion_main!(benches);

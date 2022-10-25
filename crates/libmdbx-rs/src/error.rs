@@ -111,7 +111,7 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::DecodeError(reason) => write!(fmt, "{}", reason),
+            Error::DecodeError(reason) => write!(fmt, "{reason}"),
             other => {
                 write!(fmt, "{}", unsafe {
                     let err = ffi::mdbx_strerror(other.to_err_code());
@@ -154,9 +154,6 @@ mod test {
     fn test_description() {
         assert_eq!("Permission denied", Error::from_err_code(13).to_string());
 
-        assert_eq!(
-            "MDBX_INVALID: File is not an MDBX file",
-            Error::Invalid.to_string()
-        );
+        assert_eq!("MDBX_INVALID: File is not an MDBX file", Error::Invalid.to_string());
     }
 }

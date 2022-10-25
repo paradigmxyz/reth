@@ -126,20 +126,12 @@ fn test_nested_txn() {
     let env = Environment::new().open(dir.path()).unwrap();
 
     let mut txn = env.begin_rw_txn().unwrap();
-    txn.put(
-        &txn.open_db(None).unwrap(),
-        b"key1",
-        b"val1",
-        WriteFlags::empty(),
-    )
-    .unwrap();
+    txn.put(&txn.open_db(None).unwrap(), b"key1", b"val1", WriteFlags::empty()).unwrap();
 
     {
         let nested = txn.begin_nested_txn().unwrap();
         let db = nested.open_db(None).unwrap();
-        nested
-            .put(&db, b"key2", b"val2", WriteFlags::empty())
-            .unwrap();
+        nested.put(&db, b"key2", b"val2", WriteFlags::empty()).unwrap();
         assert_eq!(nested.get(&db, b"key1").unwrap(), Some(*b"val1"));
         assert_eq!(nested.get(&db, b"key2").unwrap(), Some(*b"val2"));
     }
@@ -156,13 +148,7 @@ fn test_clear_db() {
 
     {
         let txn = env.begin_rw_txn().unwrap();
-        txn.put(
-            &txn.open_db(None).unwrap(),
-            b"key",
-            b"val",
-            WriteFlags::empty(),
-        )
-        .unwrap();
+        txn.put(&txn.open_db(None).unwrap(), b"key", b"val", WriteFlags::empty()).unwrap();
         assert!(!txn.commit().unwrap());
     }
 
@@ -173,10 +159,7 @@ fn test_clear_db() {
     }
 
     let txn = env.begin_ro_txn().unwrap();
-    assert_eq!(
-        txn.get::<()>(&txn.open_db(None).unwrap(), b"key").unwrap(),
-        None
-    );
+    assert_eq!(txn.get::<()>(&txn.open_db(None).unwrap(), b"key").unwrap(), None);
 }
 
 #[test]
@@ -195,8 +178,7 @@ fn test_drop_db() {
             )
             .unwrap();
             // Workaround for MDBX dbi drop issue
-            txn.create_db(Some("canary"), DatabaseFlags::empty())
-                .unwrap();
+            txn.create_db(Some("canary"), DatabaseFlags::empty()).unwrap();
             assert!(!txn.commit().unwrap());
         }
         {
@@ -205,10 +187,7 @@ fn test_drop_db() {
             unsafe {
                 txn.drop_db(db).unwrap();
             }
-            assert!(matches!(
-                txn.open_db(Some("test")).unwrap_err(),
-                Error::NotFound
-            ));
+            assert!(matches!(txn.open_db(Some("test")).unwrap_err(), Error::NotFound));
             assert!(!txn.commit().unwrap());
         }
     }
@@ -217,10 +196,7 @@ fn test_drop_db() {
 
     let txn = env.begin_ro_txn().unwrap();
     txn.open_db(Some("canary")).unwrap();
-    assert!(matches!(
-        txn.open_db(Some("test")).unwrap_err(),
-        Error::NotFound
-    ));
+    assert!(matches!(txn.open_db(Some("test")).unwrap_err(), Error::NotFound));
 }
 
 #[test]
@@ -285,13 +261,8 @@ fn test_concurrent_writers() {
         threads.push(thread::spawn(move || {
             let txn = writer_env.begin_rw_txn().unwrap();
             let db = txn.open_db(None).unwrap();
-            txn.put(
-                &db,
-                &format!("{}{}", key, i),
-                &format!("{}{}", val, i),
-                WriteFlags::empty(),
-            )
-            .unwrap();
+            txn.put(&db, &format!("{}{}", key, i), &format!("{}{}", val, i), WriteFlags::empty())
+                .unwrap();
             txn.commit().is_ok()
         }));
     }
@@ -303,9 +274,7 @@ fn test_concurrent_writers() {
     for i in 0..n {
         assert_eq!(
             Cow::<Vec<u8>>::Owned(format!("{}{}", val, i).into_bytes()),
-            txn.get(&db, format!("{}{}", key, i).as_bytes())
-                .unwrap()
-                .unwrap()
+            txn.get(&db, format!("{}{}", key, i).as_bytes()).unwrap().unwrap()
         );
     }
 }

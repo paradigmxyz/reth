@@ -23,8 +23,8 @@ mod private {
 
     pub trait Sealed {}
 
-    impl<'env> Sealed for RO {}
-    impl<'env> Sealed for RW {}
+    impl Sealed for RO {}
+    impl Sealed for RW {}
 }
 
 pub trait TransactionKind: private::Sealed + Debug + 'static {
@@ -127,14 +127,9 @@ where
     where
         Key: TableObject<'txn>,
     {
-        let key_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: key.len(),
-            iov_base: key.as_ptr() as *mut c_void,
-        };
-        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: 0,
-            iov_base: ptr::null_mut(),
-        };
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
 
         txn_execute(&self.txn, |txn| unsafe {
             match ffi::mdbx_get(txn, db.dbi(), &key_val, &mut data_val) {
@@ -156,7 +151,8 @@ where
         self.primed_dbis.lock().insert(db.dbi());
     }
 
-    /// Commits the transaction and returns table handles permanently open for the lifetime of `Environment`.
+    /// Commits the transaction and returns table handles permanently open for the lifetime of
+    /// `Environment`.
     pub fn commit_and_rebind_open_dbs(mut self) -> Result<(bool, Vec<Database<'env>>)> {
         let txnlck = self.txn.lock();
         let txn = *txnlck;
@@ -168,23 +164,13 @@ where
                 .txn_manager
                 .as_ref()
                 .unwrap()
-                .send(TxnManagerMessage::Commit {
-                    tx: TxnPtr(txn),
-                    sender,
-                })
+                .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
                 .unwrap();
             rx.recv().unwrap()
         };
         self.committed = true;
         result.map(|v| {
-            (
-                v,
-                self.primed_dbis
-                    .lock()
-                    .iter()
-                    .map(|&dbi| Database::new_from_ptr(dbi))
-                    .collect(),
-            )
+            (v, self.primed_dbis.lock().iter().map(|&dbi| Database::new_from_ptr(dbi)).collect())
         })
     }
 
@@ -261,8 +247,8 @@ where
     /// case the environment must be configured to allow named databases through
     /// [EnvironmentBuilder::set_max_dbs()](crate::EnvironmentBuilder::set_max_dbs).
     ///
-    /// This function will fail with [Error::BadRslot](crate::error::Error::BadRslot) if called by a thread with an open
-    /// transaction.
+    /// This function will fail with [Error::BadRslot](crate::error::Error::BadRslot) if called by a
+    /// thread with an open transaction.
     pub fn create_db<'txn>(
         &'txn self,
         name: Option<&str>,
@@ -286,14 +272,10 @@ where
     ) -> Result<()> {
         let key = key.as_ref();
         let data = data.as_ref();
-        let key_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: key.len(),
-            iov_base: key.as_ptr() as *mut c_void,
-        };
-        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: data.len(),
-            iov_base: data.as_ptr() as *mut c_void,
-        };
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
         mdbx_result(txn_execute(&self.txn, |txn| unsafe {
             ffi::mdbx_put(txn, db.dbi(), &key_val, &mut data_val, flags.bits())
         }))?;
@@ -312,14 +294,10 @@ where
         flags: WriteFlags,
     ) -> Result<&'txn mut [u8]> {
         let key = key.as_ref();
-        let key_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: key.len(),
-            iov_base: key.as_ptr() as *mut c_void,
-        };
-        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: len,
-            iov_base: ptr::null_mut::<c_void>(),
-        };
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
         unsafe {
             mdbx_result(txn_execute(&self.txn, |txn| {
                 ffi::mdbx_put(
@@ -330,19 +308,17 @@ where
                     flags.bits() | ffi::MDBX_RESERVE,
                 )
             }))?;
-            Ok(slice::from_raw_parts_mut(
-                data_val.iov_base as *mut u8,
-                data_val.iov_len,
-            ))
+            Ok(slice::from_raw_parts_mut(data_val.iov_base as *mut u8, data_val.iov_len))
         }
     }
 
     /// Delete items from a database.
     /// This function removes key/data pairs from the database.
     ///
-    /// The data parameter is NOT ignored regardless the database does support sorted duplicate data items or not.
-    /// If the data parameter is [Some] only the matching data item will be deleted.
-    /// Otherwise, if data parameter is [None], any/all value(s) for specified key will be deleted.
+    /// The data parameter is NOT ignored regardless the database does support sorted duplicate data
+    /// items or not. If the data parameter is [Some] only the matching data item will be
+    /// deleted. Otherwise, if data parameter is [None], any/all value(s) for specified key will
+    /// be deleted.
     ///
     /// Returns `true` if the key/value pair was present.
     pub fn del<'txn>(
@@ -352,10 +328,8 @@ where
         data: Option<&[u8]>,
     ) -> Result<bool> {
         let key = key.as_ref();
-        let key_val: ffi::MDBX_val = ffi::MDBX_val {
-            iov_len: key.len(),
-            iov_base: key.as_ptr() as *mut c_void,
-        };
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let data_val: Option<ffi::MDBX_val> = data.map(|data| ffi::MDBX_val {
             iov_len: data.len(),
             iov_base: data.as_ptr() as *mut c_void,
@@ -379,9 +353,7 @@ where
 
     /// Empties the given database. All items will be removed.
     pub fn clear_db<'txn>(&'txn self, db: &Database<'txn>) -> Result<()> {
-        mdbx_result(txn_execute(&self.txn, |txn| unsafe {
-            ffi::mdbx_drop(txn, db.dbi(), false)
-        }))?;
+        mdbx_result(txn_execute(&self.txn, |txn| unsafe { ffi::mdbx_drop(txn, db.dbi(), false) }))?;
 
         Ok(())
     }
@@ -389,11 +361,10 @@ where
     /// Drops the database from the environment.
     ///
     /// # Safety
-    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi BEFORE calling this function.
+    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
+    /// BEFORE calling this function.
     pub unsafe fn drop_db<'txn>(&'txn self, db: Database<'txn>) -> Result<()> {
-        mdbx_result(txn_execute(&self.txn, |txn| {
-            ffi::mdbx_drop(txn, db.dbi(), true)
-        }))?;
+        mdbx_result(txn_execute(&self.txn, |txn| ffi::mdbx_drop(txn, db.dbi(), true)))?;
 
         Ok(())
     }
@@ -406,7 +377,8 @@ where
     /// Closes the database handle.
     ///
     /// # Safety
-    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi BEFORE calling this function.
+    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
+    /// BEFORE calling this function.
     pub unsafe fn close_db(&self, db: Database<'_>) -> Result<()> {
         mdbx_result(ffi::mdbx_dbi_close(self.env.env(), db.dbi()))?;
 
@@ -430,9 +402,7 @@ impl<'env> Transaction<'env, RW, NoWriteMap> {
                 })
                 .unwrap();
 
-            rx.recv()
-                .unwrap()
-                .map(|ptr| Transaction::new_from_ptr(self.env, ptr.0))
+            rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env, ptr.0))
         })
     }
 }
@@ -465,10 +435,7 @@ where
                         .txn_manager
                         .as_ref()
                         .unwrap()
-                        .send(TxnManagerMessage::Abort {
-                            tx: TxnPtr(txn),
-                            sender,
-                        })
+                        .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
                         .unwrap();
                     rx.recv().unwrap().unwrap();
                 }
