@@ -115,7 +115,8 @@ pub struct Discv4 {
 // === impl Discv4 ===
 
 impl Discv4 {
-    /// Same as [`Self::bind`] but also spawns the service onto a new task, [`Discv4Service::spawn()`]
+    /// Same as [`Self::bind`] but also spawns the service onto a new task,
+    /// [`Discv4Service::spawn()`]
     pub async fn spawn(
         local_address: SocketAddr,
         local_enr: NodeRecord,
