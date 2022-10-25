@@ -232,9 +232,9 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.60.1"
+version = "0.61.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "062dddbc1ba4aca46de6338e2bf87771414c335f7b2f2036e8f3e9befebf88e6"
+checksum = "8a022e58a142a46fea340d68012b9201c094e93ec3d033a944a24f8fd4a4f09a"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -247,6 +247,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
+ "syn",
 ]
 
 [[package]]
@@ -2143,19 +2144,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "libmdbx"
-version = "0.1.8"
+name = "lifetimed-bytes"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc9c535ae90a96067a09087672f6eac8a7f010ab7d577037cf2e99714c2dceb1"
+checksum = "4c970c8ea4c7b023a41cfa4af4c785a16694604c2f2a3b0d1f20a9bcb73fa550"
 dependencies = [
- "bitflags",
- "byteorder",
- "derive_more",
- "indexmap",
- "libc",
- "mdbx-sys",
- "parking_lot 0.12.1",
- "thiserror",
+ "bytes",
 ]
 
 [[package]]
@@ -2197,32 +2191,6 @@ name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
-
-[[package]]
-name = "matchers"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
-dependencies = [
- "regex-automata",
-]
-
-[[package]]
-name = "matches"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
-
-[[package]]
-name = "mdbx-sys"
-version = "0.12.1-0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dd34990bd2d486fb7dda34ce57cbcd393d46afebb985a39c8ad84f6c70220aa"
-dependencies = [
- "bindgen",
- "cc",
- "libc",
-]
 
 [[package]]
 name = "memchr"
@@ -3019,11 +2987,11 @@ dependencies = [
  "criterion",
  "eyre",
  "iai",
- "libmdbx",
  "page_size",
  "parity-scale-codec",
  "postcard",
  "reth-interfaces",
+ "reth-libmdbx",
  "reth-primitives",
  "serde",
  "tempfile",
@@ -3141,6 +3109,7 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "async-trait",
  "auto_impl",
  "bytes",
@@ -3157,6 +3126,34 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "reth-libmdbx"
+version = "0.1.6"
+dependencies = [
+ "bitflags",
+ "byteorder",
+ "criterion",
+ "derive_more",
+ "indexmap",
+ "libc",
+ "lifetimed-bytes",
+ "parking_lot",
+ "rand",
+ "rand_xorshift",
+ "reth-mdbx-sys",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "reth-mdbx-sys"
+version = "0.12.1-0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "libc",
 ]
 
 [[package]]

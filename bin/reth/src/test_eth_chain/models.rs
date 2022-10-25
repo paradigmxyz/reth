@@ -335,7 +335,7 @@ mod test {
         }"#;
 
         let res = serde_json::from_str::<Test>(test);
-        assert!(res.is_ok(), "Failed to deserialize BlockchainTestData with error: {:?}", res);
+        assert!(res.is_ok(), "Failed to deserialize BlockchainTestData with error: {res:?}");
     }
 
     #[test]
@@ -360,7 +360,7 @@ mod test {
             "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
         }"#;
         let res = serde_json::from_str::<Header>(test);
-        assert!(res.is_ok(), "Failed to deserialize Header with error: {:?}", res);
+        assert!(res.is_ok(), "Failed to deserialize Header with error: {res:?}");
     }
 
     #[test]
@@ -386,6 +386,6 @@ mod test {
         ]"#;
 
         let res = serde_json::from_str::<Vec<Transaction>>(test);
-        assert!(res.is_ok(), "Failed to deserialize transactin with error: {:?}", res);
+        assert!(res.is_ok(), "Failed to deserialize transactin with error: {res:?}");
     }
 }

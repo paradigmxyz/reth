@@ -78,7 +78,7 @@ impl<Ok> ToRpcResult<Ok, reth_interfaces::Error> for reth_interfaces::Result<Ok>
         match self {
             Ok(t) => Ok(t),
             Err(err) => {
-                let msg = format!("{}: {:?}", msg, err);
+                let msg = format!("{msg}: {err:?}");
                 Err(internal_rpc_err(msg))
             }
         }

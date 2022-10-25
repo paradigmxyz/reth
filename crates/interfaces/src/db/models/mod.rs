@@ -2,3 +2,5 @@
 
 pub mod blocks;
 pub mod integer_list;
+
+pub use blocks::*;
