@@ -111,7 +111,7 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::DecodeError(reason) => write!(fmt, "{}", reason),
+            Error::DecodeError(reason) => write!(fmt, "{reason}"),
             other => {
                 write!(fmt, "{}", unsafe {
                     let err = ffi::mdbx_strerror(other.to_err_code());
