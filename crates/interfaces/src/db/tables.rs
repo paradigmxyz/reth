@@ -2,13 +2,13 @@
 
 use crate::db::{
     models::{
-        accounts::AccountBeforeTx,
+        accounts::{AccountBeforeTx, TxNumberAddress},
         blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
     },
     DupSort,
 };
 use reth_primitives::{
-    Account, Address, BlockNumber, Header, IntegerList, Receipt, StorageEntry, H256,
+    Account, Address, BlockNumber, Header, IntegerList, Receipt, StorageEntry, TxNumber, H256,
 };
 
 /// Enum for the type of table present in libmdbx.
@@ -109,7 +109,7 @@ table!(AccountHistory => Address => TxNumberList);
 table!(StorageHistory => Address_StorageKey => TxNumberList);
 
 dupsort!(AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
-table!(StorageChangeSet => TxNumber => StorageKeyBeforeTx);
+dupsort!(StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
 
 table!(TxSenders => TxNumber => Address); // Is it necessary?
 table!(Config => ConfigKey => ConfigValue);
@@ -120,7 +120,6 @@ table!(SyncStage => StageId => BlockNumber);
 /// Alias Types
 
 type TxNumberList = IntegerList;
-type TxNumber = u64;
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
@@ -134,5 +133,4 @@ type RlpTotalDifficulty = Vec<u8>;
 type RlpTxBody = Vec<u8>;
 #[allow(non_camel_case_types)]
 type Address_StorageKey = Vec<u8>;
-type StorageKeyBeforeTx = Vec<u8>;
 type StageId = Vec<u8>;

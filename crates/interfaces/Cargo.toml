@@ -27,6 +27,7 @@ tokio-stream = "0.1.11"
 rand = "0.8.5"
 
 [dev-dependencies]
+reth-db = { path = "../db", features = ["test-utils"] }
 test-fuzz = "3.0.4"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
