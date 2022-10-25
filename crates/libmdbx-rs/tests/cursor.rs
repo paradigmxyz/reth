@@ -26,10 +26,7 @@ fn test_get() {
     assert_eq!(cursor.last().unwrap(), Some((*b"key3", *b"val3")));
     assert_eq!(cursor.set(b"key1").unwrap(), Some(*b"val1"));
     assert_eq!(cursor.set_key(b"key3").unwrap(), Some((*b"key3", *b"val3")));
-    assert_eq!(
-        cursor.set_range(b"key2\0").unwrap(),
-        Some((*b"key3", *b"val3"))
-    );
+    assert_eq!(cursor.set_range(b"key2\0").unwrap(), Some((*b"key3", *b"val3")));
 }
 
 #[test]
@@ -62,16 +59,10 @@ fn test_get_dup() {
     assert_eq!(cursor.next_dup::<(), ()>().unwrap(), None);
     assert_eq!(cursor.set(b"key1").unwrap(), Some(*b"val1"));
     assert_eq!(cursor.set(b"key2").unwrap(), Some(*b"val1"));
-    assert_eq!(
-        cursor.set_range(b"key1\0").unwrap(),
-        Some((*b"key2", *b"val1"))
-    );
+    assert_eq!(cursor.set_range(b"key1\0").unwrap(), Some((*b"key2", *b"val1")));
     assert_eq!(cursor.get_both(b"key1", b"val3").unwrap(), Some(*b"val3"));
     assert_eq!(cursor.get_both_range::<()>(b"key1", b"val4").unwrap(), None);
-    assert_eq!(
-        cursor.get_both_range(b"key2", b"val").unwrap(),
-        Some(*b"val1")
-    );
+    assert_eq!(cursor.get_both_range(b"key2", b"val").unwrap(), Some(*b"val1"));
 
     assert_eq!(cursor.last().unwrap(), Some((*b"key2", *b"val3")));
     cursor.del(WriteFlags::empty()).unwrap();
@@ -88,9 +79,7 @@ fn test_get_dupfixed() {
     let env = Environment::new().open(dir.path()).unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
-    let db = txn
-        .create_db(None, DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED)
-        .unwrap();
+    let db = txn.create_db(None, DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED).unwrap();
     txn.put(&db, b"key1", b"val1", WriteFlags::empty()).unwrap();
     txn.put(&db, b"key1", b"val2", WriteFlags::empty()).unwrap();
     txn.put(&db, b"key1", b"val3", WriteFlags::empty()).unwrap();
@@ -144,33 +133,21 @@ fn test_iter() {
         cursor.iter().collect::<Result<Vec<_>>>().unwrap()
     );
 
-    assert_eq!(
-        items,
-        cursor.iter_start().collect::<Result<Vec<_>>>().unwrap()
-    );
+    assert_eq!(items, cursor.iter_start().collect::<Result<Vec<_>>>().unwrap());
 
     assert_eq!(
         items.clone().into_iter().skip(1).collect::<Vec<_>>(),
-        cursor
-            .iter_from(b"key2")
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_from(b"key2").collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
         items.into_iter().skip(3).collect::<Vec<_>>(),
-        cursor
-            .iter_from(b"key4")
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_from(b"key4").collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
         Vec::<((), ())>::new(),
-        cursor
-            .iter_from(b"key6")
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_from(b"key6").collect::<Result<Vec<_>>>().unwrap()
     );
 }
 
@@ -206,11 +183,7 @@ fn test_iter_empty_dup_database() {
     assert!(cursor.iter_from::<(), ()>(b"foo").next().is_none());
     assert!(cursor.iter_dup::<(), ()>().flatten().next().is_none());
     assert!(cursor.iter_dup_start::<(), ()>().flatten().next().is_none());
-    assert!(cursor
-        .iter_dup_from::<(), ()>(b"foo")
-        .flatten()
-        .next()
-        .is_none());
+    assert!(cursor.iter_dup_from::<(), ()>(b"foo").flatten().next().is_none());
     assert!(cursor.iter_dup_of::<(), ()>(b"foo").next().is_none());
 }
 
@@ -253,91 +226,39 @@ fn test_iter_dup() {
     let txn = env.begin_ro_txn().unwrap();
     let db = txn.open_db(None).unwrap();
     let mut cursor = txn.cursor(&db).unwrap();
-    assert_eq!(
-        items,
-        cursor
-            .iter_dup()
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
-    );
+    assert_eq!(items, cursor.iter_dup().flatten().collect::<Result<Vec<_>>>().unwrap());
 
     cursor.set::<()>(b"b").unwrap();
     assert_eq!(
         items.iter().copied().skip(4).collect::<Vec<_>>(),
-        cursor
-            .iter_dup()
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_dup().flatten().collect::<Result<Vec<_>>>().unwrap()
+    );
+
+    assert_eq!(items, cursor.iter_dup_start().flatten().collect::<Result<Vec<_>>>().unwrap());
+
+    assert_eq!(
+        items.iter().copied().into_iter().skip(3).collect::<Vec<_>>(),
+        cursor.iter_dup_from(b"b").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
-        items,
-        cursor
-            .iter_dup_start()
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        items.iter().copied().into_iter().skip(3).collect::<Vec<_>>(),
+        cursor.iter_dup_from(b"ab").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
-        items
-            .iter()
-            .copied()
-            .into_iter()
-            .skip(3)
-            .collect::<Vec<_>>(),
-        cursor
-            .iter_dup_from(b"b")
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
-    );
-
-    assert_eq!(
-        items
-            .iter()
-            .copied()
-            .into_iter()
-            .skip(3)
-            .collect::<Vec<_>>(),
-        cursor
-            .iter_dup_from(b"ab")
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
-    );
-
-    assert_eq!(
-        items
-            .iter()
-            .copied()
-            .into_iter()
-            .skip(9)
-            .collect::<Vec<_>>(),
-        cursor
-            .iter_dup_from(b"d")
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        items.iter().copied().into_iter().skip(9).collect::<Vec<_>>(),
+        cursor.iter_dup_from(b"d").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
         Vec::<([u8; 1], [u8; 1])>::new(),
-        cursor
-            .iter_dup_from(b"f")
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_dup_from(b"f").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
         items.iter().copied().skip(3).take(3).collect::<Vec<_>>(),
-        cursor
-            .iter_dup_of(b"b")
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_dup_of(b"b").collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(0, cursor.iter_dup_of::<(), ()>(b"foo").count());
@@ -376,35 +297,18 @@ fn test_iter_del_get() {
     let txn = env.begin_rw_txn().unwrap();
     let db = txn.open_db(None).unwrap();
     let mut cursor = txn.cursor(&db).unwrap();
-    assert_eq!(
-        items,
-        cursor
-            .iter_dup()
-            .flatten()
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
-    );
+    assert_eq!(items, cursor.iter_dup().flatten().collect::<Result<Vec<_>>>().unwrap());
 
     assert_eq!(
         items.iter().copied().take(1).collect::<Vec<(_, _)>>(),
-        cursor
-            .iter_dup_of(b"a")
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
+        cursor.iter_dup_of(b"a").collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(cursor.set(b"a").unwrap(), Some(*b"1"));
 
     cursor.del(WriteFlags::empty()).unwrap();
 
-    assert_eq!(
-        cursor
-            .iter_dup_of::<(), ()>(b"a")
-            .collect::<Result<Vec<_>>>()
-            .unwrap()
-            .len(),
-        0
-    );
+    assert_eq!(cursor.iter_dup_of::<(), ()>(b"a").collect::<Result<Vec<_>>>().unwrap().len(), 0);
 }
 
 #[test]
@@ -422,19 +326,13 @@ fn test_put_del() {
 
     assert_eq!(
         cursor.get_current().unwrap().unwrap(),
-        (
-            Cow::Borrowed(b"key3" as &[u8]),
-            Cow::Borrowed(b"val3" as &[u8])
-        )
+        (Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8]))
     );
 
     cursor.del(WriteFlags::empty()).unwrap();
     assert_eq!(cursor.get_current::<Vec<u8>, Vec<u8>>().unwrap(), None);
     assert_eq!(
         cursor.last().unwrap().unwrap(),
-        (
-            Cow::Borrowed(b"key2" as &[u8]),
-            Cow::Borrowed(b"val2" as &[u8])
-        )
+        (Cow::Borrowed(b"key2" as &[u8]), Cow::Borrowed(b"val2" as &[u8]))
     );
 }

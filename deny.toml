@@ -57,10 +57,6 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "tiny-keccak" },
     { allow = ["CC0-1.0"], name = "more-asserts" },
 
-    # TODO: temporarily allow libmdx
-    { allow = ["GPL-3.0"], name = "libmdbx" },
-    { allow = ["GPL-3.0"], name = "mdbx-sys" },
-
     # TODO: ethers transitive deps
     { allow = ["GPL-3.0"], name = "fastrlp" },
     { allow = ["GPL-3.0"], name = "fastrlp-derive" },

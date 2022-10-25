@@ -3,11 +3,11 @@
 use std::marker::PhantomData;
 
 use crate::utils::*;
-use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 use reth_interfaces::db::{
     DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode, Error, Table,
     Walker,
 };
+use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
