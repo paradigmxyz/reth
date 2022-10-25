@@ -24,11 +24,13 @@ parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 futures = "0.3.25"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true}
 
 [dev-dependencies]
 test-fuzz = "3.0.4"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
+arbitrary = { version = "1.1.7", features = ["derive"]}
 
 [features]
 bench = []
