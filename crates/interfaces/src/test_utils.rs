@@ -7,7 +7,7 @@ use crate::{
 };
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use reth_primitives::{Header, HeaderLocked, H256, H512};
+use reth_primitives::{Header, HeaderLocked, H256, H512, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 
 use tokio::sync::{broadcast, mpsc, watch};
@@ -134,7 +134,7 @@ impl Default for TestConsensus {
 
 impl TestConsensus {
     /// Update the forkchoice state
-    pub fn update_tip(&mut self, tip: H256) {
+    pub fn update_tip(&self, tip: H256) {
         let state = ForkchoiceState {
             head_block_hash: tip,
             finalized_block_hash: H256::zero(),
@@ -162,4 +162,29 @@ impl Consensus for TestConsensus {
             Ok(())
         }
     }
+}
+
+/// Generate a range of random header. The parent hash of the first header
+/// in the result will be equal to head
+pub fn gen_random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<HeaderLocked> {
+    let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
+    for idx in rng {
+        headers.push(gen_random_header(
+            idx,
+            Some(headers.last().map(|h: &HeaderLocked| h.hash()).unwrap_or(head)),
+        ));
+    }
+    headers
+}
+
+/// Generate a random header
+pub fn gen_random_header(number: u64, parent: Option<H256>) -> HeaderLocked {
+    let header = reth_primitives::Header {
+        number,
+        nonce: rand::random(),
+        difficulty: U256::from(rand::random::<u32>()),
+        parent_hash: parent.unwrap_or_default(),
+        ..Default::default()
+    };
+    header.lock()
 }
