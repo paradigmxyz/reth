@@ -3,7 +3,7 @@ mod utils;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ffi::*;
 use libc::size_t;
-use libmdbx::{ObjectLength, WriteFlags};
+use reth_libmdbx::{ObjectLength, WriteFlags};
 use rand::{prelude::SliceRandom, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use std::ptr;

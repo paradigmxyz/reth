@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::utils::*;
-use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
+use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 use reth_interfaces::db::{
     DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode, Error, Table,
     Walker,
@@ -25,7 +25,7 @@ pub type CursorRW<'tx, T> = Cursor<'tx, RW, T>;
 #[derive(Debug)]
 pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
-    pub inner: libmdbx::Cursor<'tx, K>,
+    pub inner: reth_libmdbx::Cursor<'tx, K>,
     /// Table name as is inside the database.
     pub table: &'static str,
     /// Phantom data to enforce encoding/decoding.

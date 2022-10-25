@@ -1,4 +1,4 @@
-use libmdbx::*;
+use reth_libmdbx::*;
 use std::{
     borrow::Cow,
     io::Write,
@@ -7,7 +7,7 @@ use std::{
 };
 use tempfile::tempdir;
 
-type Environment = libmdbx::Environment<NoWriteMap>;
+type Environment = reth_libmdbx::Environment<NoWriteMap>;
 
 #[test]
 fn test_put_get_del() {

@@ -1,7 +1,7 @@
 //! Module that interacts with MDBX.
 
 use crate::utils::default_page_size;
-use libmdbx::{
+use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
@@ -99,7 +99,7 @@ impl<E: EnvironmentKind> Env<E> {
 }
 
 impl<E: EnvironmentKind> Deref for Env<E> {
-    type Target = libmdbx::Environment<E>;
+    type Target = reth_libmdbx::Environment<E>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -134,7 +134,7 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::{test_utils, Env, EnvKind};
-    use libmdbx::{NoWriteMap, WriteMap};
+    use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_interfaces::db::{
         tables::{Headers, PlainAccountState, PlainStorageState},
         Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
