@@ -3,11 +3,11 @@
 use std::marker::PhantomData;
 
 use crate::utils::*;
-use libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 use reth_interfaces::db::{
     DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode, Error, Table,
     Walker,
 };
+use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
@@ -25,7 +25,7 @@ pub type CursorRW<'tx, T> = Cursor<'tx, RW, T>;
 #[derive(Debug)]
 pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
-    pub inner: libmdbx::Cursor<'tx, K>,
+    pub inner: reth_libmdbx::Cursor<'tx, K>,
     /// Table name as is inside the database.
     pub table: &'static str,
     /// Phantom data to enforce encoding/decoding.
@@ -126,6 +126,7 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+        // Default `WriteFlags` is UPSERT
         self.inner
             .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::UPSERT)
             .map_err(|e| Error::Internal(e.into()))

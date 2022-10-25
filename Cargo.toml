@@ -10,6 +10,7 @@ members = [
     "crates/net/p2p",
     "crates/net/ecies",
     "crates/net/eth-wire",
+    "crates/net/discv4",
     "crates/net/rpc",
     "crates/net/rpc-api",
     "crates/net/rpc-types",
@@ -17,6 +18,8 @@ members = [
     "crates/primitives",
     "crates/stages",
     "crates/transaction-pool",
-    "crates/db"
+    "crates/db",
+    "crates/libmdbx-rs",
+    "crates/libmdbx-rs/mdbx-sys"
 ]
 default-members = ["bin/reth"]

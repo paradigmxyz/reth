@@ -39,7 +39,7 @@ impl Command {
                     }
                     Err(error) => {
                         num_of_failed += 1;
-                        println!("Test {:?} failed:\n {error}\n", file);
+                        println!("Test {file:?} failed:\n {error}\n");
                     }
                 }
             }
