@@ -15,7 +15,7 @@ reth-codecs = { version = "0.1.0", path = "../codecs" }
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
-tiny-keccak = "0.3"
+tiny-keccak = { version = "2.0", features = ["sha3"] }
 
 #used for forkid
 crc = "1"
