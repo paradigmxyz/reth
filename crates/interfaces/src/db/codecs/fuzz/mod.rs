@@ -14,11 +14,16 @@ macro_rules! impl_fuzzer_with_input {
             #[allow(non_snake_case)]
             #[cfg(any(test, feature = "bench"))]
             pub mod $name {
-                use reth_primitives::$name;
                 use crate::db::table;
 
                 #[allow(unused_imports)]
+                use reth_primitives::*;
+
+                #[allow(unused_imports)]
                 use super::inputs::*;
+
+                #[allow(unused_imports)]
+                use crate::db::models::*;
 
                 /// Encodes and decodes table types returning its encoded size and the decoded object.
                 /// This method is used for benchmarking, so its parameter should be the actual type that is being tested.
@@ -26,7 +31,9 @@ macro_rules! impl_fuzzer_with_input {
                 {
                     let data = table::Encode::encode(obj);
                     let size = data.len();
-                    (size, table::Decode::decode(data).expect("failed to decode"))
+
+                    // Some `data` might be a fixed array.
+                    (size, table::Decode::decode(data.to_vec()).expect("failed to decode"))
                 }
 
                 #[cfg(test)]
@@ -57,6 +64,6 @@ macro_rules! impl_fuzzer {
     };
 }
 
-impl_fuzzer!(Header, Account);
+impl_fuzzer!(Header, Account, BlockNumHash);
 
 impl_fuzzer_with_input!((IntegerList, IntegerListInput));
