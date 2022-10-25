@@ -18,7 +18,7 @@ fn bench_encode(c: &mut Criterion) {
     c.bench_function("encode_u64", |b| {
         b.iter(|| {
             let mut out = BytesMut::new();
-            let _ = 0x1023_4567_89ab_cdefu64.encode(&mut out);
+            0x1023_4567_89ab_cdefu64.encode(&mut out);
         })
     });
     c.bench_function("encode_u256", |b| {
