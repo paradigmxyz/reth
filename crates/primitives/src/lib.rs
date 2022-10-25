@@ -16,6 +16,7 @@ mod integer_list;
 mod jsonu256;
 mod log;
 mod receipt;
+mod storage;
 mod transaction;
 
 pub use account::Account;
@@ -26,6 +27,7 @@ pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
+pub use storage::StorageEntry;
 pub use transaction::{
     AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
 };
@@ -55,6 +57,7 @@ pub use ethers_core::{
 
 #[doc(hidden)]
 mod __reexport {
+    pub use hex;
     pub use tiny_keccak;
 }
 
@@ -63,7 +66,10 @@ pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    let mut res: [u8; 32] = [0; 32];
-    tiny_keccak::keccak_256(data.as_ref(), &mut res);
-    res.into()
+    use tiny_keccak::{Hasher, Sha3};
+    let mut sha3 = Sha3::v256();
+    let mut output = [0; 32];
+    sha3.update(data.as_ref());
+    sha3.finalize(&mut output);
+    output.into()
 }

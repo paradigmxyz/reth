@@ -1183,7 +1183,7 @@ dependencies = [
  "impl-rlp",
  "impl-serde",
  "scale-info",
- "tiny-keccak 2.0.2",
+ "tiny-keccak",
 ]
 
 [[package]]
@@ -1224,7 +1224,7 @@ dependencies = [
  "serde_json",
  "strum",
  "thiserror",
- "tiny-keccak 2.0.2",
+ "tiny-keccak",
  "unicode-xid",
 ]
 
@@ -3182,6 +3182,7 @@ dependencies = [
  "bytes",
  "crc",
  "ethers-core",
+ "hex",
  "hex-literal",
  "maplit",
  "parity-scale-codec",
@@ -3191,7 +3192,7 @@ dependencies = [
  "serde_json",
  "sucds",
  "thiserror",
- "tiny-keccak 0.3.0",
+ "tiny-keccak",
 ]
 
 [[package]]
@@ -4125,12 +4126,6 @@ name = "time-core"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e153e1f1acaef8acc537e68b44906d2db6436e2b35ac2c6b42640fff91f00fd"
-
-[[package]]
-name = "tiny-keccak"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81cd8183d45872feda10001dfacfebf7e163e159922582cd919bed08732447c4"
 
 [[package]]
 name = "tiny-keccak"

@@ -6,6 +6,8 @@ pub mod models;
 mod table;
 pub mod tables;
 
+use std::marker::PhantomData;
+
 pub use error::Error;
 pub use table::*;
 
@@ -67,25 +69,22 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
     }
 }
 
-/// Read only transaction
-pub trait DbTx<'a> {
+/// Implements the GAT method from:
+/// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
+///
+/// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
+pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
     type Cursor<T: Table>: DbCursorRO<'a, T>;
     /// DupCursor GAT
     type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T>;
-    /// Get value
-    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
-    /// Commit for read only transaction will consume and free transaction and allows
-    /// freeing of memory pages
-    fn commit(self) -> Result<bool, Error>;
-    /// Iterate over read only values in table.
-    fn cursor<T: Table>(&self) -> Result<Self::Cursor<T>, Error>;
-    /// Iterate over read only values in dup sorted table.
-    fn cursor_dup<T: DupSort>(&self) -> Result<Self::DupCursor<T>, Error>;
 }
 
-/// Read write transaction that allows writing to database
-pub trait DbTxMut<'a> {
+/// Implements the GAT method from:
+/// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
+///
+/// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
+pub trait DbTxMutGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
     type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T>;
     /// DupCursor GAT
@@ -93,6 +92,23 @@ pub trait DbTxMut<'a> {
         + DbCursorRW<'a, T>
         + DbDupCursorRO<'a, T>
         + DbCursorRO<'a, T>;
+}
+
+/// Read only transaction
+pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
+    /// Get value
+    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
+    /// Commit for read only transaction will consume and free transaction and allows
+    /// freeing of memory pages
+    fn commit(self) -> Result<bool, Error>;
+    /// Iterate over read only values in table.
+    fn cursor<T: Table>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::Cursor<T>, Error>;
+    /// Iterate over read only values in dup sorted table.
+    fn cursor_dup<T: DupSort>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::DupCursor<T>, Error>;
+}
+
+/// Read write transaction that allows writing to database
+pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
     /// Delete value from database
@@ -100,9 +116,11 @@ pub trait DbTxMut<'a> {
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), Error>;
     /// Cursor mut
-    fn cursor_mut<T: Table>(&self) -> Result<Self::CursorMut<T>, Error>;
+    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'tx>>::CursorMut<T>, Error>;
     /// DupCursor mut.
-    fn cursor_dup_mut<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, Error>;
+    fn cursor_dup_mut<T: DupSort>(
+        &self,
+    ) -> Result<<Self as DbTxMutGAT<'tx>>::DupCursorMut<T>, Error>;
 }
 
 /// Alias type for a `(key, value)` result coming from a cursor.
@@ -136,8 +154,18 @@ pub trait DbCursorRO<'tx, T: Table> {
     /// Returns the current `(key, value)` pair of the cursor.
     fn current(&mut self) -> PairResult<T>;
 
+    /// Inner
+    fn inner(&'tx mut self) -> &'tx mut Self {
+        self
+    }
+
     /// Returns an iterator starting at a key greater or equal than `start_key`.
-    fn walk(&'tx mut self, start_key: T::Key) -> Result<Walker<'tx, T>, Error>;
+    fn walk<'cursor>(
+        &'cursor mut self,
+        start_key: T::Key,
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
 }
 
 /// Read only curor over DupSort table.
@@ -153,7 +181,13 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT
     /// table.
-    fn walk_dup(&'tx mut self, key: T::Key, subkey: T::SubKey) -> Result<DupWalker<'tx, T>, Error>;
+    fn walk_dup<'cursor>(
+        &'cursor mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
 }
 
 /// Read write cursor over table.
@@ -178,14 +212,18 @@ pub trait DbDupCursorRW<'tx, T: DupSort> {
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.
-pub struct Walker<'cursor, T: Table> {
+pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T> + Sized> {
     /// Cursor to be used to walk through the table.
-    pub cursor: &'cursor mut dyn DbCursorRO<'cursor, T>,
+    pub cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     pub start: IterPairResult<T>,
+    /// Phantom data for 'tx.
+    pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'cursor, T: Table> std::iter::Iterator for Walker<'cursor, T> {
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T> + Sized> std::iter::Iterator
+    for Walker<'cursor, 'tx, T, CURSOR>
+{
     type Item = Result<(T::Key, T::Value), Error>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
@@ -198,14 +236,18 @@ impl<'cursor, T: Table> std::iter::Iterator for Walker<'cursor, T> {
 }
 
 /// Provides an iterator to `Cursor` when handling a `DupSort` table.
-pub struct DupWalker<'cursor, T: DupSort> {
+pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T> + Sized> {
     /// Cursor to be used to walk through the table.
-    pub cursor: &'cursor mut dyn DbDupCursorRO<'cursor, T>,
+    pub cursor: &'cursor mut CURSOR,
     /// Value where to start the walk.
     pub start: Option<Result<T::Value, Error>>,
+    /// Phantom data for 'tx.
+    pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'cursor, T: DupSort> std::iter::Iterator for DupWalker<'cursor, T> {
+impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T> + Sized> std::iter::Iterator
+    for DupWalker<'cursor, 'tx, T, CURSOR>
+{
     type Item = Result<T::Value, Error>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
