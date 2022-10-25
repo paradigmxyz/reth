@@ -2578,6 +2578,8 @@ dependencies = [
  "parity-scale-codec",
  "postcard",
  "rand",
+ "reth-codecs",
+ "reth-db",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
