@@ -965,20 +965,21 @@ struct LIBMDBX_API_TYPE slice : public ::MDBX_val {
   hash_value() const noexcept;
 
   /// \brief Three-way fast non-lexicographically length-based comparison.
-  /// \return value:
-  ///   == 0 if "a" == "b",
-  ///   <  0 if "a" shorter than "b",
-  ///   >  0 if "a" longer than "b",
-  ///   <  0 if "a" length-equal and lexicographically less than "b",
-  ///   >  0 if "a" length-equal and lexicographically great than "b".
+  /// \details Firstly compares length and if it equal then compare content
+  /// lexicographically. \return value:
+  ///  `== 0` if `a` the same as `b`;
+  ///   `< 0` if `a` shorter than `b`,
+  ///             or the same length and lexicographically less than `b`;
+  ///   `> 0` if `a` longer than `b`,
+  ///             or the same length and lexicographically great than `b`.
   MDBX_NOTHROW_PURE_FUNCTION static MDBX_CXX14_CONSTEXPR intptr_t
   compare_fast(const slice &a, const slice &b) noexcept;
 
   /// \brief Three-way lexicographically comparison.
   /// \return value:
-  ///   <  0 if "a" <  "b",
-  ///   == 0 if "a" == "b",
-  ///   >  0 if "a" >  "b".
+  ///  `== 0` if `a` lexicographically equal `b`;
+  ///   `< 0` if `a` lexicographically less than `b`;
+  ///   `> 0` if `a` lexicographically great than `b`.
   MDBX_NOTHROW_PURE_FUNCTION static MDBX_CXX14_CONSTEXPR intptr_t
   compare_lexicographically(const slice &a, const slice &b) noexcept;
   friend MDBX_CXX14_CONSTEXPR bool operator==(const slice &a,
@@ -3224,8 +3225,12 @@ public:
 #if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
   env &copy(const ::std::wstring &destination, bool compactify,
             bool force_dynamic_size = false);
+  env &copy(const wchar_t *destination, bool compactify,
+            bool force_dynamic_size = false);
 #endif /* Windows */
   env &copy(const ::std::string &destination, bool compactify,
+            bool force_dynamic_size = false);
+  env &copy(const char *destination, bool compactify,
             bool force_dynamic_size = false);
 
   /// \brief Copy an environment to the specified file descriptor.
@@ -3251,14 +3256,18 @@ public:
   /// \brief Removes the environment's files in a proper and multiprocess-safe
   /// way.
 #ifdef MDBX_STD_FILESYSTEM_PATH
-  static bool remove(const MDBX_STD_FILESYSTEM_PATH &,
+  static bool remove(const MDBX_STD_FILESYSTEM_PATH &pathname,
                      const remove_mode mode = just_remove);
 #endif /* MDBX_STD_FILESYSTEM_PATH */
 #if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
-  static bool remove(const ::std::wstring &,
+  static bool remove(const ::std::wstring &pathname,
+                     const remove_mode mode = just_remove);
+  static bool remove(const wchar_t *pathname,
                      const remove_mode mode = just_remove);
 #endif /* Windows */
-  static bool remove(const ::std::string &,
+  static bool remove(const ::std::string &pathname,
+                     const remove_mode mode = just_remove);
+  static bool remove(const char *pathname,
                      const remove_mode mode = just_remove);
 
   /// \brief Statistics for a database in the MDBX environment.
@@ -3496,15 +3505,19 @@ public:
 
   /// \brief Open existing database.
 #ifdef MDBX_STD_FILESYSTEM_PATH
-  env_managed(const MDBX_STD_FILESYSTEM_PATH &, const operate_parameters &,
-              bool accede = true);
+  env_managed(const MDBX_STD_FILESYSTEM_PATH &pathname,
+              const operate_parameters &, bool accede = true);
 #endif /* MDBX_STD_FILESYSTEM_PATH */
 #if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
-  env_managed(const ::std::wstring &, const operate_parameters &,
+  env_managed(const ::std::wstring &pathname, const operate_parameters &,
               bool accede = true);
+  explicit env_managed(const wchar_t *pathname, const operate_parameters &,
+                       bool accede = true);
 #endif /* Windows */
-  env_managed(const ::std::string &, const operate_parameters &,
+  env_managed(const ::std::string &pathname, const operate_parameters &,
               bool accede = true);
+  explicit env_managed(const char *pathname, const operate_parameters &,
+                       bool accede = true);
 
   /// \brief Additional parameters for creating a new database.
   struct create_parameters {
@@ -3517,15 +3530,20 @@ public:
 
   /// \brief Create new or open existing database.
 #ifdef MDBX_STD_FILESYSTEM_PATH
-  env_managed(const MDBX_STD_FILESYSTEM_PATH &, const create_parameters &,
-              const operate_parameters &, bool accede = true);
+  env_managed(const MDBX_STD_FILESYSTEM_PATH &pathname,
+              const create_parameters &, const operate_parameters &,
+              bool accede = true);
 #endif /* MDBX_STD_FILESYSTEM_PATH */
 #if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
-  env_managed(const ::std::wstring &, const create_parameters &,
+  env_managed(const ::std::wstring &pathname, const create_parameters &,
               const operate_parameters &, bool accede = true);
+  explicit env_managed(const wchar_t *pathname, const create_parameters &,
+                       const operate_parameters &, bool accede = true);
 #endif /* Windows */
-  env_managed(const ::std::string &, const create_parameters &,
+  env_managed(const ::std::string &pathname, const create_parameters &,
               const operate_parameters &, bool accede = true);
+  explicit env_managed(const char *pathname, const create_parameters &,
+                       const operate_parameters &, bool accede = true);
 
   /// \brief Explicitly closes the environment and release the memory map.
   ///

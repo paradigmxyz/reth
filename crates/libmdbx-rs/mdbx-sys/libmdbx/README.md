@@ -97,6 +97,24 @@ _MithrilDB_ is a rightly relevant name.
 
 <!-- section-end -->
 
+```
+$ objdump -f -h -j .text libmdbx.so
+
+  libmdbx.so:     формат файла elf64-e2k
+  архитектура: elbrus-v6:64, флаги 0x00000150:
+  HAS_SYMS, DYNAMIC, D_PAGED
+  начальный адрес 0x0000000000021680
+
+  Разделы:
+  Idx Name          Разм      VMA               LMA               Фа  смещ.  Выр.
+   10 .text         000ddd28  0000000000021680  0000000000021680  00021680  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+
+$ cc --version
+  lcc:1.26.12:Jun-05-2022:e2k-v6-linux
+  gcc (GCC) 9.3.0 compatible
+```
+
 -----
 
 ## Table of Contents
@@ -376,20 +394,20 @@ since release the version 1.0.
 
 _libmdbx_ provides two official ways for integration in source code form:
 
-1. Using the amalgamated source code.
-   > The amalgamated source code includes all files required to build and
+1. Using an amalgamated source code which available in the [releases section](https://gitflic.ru/project/erthink/libmdbx/release) on GitFlic.
+   > An amalgamated source code includes all files required to build and
    > use _libmdbx_, but not for testing _libmdbx_ itself.
+   > Beside the releases an amalgamated sources could be created any time from the original clone of git
+   > repository on Linux by executing `make dist`. As a result, the desired
+   > set of files will be formed in the `dist` subdirectory.
 
-2. Adding the complete original source code as a `git submodule`.
+2. Adding the complete source code as a `git submodule` from the [origin git repository](https://gitflic.ru/project/erthink/libmdbx) on GitFlic.
    > This allows you to build as _libmdbx_ and testing tool.
    >  On the other hand, this way requires you to pull git tags, and use C++11 compiler for test tool.
 
 _**Please, avoid using any other techniques.**_ Otherwise, at least
 don't ask for support and don't name such chimeras `libmdbx`.
 
-The amalgamated source code could be created from the original clone of git
-repository on Linux by executing `make dist`. As a result, the desired
-set of files will be formed in the `dist` subdirectory.
 
 
 ## Building and Testing

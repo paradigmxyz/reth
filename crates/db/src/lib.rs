@@ -9,7 +9,7 @@
 
 /// Rust bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
 pub mod mdbx {
-    pub use libmdbx::*;
+    pub use reth_libmdbx::*;
 }
 
 pub mod kv;

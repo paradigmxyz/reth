@@ -1,7 +1,128 @@
 ChangeLog
 ---------
 
-## v0.11.8 at 2022-06-12
+## v0.12.1 (Positive Proxima) at 2022-08-24
+
+The planned frontward release with new superior features on the day of 20 anniversary of [Positive Technologies](https://ptsecurty.com).
+
+```
+37 files changed, 7604 insertions(+), 7417 deletions(-)
+Signed-off-by: Леонид Юрьев (Leonid Yuriev) <leo@yuriev.ru>
+```
+
+New:
+
+ - The `Big Foot` feature which significantly reduces GC overhead for processing large lists of retired pages from huge transactions.
+   Now _libmdbx_ avoid creating large chunks of PNLs (page number lists) which required a long sequences of free pages, aka large/overflow pages.
+   Thus avoiding searching, allocating and storing such sequences inside GC.
+ - Improved hot/online validation and checking of database pages both for more robustness and performance.
+ - New solid and fast method to latch meta-pages called `Troika`.
+   The minimum of memory barriers, reads, comparisons and conditional transitions are used.
+ - New `MDBX_VALIDATION` environment options to extra validation of DB structure and pages content for carefully/safe handling damaged or untrusted DB.
+ - Accelerated ×16/×8/×4 by AVX512/AVX2/SSE2/Neon implementations of search page sequences.
+ - Added the `gcrtime_seconds16dot16` counter to the "Page Operation Statistics" that accumulates time spent for GC searching and reclaiming.
+ - Copy-with-compactification now clears/zeroes unused gaps inside database pages.
+ - The `C` and `C++` APIs has been extended and/or refined to simplify using `wchar_t` pathnames.
+   On Windows the `mdbx_env_openW()`, ``mdbx_env_get_pathW()`()`, `mdbx_env_copyW()`, `mdbx_env_open_for_recoveryW()` are available for now,
+   but the `mdbx_env_get_path()` has been replaced in favor of `mdbx_env_get_pathW()`.
+ - Added explicit error message for Buildroot's Microblaze toolchain maintainers.
+ - Added `MDBX_MANAGE_BUILD_FLAGS` build options for CMake.
+ - Speed-up internal `bsearch`/`lower_bound` implementation using branchless tactic, including workaround for CLANG x86 optimiser bug.
+ - A lot internal refinement and micro-optimisations.
+ - Internally counted volume of dirty pages (unused for now but for coming features).
+
+Fixes:
+
+ - Never use modern `__cxa_thread_atexit()` on Apple's OSes.
+ - Don't check owner for finished transactions.
+ - Fixed typo in `MDBX_EINVAL` which breaks MingGW builds with CLANG.
+
+
+## v0.12.0 at 2022-06-19
+
+Not a release but preparation for changing feature set and API.
+
+
+-------------------------------------------------------------------------------
+
+
+## v0.11.10 (the TriColor) at 2022-08-22
+
+The stable bugfix release.
+It is planned that this will be the last release of the v0.11 branch.
+
+```
+14 files changed, 263 insertions(+), 252 deletions(-)
+Signed-off-by: Леонид Юрьев (Leonid Yuriev) <leo@yuriev.ru>
+```
+
+New:
+
+ - The C++ API has been refined to simplify support for `wchar_t` in path names.
+ - Added explicit error message for Buildroot's Microblaze toolchain maintainers.
+
+Fixes:
+
+ - Never use modern `__cxa_thread_atexit()` on Apple's OSes.
+ - Use `MultiByteToWideChar(CP_THREAD_ACP)` instead of `mbstowcs()`.
+ - Don't check owner for finished transactions.
+ - Fixed typo in `MDBX_EINVAL` which breaks MingGW builds with CLANG.
+
+Minors:
+
+ - Fixed variable name typo.
+ - Using `ldd` to check used dso.
+ - Added `MDBX_WEAK_IMPORT_ATTRIBUTE` macro.
+ - Use current transaction geometry for untouched parameters when `env_set_geometry()` called within a write transaction.
+ - Minor clarified `iov_page()` failure case.
+
+-------------------------------------------------------------------------------
+
+
+## v0.11.9 (Чирчик-1992) at 2022-08-02
+
+The stable bugfix release.
+
+```
+18 files changed, 318 insertions(+), 178 deletions(-)
+Signed-off-by: Леонид Юрьев (Leonid Yuriev) <leo@yuriev.ru>
+```
+
+Acknowledgements:
+
+ - [Alex Sharov](https://github.com/AskAlexSharov) and Erigon team for reporting and testing.
+ - [Andrew Ashikhmin](https://gitflic.ru/user/yperbasis) for contributing.
+
+New:
+
+ - Ability to customise `MDBX_LOCK_SUFFIX`, `MDBX_DATANAME`, `MDBX_LOCKNAME` just by predefine ones during build.
+ - Added to [`mdbx::env_managed`](https://libmdbx.dqdkfa.ru/group__cxx__api.html#classmdbx_1_1env__managed)'s methods a few overloads with `const char* pathname` parameter (C++ API).
+
+Fixes:
+
+ - Fixed hang copy-with-compactification of a corrupted DB
+   or in case the volume of output pages is a multiple of `MDBX_ENVCOPY_WRITEBUF`.
+ - Fixed standalone non-CMake build on MacOS (`#include AvailabilityMacros.h>`).
+ - Fixed unexpected `MDBX_PAGE_FULL` error in rare cases with large database page sizes.
+
+Minors:
+
+ - Minor fixes Doxygen references, comments, descriptions, etc.
+ - Fixed copy&paste typo inside `meta_checktxnid()`.
+ - Minor fix `meta_checktxnid()` to avoid assertion in debug mode.
+ - Minor fix `mdbx_env_set_geometry()` to avoid returning `EINVAL` in particular rare cases.
+ - Minor refine/fix batch-get testcase for large page size.
+ - Added `--pagesize NN` option to long-stotastic test script.
+ - Updated Valgrind-suppressions file for modern GCC.
+ - Fixed `has no symbols` warning from Apple's ranlib.
+
+
+-------------------------------------------------------------------------------
+
+
+## v0.11.8 (Baked Apple) at 2022-06-12
+
+The stable release with an important fixes and workaround for the critical macOS thread-local-storage issue.
 
 Acknowledgements:
 
@@ -25,6 +146,7 @@ Fixes:
  - Fixed `mdbx_check_fs_local()` for CDROM case on Windows.
  - Fixed nasty typo of typename which caused false `MDBX_CORRUPTED` error in a rare execution path,
    when the size of the thread-ID type not equal to 8.
+ - Fixed Elbrus/E2K LCC 1.26 compiler warnings (memory model for atomic operations, etc).
  - Fixed write-after-free memory corruption on latest `macOS` during finalization/cleanup of thread(s) that executed read transaction(s).
    > The issue was suddenly discovered by a [CI](https://en.wikipedia.org/wiki/Continuous_integration)
    > after adding an iteration with macOS 11 "Big Sur", and then reproduced on recent release of macOS 12 "Monterey".
@@ -36,7 +158,6 @@ Fixes:
    > This is unexpected crazy-like behavior since the order of resources releasing/destroying
    > is not the reverse of ones acquiring/construction order. Nonetheless such surprise
    > is now workarounded by using atomic compare-and-swap operations on a 64-bit signatures/cookies.
- - Fixed Elbrus/E2K LCC 1.26 compiler warnings (memory model for atomic operations, etc).
 
 Minors:
 
@@ -51,7 +172,8 @@ Minors:
 
 -------------------------------------------------------------------------------
 
-## v0.11.7 at 2022-04-22
+
+## v0.11.7 (Resurrected Sarmat) at 2022-04-22
 
 The stable risen release after the Github's intentional malicious disaster.
 

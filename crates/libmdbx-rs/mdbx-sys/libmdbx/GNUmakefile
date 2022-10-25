@@ -53,8 +53,9 @@ CFLAGS_EXTRA ?=
 LD      ?= ld
 
 # build options
-MDBX_BUILD_OPTIONS ?=-DNDEBUG=1
+MDBX_BUILD_OPTIONS   ?=-DNDEBUG=1
 MDBX_BUILD_TIMESTAMP ?=$(shell date +%Y-%m-%dT%H:%M:%S%z)
+MDBX_BUILD_CXX       ?= YES
 
 # probe and compose common compiler flags with variable expansion trick (seems this work two times per session for GNU Make 3.81)
 CFLAGS       ?= $(strip $(eval CFLAGS := -std=gnu11 -O2 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -pthread -Wno-error=attributes $$(shell for opt in -fno-semantic-interposition -Wno-unused-command-line-argument -Wno-tautological-compare; do [ -z "$$$$($(CC) '-DMDBX_BUILD_FLAGS="probe"' $$$${opt} -c $(SRC_PROBE_C) -o /dev/null >/dev/null 2>&1 || echo failed)" ] && echo "$$$${opt} "; done)$(CFLAGS_EXTRA))$(CFLAGS))
@@ -127,6 +128,9 @@ TIP        := // TIP:
 .PHONY: all help options lib libs tools clean install uninstall check_buildflags_tag tools-static
 .PHONY: install-strip install-no-strip strip libmdbx mdbx show-options lib-static lib-shared
 
+boolean = $(if $(findstring $(strip $($1)),YES Yes yes y ON On on 1 true True TRUE),1,$(if $(findstring $(strip $($1)),NO No no n OFF Off off 0 false False FALSE),,$(error Wrong value `$($1)` of $1 for YES/NO option)))
+select_by = $(if $(call boolean,$(1)),$(2),$(3))
+
 ifeq ("$(origin V)", "command line")
   MDBX_BUILD_VERBOSE := $(V)
 endif
@@ -134,7 +138,7 @@ ifndef MDBX_BUILD_VERBOSE
   MDBX_BUILD_VERBOSE := 0
 endif
 
-ifeq ($(MDBX_BUILD_VERBOSE),1)
+ifeq ($(call boolean,MDBX_BUILD_VERBOSE),1)
   QUIET :=
   HUSH :=
   $(info $(TIP) Use `make V=0` for quiet.)
@@ -169,12 +173,12 @@ help:
 
 show-options:
 	@echo "  MDBX_BUILD_OPTIONS   = $(MDBX_BUILD_OPTIONS)"
+	@echo "  MDBX_BUILD_CXX       = $(MDBX_BUILD_CXX)"
 	@echo "  MDBX_BUILD_TIMESTAMP = $(MDBX_BUILD_TIMESTAMP)"
 	@echo '$(TIP) Use `make options` to listing available build options.'
-	@echo "  CC       =`which $(CC)` | `$(CC) --version | head -1`"
-	@echo "  CFLAGS   =$(CFLAGS)"
-	@echo "  CXXFLAGS =$(CXXFLAGS)"
-	@echo "  LDFLAGS  =$(LDFLAGS) $(LIB_STDCXXFS) $(LIBS) $(EXE_LDFLAGS)"
+	@echo $(call select_by,MDBX_BUILD_CXX,"  CXX      =`which $(CXX)` | `$(CXX) --version | head -1`","  CC       =`which $(CC)` | `$(CC) --version | head -1`")
+	@echo $(call select_by,MDBX_BUILD_CXX,"  CXXFLAGS =$(CXXFLAGS)","  CFLAGS   =$(CFLAGS)")
+	@echo $(call select_by,MDBX_BUILD_CXX,"  LDFLAGS  =$(LDFLAGS) $(LIB_STDCXXFS) $(LIBS) $(EXE_LDFLAGS)","  LDFLAGS  =$(LDFLAGS) $(LIBS) $(EXE_LDFLAGS)")
 	@echo '$(TIP) Use `make help` to listing available targets.'
 
 options:
@@ -221,7 +225,7 @@ clean:
 		config.h src/config.h src/version.c *.tar* buildflags.tag \
 		mdbx_*.static mdbx_*.static-lto
 
-MDBX_BUILD_FLAGS =$(strip $(MDBX_BUILD_OPTIONS) $(CXXSTD) $(CFLAGS) $(LDFLAGS) $(LIBS))
+MDBX_BUILD_FLAGS =$(strip MDBX_BUILD_CXX=$(MDBX_BUILD_CXX) $(MDBX_BUILD_OPTIONS) $(call select_by,MDBX_BUILD_CXX,$(CXXFLAGS) $(LDFLAGS) $(LIB_STDCXXFS) $(LIBS),$(CFLAGS) $(LDFLAGS) $(LIBS)))
 check_buildflags_tag:
 	$(QUIET)if [ "$(MDBX_BUILD_FLAGS)" != "$$(cat buildflags.tag 2>&1)" ]; then \
 		echo -n "  CLEAN for build with specified flags..." && \
@@ -231,13 +235,13 @@ check_buildflags_tag:
 
 buildflags.tag: check_buildflags_tag
 
-lib-static libmdbx.a: mdbx-static.o mdbx++-static.o
+lib-static libmdbx.a: mdbx-static.o $(call select_by,MDBX_BUILD_CXX,mdbx++-static.o)
 	@echo '  AR $@'
 	$(QUIET)$(AR) rcs $@ $? $(HUSH)
 
-lib-shared libmdbx.$(SO_SUFFIX): mdbx-dylib.o mdbx++-dylib.o
+lib-shared libmdbx.$(SO_SUFFIX): mdbx-dylib.o $(call select_by,MDBX_BUILD_CXX,mdbx++-dylib.o)
 	@echo '  LD $@'
-	$(QUIET)$(CXX) $(CXXFLAGS) $^ -pthread -shared $(LDFLAGS) $(LIB_STDCXXFS) $(LIBS) -o $@
+	$(QUIET)$(call select_by,MDBX_BUILD_CXX,$(CXX) $(CXXFLAGS),$(CC) $(CFLAGS)) $^ -pthread -shared $(LDFLAGS) $(call select_by,MDBX_BUILD_CXX,$(LIB_STDCXXFS)) $(LIBS) -o $@
 
 
 ################################################################################
@@ -340,13 +344,13 @@ else
 define bench-rule
 bench-$(1)_$(2).txt: $(3) $(IOARENA) $(lastword $(MAKEFILE_LIST))
 	@echo '  RUNNING ioarena for $1/$2...'
-	$(QUIET)LD_LIBRARY_PATH="./:$$$${LD_LIBRARY_PATH}" \
+	$(QUIET)(export LD_LIBRARY_PATH="./:$$$${LD_LIBRARY_PATH}"; \
+		ldd $(IOARENA) && \
 		$(IOARENA) -D $(1) -B crud -m $(BENCH_CRUD_MODE) -n $(2) \
-		| tee $$@ | grep throughput && \
-	LD_LIBRARY_PATH="./:$$$${LD_LIBRARY_PATH}" \
-		$(IOARENA) -D $(1) -B get,iterate -m $(BENCH_CRUD_MODE) -r 4 -n $(2) \
-		| tee -a $$@ | grep throughput \
-	|| mv -f $$@ $$@.error
+			| tee $$@ | grep throughput && \
+		$(IOARENA) -D $(1) -B iterate,get,iterate,get,iterate -m $(BENCH_CRUD_MODE) -r 4 -n $(2) \
+			| tee -a $$@ | grep throughput \
+	) || mv -f $$@ $$@.error
 
 endef
 
