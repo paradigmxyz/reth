@@ -18,6 +18,7 @@ pub enum StageError {
     /// The stage encountered a database error.
     #[error("A database error occurred.")]
     Database(#[from] DbError),
+    /// The headers stage encountered an error.
     #[error("Headers stage error.")]
     HeadersStage(#[from] HeaderStageError),
     /// The stage encountered an internal error.

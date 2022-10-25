@@ -1,5 +1,4 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use reth_db::mdbx::{self, WriteFlags};
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     db::{
@@ -90,10 +89,17 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         let head = HeaderLocked::new(last_header, last_hash);
 
         let forkchoice = self.next_fork_choice_state(&head.hash()).await;
+        // The stage relies on the downloader to return the headers
+        // in descending order starting from the tip down to
+        // the local head (latest block in db)
         let headers = match self.downloader.download(&head, &forkchoice).await {
-            Ok(res) => res,
+            Ok(res) => {
+                // TODO: validate the result order?
+                // at least check if it attaches (first == tip && last == last_hash)
+                res
+            }
             Err(e) => match e {
-                DownloadError::NoHeaderResponse { request_id } => {
+                DownloadError::Timeout { request_id } => {
                     warn!("no response for header request {request_id}");
                     return Ok(ExecOutput {
                         stage_progress: last_block_num,
@@ -105,7 +111,8 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
                     warn!("validation error for header {hash}: {details}");
                     return Err(StageError::Validation { block: last_block_num })
                 }
-                DownloadError::Timeout { .. } | DownloadError::MismatchedHeaders { .. } => todo!(),
+                // TODO: this error is never propagated, clean up
+                DownloadError::MismatchedHeaders { .. } => todo!(),
             },
         };
 
@@ -120,7 +127,7 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let tx = db.get_mut();
-        if let Some(bad_block) = input.bad_block {
+        if let Some(_bad_block) = input.bad_block {
             todo!()
         }
 
@@ -204,7 +211,9 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 
         // TODO: comment
         let mut latest = 0;
-        for header in headers {
+        // Since the headers were returned in descending order,
+        // iterate them in the reverse order
+        for header in headers.into_iter().rev() {
             if header.number == 0 {
                 continue
             }
@@ -235,40 +244,128 @@ pub(crate) mod tests {
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
     use reth_db::{
-        kv::{test_utils as test_db_utils, EnvKind},
-        mdbx,
+        kv::{test_utils as test_db_utils, Env, EnvKind},
+        mdbx::{self, WriteMap},
     };
     use reth_interfaces::{
-        db::{DBContainer, Database},
-        test_utils::{TestConsensus, TestHeadersClient},
+        db::DBContainer,
+        test_utils::{
+            gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
+        },
     };
-    use tokio::sync::mpsc;
+    use tokio::sync::oneshot;
 
     static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::default());
     static CLIENT: Lazy<TestHeadersClient> = Lazy::new(|| TestHeadersClient::default());
 
     #[tokio::test]
-    async fn headers_stage_empty_db() {
-        let mut stage = HeaderStage {
-            client: &*CLIENT,
-            consensus: &*CONSENSUS,
-            downloader: test_utils::TestDownloader::new(Ok(vec![])),
-        };
-
+    async fn headers_execute_empty_db() {
         let db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        let mut db = DBContainer::new(&db).unwrap();
-
         let input = ExecInput { previous_stage: None, stage_progress: None };
+        let rx = run_stage(db, input, Ok(vec![]));
         assert_matches!(
-            stage.execute(&mut db, input).await,
+            rx.await.unwrap(),
             Err(StageError::HeadersStage(HeaderStageError::NoCannonicalHeader { .. }))
         );
+    }
+
+    #[tokio::test]
+    async fn headers_execute_no_response() {
+        let db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let head = gen_random_header(0, None);
+        insert_header(&mut DBContainer::new(&db).unwrap(), &head).expect("failed to insert header");
+
+        let input = ExecInput { previous_stage: None, stage_progress: None };
+        let rx = run_stage(db, input, Err(DownloadError::Timeout { request_id: 0 }));
+        CONSENSUS.update_tip(H256::from_low_u64_be(1));
+        assert_matches!(rx.await.unwrap(), Ok(ExecOutput { done, .. }) if !done);
+    }
+
+    #[tokio::test]
+    async fn headers_execute_validation_error() {
+        let db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let head = gen_random_header(0, None);
+        insert_header(&mut DBContainer::new(&db).unwrap(), &head).expect("failed to insert header");
+
+        let input = ExecInput { previous_stage: None, stage_progress: None };
+        let rx = run_stage(
+            db,
+            input,
+            Err(DownloadError::HeaderValidation { hash: H256::zero(), details: "".to_owned() }),
+        );
+        CONSENSUS.update_tip(H256::from_low_u64_be(1));
+
+        let result =
+            assert_matches!(rx.await.unwrap(), Err(StageError::Validation { block }) if block == 0);
+    }
+
+    #[tokio::test]
+    async fn headers_execute_no_progress() {
+        let db = test_db_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let head = gen_random_header(0, None);
+        insert_header(&mut DBContainer::new(&db).unwrap(), &head).expect("failed to insert header");
+        let headers = gen_random_header_range(1..100, head.hash());
+
+        let result: Vec<_> = headers.iter().rev().cloned().collect();
+        let input = ExecInput { previous_stage: None, stage_progress: None };
+        let rx = run_stage(db, input, Ok(result));
+        let tip = headers.last().unwrap();
+        CONSENSUS.update_tip(tip.hash());
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { .. }));
+        let result = result.unwrap();
+        assert!(result.done && result.reached_tip);
+        assert_eq!(result.stage_progress, tip.number);
+
+        // TODO: validate db
+    }
+
+    #[tokio::test]
+    async fn headers_execute_prev_progress() {}
+
+    fn run_stage(
+        db: Env<WriteMap>,
+        input: ExecInput,
+        download_result: Result<Vec<HeaderLocked>, DownloadError>,
+    ) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
+        let (tx, rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let mut db = DBContainer::new(&db).unwrap();
+            let mut stage = HeaderStage {
+                client: &*CLIENT,
+                consensus: &*CONSENSUS,
+                downloader: test_utils::TestDownloader::new(download_result),
+            };
+            let result = stage.execute(&mut db, input).await;
+            tx.send(result).expect("failed to send result");
+        });
+        rx
+    }
+
+    fn insert_header(
+        db: &mut DBContainer<'_, Env<WriteMap>>,
+        header: &HeaderLocked,
+    ) -> Result<(), reth_interfaces::db::Error> {
+        let tx = db.get_mut();
+
+        let key: BlockNumHash = (header.number, header.hash()).into();
+        tx.put::<tables::HeaderNumbers>(key, header.number)?;
+        tx.put::<tables::Headers>(key, header.clone().unlock())?;
+        tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+
+        let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
+        let td = U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap_or(vec![]));
+        cursor_td.append(key, H256::from_uint(&(td + header.difficulty)).as_bytes().to_vec())?;
+
+        db.commit()?;
+        Ok(())
     }
 
     pub(crate) mod test_utils {
         use async_trait::async_trait;
         use reth_interfaces::{
-            consensus::{Consensus, ForkchoiceState},
+            consensus::ForkchoiceState,
             p2p::headers::downloader::{DownloadError, Downloader},
             test_utils::{TestConsensus, TestHeadersClient},
         };
