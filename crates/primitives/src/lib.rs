@@ -68,10 +68,10 @@ pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    use tiny_keccak::{Hasher, Sha3};
-    let mut sha3 = Sha3::v256();
+    use tiny_keccak::{Hasher, Keccak};
+    let mut keccak = Keccak::v256();
     let mut output = [0; 32];
-    sha3.update(data.as_ref());
-    sha3.finalize(&mut output);
+    keccak.update(data.as_ref());
+    keccak.finalize(&mut output);
     output.into()
 }
