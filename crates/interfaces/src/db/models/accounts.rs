@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     address: Address,
-    /// Address for the account. Acts as `DupSort::SubKey`.
+    /// Account state before the transaction.
     info: Account,
 }
 
@@ -91,10 +91,10 @@ mod test {
         bytes[8..].copy_from_slice(&hash.0);
 
         let encoded = Encode::encode(key.clone());
-        assert!(encoded == bytes);
+        assert_eq!(encoded, bytes);
 
         let decoded: TxNumberAddress = Decode::decode(encoded.to_vec()).unwrap();
-        assert!(decoded == key);
+        assert_eq!(decoded, key);
     }
 
     #[test]
@@ -102,6 +102,6 @@ mod test {
         let mut bytes = [0u8; 28];
         thread_rng().fill(bytes.as_mut_slice());
         let key = TxNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        assert!(bytes == Encode::encode(key));
+        assert_eq!(bytes, Encode::encode(key));
     }
 }

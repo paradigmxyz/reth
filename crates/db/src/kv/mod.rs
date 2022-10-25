@@ -253,7 +253,7 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value11.clone()).expect(ERROR_PUT))
             .unwrap();
 
-        // Get with cursor
+        // Iterate with cursor
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
@@ -264,7 +264,7 @@ mod tests {
             assert!(Some(value22) == cursor.next_dup_val().unwrap());
         }
 
-        // Seek DupSorted Val
+        // Seek value with subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
