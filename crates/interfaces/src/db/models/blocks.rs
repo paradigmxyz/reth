@@ -21,7 +21,7 @@ pub type HeaderHash = H256;
 /// element as BlockNumber, helps out with querying/sorting.
 ///
 /// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub struct BlockNumHash(pub (BlockNumber, BlockHash));
 

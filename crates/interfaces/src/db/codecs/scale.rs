@@ -37,7 +37,7 @@ macro_rules! impl_scale {
     };
 }
 
-impl_scale!(u16, H256, U256, H160, u8, u64, Header, Account, Log, Receipt, TxType);
+impl_scale!(u16, H256, U256, H160, u8, u64, Header, Account, Log, Receipt, TxType, StorageEntry);
 
 impl ScaleOnly for Vec<u8> {}
 impl sealed::Sealed for Vec<u8> {}

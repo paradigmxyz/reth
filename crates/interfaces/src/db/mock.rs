@@ -2,8 +2,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DbTx, DbTxMut,
-    DupSort, Table,
+    Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DbTx, DbTxGAT,
+    DbTxMut, DbTxMutGAT, DupSort, DupWalker, Error, Table, Walker,
 };
 
 /// Mock database used for testing with inner BTreeMap structure
@@ -37,11 +37,17 @@ pub struct TxMock {
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
+impl<'a> DbTxGAT<'a> for TxMock {
+    type Cursor<T: Table> = CursorMock;
+    type DupCursor<T: DupSort> = CursorMock;
+}
+
+impl<'a> DbTxMutGAT<'a> for TxMock {
+    type CursorMut<T: Table> = CursorMock;
+    type DupCursorMut<T: DupSort> = CursorMock;
+}
+
 impl<'a> DbTx<'a> for TxMock {
-    type Cursor<T: super::Table> = CursorMock;
-
-    type DupCursor<T: super::DupSort> = CursorMock;
-
     fn get<T: super::Table>(&self, _key: T::Key) -> Result<Option<T::Value>, super::Error> {
         todo!()
     }
@@ -50,20 +56,18 @@ impl<'a> DbTx<'a> for TxMock {
         todo!()
     }
 
-    fn cursor<T: super::Table>(&self) -> Result<Self::Cursor<T>, super::Error> {
+    fn cursor<T: super::Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, super::Error> {
         todo!()
     }
 
-    fn cursor_dup<T: super::DupSort>(&self) -> Result<Self::DupCursor<T>, super::Error> {
+    fn cursor_dup<T: super::DupSort>(
+        &self,
+    ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, super::Error> {
         todo!()
     }
 }
 
 impl<'a> DbTxMut<'a> for TxMock {
-    type CursorMut<T: super::Table> = CursorMock;
-
-    type DupCursorMut<T: super::DupSort> = CursorMock;
-
     fn put<T: super::Table>(&self, _key: T::Key, _value: T::Value) -> Result<(), super::Error> {
         todo!()
     }
@@ -76,11 +80,15 @@ impl<'a> DbTxMut<'a> for TxMock {
         todo!()
     }
 
-    fn cursor_mut<T: super::Table>(&self) -> Result<Self::CursorMut<T>, super::Error> {
+    fn cursor_mut<T: super::Table>(
+        &self,
+    ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, super::Error> {
         todo!()
     }
 
-    fn cursor_dup_mut<T: super::DupSort>(&self) -> Result<Self::DupCursorMut<T>, super::Error> {
+    fn cursor_dup_mut<T: super::DupSort>(
+        &self,
+    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, super::Error> {
         todo!()
     }
 
@@ -123,7 +131,13 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn walk(&'tx mut self, _start_key: T::Key) -> Result<super::Walker<'tx, T>, super::Error> {
+    fn walk<'cursor>(
+        &'cursor mut self,
+        _start_key: T::Key,
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
@@ -141,11 +155,14 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn walk_dup(
-        &'tx mut self,
+    fn walk_dup<'cursor>(
+        &'cursor mut self,
         _key: <T>::Key,
         _subkey: <T as DupSort>::SubKey,
-    ) -> Result<super::DupWalker<'tx, T>, super::Error> {
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
