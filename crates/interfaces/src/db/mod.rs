@@ -154,11 +154,6 @@ pub trait DbCursorRO<'tx, T: Table> {
     /// Returns the current `(key, value)` pair of the cursor.
     fn current(&mut self) -> PairResult<T>;
 
-    /// Inner
-    fn inner(&'tx mut self) -> &'tx mut Self {
-        self
-    }
-
     /// Returns an iterator starting at a key greater or equal than `start_key`.
     fn walk<'cursor>(
         &'cursor mut self,
@@ -212,16 +207,20 @@ pub trait DbDupCursorRW<'tx, T: DupSort> {
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.
-pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T> + Sized> {
+///
+/// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
+/// and inherited `'tx` lifetime. If there is only one, rust would short circle
+/// the Cursor lifetime and it wouldn't be possible to use Walker.
+pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     /// Cursor to be used to walk through the table.
     pub cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     pub start: IterPairResult<T>,
-    /// Phantom data for 'tx.
+    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T> + Sized> std::iter::Iterator
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for Walker<'cursor, 'tx, T, CURSOR>
 {
     type Item = Result<(T::Key, T::Value), Error>;
@@ -236,16 +235,20 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T> + Sized> std::iter::Iter
 }
 
 /// Provides an iterator to `Cursor` when handling a `DupSort` table.
-pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T> + Sized> {
+///
+/// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
+/// and inherited `'tx` lifetime. If there is only one, rust would short circle
+/// the Cursor lifetime and it wouldn't be possible to use Walker.
+pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
     /// Cursor to be used to walk through the table.
     pub cursor: &'cursor mut CURSOR,
     /// Value where to start the walk.
     pub start: Option<Result<T::Value, Error>>,
-    /// Phantom data for 'tx.
+    /// Phantom data for 'tx. As it is only used for `DbDupCursorRO`.
     pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T> + Sized> std::iter::Iterator
+impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterator
     for DupWalker<'cursor, 'tx, T, CURSOR>
 {
     type Item = Result<T::Value, Error>;
