@@ -154,9 +154,6 @@ mod test {
     fn test_description() {
         assert_eq!("Permission denied", Error::from_err_code(13).to_string());
 
-        assert_eq!(
-            "MDBX_INVALID: File is not an MDBX file",
-            Error::Invalid.to_string()
-        );
+        assert_eq!("MDBX_INVALID: File is not an MDBX file", Error::Invalid.to_string());
     }
 }

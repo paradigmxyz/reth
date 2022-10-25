@@ -27,11 +27,7 @@ impl<'txn> Database<'txn> {
         flags: c_uint,
     ) -> Result<Self> {
         let c_name = name.map(|n| CString::new(n).unwrap());
-        let name_ptr = if let Some(c_name) = &c_name {
-            c_name.as_ptr()
-        } else {
-            ptr::null()
-        };
+        let name_ptr = if let Some(c_name) = &c_name { c_name.as_ptr() } else { ptr::null() };
         let mut dbi: ffi::MDBX_dbi = 0;
         mdbx_result(txn_execute(&*txn.txn_mutex(), |txn| unsafe {
             ffi::mdbx_dbi_open(txn, name_ptr, flags, &mut dbi)
@@ -40,17 +36,11 @@ impl<'txn> Database<'txn> {
     }
 
     pub(crate) fn new_from_ptr(dbi: ffi::MDBX_dbi) -> Self {
-        Self {
-            dbi,
-            _marker: PhantomData,
-        }
+        Self { dbi, _marker: PhantomData }
     }
 
     pub(crate) fn freelist_db() -> Self {
-        Database {
-            dbi: 0,
-            _marker: PhantomData,
-        }
+        Database { dbi: 0, _marker: PhantomData }
     }
 
     /// Returns the underlying MDBX database handle.

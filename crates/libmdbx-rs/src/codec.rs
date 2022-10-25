@@ -37,11 +37,7 @@ impl<'tx> TableObject<'tx> for Cow<'tx, [u8]> {
 
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
 
-        Ok(if is_dirty {
-            Cow::Owned(s.to_vec())
-        } else {
-            Cow::Borrowed(s)
-        })
+        Ok(if is_dirty { Cow::Owned(s.to_vec()) } else { Cow::Borrowed(s) })
     }
 }
 
@@ -106,9 +102,7 @@ impl<'tx, const LEN: usize> TableObject<'tx> for [u8; LEN] {
         }
 
         if data_val.len() != LEN {
-            return Err(Error::DecodeError(Box::new(InvalidSize::<LEN> {
-                got: data_val.len(),
-            })));
+            return Err(Error::DecodeError(Box::new(InvalidSize::<LEN> { got: data_val.len() })))
         }
         let mut a = [0; LEN];
         a[..].copy_from_slice(data_val);

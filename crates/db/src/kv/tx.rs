@@ -1,8 +1,8 @@
 //! Transaction wrapper for libmdbx-sys.
 
 use crate::{kv::cursor::Cursor, utils::decode_one};
-use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use reth_interfaces::db::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT, DupSort, Encode, Error, Table};
+use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use std::marker::PhantomData;
 
 /// Wrapper for the libmdbx transaction.
