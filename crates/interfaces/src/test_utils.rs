@@ -7,7 +7,7 @@ use crate::{
 };
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use reth_primitives::{Header, HeaderLocked, H256, H512};
+use reth_primitives::{Header, HeaderLocked, H256, H512, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 
 use tokio::sync::{broadcast, mpsc, watch};
@@ -182,6 +182,7 @@ pub fn gen_random_header(number: u64, parent: Option<H256>) -> HeaderLocked {
     let header = reth_primitives::Header {
         number,
         nonce: rand::random(),
+        difficulty: U256::from(rand::random::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
