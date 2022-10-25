@@ -283,7 +283,6 @@ mod gat_tests {
     impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
         async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
             let _tx = db.commit().unwrap();
-            
         }
     }
 
