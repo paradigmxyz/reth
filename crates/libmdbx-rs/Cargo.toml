@@ -19,7 +19,7 @@ libc = "0.2"
 parking_lot = "0.12"
 thiserror = "1"
 
-ffi = { package = "reth-mdbx-sys", version = "=0.11.8-0", path = "./mdbx-sys" }
+ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 
 lifetimed-bytes = { version = "0.1", optional = true }
 
