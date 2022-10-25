@@ -88,7 +88,7 @@ mod test {
 
     #[test]
     fn test_block_num_hash() {
-        let num = 2u64;
+        let num = 1u64;
         let hash = H256::from_low_u64_be(2);
         let key = BlockNumHash((num, hash));
 
