@@ -84,7 +84,6 @@ mod tests {
     impl<'a, DB: Database> Stage<DB> for MyStage<'a, DB> {
         async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
             let _tx = db.commit().unwrap();
-            ()
         }
     }
 
