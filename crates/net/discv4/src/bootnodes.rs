@@ -1,5 +1,7 @@
 //! Various known bootstrap nodes for networks
 
+// <https://github.com/ledgerwatch/erigon/blob/610e648dc43ec8cd6563313e28f06f534a9091b3/params/bootnodes.go>
+
 use crate::node::NodeRecord;
 
 /// Ethereum Foundation Go Bootnodes

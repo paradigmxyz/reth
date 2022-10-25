@@ -34,12 +34,16 @@ pub(crate) fn kad_key(node: NodeId) -> discv5::Key<NodeKey> {
     discv5::kbucket::Key::from(NodeKey::from(node))
 }
 
-/// Represents a ENR in discv4
+/// Represents a ENR in discv4.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NodeRecord {
+    /// The Address of a node.
     pub address: IpAddr,
+    /// TCP port of the port that accepts connections.
     pub tcp_port: u16,
+    /// UDP discovery port.
     pub udp_port: u16,
+    /// Public key of the discovery service
     pub id: NodeId,
 }
 
