@@ -1,7 +1,7 @@
 //! Module that interacts with MDBX.
 
 use crate::utils::default_page_size;
-use libmdbx::{
+use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
 };
@@ -99,7 +99,7 @@ impl<E: EnvironmentKind> Env<E> {
 }
 
 impl<E: EnvironmentKind> Deref for Env<E> {
-    type Target = libmdbx::Environment<E>;
+    type Target = reth_libmdbx::Environment<E>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -134,7 +134,7 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::{test_utils, Env, EnvKind};
-    use libmdbx::{NoWriteMap, WriteMap};
+    use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_interfaces::db::{
         tables::{Headers, PlainAccountState, PlainStorageState},
         Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
@@ -240,17 +240,17 @@ mod tests {
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value00.clone()).expect(ERROR_PUT))
+        env.update(|tx| tx.put::<PlainStorageState>(key, value00.clone()).expect(ERROR_PUT))
             .unwrap();
 
         // PUT (2,2)
         let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value22.clone()).expect(ERROR_PUT))
+        env.update(|tx| tx.put::<PlainStorageState>(key, value22.clone()).expect(ERROR_PUT))
             .unwrap();
 
         // PUT (1,1)
         let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key.into(), value11.clone()).expect(ERROR_PUT))
+        env.update(|tx| tx.put::<PlainStorageState>(key, value11.clone()).expect(ERROR_PUT))
             .unwrap();
 
         // Get with cursor
@@ -297,7 +297,6 @@ mod gat_tests {
     impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
         async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
             let _tx = db.commit().unwrap();
-            ()
         }
     }
 
