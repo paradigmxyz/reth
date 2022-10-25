@@ -28,8 +28,8 @@ mod private {
 
     pub trait Sealed {}
 
-    impl<'env> Sealed for NoWriteMap {}
-    impl<'env> Sealed for WriteMap {}
+    impl Sealed for NoWriteMap {}
+    impl Sealed for WriteMap {}
 }
 
 pub trait EnvironmentKind: private::Sealed + Debug + 'static {
@@ -59,19 +59,9 @@ unsafe impl Send for EnvPtr {}
 unsafe impl Sync for EnvPtr {}
 
 pub(crate) enum TxnManagerMessage {
-    Begin {
-        parent: TxnPtr,
-        flags: ffi::MDBX_txn_flags_t,
-        sender: SyncSender<Result<TxnPtr>>,
-    },
-    Abort {
-        tx: TxnPtr,
-        sender: SyncSender<Result<bool>>,
-    },
-    Commit {
-        tx: TxnPtr,
-        sender: SyncSender<Result<bool>>,
-    },
+    Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
+    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
+    Commit { tx: TxnPtr, sender: SyncSender<Result<bool>> },
 }
 
 /// An environment supports multiple databases, all residing in the same shared-memory map.
@@ -135,10 +125,10 @@ where
             let res = rx.recv().unwrap();
             if let Err(Error::Busy) = &res {
                 sleep(Duration::from_millis(250));
-                continue;
+                continue
             }
 
-            break res;
+            break res
         }?;
         Ok(Transaction::new_from_ptr(self, txn.0))
     }
@@ -197,9 +187,9 @@ where
     ///
     /// Note:
     ///
-    /// * LMDB stores all the freelists in the designated database 0 in each environment,
-    ///   and the freelist count is stored at the beginning of the value as `libc::size_t`
-    ///   in the native byte order.
+    /// * LMDB stores all the freelists in the designated database 0 in each environment, and the
+    ///   freelist count is stored at the beginning of the value as `libc::size_t` in the native
+    ///   byte order.
     ///
     /// * It will create a read transaction to traverse the freelist database.
     pub fn freelist(&self) -> Result<usize> {
@@ -211,7 +201,7 @@ where
         for result in cursor {
             let (_key, value) = result?;
             if value.len() < mem::size_of::<usize>() {
-                return Err(Error::Corrupted);
+                return Err(Error::Corrupted)
             }
 
             let s = &value[..mem::size_of::<usize>()];
@@ -376,12 +366,7 @@ pub struct Geometry<R> {
 
 impl<R> Default for Geometry<R> {
     fn default() -> Self {
-        Self {
-            size: None,
-            growth_step: None,
-            shrink_threshold: None,
-            page_size: None,
-        }
+        Self { size: None, growth_step: None, shrink_threshold: None, page_size: None }
     }
 }
 
@@ -461,14 +446,8 @@ where
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
                     (ffi::MDBX_opt_dp_reserve_limit, self.dp_reserve_limit),
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
-                    (
-                        ffi::MDBX_opt_spill_max_denominator,
-                        self.spill_max_denominator,
-                    ),
-                    (
-                        ffi::MDBX_opt_spill_min_denominator,
-                        self.spill_min_denominator,
-                    ),
+                    (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
+                    (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
                 ] {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
@@ -490,15 +469,11 @@ where
             })() {
                 ffi::mdbx_env_close_ex(env, false);
 
-                return Err(e);
+                return Err(e)
             }
         }
 
-        let mut env = Environment {
-            env,
-            txn_manager: None,
-            _marker: PhantomData,
-        };
+        let mut env = Environment { env, txn_manager: None, _marker: PhantomData };
 
         if let Mode::ReadWrite { .. } = self.flags.mode {
             let (tx, rx) = std::sync::mpsc::sync_channel(0);
@@ -506,11 +481,7 @@ where
             std::thread::spawn(move || loop {
                 match rx.recv() {
                     Ok(msg) => match msg {
-                        TxnManagerMessage::Begin {
-                            parent,
-                            flags,
-                            sender,
-                        } => {
+                        TxnManagerMessage::Begin { parent, flags, sender } => {
                             let e = e;
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             sender
@@ -529,9 +500,7 @@ where
                                 .unwrap()
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
-                            sender
-                                .send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) }))
-                                .unwrap();
+                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             sender
@@ -611,7 +580,8 @@ where
         self
     }
 
-    /// Set all size-related parameters of environment, including page size and the min/max size of the memory map.
+    /// Set all size-related parameters of environment, including page size and the min/max size of
+    /// the memory map.
     pub fn set_geometry<R: RangeBounds<usize>>(&mut self, geometry: Geometry<R>) -> &mut Self {
         let convert_bound = |bound: Bound<&usize>| match bound {
             Bound::Included(v) | Bound::Excluded(v) => Some(*v),
@@ -619,10 +589,7 @@ where
         };
         self.geometry = Some(Geometry {
             size: geometry.size.map(|range| {
-                (
-                    convert_bound(range.start_bound()),
-                    convert_bound(range.end_bound()),
-                )
+                (convert_bound(range.start_bound()), convert_bound(range.end_bound()))
             }),
             growth_step: geometry.growth_step,
             shrink_threshold: geometry.shrink_threshold,

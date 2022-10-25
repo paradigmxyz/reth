@@ -42,6 +42,8 @@ pub type Address = H160;
 pub type BlockID = H256;
 /// TxHash is Kecack hash of rlp encoded signed transaction
 pub type TxHash = H256;
+/// TxNumber is sequence number of all existing transactions
+pub type TxNumber = u64;
 
 /// Storage Key
 pub type StorageKey = H256;
