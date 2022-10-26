@@ -386,65 +386,12 @@ impl Decodable for Octets {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS;
+    use crate::{
+        mock::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
+        SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
+    };
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
-
-    fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
-        let address = if rng.gen() {
-            let mut ip = [0u8; 4];
-            rng.fill_bytes(&mut ip);
-            IpAddr::V4(ip.into())
-        } else {
-            let mut ip = [0u8; 16];
-            rng.fill_bytes(&mut ip);
-            IpAddr::V6(ip.into())
-        };
-        NodeEndpoint { address, tcp_port: rng.gen(), udp_port: rng.gen() }
-    }
-
-    fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
-        let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
-        NodeRecord { address, tcp_port, udp_port, id: NodeId::random() }
-    }
-
-    fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
-        let mut ip = [0u8; 16];
-        rng.fill_bytes(&mut ip);
-        let address = IpAddr::V6(ip.into());
-        NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: NodeId::random() }
-    }
-
-    fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
-        let mut ip = [0u8; 4];
-        rng.fill_bytes(&mut ip);
-        let address = IpAddr::V4(ip.into());
-        NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: NodeId::random() }
-    }
-
-    fn rng_message(rng: &mut impl RngCore) -> Message {
-        match rng.gen_range(1..=4) {
-            1 => Message::Ping(Ping {
-                from: rng_endpoint(rng),
-                to: rng_endpoint(rng),
-                expire: rng.gen(),
-            }),
-            2 => Message::Pong(Pong {
-                to: rng_endpoint(rng),
-                echo: H256::random(),
-                expire: rng.gen(),
-            }),
-            3 => Message::FindNode(FindNode { id: NodeId::random(), expire: rng.gen() }),
-            4 => {
-                let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
-                Message::Neighbours(Neighbours {
-                    nodes: std::iter::repeat_with(|| rng_record(rng)).take(num).collect(),
-                    expire: rng.gen(),
-                })
-            }
-            _ => unreachable!(),
-        }
-    }
 
     #[test]
     fn test_endpoint_ipv_v4() {
