@@ -14,8 +14,12 @@ mod listener;
 mod manager;
 mod network;
 mod peers;
-mod swarm;
 mod session;
+mod swarm;
+
+/// Identifier for a unique peer
+pub type PeerId = H512;
 
 pub use manager::NetworkManager;
 pub use network::NetworkHandle;
+use reth_primitives::H512;
