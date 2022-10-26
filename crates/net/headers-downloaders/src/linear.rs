@@ -206,9 +206,11 @@ mod tests {
     use super::*;
     use reth_interfaces::{
         p2p::headers::client::HeadersRequest,
-        test_utils::{TestConsensus, TestHeadersClient},
+        test_utils::{
+            gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
+        },
     };
-    use reth_primitives::{rpc::BlockId, HeaderLocked, H256};
+    use reth_primitives::{rpc::BlockId, HeaderLocked};
 
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
@@ -246,7 +248,7 @@ mod tests {
             })
             .await;
         assert_eq!(requests.len(), retries);
-        assert_matches!(rx.await, Ok(Err(DownloadError::NoHeaderResponse { .. })));
+        assert_matches!(rx.await, Ok(Err(DownloadError::Timeout { .. })));
     }
 
     #[tokio::test]
@@ -277,7 +279,7 @@ mod tests {
         assert_eq!(num_of_reqs, retries);
         assert_matches!(
             rx.await,
-            Ok(Err(DownloadError::NoHeaderResponse { request_id })) if request_id == last_req_id.unwrap()
+            Ok(Err(DownloadError::Timeout { request_id })) if request_id == last_req_id.unwrap()
         );
     }
 
@@ -358,7 +360,7 @@ mod tests {
     async fn download_returns_headers_desc() {
         let (start, end) = (100, 200);
         let head = gen_random_header(start, None);
-        let mut headers = gen_block_range(start + 1..end, head.hash());
+        let mut headers = gen_random_header_range(start + 1..end, head.hash());
         headers.reverse();
 
         let tip_hash = headers.first().unwrap().hash();
@@ -394,26 +396,5 @@ mod tests {
         let result = result.unwrap().unwrap();
         assert_eq!(result.len(), headers.len());
         assert_eq!(result, headers);
-    }
-
-    pub(crate) fn gen_block_range(rng: std::ops::Range<u64>, head: H256) -> Vec<HeaderLocked> {
-        let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
-        for idx in rng {
-            headers.push(gen_random_header(
-                idx,
-                Some(headers.last().map(|h: &HeaderLocked| h.hash()).unwrap_or(head)),
-            ));
-        }
-        headers
-    }
-
-    pub(crate) fn gen_random_header(number: u64, parent: Option<H256>) -> HeaderLocked {
-        let header = reth_primitives::Header {
-            number,
-            nonce: rand::random(),
-            parent_hash: parent.unwrap_or_default(),
-            ..Default::default()
-        };
-        header.lock()
     }
 }

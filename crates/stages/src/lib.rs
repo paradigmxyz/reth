@@ -20,6 +20,9 @@ mod pipeline;
 mod stage;
 mod util;
 
+/// Implementations of stages.
+pub mod stages;
+
 pub use error::*;
 pub use id::*;
 pub use pipeline::*;

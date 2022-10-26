@@ -3288,8 +3288,10 @@ name = "reth-stages"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
+ "assert_matches",
  "async-trait",
  "metrics",
+ "once_cell",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
