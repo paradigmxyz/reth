@@ -289,7 +289,7 @@ mod gat_tests {
     #[test]
     #[should_panic] // no tokio runtime configured
     fn can_spawn() {
-        let db = DatabaseMock::default();
+        let db = DatabaseMock::create(&[]);
         tokio::spawn(async move {
             let mut container = DBContainer::new(&db).unwrap();
             let mut stage = MyStage(&db);

@@ -2576,6 +2576,7 @@ dependencies = [
  "futures",
  "heapless",
  "parity-scale-codec",
+ "parking_lot",
  "postcard",
  "rand",
  "reth-primitives",

@@ -15,6 +15,7 @@ eyre = "0.6.8"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
 bytes = "1.2"
+parking_lot = "0.12"
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
