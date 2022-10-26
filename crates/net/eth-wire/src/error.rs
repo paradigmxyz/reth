@@ -59,6 +59,9 @@ pub enum P2PStreamError {
     PingTimeout(u8),
     #[error("started ping task before the handshake completed")]
     PingBeforeHandshake,
+    // TODO: remove / reconsider
+    #[error("disconnected")]
+    Disconnected,
 }
 
 /// Errors when conducting a p2p handshake

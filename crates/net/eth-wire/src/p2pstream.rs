@@ -1,6 +1,6 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use bytes::{Bytes, BytesMut, Buf};
-use futures::{Sink, StreamExt, Future, SinkExt};
+use futures::{Sink, StreamExt, Future, SinkExt, ready};
 use pin_project::pin_project;
 use pin_utils::pin_mut;
 use reth_primitives::H512 as PeerId;
@@ -56,17 +56,11 @@ pub struct P2PStream<S> {
     /// The state machine used for keeping track of the peer's ping status.
     pinger: Pinger,
 
-    // /// The offset?
-    // thoughts on offsets: they are calculated per-peer, so if we supported multiple subprotocols
-    // we would need to support multiple offsets and route them per-protocol.
-    //
-    // If we did support multiple subprotocls, though, we would have implementations of them and we
-    // would be able to associate them with a versioned capability (why implement multiple?).
-    //
-    // Do we need to create a router?
-    // I will just work with p2p stuff now and figure out whether or not we want some sort of
-    // larger router abstraction later.
-    // TODO: put message stream in
+    // currently starts at 0x10
+    // maybe we need an array of offsets and lengths for each subprotocol and can just subtract
+    // based on the range of the message id / protocol length
+    /// The offset? TODO: revisit when implementing shared capabilities
+    offset: u8,
 }
 
 impl<S> P2PStream<S> {
@@ -76,6 +70,7 @@ impl<S> P2PStream<S> {
         Self {
             inner,
             authed: false,
+            offset: 0x10,
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
             pinger: Pinger::new(MAX_FAILED_PINGS),
@@ -129,7 +124,7 @@ where
         // decode the hello message from the rest of the bytes
         let their_hello = HelloMessage::decode(&mut &hello_bytes[1..])?;
 
-        // todo: determine shared capabilities
+        // TODO: determine shared capabilities
 
         self.authed = true;
         Ok(())
@@ -209,6 +204,7 @@ where
                     }
                     // this cases where we have received a message
                     msg = stream.next() => {
+                        // TODO: remove
                         // if we are waiting for a pong, we can check if we have received a pong
                         if self.pinger.is_waiting_for_pong() {
                             if let Some(msg) = msg {
@@ -216,36 +212,6 @@ where
                                 if id == P2PMessageID::Pong as u8 {
                                     self.pinger.pong_received();
                                 }
-                            }
-                        } else if let Some(msg) = msg {
-                            let msg = msg?;
-                            let id = *msg.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
-                            if id == P2PMessageID::Ping as u8 {
-                                // we have received a ping, so we will send a pong
-                                let mut pong_bytes = BytesMut::new();
-                                P2PMessage::Pong.encode(&mut pong_bytes);
-                                stream.send(pong_bytes.into()).await?;
-                            } else if id == P2PMessageID::Disconnect as u8 {
-                                // we have received a disconnect message, so we will terminate the task
-                                let reason = DisconnectReason::decode(&mut &msg[1..])?;
-                                // TODO: do something with the reason
-                                return Ok(())
-                            } else if id == P2PMessageID::Hello as u8 {
-                                // we have received a hello message outside of the handshake,
-                                // so we will terminate the task
-                                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
-                            } else if id == P2PMessageID::Pong as u8 {
-                                // we have received a pong without waiting for a pong
-                                return Err(PingerError::PongWhileReady.into())
-                            } else if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID {
-                                // we have received an unknown reserved message
-                                return Err(P2PStreamError::UnknownReservedMessageId(id))
-                            } else {
-                                // we have a subprotocol message that needs to be sent in the
-                                // stream
-                                // TODO
-                                // returning Ok(()) because TODO
-                                return Ok(())
                             }
                         }
                     }
@@ -351,6 +317,8 @@ impl Pinger {
     }
 }
 
+// TODO: pinger poll
+
 /// This represents only the reserved `p2p` subprotocol messages.
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
@@ -448,33 +416,91 @@ impl TryFrom<u8> for P2PMessageID {
     }
 }
 
-// TODO: determine what snappy::encode(disconnectreason) comes out to
-// TODO: determine what snappy::encode(ping) and snappy::encode(pong) come out to (they both encode
-// 0x80 i think)
-// ANSWER:
+// snappy encodings of ping/pong/discreason:
 // snappy::encode(ping): [0x01, 0x00, 0x80]
 // snappy::encode(pong): [0x01, 0x00, 0x80]
 // snappy::encode(reason): [0x01, 0x00, reason as u8]
-// the reason for doing this is so we don't need to run it through the encoder or decoder.
+// TODOs referring to snappy are for encoding/decoding these messages
 
 // EIP-706 mentions allowing for some additional length in the hello message.
 // Should we really follow this? Is a RLPx Devp2p protocol upgrade more or less likely than a
 // complete overhaul of the p2p protocol?
 // should we even accept protocol v4?
 
-// how should we accept arbitrary subprotocol messages?
-// we need to transform the message id depending on the shared capabilities - we should do this
-// with some easy methods in the p2pstream struct
-
+// S must also be `Sink` because we need to be able to respond with ping messages to follow the
+// protocol
 impl<S> Stream for P2PStream<S>
 where
-    S: Stream<Item = Result<BytesMut, io::Error>> + Unpin,
+    S: Stream<Item = Result<BytesMut, io::Error>> + Sink<Bytes, Error = io::Error> + Unpin,
 {
     type Item = Result<BytesMut, P2PStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // we should use BytesMut
-        todo!()
+        let this = self.project();
+
+        // we should loop here to ensure we don't return Poll::Pending if we have a message to
+        // return behind any pings we need to respond to
+        while let Poll::Ready(Some(event)) = this.inner.poll_next(cx) {
+            let res = ready!(this.inner.poll_next(cx));
+            let bytes = match res {
+                Some(Ok(bytes)) => bytes,
+                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                None => return Poll::Ready(None),
+            };
+
+            let id = *bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
+            if id == P2PMessageID::Ping as u8 {
+                // we have received a ping, so we will send a pong
+                let mut pong_bytes = BytesMut::new();
+                P2PMessage::Pong.encode(&mut pong_bytes);
+
+                // make sure the sink is ready before we send the pong
+                match this.inner.poll_ready(cx) {
+                    Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                    Poll::Pending => return Poll::Pending,
+                };
+
+                // send the pong
+                match this.inner.start_send(pong_bytes.into()) {
+                    Ok(()) => {}
+                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                };
+
+                // flush the sink
+                match this.inner.poll_flush(cx) {
+                    Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                    Poll::Pending => return Poll::Pending,
+                };
+
+                // continue to the next message if there is one
+                continue
+            } else if id == P2PMessageID::Disconnect as u8 {
+                let reason = DisconnectReason::decode(&mut &bytes[1..])?;
+                // TODO: do something with the reason
+                return Poll::Ready(Some(Err(P2PStreamError::Disconnected)))
+            } else if id == P2PMessageID::Hello as u8 {
+                // we have received a hello message outside of the handshake, so we will return an
+                // error
+                return Poll::Ready(Some(Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))))
+            } else if id == P2PMessageID::Pong as u8 {
+                // we have received a pong without waiting for a pong
+                return Poll::Ready(Some(Err(PingerError::PongWhileReady.into())))
+            } else if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID {
+                // we have received an unknown reserved message
+                return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
+            } else {
+                // we have a subprotocol message that needs to be sent in the stream.
+                // first, switch the message id based on offset so the next layer can decode it
+                // without being aware of the p2p stream's state (shared capabilities / the message
+                // id offset)
+                bytes[0] -= *this.offset;
+                return Poll::Ready(Some(Ok(bytes)))
+            }
+        }
+
+        Poll::Pending
     }
 }
 
