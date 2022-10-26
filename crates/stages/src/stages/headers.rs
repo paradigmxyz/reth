@@ -484,14 +484,13 @@ pub mod tests {
         input: UnwindInput,
     ) -> oneshot::Receiver<Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>> {
         let (tx, rx) = oneshot::channel();
+        let mut stage = HeaderStage {
+            client: Arc::new(TestHeadersClient::default()),
+            consensus: Arc::new(TestConsensus::default()),
+            downloader: test_utils::TestDownloader::new(Ok(vec![])),
+        };
         tokio::spawn(async move {
-            let db = db.clone();
             let mut db = DBContainer::<Env<WriteMap>>::new(db.borrow()).unwrap();
-            let mut stage = HeaderStage {
-                client: Arc::new(TestHeadersClient::default()),
-                consensus: Arc::new(TestConsensus::default()),
-                downloader: test_utils::TestDownloader::new(Ok(vec![])),
-            };
             let result = stage.unwind(&mut db, input).await;
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
