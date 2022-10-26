@@ -42,6 +42,8 @@ pub enum HandshakeError {
 #[derive(thiserror::Error, Debug)]
 pub enum P2PStreamError {
     #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
     Rlp(#[from] reth_rlp::DecodeError),
     #[error(transparent)]
     HandshakeError(#[from] P2PHandshakeError),
@@ -51,6 +53,12 @@ pub enum P2PStreamError {
     UnknownReservedMessageId(u8),
     #[error("empty protocol message received")]
     EmptyProtocolMessage,
+    #[error(transparent)]
+    PingerError(#[from] PingerError),
+    #[error("ping timed out with {0} retries")]
+    PingTimeout(u8),
+    #[error("started ping task before the handshake completed")]
+    PingBeforeHandshake,
 }
 
 /// Errors when conducting a p2p handshake
@@ -65,3 +73,29 @@ pub enum P2PHandshakeError {
     #[error("handshake timed out")]
     Timeout,
 }
+
+/// An error that can occur when interacting with a [`Pinger`].
+#[derive(Debug, thiserror::Error)]
+pub enum PingerError {
+    /// A ping was sent while the pinger was in the `TimedOut` state.
+    #[error("ping sent while timed out")]
+    PingWhileTimedOut,
+
+    /// A pong was received while the pinger was in the `Ready` state.
+    #[error("pong received while ready")]
+    PongWhileReady,
+
+    /// A pong was received while the pinger was in the `TimedOut` state.
+    #[error("pong received while timed out")]
+    PongWhileTimedOut,
+}
+
+/// An error that can occur when using the Timeout Pinger.
+#[derive(Debug, thiserror::Error)]
+pub enum TimeoutPingerError {
+    #[error(transparent)]
+    TimeoutError(#[from] tokio::time::error::Elapsed),
+    #[error(transparent)]
+    PingerError(#[from] PingerError),
+}
+

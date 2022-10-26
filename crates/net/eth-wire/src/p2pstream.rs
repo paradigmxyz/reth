@@ -1,9 +1,12 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-use bytes::{Bytes, BytesMut};
-use futures::{Sink, StreamExt};
+use bytes::{Bytes, BytesMut, Buf};
+use futures::{Sink, StreamExt, Future, SinkExt};
 use pin_project::pin_project;
+use pin_utils::pin_mut;
 use reth_primitives::H512 as PeerId;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{DecodeError, Decodable, Encodable, RlpEncodable, RlpDecodable};
+use thiserror::Error;
+use tokio::time::{Timeout, Sleep, Instant};
 use std::{
     fmt::Display,
     io,
@@ -13,7 +16,7 @@ use std::{
 };
 use tokio_stream::Stream;
 
-use crate::error::{P2PHandshakeError, P2PStreamError};
+use crate::error::{P2PHandshakeError, P2PStreamError, PingerError, TimeoutPingerError};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -31,7 +34,8 @@ const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_TIMEOUT: Duration = Duration::from_secs(15);
 const PING_INTERVAL: Duration = Duration::from_secs(60);
-const MAX_FAILED_PINGS: usize = 3;
+const GRACE_PERIOD: Duration = Duration::from_secs(2);
+const MAX_FAILED_PINGS: u8 = 3;
 
 /// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
 /// protocol messages.
@@ -48,7 +52,21 @@ pub struct P2PStream<S> {
 
     /// The snappy decoder used for decompressing incoming messages
     decoder: snap::raw::Decoder,
-    // shared capabilities: todo, needed for message id conversion
+
+    /// The state machine used for keeping track of the peer's ping status.
+    pinger: Pinger,
+
+    // /// The offset?
+    // thoughts on offsets: they are calculated per-peer, so if we supported multiple subprotocols
+    // we would need to support multiple offsets and route them per-protocol.
+    //
+    // If we did support multiple subprotocls, though, we would have implementations of them and we
+    // would be able to associate them with a versioned capability (why implement multiple?).
+    //
+    // Do we need to create a router?
+    // I will just work with p2p stuff now and figure out whether or not we want some sort of
+    // larger router abstraction later.
+    // TODO: put message stream in
 }
 
 impl<S> P2PStream<S> {
@@ -60,6 +78,7 @@ impl<S> P2PStream<S> {
             authed: false,
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
+            pinger: Pinger::new(MAX_FAILED_PINGS),
         }
     }
 }
@@ -78,9 +97,6 @@ where
 
     /// Perform a handshake with the peer. This will send a [`Hello`] message and wait for a
     /// [`Hello`] message in response.
-    // TODO: do we need to return a task here? and store the task handle in the P2PStream in
-    // `connect`? then recognize pings / pongs / disconnects and send them through a channel to the
-    // task?
     pub async fn handshake(&mut self, hello: HelloMessage) -> Result<(), P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
         // TODO: fix
@@ -118,6 +134,221 @@ where
         self.authed = true;
         Ok(())
     }
+
+    /// Create a task which will periodically (based on [`PING_INTERVAL`]) send a [`Ping`] message
+    /// to the peer and wait for a [`Pong`] message in response. If the peer does not respond
+    /// within [`PING_TIMEOUT`], the task will terminate and the peer will be sent a disconnect
+    /// message.
+    ///
+    /// The task will terminate after [`MAX_FAILED_PINGS`] have been sent without a response.
+    ///
+    /// If [`P2PStream`] is dropped, this task will send a disconnect message, wait for the
+    /// [`GRACE_PERIOD`] and then terminate.
+    ///
+    /// This task must be created only after the [`Hello`] handshake has been completed, so this
+    /// method will return an error if the [`P2PStream`] is not yet authed.
+    pub fn ping_task(&mut self) -> Result<impl Future<Output = Result<(), P2PStreamError>> + '_, P2PStreamError> {
+        if !self.authed {
+            return Err(P2PStreamError::PingBeforeHandshake)
+        }
+
+        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+
+        // when we are not waiting for a pong, we will only be selecting on the ping interval.
+        // otherwise, we will be retrying the ping until we either get a pong or we have reached
+        // the maximum number of retries.
+        let task = async move {
+            let mut ping_timeout = tokio::time::sleep(PING_TIMEOUT);
+            pin_mut!(ping_timeout);
+
+            let mut stream = &mut self.inner;
+
+            loop {
+                tokio::select! {
+                    // this handles the case where we are not waiting for a pong and should send a
+                    // ping
+                    _ = ping_interval.tick() => {
+                        // if we are not waiting for a pong, we can send a ping
+                        if self.pinger.is_ready() {
+                            let mut ping_bytes = BytesMut::new();
+                            P2PMessage::Ping.encode(&mut ping_bytes);
+                            stream.send(ping_bytes.into()).await?;
+
+                            self.pinger.ping_sent();
+                            ping_timeout.reset(Instant::now() + PING_TIMEOUT);
+                        }
+                    }
+                    // this handles the case where we were waiting for a pong and the timeout has
+                    // completed
+                    _ = ping_timeout => {
+                        if !matches!(self.pinger.state(), PingState::Ready) {
+                            // if we are waiting for a pong, we can check if we have reached the maximum
+                            // number of retries
+                            if self.pinger.is_waiting_for_pong() {
+                                if self.pinger.is_timed_out() {
+                                    // we have reached the maximum number of retries, so we will send a
+                                    // disconnect message and terminate the task
+                                    let mut disconnect_bytes = BytesMut::new();
+                                    P2PMessage::Disconnect(DisconnectReason::PingTimeout).encode(&mut disconnect_bytes);
+                                    stream.send(disconnect_bytes.into()).await?;
+
+                                    tokio::time::sleep(GRACE_PERIOD).await;
+                                    return Ok(())
+                                } else {
+                                    // we have not reached the maximum number of retries, so we will send
+                                    // another ping and reset the timeout
+                                    let mut ping_bytes = BytesMut::new();
+                                    P2PMessage::Ping.encode(&mut ping_bytes);
+                                    stream.send(ping_bytes.into()).await?;
+
+                                    self.pinger.ping_sent();
+                                    ping_timeout.reset(Instant::now() + PING_TIMEOUT);
+                                }
+                            }
+                        }
+                    }
+                    // this cases where we have received a message
+                    msg = stream.next() => {
+                        // if we are waiting for a pong, we can check if we have received a pong
+                        if self.pinger.is_waiting_for_pong() {
+                            if let Some(msg) = msg {
+                                let id = *msg?.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
+                                if id == P2PMessageID::Pong as u8 {
+                                    self.pinger.pong_received();
+                                }
+                            }
+                        } else if let Some(msg) = msg {
+                            let msg = msg?;
+                            let id = *msg.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
+                            if id == P2PMessageID::Ping as u8 {
+                                // we have received a ping, so we will send a pong
+                                let mut pong_bytes = BytesMut::new();
+                                P2PMessage::Pong.encode(&mut pong_bytes);
+                                stream.send(pong_bytes.into()).await?;
+                            } else if id == P2PMessageID::Disconnect as u8 {
+                                // we have received a disconnect message, so we will terminate the task
+                                let reason = DisconnectReason::decode(&mut &msg[1..])?;
+                                // TODO: do something with the reason
+                                return Ok(())
+                            } else if id == P2PMessageID::Hello as u8 {
+                                // we have received a hello message outside of the handshake,
+                                // so we will terminate the task
+                                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
+                            } else if id == P2PMessageID::Pong as u8 {
+                                // we have received a pong without waiting for a pong
+                                return Err(PingerError::PongWhileReady.into())
+                            } else if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID {
+                                // we have received an unknown reserved message
+                                return Err(P2PStreamError::UnknownReservedMessageId(id))
+                            } else {
+                                // we have a subprotocol message that needs to be sent in the
+                                // stream
+                                // TODO
+                                // returning Ok(()) because TODO
+                                return Ok(())
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        Ok(task)
+    }
+}
+
+/// This represents the possible states of the pinger.
+pub enum PingState {
+    /// There are no pings in flight, or all pings have been responded to and we are ready to send
+    /// a ping at a later point.
+    Ready,
+
+    /// We have sent a ping and are waiting for a pong, but the peer has missed n pongs.
+    WaitingForPong(u8),
+
+    /// The peer has missed n pongs and is considered timed out.
+    TimedOut(u8),
+}
+
+/// The pinger is a state machine that is created with a maximum number of pongs that can be
+/// missed.
+pub struct Pinger {
+    /// The maximum number of pongs that can be missed.
+    max_missed: u8,
+
+    /// The current state of the pinger.
+    state: PingState,
+}
+
+impl Pinger {
+    /// Create a new pinger with the given maximum number of pongs that can be missed.
+    pub fn new(max_missed: u8) -> Self {
+        Self {
+            max_missed,
+            state: PingState::Ready,
+        }
+    }
+
+    /// Return the current state of the pinger.
+    pub fn state(&self) -> &PingState {
+        &self.state
+    }
+
+    /// Check if the pinger is in the `Ready` state.
+    pub fn is_ready(&self) -> bool {
+        matches!(self.state, PingState::Ready)
+    }
+
+    /// Check if the pinger is in the `WaitingForPong` state.
+    pub fn is_waiting_for_pong(&self) -> bool {
+        matches!(self.state, PingState::WaitingForPong(_))
+    }
+
+    /// Check if the pinger is in the `TimedOut` state.
+    pub fn is_timed_out(&self) -> bool {
+        matches!(self.state, PingState::TimedOut(_))
+    }
+
+    /// Mark a ping as sent, and transition the pinger to the `WaitingForPong` state if it was in
+    /// the `Ready` state.
+    ///
+    /// If the pinger is in the `WaitingForPong` state, the number of missed pongs will be incremented.
+    /// If the number of missed pongs exceeds the maximum missed pongs allowed, the pinger will be
+    /// transitioned to the `TimedOut` state.
+    ///
+    /// If the pinger is in the `TimedOut` state, this method will return an error.
+    pub fn ping_sent(&mut self) -> Result<(), PingerError> {
+        match self.state {
+            PingState::Ready => {
+                self.state = PingState::WaitingForPong(0);
+                Ok(())
+            }
+            PingState::WaitingForPong(missed) => {
+                if missed + 1 >= self.max_missed {
+                    self.state = PingState::TimedOut(missed + 1);
+                    Ok(())
+                } else {
+                    self.state = PingState::WaitingForPong(missed + 1);
+                    Ok(())
+                }
+            }
+            PingState::TimedOut(_) => Err(PingerError::PingWhileTimedOut),
+        }
+    }
+
+    /// Mark a pong as received, and transition the pinger to the `Ready` state if it was in the
+    /// `WaitingForPong` state.
+    ///
+    /// If the pinger is in the `Ready` or `TimedOut` state, this method will return an error.
+    pub fn pong_received(&mut self) -> Result<(), PingerError> {
+        match self.state {
+            PingState::Ready => Err(PingerError::PongWhileReady),
+            PingState::WaitingForPong(_) => {
+                self.state = PingState::Ready;
+                Ok(())
+            }
+            PingState::TimedOut(_) => Err(PingerError::PongWhileTimedOut),
+        }
+    }
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
@@ -134,6 +365,47 @@ pub enum P2PMessage {
 
     /// Reply to the peer's [`Ping`] packet.
     Pong,
+}
+
+// TODO: snappy stuff for non-hello
+impl Encodable for P2PMessage {
+    fn length(&self) -> usize {
+        match self {
+            P2PMessage::Hello(msg) => msg.length(),
+            P2PMessage::Disconnect(msg) => msg.length(),
+            P2PMessage::Ping => 1,
+            P2PMessage::Pong => 1,
+        }
+    }
+
+    fn encode(&self,out: &mut dyn bytes::BufMut) {
+        match self {
+            P2PMessage::Hello(msg) => msg.encode(out),
+            P2PMessage::Disconnect(msg) => msg.encode(out),
+            P2PMessage::Ping => out.put_u8(P2PMessageID::Ping as u8),
+            P2PMessage::Pong => out.put_u8(P2PMessageID::Pong as u8),
+        }
+    }
+}
+
+// TODO: snappy stuff for non-hello
+impl Decodable for P2PMessage {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let first = buf.first().expect("cannot decode empty p2p message");
+        let id = P2PMessageID::try_from(*first).or(Err(DecodeError::Custom("unknown p2p message id")))?;
+        match id {
+            P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
+            P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
+            P2PMessageID::Ping => {
+                buf.advance(1);
+                Ok(P2PMessage::Ping)
+            }
+            P2PMessageID::Pong => {
+                buf.advance(1);
+                Ok(P2PMessage::Pong)
+            }
+        }
+    }
 }
 
 /// Message IDs for `p2p` subprotocol messages.
@@ -295,7 +567,7 @@ pub enum DisconnectReason {
     TcpSubsystemError = 0x01,
     /// Breach of protocol at the transport or p2p level
     ProtocolBreach = 0x02,
-    /// Useless peer
+    /// Node has no matching protocols.
     UselessPeer = 0x03,
     /// Either the remote or local node has too many peers.
     TooManyPeers = 0x04,
@@ -370,3 +642,24 @@ impl TryFrom<u8> for DisconnectReason {
         }
     }
 }
+
+impl Encodable for DisconnectReason {
+    fn length(&self) -> usize {
+        // the reason should be a single byte
+        1
+    }
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        out.put_u8(*self as u8);
+        // TODO: switch to snappy format
+    }
+}
+
+// TODO: switch to snappy format
+impl Decodable for DisconnectReason {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let reason = buf.first().ok_or(DecodeError::Custom("disconnect reason cannot be empty"))?;
+        DisconnectReason::try_from(*reason).map_err(|_| DecodeError::Custom("unknown disconnect reason"))
+    }
+}
+
+// TODO: test ping pong stuff
