@@ -3177,6 +3177,7 @@ dependencies = [
 name = "reth-network"
 version = "0.1.0"
 dependencies = [
+ "fnv",
  "futures",
  "pin-project",
  "reth-discv4",

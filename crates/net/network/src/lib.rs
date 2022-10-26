@@ -10,12 +10,12 @@
 //! reth network management.
 
 mod config;
-mod connections;
 mod listener;
 mod manager;
 mod network;
 mod peers;
 mod swarm;
+mod session;
 
 pub use manager::NetworkManager;
 pub use network::NetworkHandle;

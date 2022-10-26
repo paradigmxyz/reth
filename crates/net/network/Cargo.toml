@@ -22,3 +22,4 @@ tokio-stream = "0.1"
 
 # misc
 tracing = "0.1"
+fnv = "1.0.7"

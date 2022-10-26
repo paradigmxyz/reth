@@ -1,4 +1,4 @@
-use crate::{connections::Connections, listener::ConnectionListener};
+use crate::{sessions::SessionManager, listener::ConnectionListener};
 use futures::Stream;
 use std::{
     pin::Pin,
@@ -13,7 +13,7 @@ pub struct Swarm {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// Active connections.
-    connections: Connections,
+    connections: SessionManager,
     // TODO add discovery update stream
     // TODO this provides info about connected peers
 }
@@ -28,4 +28,6 @@ impl Stream for Swarm {
 
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
-pub enum SwarmEvent {}
+pub enum SwarmEvent {
+
+}
