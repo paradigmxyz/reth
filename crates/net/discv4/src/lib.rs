@@ -35,13 +35,12 @@ use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
-    future::Future,
     io,
     net::SocketAddr,
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -50,7 +49,7 @@ use tokio::{
     task::{JoinHandle, JoinSet},
     time::Interval,
 };
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{debug, instrument, trace, warn};
 
 pub mod bootnodes;
@@ -61,6 +60,9 @@ mod config;
 pub use config::Discv4Config;
 mod node;
 pub use node::NodeRecord;
+
+#[cfg(any(test, feature = "mock"))]
+pub mod mock;
 
 /// reexport to get public ip.
 pub use public_ip;
@@ -98,8 +100,8 @@ const NODE_LAST_SEEN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 type EgressSender = mpsc::Sender<(Bytes, SocketAddr)>;
 type EgressReceiver = mpsc::Receiver<(Bytes, SocketAddr)>;
 
-type IngressSender = mpsc::Sender<IngressEvent>;
-type IngressReceiver = mpsc::Receiver<IngressEvent>;
+pub(crate) type IngressSender = mpsc::Sender<IngressEvent>;
+pub(crate) type IngressReceiver = mpsc::Receiver<IngressEvent>;
 
 type NodeRecordSender = OneshotSender<Vec<NodeRecord>>;
 
@@ -348,8 +350,25 @@ impl Discv4Service {
     }
 
     /// Returns the address of the UDP socket
-    pub fn local_address(&self) -> SocketAddr {
+    pub fn local_addr(&self) -> SocketAddr {
         self.local_address
+    }
+
+    /// Returns the ENR of this service.
+    pub fn local_enr(&self) -> NodeRecord {
+        self.local_enr
+    }
+
+    /// Returns mutable reference to ENR for testing.
+    #[cfg(test)]
+    pub fn local_enr_mut(&mut self) -> &mut NodeRecord {
+        &mut self.local_enr
+    }
+
+    /// Returns true if the given NodeId is currently in the bucket
+    pub fn contains_node(&self, id: NodeId) -> bool {
+        let key = kad_key(id);
+        self.kbuckets.get_index(&key).is_some()
     }
 
     /// Bootstraps the local node to join the DHT.
@@ -374,7 +393,9 @@ impl Discv4Service {
     pub fn spawn(mut self) -> JoinHandle<()> {
         tokio::task::spawn(async move {
             self.bootstrap();
-            self.await
+            while let Some(event) = self.next().await {
+                trace!(?event, target = "net::disc", "processed");
+            }
         })
     }
 
@@ -518,7 +539,7 @@ impl Discv4Service {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
+    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(r#type=?msg.msg_type(), ?to, ?hash, target = "net::disc", "sending packet");
         let _ = self.egress.try_send((payload, to));
@@ -555,14 +576,16 @@ impl Discv4Service {
         }
 
         if self.pending_pings.len() < MAX_NODES_PING {
-            self.send_ping(node, reason)
+            self.send_ping(node, reason);
         } else {
-            self.queued_pings.push_back((node, reason))
+            self.queued_pings.push_back((node, reason));
         }
     }
 
     /// Sends a ping message to the node's UDP address.
-    fn send_ping(&mut self, node: NodeRecord, reason: PingReason) {
+    ///
+    /// Returns the echo hash of the ping message.
+    pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> H256 {
         let remote_addr = node.udp_addr();
         let id = node.id;
         let ping =
@@ -572,6 +595,7 @@ impl Discv4Service {
 
         self.pending_pings
             .insert(id, PingRequest { sent_at: Instant::now(), node, echo_hash, reason });
+        echo_hash
     }
 
     /// Message handler for an incoming `Pong`.
@@ -820,7 +844,7 @@ impl Discv4Service {
     /// To prevent traffic amplification attacks, implementations must verify that the sender of a
     /// query participates in the discovery protocol. The sender of a packet is considered verified
     /// if it has sent a valid Pong response with matching ping hash within the last 12 hours.
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
         // trigger self lookup
         if self.lookup_interval.poll_tick(cx).is_ready() {
             let target = self.lookup_rotator.next(&self.local_enr.id);
@@ -874,15 +898,19 @@ impl Discv4Service {
                     match msg {
                         Message::Ping(ping) => {
                             self.on_ping(ping, remote_addr, node_id, hash);
+                            return Poll::Ready(Discv4Event::Ping)
                         }
                         Message::Pong(pong) => {
                             self.on_pong(pong, remote_addr, node_id);
+                            return Poll::Ready(Discv4Event::Pong)
                         }
                         Message::FindNode(msg) => {
                             self.on_find_node(msg, remote_addr, node_id);
+                            return Poll::Ready(Discv4Event::FindNode)
                         }
                         Message::Neighbours(msg) => {
                             self.on_neighbours(msg, remote_addr, node_id);
+                            return Poll::Ready(Discv4Event::Neighbours)
                         }
                     }
                 }
@@ -897,16 +925,31 @@ impl Discv4Service {
 }
 
 /// Endless future impl
-impl Future for Discv4Service {
-    type Output = ();
+impl Stream for Discv4Service {
+    type Item = Discv4Event;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.get_mut().poll(cx)
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(Some(ready!(self.get_mut().poll(cx))))
     }
 }
 
+/// The Event type the Service stream produces.
+///
+/// This is mainly used for testing purposes and represents messages the service processed
+#[derive(Debug, Eq, PartialEq)]
+pub enum Discv4Event {
+    /// A `Ping` message was handled.
+    Ping,
+    /// A `Pong` message was handled.
+    Pong,
+    /// A `FindNode` message was handled.
+    FindNode,
+    /// A `Neighbours` message was handled.
+    Neighbours,
+}
+
 /// Continuously reads new messages from the channel and writes them to the socket
-async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
+pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
         match udp.send_to(&payload, to).await {
@@ -921,7 +964,7 @@ async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
 }
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
-async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: NodeId) {
+pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: NodeId) {
     loop {
         let mut buf = [0; MAX_PACKET_SIZE];
         let res = udp.recv_from(&mut buf).await;
@@ -1204,37 +1247,18 @@ pub enum TableUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bootnodes::mainnet_nodes;
-    use rand::thread_rng;
-    use secp256k1::SECP256K1;
-    use std::str::FromStr;
+    use crate::{
+        bootnodes::mainnet_nodes,
+        mock::{create_discv4, create_discv4_with_config},
+    };
     use tracing_test::traced_test;
-
-    async fn create() -> (Discv4, Discv4Service) {
-        create_with_config(Default::default()).await
-    }
-
-    async fn create_with_config(config: Discv4Config) -> (Discv4, Discv4Service) {
-        let mut rng = thread_rng();
-        let socket = SocketAddr::from_str("0.0.0.0:30303").unwrap();
-        let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-        let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
-        let external_addr = public_ip::addr().await.unwrap_or_else(|| socket.ip());
-        let local_enr = NodeRecord {
-            address: external_addr,
-            tcp_port: socket.port(),
-            udp_port: socket.port(),
-            id,
-        };
-        Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
-    }
 
     #[tokio::test]
     #[traced_test]
     async fn test_pending_ping() {
-        let (_, mut service) = create().await;
+        let (_, mut service) = create_discv4().await;
 
-        let local_addr = service.local_address();
+        let local_addr = service.local_addr();
 
         for idx in 0..MAX_NODES_PING {
             let node = NodeRecord::new(local_addr, NodeId::random());
@@ -1250,7 +1274,7 @@ mod tests {
     async fn test_lookup() {
         let all_nodes = mainnet_nodes();
         let config = Discv4Config::builder().add_boot_nodes(all_nodes).build();
-        let (_discv4, mut service) = create_with_config(config).await;
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
 
         let mut updates = service.update_stream();
 
