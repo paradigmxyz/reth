@@ -22,12 +22,6 @@ pub enum DownloadError {
         /// The details of validation failure
         details: String,
     },
-    /// No headers reponse received
-    #[error("Failed to get headers for request {request_id}.")]
-    NoHeaderResponse {
-        /// The last request ID
-        request_id: u64,
-    },
     /// Timed out while waiting for request id response.
     #[error("Timed out while getting headers for request {request_id}.")]
     Timeout {
@@ -53,7 +47,7 @@ impl DownloadError {
     /// Returns bool indicating whether this error is retryable or fatal, in the cases
     /// where the peer responds with no headers, or times out.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, DownloadError::NoHeaderResponse { .. } | DownloadError::Timeout { .. })
+        matches!(self, DownloadError::Timeout { .. })
     }
 }
 
@@ -106,7 +100,7 @@ pub trait Downloader: Sync + Send {
         // Pop the first item.
         match Box::pin(stream).try_next().await {
             Ok(Some(item)) => Ok(item.headers),
-            _ => return Err(DownloadError::NoHeaderResponse { request_id }),
+            _ => return Err(DownloadError::Timeout { request_id }),
         }
     }
 

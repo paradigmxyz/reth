@@ -1,4 +1,4 @@
-use crate::pipeline::PipelineEvent;
+use crate::{pipeline::PipelineEvent, stages::headers::HeaderStageError};
 use reth_interfaces::db::Error as DbError;
 use reth_primitives::BlockNumber;
 use thiserror::Error;
@@ -18,6 +18,9 @@ pub enum StageError {
     /// The stage encountered a database error.
     #[error("A database error occurred.")]
     Database(#[from] DbError),
+    /// The headers stage encountered an error.
+    #[error("Headers stage error.")]
+    HeadersStage(#[from] HeaderStageError),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

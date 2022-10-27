@@ -14,7 +14,7 @@ pub enum Error {
     #[error("A internal database error:{0}")]
     Internal(eyre::Error),
     /// Table not created and it does not exist.
-    #[error("Table {0} is not eexisting")]
+    #[error("Table {0} is not existing")]
     TableNotExist(String),
     /// Permission denied
     #[error("Permission denied, action can't be completed.")]

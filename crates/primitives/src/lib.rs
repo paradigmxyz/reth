@@ -42,6 +42,8 @@ pub type Address = H160;
 pub type BlockID = H256;
 /// TxHash is Kecack hash of rlp encoded signed transaction
 pub type TxHash = H256;
+/// TxNumber is sequence number of all existing transactions
+pub type TxNumber = u64;
 
 /// Storage Key
 pub type StorageKey = H256;
@@ -52,7 +54,7 @@ pub type StorageValue = H256;
 // NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
-    types::{Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 #[doc(hidden)]
@@ -66,10 +68,10 @@ pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    use tiny_keccak::{Hasher, Sha3};
-    let mut sha3 = Sha3::v256();
+    use tiny_keccak::{Hasher, Keccak};
+    let mut keccak = Keccak::v256();
     let mut output = [0; 32];
-    sha3.update(data.as_ref());
-    sha3.finalize(&mut output);
+    keccak.update(data.as_ref());
+    keccak.finalize(&mut output);
     output.into()
 }

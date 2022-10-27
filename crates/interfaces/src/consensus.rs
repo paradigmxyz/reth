@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use reth_primitives::Header;
-use reth_rpc_types::engine::ForkchoiceState;
 use thiserror::Error;
 use tokio::sync::watch::Receiver;
+
+/// Re-export forkchoice state
+pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
 /// We are checking validity of block header here.

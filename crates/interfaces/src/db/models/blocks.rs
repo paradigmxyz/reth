@@ -1,8 +1,11 @@
 //! Block related models and types.
 
-use crate::db::{
-    table::{Decode, Encode},
-    Error,
+use crate::{
+    db::{
+        table::{Decode, Encode},
+        Error,
+    },
+    impl_fixed_arbitrary,
 };
 use bytes::Bytes;
 use eyre::eyre;
@@ -22,8 +25,8 @@ pub type HeaderHash = H256;
 /// element as BlockNumber, helps out with querying/sorting.
 ///
 /// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct BlockNumHash((BlockNumber, BlockHash));
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BlockNumHash(pub (BlockNumber, BlockHash));
 
 impl BlockNumHash {
     /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]
@@ -68,18 +71,7 @@ impl Decode for BlockNumHash {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-use arbitrary::{Arbitrary, Unstructured};
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> Arbitrary<'a> for BlockNumHash {
-    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
-        let mut buffer = vec![0; 40];
-        u.fill_buffer(buffer.as_mut_slice())?;
-
-        Decode::decode(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
-    }
-}
+impl_fixed_arbitrary!(BlockNumHash, 40);
 
 #[cfg(test)]
 mod test {
@@ -97,10 +89,10 @@ mod test {
         bytes[8..].copy_from_slice(&hash.0);
 
         let encoded = Encode::encode(key.clone());
-        assert!(encoded == bytes);
+        assert_eq!(encoded, bytes);
 
         let decoded: BlockNumHash = Decode::decode(encoded.to_vec()).unwrap();
-        assert!(decoded == key);
+        assert_eq!(decoded, key);
     }
 
     #[test]
@@ -108,6 +100,6 @@ mod test {
         let mut bytes = [0u8; 40];
         thread_rng().fill(bytes.as_mut_slice());
         let key = BlockNumHash::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        assert!(bytes == Encode::encode(key));
+        assert_eq!(bytes, Encode::encode(key));
     }
 }
