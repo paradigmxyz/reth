@@ -1,7 +1,9 @@
 pub mod codecs;
 mod container;
 mod error;
+#[doc(hidden)]
 pub mod mock;
+
 pub mod models;
 mod table;
 pub mod tables;

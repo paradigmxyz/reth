@@ -18,5 +18,5 @@ pub enum Error {
     TableNotExist(String),
     /// Permission denied
     #[error("Permission denied, action can't be completed.")]
-    PermissionDenied
+    PermissionDenied,
 }
