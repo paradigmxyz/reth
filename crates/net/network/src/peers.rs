@@ -1,16 +1,18 @@
 use reth_discv4::NodeId;
+use reth_primitives::{H256, U256};
 use std::{
     collections::HashSet,
     net::{IpAddr, SocketAddr},
 };
 
-/// Maintains peer information.
+/// Maintains peer related information.
 #[derive(Debug)]
 pub(crate) struct PeerSet {
     /// List of node IP addresses for which incoming connections should be rejected.
     banned_addresses: HashSet<IpAddr>,
     /// List of peers for which connections should be rejected.
     banned_peers: HashSet<NodeId>,
+    // TODO needs reputation system
 }
 
 impl PeerSet {

@@ -3179,9 +3179,11 @@ version = "0.1.0"
 dependencies = [
  "fnv",
  "futures",
+ "parking_lot 0.12.1",
  "pin-project",
  "reth-discv4",
  "reth-primitives",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",

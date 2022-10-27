@@ -7,7 +7,13 @@
 // TODO remove later
 #![allow(dead_code)]
 
-//! reth network management.
+//! reth P2P networking.
+//!
+//! Ethereum's networking protocol is specified in [devp2p](https://github.com/ethereum/devp2p).
+//!
+//! In order for a node to join the ethereum p2p network it needs to know what nodes are already
+//! port of that network. This includes public identities (public key) and addresses (where to reach
+//! them).
 
 mod config;
 mod listener;
@@ -15,11 +21,11 @@ mod manager;
 mod network;
 mod peers;
 mod session;
+mod state;
 mod swarm;
 
-/// Identifier for a unique peer
-pub type PeerId = H512;
+/// Identifier for a unique node
+pub type NodeId = reth_discv4::NodeId;
 
 pub use manager::NetworkManager;
 pub use network::NetworkHandle;
-use reth_primitives::H512;

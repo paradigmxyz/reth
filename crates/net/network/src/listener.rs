@@ -38,7 +38,9 @@ impl ConnectionListener {
                 Poll::Ready(ListenerEvent::Incoming { stream, remote_addr })
             }
             Some(Err(err)) => Poll::Ready(ListenerEvent::Error(err)),
-            None => Poll::Ready(ListenerEvent::ListenerClosed),
+            None => {
+                Poll::Ready(ListenerEvent::ListenerClosed { local_address: *this.local_address })
+            }
         }
     }
 
@@ -58,7 +60,12 @@ pub enum ListenerEvent {
         remote_addr: SocketAddr,
     },
     /// Returned when the underlying connection listener has been closed.
-    ListenerClosed,
+    ///
+    /// This is the case if the [`TcpListenerStream`] should ever return `None`
+    ListenerClosed {
+        /// Address of the closed listener.
+        local_address: SocketAddr,
+    },
     /// Encountered an error when accepting a connection.
     ///
     /// This is non-fatal error as the listener continues to listen for new connections to accept.

@@ -7,27 +7,34 @@ use crate::{
     config::NetworkConfig,
     network::{NetworkHandle, NetworkHandleMessage},
     swarm::Swarm,
+    NodeId,
 };
-use futures::Future;
+use futures::{Future, Stream, StreamExt};
 use std::{
     pin::Pin,
+    sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::error;
 
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
 #[must_use = "The NetworkManager does nothing unless polled"]
-#[pin_project::pin_project]
 pub struct NetworkManager {
     /// The type that manages the actual network part, which includes connections.
-    #[pin]
     swarm: Swarm,
     /// Underlying network handle that can be shared.
     handle: NetworkHandle,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
-    from_handle_rx: UnboundedReceiver<NetworkHandleMessage>,
+    from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
+    /// Handles block imports.
+    block_sink: (),
+
+    /// Local copy of the `NodeId` of the local node.
+    local_node_id: NodeId,
 }
 
 // === impl NetworkManager ===
@@ -35,7 +42,7 @@ pub struct NetworkManager {
 impl NetworkManager {
     /// Creates the manager of a new network.
     ///
-    /// The [`NetworkManager`] is an endless future that needs to be polled in order to adavance the
+    /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
 
     pub fn new(_config: NetworkConfig) {
@@ -67,7 +74,34 @@ impl NetworkManager {
 impl Future for NetworkManager {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        // process incoming messages
+        loop {
+            let msg = match this.from_handle_rx.poll_next_unpin(cx) {
+                Poll::Ready(Some(msg)) => msg,
+                Poll::Pending => break,
+                Poll::Ready(None) => {
+                    // This is only possible if the channel was deliberately closed since we always
+                    // have an instance of `NetworkHandle`
+                    error!("network message channel closed.");
+                    return Poll::Ready(())
+                }
+            };
+            match msg {
+                _ => {}
+            }
+        }
+
+        // poll the stream
+        while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
+            // handle event
+            match event {
+                _ => {}
+            }
+        }
+
         todo!()
     }
 }
