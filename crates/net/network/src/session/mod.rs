@@ -83,8 +83,8 @@ impl SessionManager {
     /// Returns an error if the configured limit has been reached.
     pub(crate) fn on_incoming(
         &mut self,
-        stream: TcpStream,
-        remote_addr: SocketAddr,
+        _stream: TcpStream,
+        _remote_addr: SocketAddr,
     ) -> Result<SessionId, ExceedsSessionLimit> {
         // TODO spawn the pending task and track handle
         todo!()
@@ -100,20 +100,18 @@ impl SessionManager {
             Poll::Ready(None) => {
                 unreachable!("Manager holds both channel halves.")
             }
-            Poll::Ready(Some(event)) => {}
+            Poll::Ready(Some(_event)) => {}
         }
 
         // Poll the pending session event stream
         loop {
-            let event = match self.pending_session_rx.poll_next_unpin(cx) {
+            let _event = match self.pending_session_rx.poll_next_unpin(cx) {
                 Poll::Pending => break,
                 Poll::Ready(None) => unreachable!("Manager holds both channel halves."),
                 Poll::Ready(Some(event)) => event,
             };
 
-            match event {
-                _ => {}
-            }
+            {}
         }
 
         Poll::Pending
@@ -121,7 +119,22 @@ impl SessionManager {
 }
 
 /// Events produced by the [`SessionManager`]
-pub(crate) enum SessionEvent {}
+pub(crate) enum SessionEvent {
+    /// A new session was successfully authenticated.
+    ///
+    /// This session is now able to exchange data.
+    SessionAuthenticated { session: SessionId, peer: NodeId },
+    /// A session received a message via RLPx
+    ProtocolMessage {
+        session: SessionId,
+        peer: NodeId,
+        /// Event produced by the session.
+        // TODO add message enum, e.g. block import etc. request
+        message: (),
+    },
+    /// Active session was disconnected
+    Disconnected { session: SessionId, peer: NodeId, handle: ActiveSessionHandle },
+}
 
 /// The error thrown when the max configured limit has been reached and no more connections are
 /// accepted.
@@ -131,10 +144,10 @@ pub struct ExceedsSessionLimit(usize);
 
 /// Starts the authentication process for a connection initiated by a remote peer.
 async fn start_pending_incoming_session(
-    session_id: SessionId,
-    stream: TcpStream,
-    disconnect_rx: oneshot::Receiver<()>,
-    mut events: mpsc::Sender<PendingSessionEvent>,
+    _session_id: SessionId,
+    _stream: TcpStream,
+    _disconnect_rx: oneshot::Receiver<()>,
+    _events: mpsc::Sender<PendingSessionEvent>,
 ) {
     // Authenticates the stream, sends `PendingSessionEvent` updates back, sends Disconnect if
     // disconnect trigger was fired.

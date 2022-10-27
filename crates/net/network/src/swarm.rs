@@ -1,6 +1,8 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    session::{ExceedsSessionLimit, SessionEvent, SessionId, SessionManager},
+    session::{SessionId, SessionManager},
+    state::NetworkState,
+    NodeId,
 };
 use futures::Stream;
 use std::{
@@ -9,6 +11,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use tokio::sync::oneshot;
 use tracing::warn;
 
 /// Contains the connectivity related state of the network.
@@ -20,13 +23,18 @@ pub struct Swarm {
     incoming: ConnectionListener,
     /// All sessions.
     sessions: SessionManager,
-    // TODO add discovery update stream
-    // TODO this provides info about connected peers
+    /// Tracks the entire state of the network
+    state: NetworkState,
 }
 
 // === impl Swarm ===
 
 impl Swarm {
+    /// Mutable access to the state.
+    pub(crate) fn state_mut(&mut self) -> &mut NetworkState {
+        &mut self.state
+    }
+
     /// Callback for events produced by [`ConnectionListener`].
     ///
     /// Depending on the event, this will produce a new [`SwarmEvent`].
@@ -67,7 +75,7 @@ impl Stream for Swarm {
             // poll all sessions
             match this.sessions.poll(cx) {
                 Poll::Pending => {}
-                Poll::Ready(event) => {
+                Poll::Ready(_event) => {
                     // handle event
                 }
             }
@@ -91,6 +99,10 @@ impl Stream for Swarm {
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
 pub enum SwarmEvent {
+    /// Events related to the actual protocol
+    ///
+    /// TODO this could be requests for eth-wire, or general protocol related info
+    ProtocolEvent(ProtocolEvent),
     /// The underlying tcp listener closed.
     TcpListenerClosed {
         /// Address of the closed listener.
@@ -109,4 +121,22 @@ pub enum SwarmEvent {
         remote_addr: SocketAddr,
     },
     // TODO variants for discovered peers so they get bubbled up to the manager
+}
+
+/// Various protocol related event types bubbled up from a session that need to be handled by the
+/// network.
+pub enum ProtocolEvent {
+    EthWire(EthWireMessage),
+}
+
+pub enum EthWireMessage {
+    NewBlock,
+
+    /// Received a `GetBlockHeaders` that needs to be answered
+    GetBlockHeadersRequest {
+        /// Node that requested the headers
+        target: NodeId,
+        /// sender half of the channel to send the response back to the session
+        response: oneshot::Sender<()>,
+    }, // TODO all variants
 }

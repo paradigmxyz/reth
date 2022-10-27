@@ -8,10 +8,16 @@ use reth_primitives::{H256, U256};
 pub struct NetworkState {
     /// All connected peers and their state.
     peers: FnvHashMap<NodeId, PeerInfo>,
+    // TODO add discovery state
 }
 
 impl NetworkState {
     // TODO add functions for adding/removing peers
+
+    /// Propagates Block to peers.
+    pub fn announce_block(&mut self, _hash: H256, _block: ()) {
+        for (_id, ref mut _peer) in self.peers.iter_mut() {}
+    }
 }
 
 /// Tracks the state of a Peer.
@@ -23,3 +29,6 @@ pub struct PeerInfo {
     /// Best block number of the peer.
     pub best_number: U256,
 }
+
+/// Tracks the current state of the peer session
+pub enum PeerSessionState {}

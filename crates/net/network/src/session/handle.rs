@@ -1,4 +1,5 @@
 //! Session handles
+use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 
 // TODO: integrate with the actual P2PStream
@@ -25,7 +26,9 @@ pub struct PendingSessionHandle {
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
 pub struct ActiveSessionHandle {
-    /// Sender half of the command channel used send commands to the spawned session
+    /// The timestamp when the session has been established.
+    established: Instant,
+    /// Sender half of the command channel used send commands _to_ the spawned session
     tx: mpsc::Sender<SessionCommand>,
 }
 

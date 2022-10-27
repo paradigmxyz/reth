@@ -9,13 +9,12 @@ use crate::{
     swarm::Swarm,
     NodeId,
 };
-use futures::{Future, Stream, StreamExt};
+use futures::{Future, StreamExt};
 use std::{
     pin::Pin,
-    sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::UnboundedReceiver;
+
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::error;
 
@@ -45,7 +44,7 @@ impl NetworkManager {
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
 
-    pub fn new(_config: NetworkConfig) {
+    pub fn new(_config: NetworkConfig) -> Self {
         todo!()
     }
 
@@ -79,7 +78,7 @@ impl Future for NetworkManager {
 
         // process incoming messages
         loop {
-            let msg = match this.from_handle_rx.poll_next_unpin(cx) {
+            let _msg = match this.from_handle_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(msg)) => msg,
                 Poll::Pending => break,
                 Poll::Ready(None) => {
@@ -89,17 +88,13 @@ impl Future for NetworkManager {
                     return Poll::Ready(())
                 }
             };
-            match msg {
-                _ => {}
-            }
+            {}
         }
 
         // poll the stream
-        while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
+        while let Poll::Ready(Some(_event)) = this.swarm.poll_next_unpin(cx) {
             // handle event
-            match event {
-                _ => {}
-            }
+            {}
         }
 
         todo!()

@@ -1,5 +1,5 @@
 use reth_discv4::NodeId;
-use reth_primitives::{H256, U256};
+
 use std::{
     collections::HashSet,
     net::{IpAddr, SocketAddr},
