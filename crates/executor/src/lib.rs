@@ -7,13 +7,13 @@
 
 //! Reth executor executes transaction in block of data.
 
+/// Linking of blocks inside chains
+pub mod blockchain;
 mod cfg;
 /// Executor
 pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
-/// Linking of blocks inside chains
-pub mod blockchain;
 
 /// Helper function for transactions
 pub mod proofs;

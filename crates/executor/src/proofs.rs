@@ -1,11 +1,10 @@
-use reth_primitives::{Bytes, Header, Receipt, TransactionSigned, H256, Log};
 use hash_db::Hasher;
 use plain_hasher::PlainHasher;
+use reth_primitives::{Bytes, Header, Log, Receipt, TransactionSigned, H256};
+use reth_rlp::Encodable;
 use rlp::RlpStream;
 use sha3::{Digest, Keccak256};
 use triehash::sec_trie_root;
-use reth_rlp::Encodable;
-
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 struct KeccakHasher;
@@ -20,7 +19,8 @@ impl Hasher for KeccakHasher {
     }
 }
 
-/// Calculate Transaction root. Iterate over transaction and create merkle trie of (rlp(index),encoded(tx)) pairs.
+/// Calculate Transaction root. Iterate over transaction and create merkle trie of
+/// (rlp(index),encoded(tx)) pairs.
 pub fn calculate_transaction_root<'a>(
     transactions: impl IntoIterator<Item = &'a TransactionSigned>,
 ) -> H256 {
@@ -56,7 +56,6 @@ pub fn calculate_receipt_root<'a>(receipts: impl IntoIterator<Item = &'a Receipt
             .collect::<Vec<(Bytes, Vec<u8>)>>(),
     )
 }
-
 
 /// Create log hash for header
 pub fn calculate_log_root<'a>(logs: impl IntoIterator<Item = &'a Log>) -> H256 {

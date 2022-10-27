@@ -1,9 +1,10 @@
-use crate::{revm_wrap::{self, SubState, State}, Config};
-use reth_interfaces::{
-    executor::{BlockExecutor, Error, ExecutorDb},
+use crate::{
+    revm_wrap::{self, State, SubState},
+    Config,
 };
+use reth_interfaces::executor::{BlockExecutor, Error, ExecutorDb};
 use reth_primitives::BlockLocked;
-use revm::{AnalysisKind, Env, SpecId,EVM};
+use revm::{AnalysisKind, Env, SpecId, EVM};
 
 /// Main block executor
 pub struct Executor {
@@ -14,13 +15,11 @@ pub struct Executor {
 impl Executor {
     /// Create new Executor
     pub fn new(config: Config) -> Self {
-        Self { config}
+        Self { config }
     }
 
     /// Verify block. Execute all transaction and compare results.
     pub fn verify<DB: ExecutorDb>(&self, block: &BlockLocked, db: DB) -> Result<(), Error> {
-
-
         let db = SubState::new(State::new(db));
         let mut evm = EVM::new();
         evm.database(db);
@@ -46,8 +45,6 @@ impl Executor {
 
             // create receipt
             // bloom filter from logs
-
-
 
             // Receipt outcome EIP-658: Embedding transaction status code in receipts
             // EIP-658 supperseeded EIP-98 in Byzantium fork

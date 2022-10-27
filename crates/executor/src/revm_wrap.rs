@@ -32,7 +32,6 @@ impl<DB: ExecutorDb> State<DB> {
     pub fn unwrap(self) -> DB {
         self.0
     }
-
 }
 
 impl<DB: ExecutorDb> DatabaseRef for State<DB> {
