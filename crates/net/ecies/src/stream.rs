@@ -111,7 +111,7 @@ where
             Some(Ok(IngressECIESValue::Message(body))) => Poll::Ready(Some(Ok(body))),
             Some(other) => Poll::Ready(Some(Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("ECIES stream protocol error: expected message, received {:?}", other),
+                format!("ECIES stream protocol error: expected message, received {other:?}"),
             )))),
             None => Poll::Ready(None),
         }

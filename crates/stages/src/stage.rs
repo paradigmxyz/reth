@@ -1,6 +1,6 @@
 use crate::{error::StageError, id::StageId};
 use async_trait::async_trait;
-use reth_db::{kv::tx::Tx, mdbx};
+use reth_interfaces::db::{DBContainer, Database};
 use reth_primitives::BlockNumber;
 
 /// Stage execution input, see [Stage::execute].
@@ -50,31 +50,27 @@ pub struct UnwindOutput {
 /// ([Stage::execute]) and a way to "roll back" ([Stage::unwind]).
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
+///
+/// Stages receive a [`DBContainer`] which manages the lifecycle of a transaction, such
+/// as when to commit / reopen a new one etc.
 #[async_trait]
-pub trait Stage<'db, E>: Send + Sync
-where
-    E: mdbx::EnvironmentKind,
-{
+pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.
     fn id(&self) -> StageId;
 
     /// Execute the stage.
-    async fn execute<'tx>(
+    async fn execute(
         &mut self,
-        tx: &mut Tx<'tx, mdbx::RW, E>,
+        db: &mut DBContainer<'_, DB>,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError>
-    where
-        'db: 'tx;
+    ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
-    async fn unwind<'tx>(
+    async fn unwind(
         &mut self,
-        tx: &mut Tx<'tx, mdbx::RW, E>,
+        db: &mut DBContainer<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>
-    where
-        'db: 'tx;
+    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }

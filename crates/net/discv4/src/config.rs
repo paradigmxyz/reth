@@ -1,0 +1,128 @@
+use crate::node::NodeRecord;
+use discv5::PermitBanList;
+///! A set of configuration parameters to tune the discovery protocol.
+// This basis of this file has been taken from the discv5 codebase:
+// https://github.com/sigp/discv5
+use std::collections::HashSet;
+use std::time::Duration;
+
+/// Configuration parameters that define the performance of the discovery network.
+#[derive(Clone, Debug)]
+pub struct Discv4Config {
+    /// Whether to enable the incoming packet filter. Default: false.
+    pub enable_packet_filter: bool,
+    /// The number of retries for each UDP request. Default: 1.
+    pub request_retries: u8,
+    /// The time between pings to ensure connectivity amongst connected nodes. Default: 300
+    /// seconds.
+    pub ping_interval: Duration,
+    /// The duration of we consider a ping timed out.
+    pub ping_timeout: Duration,
+    /// The rate at which lookups should be triggered.
+    pub lookup_interval: Duration,
+    /// The duration of we consider a FindNode request timed out.
+    pub find_node_timeout: Duration,
+    /// The duration we set for neighbours responses
+    pub neighbours_timeout: Duration,
+    /// A set of lists that permit or ban IP's or NodeIds from the server. See
+    /// `crate::PermitBanList`.
+    pub permit_ban_list: PermitBanList,
+    /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
+    /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
+    /// the filter will last indefinitely. Default is 1 hour.
+    pub ban_duration: Option<Duration>,
+    /// Nodes to boot from.
+    pub bootstrap_nodes: HashSet<NodeRecord>,
+}
+
+impl Discv4Config {
+    /// Returns a new default builder instance
+    pub fn builder() -> Discv4ConfigBuilder {
+        Default::default()
+    }
+}
+
+impl Default for Discv4Config {
+    fn default() -> Self {
+        Self {
+            enable_packet_filter: false,
+            request_retries: 1,
+            ping_interval: Duration::from_secs(300),
+            ping_timeout: Duration::from_secs(5),
+            find_node_timeout: Duration::from_secs(2),
+            neighbours_timeout: Duration::from_secs(30),
+            lookup_interval: Duration::from_secs(20),
+            permit_ban_list: PermitBanList::default(),
+            ban_duration: Some(Duration::from_secs(3600)), // 1 hour
+            bootstrap_nodes: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Discv4ConfigBuilder {
+    config: Discv4Config,
+}
+
+impl Discv4ConfigBuilder {
+    /// Whether to enable the incoming packet filter.
+    pub fn enable_packet_filter(&mut self) -> &mut Self {
+        self.config.enable_packet_filter = true;
+        self
+    }
+
+    /// The number of retries for each UDP request.
+    pub fn request_retries(&mut self, retries: u8) -> &mut Self {
+        self.config.request_retries = retries;
+        self
+    }
+
+    /// The time between pings to ensure connectivity amongst connected nodes.
+    pub fn ping_interval(&mut self, interval: Duration) -> &mut Self {
+        self.config.ping_interval = interval;
+        self
+    }
+
+    /// Sets the timeout for pings
+    pub fn ping_timeout(&mut self, duration: Duration) -> &mut Self {
+        self.config.ping_timeout = duration;
+        self
+    }
+
+    /// A set of lists that permit or ban IP's or NodeIds from the server. See
+    /// `crate::PermitBanList`.
+    pub fn permit_ban_list(&mut self, list: PermitBanList) -> &mut Self {
+        self.config.permit_ban_list = list;
+        self
+    }
+
+    /// Sets the lookup interval duration.
+    pub fn lookup_interval(&mut self, lookup_interval: Duration) -> &mut Self {
+        self.config.lookup_interval = lookup_interval;
+        self
+    }
+
+    /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
+    /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
+    /// the filter will last indefinitely. Default is 1 hour.
+    pub fn ban_duration(&mut self, ban_duration: Option<Duration>) -> &mut Self {
+        self.config.ban_duration = ban_duration;
+        self
+    }
+
+    /// Adds a boot node
+    pub fn add_boot_node(&mut self, node: NodeRecord) -> &mut Self {
+        self.config.bootstrap_nodes.insert(node);
+        self
+    }
+
+    /// Adds multiple boot nodes
+    pub fn add_boot_nodes(&mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> &mut Self {
+        self.config.bootstrap_nodes.extend(nodes);
+        self
+    }
+
+    pub fn build(&mut self) -> Discv4Config {
+        self.config.clone()
+    }
+}

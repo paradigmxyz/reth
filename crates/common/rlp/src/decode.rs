@@ -392,9 +392,9 @@ mod tests {
     #[test]
     fn rlp_strings() {
         check_decode::<Bytes, _>(vec![
-            (Ok((&hex!("00")[..]).to_vec().into()), &hex!("00")[..]),
+            (Ok(hex!("00")[..].to_vec().into()), &hex!("00")[..]),
             (
-                Ok((&hex!("6f62636465666768696a6b6c6d")[..]).to_vec().into()),
+                Ok(hex!("6f62636465666768696a6b6c6d")[..].to_vec().into()),
                 &hex!("8D6F62636465666768696A6B6C6D")[..],
             ),
             (Err(DecodeError::UnexpectedList), &hex!("C0")[..]),

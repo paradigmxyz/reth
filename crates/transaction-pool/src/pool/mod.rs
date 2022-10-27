@@ -92,6 +92,7 @@ pub(crate) mod size;
 pub(crate) mod state;
 mod transaction;
 pub mod txpool;
+mod update;
 
 /// Transaction pool internals.
 pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
@@ -139,11 +140,6 @@ where
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
-    }
-
-    /// Updates the pool
-    pub(crate) fn update_base_fee(&self, base_fee: U256) {
-        self.pool.write().update_base_fee(base_fee);
     }
 
     /// Get the validator reference.
