@@ -101,4 +101,3 @@ pub enum TimeoutPingerError {
     #[error(transparent)]
     PingerError(#[from] PingerError),
 }
-

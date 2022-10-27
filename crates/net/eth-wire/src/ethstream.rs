@@ -2,7 +2,7 @@ use crate::{
     error::{EthStreamError, HandshakeError},
     types::{forkid::ForkFilter, EthMessage, ProtocolMessage, Status},
 };
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_rlp::{Decodable, Encodable};
@@ -141,7 +141,7 @@ where
 
 impl<S> Sink<EthMessage> for EthStream<S>
 where
-    S: Sink<bytes::Bytes, Error = io::Error> + Unpin,
+    S: Sink<Bytes, Error = io::Error> + Unpin,
 {
     type Error = EthStreamError;
 

@@ -1,12 +1,10 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-use bytes::{Bytes, BytesMut, Buf};
-use futures::{Sink, StreamExt, Future, SinkExt, ready};
+use bytes::{Buf, Bytes, BytesMut};
+use futures::{ready, Future, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use pin_utils::pin_mut;
 use reth_primitives::H512 as PeerId;
-use reth_rlp::{DecodeError, Decodable, Encodable, RlpEncodable, RlpDecodable};
-use thiserror::Error;
-use tokio::time::{Timeout, Sleep, Instant};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use std::{
     fmt::Display,
     io,
@@ -14,6 +12,8 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+use thiserror::Error;
+use tokio::time::{Instant, Sleep, Timeout};
 use tokio_stream::Stream;
 
 use crate::error::{P2PHandshakeError, P2PStreamError, PingerError, TimeoutPingerError};
@@ -94,8 +94,9 @@ where
     /// [`Hello`] message in response.
     pub async fn handshake(&mut self, hello: HelloMessage) -> Result<(), P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
-        // TODO: fix
-        // self.send(hello.into()).await?;
+        let mut hello_bytes = BytesMut::new();
+        P2PMessage::Hello(hello).encode(&mut hello_bytes);
+        self.inner.send(hello_bytes.into()).await?;
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
@@ -129,97 +130,6 @@ where
         self.authed = true;
         Ok(())
     }
-
-    /// Create a task which will periodically (based on [`PING_INTERVAL`]) send a [`Ping`] message
-    /// to the peer and wait for a [`Pong`] message in response. If the peer does not respond
-    /// within [`PING_TIMEOUT`], the task will terminate and the peer will be sent a disconnect
-    /// message.
-    ///
-    /// The task will terminate after [`MAX_FAILED_PINGS`] have been sent without a response.
-    ///
-    /// If [`P2PStream`] is dropped, this task will send a disconnect message, wait for the
-    /// [`GRACE_PERIOD`] and then terminate.
-    ///
-    /// This task must be created only after the [`Hello`] handshake has been completed, so this
-    /// method will return an error if the [`P2PStream`] is not yet authed.
-    pub fn ping_task(&mut self) -> Result<impl Future<Output = Result<(), P2PStreamError>> + '_, P2PStreamError> {
-        if !self.authed {
-            return Err(P2PStreamError::PingBeforeHandshake)
-        }
-
-        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
-
-        // when we are not waiting for a pong, we will only be selecting on the ping interval.
-        // otherwise, we will be retrying the ping until we either get a pong or we have reached
-        // the maximum number of retries.
-        let task = async move {
-            let mut ping_timeout = tokio::time::sleep(PING_TIMEOUT);
-            pin_mut!(ping_timeout);
-
-            let mut stream = &mut self.inner;
-
-            loop {
-                tokio::select! {
-                    // this handles the case where we are not waiting for a pong and should send a
-                    // ping
-                    _ = ping_interval.tick() => {
-                        // if we are not waiting for a pong, we can send a ping
-                        if self.pinger.is_ready() {
-                            let mut ping_bytes = BytesMut::new();
-                            P2PMessage::Ping.encode(&mut ping_bytes);
-                            stream.send(ping_bytes.into()).await?;
-
-                            self.pinger.ping_sent();
-                            ping_timeout.reset(Instant::now() + PING_TIMEOUT);
-                        }
-                    }
-                    // this handles the case where we were waiting for a pong and the timeout has
-                    // completed
-                    _ = ping_timeout => {
-                        if !matches!(self.pinger.state(), PingState::Ready) {
-                            // if we are waiting for a pong, we can check if we have reached the maximum
-                            // number of retries
-                            if self.pinger.is_waiting_for_pong() {
-                                if self.pinger.is_timed_out() {
-                                    // we have reached the maximum number of retries, so we will send a
-                                    // disconnect message and terminate the task
-                                    let mut disconnect_bytes = BytesMut::new();
-                                    P2PMessage::Disconnect(DisconnectReason::PingTimeout).encode(&mut disconnect_bytes);
-                                    stream.send(disconnect_bytes.into()).await?;
-
-                                    tokio::time::sleep(GRACE_PERIOD).await;
-                                    return Ok(())
-                                } else {
-                                    // we have not reached the maximum number of retries, so we will send
-                                    // another ping and reset the timeout
-                                    let mut ping_bytes = BytesMut::new();
-                                    P2PMessage::Ping.encode(&mut ping_bytes);
-                                    stream.send(ping_bytes.into()).await?;
-
-                                    self.pinger.ping_sent();
-                                    ping_timeout.reset(Instant::now() + PING_TIMEOUT);
-                                }
-                            }
-                        }
-                    }
-                    // this cases where we have received a message
-                    msg = stream.next() => {
-                        // TODO: remove
-                        // if we are waiting for a pong, we can check if we have received a pong
-                        if self.pinger.is_waiting_for_pong() {
-                            if let Some(msg) = msg {
-                                let id = *msg?.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
-                                if id == P2PMessageID::Pong as u8 {
-                                    self.pinger.pong_received();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        Ok(task)
-    }
 }
 
 /// This represents the possible states of the pinger.
@@ -248,10 +158,7 @@ pub struct Pinger {
 impl Pinger {
     /// Create a new pinger with the given maximum number of pongs that can be missed.
     pub fn new(max_missed: u8) -> Self {
-        Self {
-            max_missed,
-            state: PingState::Ready,
-        }
+        Self { max_missed, state: PingState::Ready }
     }
 
     /// Return the current state of the pinger.
@@ -277,9 +184,9 @@ impl Pinger {
     /// Mark a ping as sent, and transition the pinger to the `WaitingForPong` state if it was in
     /// the `Ready` state.
     ///
-    /// If the pinger is in the `WaitingForPong` state, the number of missed pongs will be incremented.
-    /// If the number of missed pongs exceeds the maximum missed pongs allowed, the pinger will be
-    /// transitioned to the `TimedOut` state.
+    /// If the pinger is in the `WaitingForPong` state, the number of missed pongs will be
+    /// incremented. If the number of missed pongs exceeds the maximum missed pongs allowed, the
+    /// pinger will be transitioned to the `TimedOut` state.
     ///
     /// If the pinger is in the `TimedOut` state, this method will return an error.
     pub fn ping_sent(&mut self) -> Result<(), PingerError> {
@@ -346,7 +253,7 @@ impl Encodable for P2PMessage {
         }
     }
 
-    fn encode(&self,out: &mut dyn bytes::BufMut) {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
             P2PMessage::Disconnect(msg) => msg.encode(out),
@@ -360,7 +267,8 @@ impl Encodable for P2PMessage {
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         let first = buf.first().expect("cannot decode empty p2p message");
-        let id = P2PMessageID::try_from(*first).or(Err(DecodeError::Custom("unknown p2p message id")))?;
+        let id = P2PMessageID::try_from(*first)
+            .or(Err(DecodeError::Custom("unknown p2p message id")))?;
         match id {
             P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
             P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
@@ -436,39 +344,38 @@ where
     type Item = Result<BytesMut, P2PStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        let mut this = self.project();
 
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
         // return behind any pings we need to respond to
-        while let Poll::Ready(Some(event)) = this.inner.poll_next(cx) {
-            let res = ready!(this.inner.poll_next(cx));
-            let bytes = match res {
+        while let Poll::Ready(res) = this.inner.as_mut().poll_next(cx) {
+            let mut bytes = match res {
                 Some(Ok(bytes)) => bytes,
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 None => return Poll::Ready(None),
             };
 
-            let id = *bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
+            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             if id == P2PMessageID::Ping as u8 {
                 // we have received a ping, so we will send a pong
                 let mut pong_bytes = BytesMut::new();
                 P2PMessage::Pong.encode(&mut pong_bytes);
 
                 // make sure the sink is ready before we send the pong
-                match this.inner.poll_ready(cx) {
+                match this.inner.as_mut().poll_ready(cx) {
                     Poll::Ready(Ok(())) => {}
                     Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Pending => return Poll::Pending,
                 };
 
                 // send the pong
-                match this.inner.start_send(pong_bytes.into()) {
+                match this.inner.as_mut().start_send(pong_bytes.into()) {
                     Ok(()) => {}
                     Err(err) => return Poll::Ready(Some(Err(err.into()))),
                 };
 
                 // flush the sink
-                match this.inner.poll_flush(cx) {
+                match this.inner.as_mut().poll_flush(cx) {
                     Poll::Ready(Ok(())) => {}
                     Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Pending => return Poll::Pending,
@@ -483,7 +390,9 @@ where
             } else if id == P2PMessageID::Hello as u8 {
                 // we have received a hello message outside of the handshake, so we will return an
                 // error
-                return Poll::Ready(Some(Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))))
+                return Poll::Ready(Some(Err(P2PStreamError::HandshakeError(
+                    P2PHandshakeError::HelloNotInHandshake,
+                ))))
             } else if id == P2PMessageID::Pong as u8 {
                 // we have received a pong without waiting for a pong
                 return Poll::Ready(Some(Err(PingerError::PongWhileReady.into())))
@@ -511,19 +420,31 @@ where
     type Error = P2PStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.project().inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn start_send(self: Pin<&mut Self>, item: P2PMessage) -> Result<(), Self::Error> {
-        todo!()
+        if self.authed && matches!(item, P2PMessage::Hello(_)) {
+            return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
+        }
+
+        let mut bytes = BytesMut::new();
+        item.encode(&mut bytes);
+
+        // all messages sent in this stream are subprotocol messages, so we need to switch the
+        // message id based on the offset
+        bytes[0] += self.offset;
+
+        self.project().inner.start_send(bytes.into())?;
+        Ok(())
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.project().inner.poll_flush(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.project().inner.poll_close(cx).map_err(Into::into)
     }
 }
 
@@ -684,8 +605,63 @@ impl Encodable for DisconnectReason {
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         let reason = buf.first().ok_or(DecodeError::Custom("disconnect reason cannot be empty"))?;
-        DisconnectReason::try_from(*reason).map_err(|_| DecodeError::Custom("unknown disconnect reason"))
+        DisconnectReason::try_from(*reason)
+            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))
     }
 }
 
 // TODO: test ping pong stuff
+#[cfg(test)]
+mod tests {
+    use reth_ecies::{stream::ECIESStream, util::pk2id};
+    use secp256k1::{SecretKey, SECP256K1};
+    use tokio::net::{TcpListener, TcpStream};
+
+    use crate::{BlockHashNumber, EthMessage, EthStream};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn ping_pong_test() {
+        // create a p2p stream and server, then confirm that the two are authed
+        // create tcpstream
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::thread_rng());
+        let test_msg = EthMessage::NewBlockHashes(
+            vec![
+                BlockHashNumber { hash: reth_primitives::H256::random(), number: 5 },
+                BlockHashNumber { hash: reth_primitives::H256::random(), number: 6 },
+            ]
+            .into(),
+        );
+
+        let test_msg_clone = test_msg.clone();
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
+
+            // TODO: p2p stream replacement
+            let mut p2p_stream = P2PStream::new(stream);
+
+            // use the stream to get the next message
+            let message = stream.next().await.unwrap().unwrap();
+            assert_eq!(message, test_msg_clone);
+        });
+
+        // create the server pubkey
+        let server_id = pk2id(&server_key.public_key(SECP256K1));
+
+        let client_key = SecretKey::new(&mut rand::thread_rng());
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let mut client_stream = P2PStream::new(outgoing);
+
+        client_stream.send(test_msg).await.unwrap();
+
+        // make sure the server receives the message and asserts before ending the test
+        handle.await.unwrap();
+    }
+}
