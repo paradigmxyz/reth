@@ -175,6 +175,16 @@ impl Encodable for bool {
 
 impl_max_encoded_len!(bool, { <u8 as MaxEncodedLenAssoc>::LEN });
 
+#[cfg(feature = "smol_str")]
+impl Encodable for smol_str::SmolStr {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.as_bytes().encode(out);
+    }
+    fn length(&self) -> usize {
+        self.as_bytes().length()
+    }
+}
+
 #[cfg(feature = "ethnum")]
 mod ethnum_support {
     use super::*;
@@ -505,5 +515,18 @@ mod tests {
     fn rlp_list() {
         assert_eq!(encoded_list::<u64>(&[]), &hex!("c0")[..]);
         assert_eq!(encoded_list(&[0xFFCCB5_u64, 0xFFC0B5_u64]), &hex!("c883ffccb583ffc0b5")[..]);
+    }
+
+    #[cfg(feature = "smol_str")]
+    #[test]
+    fn rlp_smol_str() {
+        use smol_str::SmolStr;
+        assert_eq!(encoded(SmolStr::new(""))[..], hex!("80")[..]);
+        let mut b = BytesMut::new();
+        "test smol str".to_string().encode(&mut b);
+        assert_eq!(&encoded(SmolStr::new("test smol str"))[..], b.as_ref());
+        let mut b = BytesMut::new();
+        "abcdefgh".to_string().encode(&mut b);
+        assert_eq!(&encoded(SmolStr::new("abcdefgh"))[..], b.as_ref());
     }
 }
