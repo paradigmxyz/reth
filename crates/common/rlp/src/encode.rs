@@ -370,6 +370,13 @@ mod tests {
     }
 
     #[test]
+    fn rlp_str() {
+        assert_eq!(encoded("")[..], hex!("80")[..]);
+        assert_eq!(encoded("{")[..], hex!("7b")[..]);
+        assert_eq!(encoded("test str")[..], hex!("887465737420737472")[..]);
+    }
+
+    #[test]
     fn rlp_strings() {
         assert_eq!(encoded(hex!(""))[..], hex!("80")[..]);
         assert_eq!(encoded(hex!("7B"))[..], hex!("7b")[..]);
