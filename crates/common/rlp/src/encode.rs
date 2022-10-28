@@ -291,6 +291,16 @@ mod alloc_support {
         }
     }
 }
+
+impl Encodable for &str {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.as_bytes().encode(out);
+    }
+    fn length(&self) -> usize {
+        self.as_bytes().length()
+    }
+}
+
 slice_impl!(Bytes);
 slice_impl!(BytesMut);
 
@@ -367,6 +377,13 @@ mod tests {
         assert_eq!(out1, out2);
 
         out1
+    }
+
+    #[test]
+    fn rlp_str() {
+        assert_eq!(encoded("")[..], hex!("80")[..]);
+        assert_eq!(encoded("{")[..], hex!("7b")[..]);
+        assert_eq!(encoded("test str")[..], hex!("887465737420737472")[..]);
     }
 
     #[test]
