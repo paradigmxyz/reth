@@ -15,7 +15,6 @@ use reth_interfaces::{
 };
 use reth_primitives::{rpc::BigEndianHash, BlockNumber, HeaderLocked, H256, U256};
 use std::fmt::Debug;
-use thiserror::Error;
 use tracing::*;
 
 const HEADERS: StageId = StageId("HEADERS");
