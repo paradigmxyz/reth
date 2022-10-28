@@ -1,17 +1,17 @@
-use futures::{Future, StreamExt, ready, FutureExt};
+use futures::{ready, Future, FutureExt, StreamExt};
 use pin_project::pin_project;
 use std::{
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::time::{Sleep, interval, sleep};
-use tokio_stream::{Stream, wrappers::IntervalStream};
+use tokio::time::{interval, sleep, Sleep};
+use tokio_stream::{wrappers::IntervalStream, Stream};
 
 use crate::error::PingerError;
 
 /// This represents the possible states of the pinger.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum PingState {
     /// There are no pings in flight, or all pings have been responded to and we are ready to send
     /// a ping at a later point.
@@ -114,16 +114,17 @@ pub struct PingerStream {
 }
 
 impl PingerStream {
-    /// Poll the [`Pinger`] for a [`Option<PingEvent>`], which can be either a [`PingEvent::Ping`] or a
-    /// final [`PingEvent::Timeout`] event, after which the stream will end and return None.
+    /// Poll the [`Pinger`] for a [`Option<PingEvent>`], which can be either a [`PingEvent::Ping`]
+    /// or a final [`PingEvent::Timeout`] event, after which the stream will end and return
+    /// None.
     pub fn poll(&mut self) -> Option<Result<PingerEvent, PingerError>> {
         // the stream has already sent a timeout event, so we return None
         if self.timeout_sent {
-            return None;
+            return None
         }
 
         match self.pinger.state {
-            PingState::Ready  => {
+            PingState::Ready => {
                 // the pinger is ready, send a ping
                 match self.pinger.next_state() {
                     Ok(()) => Some(Ok(PingerEvent::Ping)),
@@ -148,7 +149,7 @@ impl PingerStream {
                             }
                         }
                     }
-                    Err(e) => {Some(Err(e))}
+                    Err(e) => Some(Err(e)),
                 }
             }
             PingState::TimedOut(_) => {
@@ -164,11 +165,11 @@ impl Stream for PingerStream {
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.timeout_sent {
-            return Poll::Ready(None);
+            return Poll::Ready(None)
         }
 
         match self.pinger.state {
-            PingState::Ready  => {
+            PingState::Ready => {
                 // the pinger is ready, send a ping
                 self.pinger.next_state()?;
                 Poll::Ready(Some(Ok(PingerEvent::Ping)))
@@ -196,37 +197,6 @@ impl Stream for PingerStream {
     }
 }
 
-/// A version of [`Pinger`] that contains an [`Interval`], which will stream [`PingerEvent`]s when
-/// polled.
-/// These [`PingerEvent`]s can be used to determine when to send a ping.
-#[derive(Debug)]
-pub struct IntervalPingerStream {
-    /// The pinger stream.
-    pinger_stream: PingerStream,
-
-    /// The interval that determines ping retries.
-    interval: IntervalStream,
-}
-
-impl IntervalPingerStream {
-    /// Creates a new [`IntervalPingerStream`] with the given max missed pongs and interval duration.
-    pub fn new(max_missed: u8, interval_duration: Duration) -> Self {
-        Self {
-            pinger_stream: PingerStream { pinger: Pinger::new(max_missed), timeout_sent: false },
-            interval: IntervalStream::new(interval(interval_duration)),
-        }
-    }
-
-    /// Mark a pong as received, and transition the pinger to the `Ready` state if it was in the
-    /// `WaitingForPong` state.
-    ///
-    /// If the pinger is in the `Ready` or `TimedOut` state, this method will return an error.
-    pub fn pong_received(&mut self) -> Result<(), PingerError> {
-        self.interval.as_mut().reset();
-        self.pinger_stream.pinger.pong_received()
-    }
-}
-
 /// The element type produced by a [`IntervalPingerStream`], representing either a new [`Ping`]
 /// message to send, or an indication that the peer should be timed out.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,22 +206,6 @@ pub enum PingerEvent {
 
     /// The peer should be timed out.
     Timeout,
-}
-
-impl Stream for IntervalPingerStream {
-    type Item = Result<PingerEvent, PingerError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        let res = ready!(this.interval.poll_next_unpin(cx));
-        if res.is_none() {
-            return Poll::Ready(None);
-        }
-
-        // poll the interval, only advance the state if the interval is ready
-        Poll::Ready(this.pinger_stream.poll())
-    }
 }
 
 /// A type of [`Pinger`] that uses an interval and a timeout to determine when to send a ping and
@@ -272,8 +226,8 @@ pub struct IntervalTimeoutPinger {
 }
 
 impl IntervalTimeoutPinger {
-    /// Creates a new [`IntervalTimeoutPinger`] with the given max missed pongs, interval duration, and
-    /// timeout duration.
+    /// Creates a new [`IntervalTimeoutPinger`] with the given max missed pongs, interval duration,
+    /// and timeout duration.
     pub fn new(max_missed: u8, interval_duration: Duration, timeout_duration: Duration) -> Self {
         Self {
             interval_stream: IntervalStream::new(interval(interval_duration)),
@@ -286,17 +240,15 @@ impl IntervalTimeoutPinger {
     /// Mark a pong as received, and transition the pinger to the `Ready` state if it was in the
     /// `WaitingForPong` state. Unsets the sleep timer.
     pub fn pong_received(&mut self) -> Result<(), PingerError> {
-        println!("resetting state from {:?}", self.pinger_stream.pinger.state());
         self.interval_stream.as_mut().reset();
         self.pinger_stream.pinger.pong_received()?;
-        println!("current state after reset: {:?}", self.pinger_stream.pinger.state());
         self.sleep = None;
         Ok(())
     }
 
     /// Waits until the pinger sends a timeout event by exhausting the stream.
     pub async fn wait_for_timeout(&mut self) {
-        while self.next().await.is_some() {}
+        while let Some(Ok(PingerEvent::Ping)) = self.next().await {}
     }
 
     /// Returns the current state of the pinger.
@@ -311,54 +263,49 @@ impl Stream for IntervalTimeoutPinger {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // if the pinger state is None, we should also return None regardless of the sleep or
+        // interval state
+
         // if we have a sleep timer, prefer that over the interval stream
         if let Some(inner_sleep) = this.sleep.as_mut() {
             // if the sleep is pending, we should return pending (we are waiting for a timeout)
             let pinned_sleep = Pin::new(inner_sleep);
             ready!(pinned_sleep.poll_next(cx));
 
+            // let's reset the interval, because the first one returns immediately when created
+            // using `interval`
+            let mut interval = interval(this.timeout);
+            interval.reset();
+
             // the sleep has elapsed, create a new sleep for the next timeout interval, then send a
             // new ping
-            this.sleep = Some(IntervalStream::new(interval(this.timeout)));
-            println!("pinging sleep");
-            println!("state: {:?}", this.pinger_stream.pinger.state());
-            let rest = Pin::new(&mut this.pinger_stream).poll_next(cx);
-            println!("state: {:?}", this.pinger_stream.pinger.state());
-            rest
+            this.sleep = Some(IntervalStream::new(interval));
+
+            Pin::new(&mut this.pinger_stream).poll_next(cx)
         } else {
             // first poll the interval stream, if it is ready, send a ping
             let res = ready!(this.interval_stream.poll_next_unpin(cx));
             if res.is_none() {
                 // this should never happen (the Stream impl of IntervalStream never is always Some)
-                return Poll::Ready(None);
+                return Poll::Ready(None)
             }
 
             let pinned_stream = Pin::new(&mut this.pinger_stream);
             let stream_res = ready!(pinned_stream.poll_next(cx));
-            match stream_res {
-                Some(Ok(PingerEvent::Ping)) => {
-                    // the pinger is ready, set the sleep to Some
-                    this.sleep = Some(IntervalStream::new(interval(this.timeout)));
-                    println!("pinging interval");
-                    println!("state: {:?}", this.pinger_stream.pinger.state());
-                    Poll::Ready(Some(Ok(PingerEvent::Ping)))
-                }
-                Some(Ok(PingerEvent::Timeout)) => {
-                    // the pinger has timed out, set the sleep to Some
-                    Poll::Ready(Some(Ok(PingerEvent::Timeout)))
-                }
-                Some(Err(e)) => Poll::Ready(Some(Err(e))),
-                None => Poll::Ready(None),
-            }
+
+            // let's reset the interval, because the first one returns immediately when created
+            // using `interval`
+            let mut interval = interval(this.timeout);
+            interval.reset();
+
+            this.sleep = Some(IntervalStream::new(interval));
+            Poll::Ready(stream_res)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use futures::pin_mut;
     use tokio::select;
 
     use super::*;
@@ -410,40 +357,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_many_pings_interval() {
-        // here we just need to wait for the interval to elapse and we should be able to assert
-        // that the pinger times out after not receiving a pong
-        let mut pinger = IntervalPingerStream::new(3, Duration::from_millis(10));
-
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Timeout);
-    }
-
-    #[tokio::test]
-    async fn send_many_pings_interval_with_pongs() {
-        // here we need to wait for the interval to elapse and then receive a pong before the
-        // interval elapses again
-        let mut pinger = IntervalPingerStream::new(3, Duration::from_millis(10));
-
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-
-        pinger.pong_received().unwrap();
-
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
-        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Timeout);
-    }
-
-    #[tokio::test]
     async fn send_many_pings_interval_timeout() {
         // we should wait for the interval to elapse, just like the interval-only version
         // TODO: should the timeout ever be less than the interval?
-        let pinger = IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
-        pin_mut!(pinger);
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
 
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
@@ -455,7 +373,8 @@ mod tests {
     async fn send_many_pings_interval_timeout_with_pongs() {
         // we should wait for the interval to elapse and receive a pong before the timeout elapses
 
-        let mut pinger = IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
 
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
@@ -471,13 +390,15 @@ mod tests {
     #[tokio::test]
     async fn check_timing_over_interval() {
         // send pongs after a ping event, timing the interval between the two
-        let mut pinger = IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
 
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
         pinger.pong_received().unwrap();
 
         // wait for the interval to elapse, and compare it to the interval ping
-        let sleep = tokio::time::sleep(Duration::from_millis(21));
+        // to avoid flakiness let's do 25?
+        let sleep = tokio::time::sleep(Duration::from_millis(25));
         let wait_for_timeout = pinger.next();
 
         select! {
@@ -489,42 +410,169 @@ mod tests {
     #[tokio::test]
     async fn check_timing_under_interval() {
         // send pongs after a ping event, timing the interval between the two
-        let mut pinger = IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
 
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
         pinger.pong_received().unwrap();
 
         // wait for the interval to elapse, and compare it to the interval ping
         // to avoid flakiness let's do 15?
-        let sleep = tokio::time::sleep(Duration::from_millis(19));
-        let wait_for_timeout = pinger.next();
+        let sleep = tokio::time::sleep(Duration::from_millis(15));
+        let next_ping = pinger.next();
 
         select! {
             _ = sleep => {}
-            _ = wait_for_timeout => panic!("sleep should have elapsed first")
+            _ = next_ping => panic!("sleep should have elapsed first")
         }
+    }
+
+    #[tokio::test]
+    async fn check_timing_before_timeout() {
+        // send pongs after a ping event, timing the interval between the two
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+
+        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
+        pinger.pong_received().unwrap();
+
+        // wait ~20ms for the next ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // ensure that a <10ms sleep completes first
+        let sleep = tokio::time::sleep(Duration::from_millis(5));
+        let next_ping = pinger.next();
+
+        select! {
+            _ = sleep => {}
+            _ = next_ping => panic!("sleep should have before re-sending a ping")
+        }
+
+        // check that we are in the WaitingForPong(0) state (we should not have timed out the first
+        // ping yet)
+        let curr_state = *pinger.state();
+        assert_eq!(curr_state, PingState::WaitingForPong(0));
+    }
+
+    #[tokio::test]
+    async fn check_timing_after_timeout() {
+        // send pongs after a ping event, timing the interval between the two
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+
+        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
+        pinger.pong_received().unwrap();
+
+        // wait ~20ms for the next ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // ensure that the ping completes before a >10ms sleep
+        let sleep = tokio::time::sleep(Duration::from_millis(15));
+        let next_ping = pinger.next();
+
+        select! {
+            _ = sleep => panic!("ping retry should have completed before sleep"),
+            _ = next_ping => {}
+        }
+
+        // check that we are in the WaitingForPong(1) state (we should have timed out the first
+        // ping)
+        let curr_state = *pinger.state();
+        assert_eq!(curr_state, PingState::WaitingForPong(1));
+    }
+
+    #[tokio::test]
+    async fn check_timing_after_second_timeout() {
+        // send pongs after a ping event, timing the interval between the two
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+
+        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
+        pinger.pong_received().unwrap();
+
+        // wait ~20ms for the next ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // wait another ~10ms for the next ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // ensure that the ping completes before a >10ms sleep
+        let sleep = tokio::time::sleep(Duration::from_millis(15));
+        let next_ping = pinger.next();
+
+        select! {
+            _ = sleep => panic!("ping retry should have completed before sleep"),
+            _ = next_ping => {}
+        }
+
+        // check that we are in the WaitingForPong(2) state (we should have timed out the second
+        // ping)
+        let curr_state = *pinger.state();
+        assert_eq!(curr_state, PingState::WaitingForPong(2));
+    }
+
+    #[tokio::test]
+    async fn check_timing_after_last_timeout() {
+        // send pongs after a ping event, timing the interval between the two
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+
+        assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
+        pinger.pong_received().unwrap();
+
+        // wait ~20ms for the next ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // wait another ~10ms for the next ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // wait another ~10ms for the last ping
+        let next_ping = pinger.next().await.unwrap().unwrap();
+        assert_eq!(next_ping, PingerEvent::Ping);
+
+        // ensure that the ping completes before a >10ms sleep
+        let sleep = tokio::time::sleep(Duration::from_millis(15));
+        let next_ping = pinger.next();
+
+        let ping_res = select! {
+            _ = sleep => panic!("ping retry should have completed before sleep"),
+            res = next_ping => {
+                res.expect("stream should not be empty yet")
+            }
+        };
+
+        assert_eq!(ping_res.unwrap(), PingerEvent::Timeout);
+
+        // check that we are in the TimedOut(3) state (we should have timed out after the last ping)
+        let curr_state = *pinger.state();
+        assert_eq!(curr_state, PingState::TimedOut(3));
     }
 
     #[tokio::test]
     async fn timeout_with_pongs() {
         // we should wait for the interval to elapse and receive a pong before the timeout elapses
-        let mut pinger = IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
+        let mut pinger =
+            IntervalTimeoutPinger::new(3, Duration::from_millis(20), Duration::from_millis(10));
 
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
 
         pinger.pong_received().unwrap();
 
-        // let's wait for the timeout to elapse (3 ping timeouts + interval)
-        // TODO: fix this test - this should fail
-        let sleep = tokio::time::sleep(Duration::from_millis(31));
+        // let's wait for the timeout to elapse (3 ping timeouts + interval + 7ms for flake
+        // protection)
+        let sleep = tokio::time::sleep(Duration::from_millis(57));
         let wait_for_timeout = pinger.wait_for_timeout();
 
         select! {
             _ = sleep => panic!("timeout should have elapsed by now"),
             _ = wait_for_timeout => (),
         }
-
-        assert!(false)
     }
 }

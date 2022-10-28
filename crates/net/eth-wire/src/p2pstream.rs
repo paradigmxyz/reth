@@ -13,10 +13,13 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tokio::time::{Instant, Sleep, Timeout, Interval, interval, sleep};
-use tokio_stream::{Stream, wrappers::IntervalStream};
+use tokio::time::{interval, sleep, Instant, Interval, Sleep, Timeout};
+use tokio_stream::{wrappers::IntervalStream, Stream};
 
-use crate::{error::{P2PHandshakeError, P2PStreamError, PingerError}, pinger::IntervalPingerStream};
+use crate::{
+    error::{P2PHandshakeError, P2PStreamError, PingerError},
+    pinger::IntervalTimeoutPinger,
+};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -54,7 +57,7 @@ pub struct P2PStream<S> {
     decoder: snap::raw::Decoder,
 
     /// The state machine used for keeping track of the peer's ping status.
-    pinger: IntervalPingerStream,
+    pinger: IntervalTimeoutPinger,
 
     // currently starts at 0x10
     // maybe we need an array of offsets and lengths for each subprotocol and can just subtract
@@ -74,9 +77,7 @@ pub struct UnauthedP2PStream<S> {
 impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a `Stream` of bytes.
     pub fn new(inner: S) -> Self {
-        Self {
-            stream: P2PStream::new(inner),
-        }
+        Self { stream: P2PStream::new(inner) }
     }
 }
 
@@ -136,7 +137,7 @@ impl<S> P2PStream<S> {
             offset: 0x10,
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
-            pinger: IntervalPingerStream::new(MAX_FAILED_PINGS, PING_INTERVAL),
+            pinger: IntervalTimeoutPinger::new(MAX_FAILED_PINGS, PING_INTERVAL, PING_TIMEOUT),
         }
     }
 }
