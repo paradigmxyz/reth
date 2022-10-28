@@ -20,6 +20,7 @@ pub enum TableType {
     /// Duplicate key value table
     DupSort,
 }
+
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 19] = [
     (TableType::Table, CanonicalHeaders::const_name()),
@@ -46,8 +47,11 @@ pub const TABLES: [(TableType, &str); 19] = [
 #[macro_export]
 /// Macro to declare all necessary tables.
 macro_rules! table {
-    ($name:ident => $key:ty => $value:ty => $seek:ty) => {
-        /// $name MDBX table.
+    (
+    $(#[$docs:meta])+ $name:ident => $key:ty => $value:ty => $seek:ty) => {
+        $(#[$docs])+
+        ///
+        #[doc = concat!("Takes [`", stringify!($key), "`] as a key and returns [`", stringify!($value), "`]")]
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $name;
 
@@ -56,11 +60,10 @@ macro_rules! table {
             type Key = $key;
             type Value = $value;
             type SeekKey = $seek;
-
         }
 
         impl $name {
-            /// Return $name as it is present inside the database.
+            #[doc=concat!("Return ", stringify!($name), " as it is present inside the database.")]
             pub const fn const_name() -> &'static str {
                 stringify!($name)
             }
@@ -72,14 +75,20 @@ macro_rules! table {
             }
         }
     };
-    ($name:ident => $key:ty => $value:ty) => {
-        table!($name => $key => $value => $key);
+    ($(#[$docs:meta])+ $name:ident => $key:ty => $value:ty) => {
+        table!(
+            $(#[$docs])+
+            $name => $key => $value => $key
+        );
     };
 }
 
 macro_rules! dupsort {
-    ($name:ident => $key:ty => [$subkey:ty] $value:ty) => {
-        table!($name => $key => $value);
+    ($(#[$outer:meta])+ $name:ident => $key:ty => [$subkey:ty] $value:ty) => {
+        table!(
+            $(#[$outer])+
+            $name => $key => $value
+        );
         impl DupSort for $name {
             type SubKey = $subkey;
         }
@@ -90,48 +99,97 @@ macro_rules! dupsort {
 //  TABLE DEFINITIONS
 //
 
-table!(CanonicalHeaders => BlockNumber => HeaderHash);
-table!(HeaderTD => BlockNumHash => RlpTotalDifficulty);
-table!(HeaderNumbers => BlockNumHash => BlockNumber);
-table!(Headers => BlockNumHash => Header);
+table!(
+    /// Stores the header hashes belonging to the canonical chain.
+    CanonicalHeaders => BlockNumber => HeaderHash);
 
-table!(BlockBodies => BlockNumHash => NumTxesInBlock);
-table!(CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
+table!(
+    /// Stores the total difficulty from a block header.
+    HeaderTD => BlockNumHash => RlpTotalDifficulty);
 
-table!(NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
-table!(Transactions => TxNumber => RlpTxBody); // Canonical only
-table!(Receipts => TxNumber => Receipt); // Canonical only
-table!(Logs => TxNumber => Receipt); // Canonical only
+table!(
+    /// Stores the block number corresponding to an header.
+    HeaderNumbers => BlockNumHash => BlockNumber);
 
-table!(PlainAccountState => Address => Account);
-dupsort!(PlainStorageState => Address => [H256] StorageEntry);
+table!(
+    /// Stores header bodies.
+    Headers => BlockNumHash => Header);
 
-table!(AccountHistory => ShardedKey<Address> => TxNumberList);
-table!(StorageHistory => Address_StorageKey => TxNumberList);
+table!(
+    /// Stores the number of transactions of a block.
+    BlockBodies => BlockNumHash => NumTxesInBlock);
 
-dupsort!(AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
-dupsort!(StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
+table!(
+    /// Stores the maximum [`TxNumber`] from which this particular block starts.
+    CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
 
-table!(TxSenders => TxNumber => Address); // Is it necessary?
-table!(Config => ConfigKey => ConfigValue);
+table!(
+    /// Stores the transaction body from non canonical transactions.
+    NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
 
-table!(SyncStage => StageId => BlockNumber);
+table!(
+    /// Stores the transaction body from canonical transactions. Canonical only
+    Transactions => TxNumber => RlpTxBody);
+
+table!(
+    /// Stores transaction receipts. Canonical only
+    Receipts => TxNumber => Receipt);
+
+table!(
+    /// Stores transaction logs. Canonical only
+    Logs => TxNumber => Receipt);
+
+table!(
+    /// Stores the current state of an Account.
+    PlainAccountState => Address => Account);
+
+dupsort!(
+    /// Stores the current value of a storage key.
+    PlainStorageState => Address => [H256] StorageEntry);
+
+table!(
+    /// Stores the transaction numbers that changed each account.
+    AccountHistory => ShardedKey<Address> => TxNumberList);
+
+table!(
+    /// Stores the transaction numbers that changed each storage key.
+    StorageHistory => Address_StorageKey => TxNumberList);
+
+dupsort!(
+    /// Stores state of an account before a certain transaction changed it.
+    AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
+
+dupsort!(
+    /// Stores state of a storage key before a certain transaction changed it.
+    StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
+
+table!(
+    /// Stores the transaction sender from each transaction.
+    TxSenders => TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
+
+table!(
+    /// Config.
+    Config => ConfigKey => ConfigValue);
+
+table!(
+    /// Stores the block number of each stage id.
+    SyncStage => StageId => BlockNumber);
 
 ///
 /// Alias Types
 
-type TxNumberList = IntegerList;
+pub type TxNumberList = IntegerList;
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
 
-type ConfigKey = Vec<u8>;
-type ConfigValue = Vec<u8>;
+pub type ConfigKey = Vec<u8>;
+pub type ConfigValue = Vec<u8>;
 #[allow(non_camel_case_types)]
-type BlockNumHashTxNumber = Vec<u8>;
-type RlpTotalDifficulty = Vec<u8>;
-type RlpTxBody = Vec<u8>;
+pub type BlockNumHashTxNumber = Vec<u8>;
+pub type RlpTotalDifficulty = Vec<u8>;
+pub type RlpTxBody = Vec<u8>;
 #[allow(non_camel_case_types)]
-type Address_StorageKey = Vec<u8>;
-type StageId = Vec<u8>;
+pub type Address_StorageKey = Vec<u8>;
+pub type StageId = Vec<u8>;
