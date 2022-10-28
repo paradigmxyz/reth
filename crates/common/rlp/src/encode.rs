@@ -281,6 +281,16 @@ mod alloc_support {
         }
     }
 }
+
+impl Encodable for &str {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.as_bytes().encode(out);
+    }
+    fn length(&self) -> usize {
+        self.as_bytes().length()
+    }
+}
+
 slice_impl!(Bytes);
 slice_impl!(BytesMut);
 
