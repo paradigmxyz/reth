@@ -1,18 +1,17 @@
-use futures::{ready, Future, FutureExt, StreamExt};
-use pin_project::pin_project;
+use futures::{ready, StreamExt};
 use std::{
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::time::{interval, sleep, Sleep};
+use tokio::time::interval;
 use tokio_stream::{wrappers::IntervalStream, Stream};
 
 use crate::error::PingerError;
 
 /// This represents the possible states of the pinger.
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub enum PingState {
+pub(crate) enum PingState {
     /// There are no pings in flight, or all pings have been responded to and we are ready to send
     /// a ping at a later point.
     Ready,
@@ -27,7 +26,7 @@ pub enum PingState {
 /// The pinger is a state machine that is created with a maximum number of pongs that can be
 /// missed.
 #[derive(Debug, Clone)]
-pub struct Pinger {
+pub(crate) struct Pinger {
     /// The maximum number of pongs that can be missed.
     max_missed: u8,
 
@@ -37,27 +36,27 @@ pub struct Pinger {
 
 impl Pinger {
     /// Create a new pinger with the given maximum number of pongs that can be missed.
-    pub fn new(max_missed: u8) -> Self {
+    pub(crate) fn new(max_missed: u8) -> Self {
         Self { max_missed, state: PingState::Ready }
     }
 
     /// Return the current state of the pinger.
-    pub fn state(&self) -> &PingState {
+    pub(crate) fn state(&self) -> &PingState {
         &self.state
     }
 
     /// Check if the pinger is in the `Ready` state.
-    pub fn is_ready(&self) -> bool {
+    pub(crate) fn is_ready(&self) -> bool {
         matches!(self.state, PingState::Ready)
     }
 
     /// Check if the pinger is in the `WaitingForPong` state.
-    pub fn is_waiting_for_pong(&self) -> bool {
+    pub(crate) fn is_waiting_for_pong(&self) -> bool {
         matches!(self.state, PingState::WaitingForPong(_))
     }
 
     /// Check if the pinger is in the `TimedOut` state.
-    pub fn is_timed_out(&self) -> bool {
+    pub(crate) fn is_timed_out(&self) -> bool {
         matches!(self.state, PingState::TimedOut(_))
     }
 
@@ -68,7 +67,7 @@ impl Pinger {
     /// pinger will be transitioned to the `TimedOut` state.
     ///
     /// If the pinger is in the `TimedOut` state, this method will return an error.
-    pub fn next_state(&mut self) -> Result<(), PingerError> {
+    pub(crate) fn next_state(&mut self) -> Result<(), PingerError> {
         match self.state {
             PingState::Ready => {
                 self.state = PingState::WaitingForPong(0);
@@ -91,7 +90,7 @@ impl Pinger {
     /// `WaitingForPong` state.
     ///
     /// If the pinger is in the `Ready` or `TimedOut` state, this method will return an error.
-    pub fn pong_received(&mut self) -> Result<(), PingerError> {
+    pub(crate) fn pong_received(&mut self) -> Result<(), PingerError> {
         match self.state {
             PingState::Ready => Err(PingerError::PongWhileReady),
             PingState::WaitingForPong(_) => {
@@ -105,7 +104,7 @@ impl Pinger {
 
 /// A Pinger that can be used as a `Stream`, which will emit
 #[derive(Debug, Clone)]
-pub struct PingerStream {
+pub(crate) struct PingerStream {
     /// The pinger.
     pinger: Pinger,
 
@@ -117,7 +116,7 @@ impl PingerStream {
     /// Poll the [`Pinger`] for a [`Option<PingEvent>`], which can be either a [`PingEvent::Ping`]
     /// or a final [`PingEvent::Timeout`] event, after which the stream will end and return
     /// None.
-    pub fn poll(&mut self) -> Option<Result<PingerEvent, PingerError>> {
+    pub(crate) fn poll(&mut self) -> Option<Result<PingerEvent, PingerError>> {
         // the stream has already sent a timeout event, so we return None
         if self.timeout_sent {
             return None
@@ -200,7 +199,7 @@ impl Stream for PingerStream {
 /// The element type produced by a [`IntervalPingerStream`], representing either a new [`Ping`]
 /// message to send, or an indication that the peer should be timed out.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PingerEvent {
+pub(crate) enum PingerEvent {
     /// A new [`Ping`] message should be sent.
     Ping,
 
@@ -211,7 +210,7 @@ pub enum PingerEvent {
 /// A type of [`Pinger`] that uses an interval and a timeout to determine when to send a ping and
 /// when to consider the peer timed out.
 #[derive(Debug)]
-pub struct IntervalTimeoutPinger {
+pub(crate) struct IntervalTimeoutPinger {
     /// The interval pinger stream.
     interval_stream: IntervalStream,
 
@@ -228,7 +227,11 @@ pub struct IntervalTimeoutPinger {
 impl IntervalTimeoutPinger {
     /// Creates a new [`IntervalTimeoutPinger`] with the given max missed pongs, interval duration,
     /// and timeout duration.
-    pub fn new(max_missed: u8, interval_duration: Duration, timeout_duration: Duration) -> Self {
+    pub(crate) fn new(
+        max_missed: u8,
+        interval_duration: Duration,
+        timeout_duration: Duration,
+    ) -> Self {
         Self {
             interval_stream: IntervalStream::new(interval(interval_duration)),
             pinger_stream: PingerStream { pinger: Pinger::new(max_missed), timeout_sent: false },
@@ -239,7 +242,7 @@ impl IntervalTimeoutPinger {
 
     /// Mark a pong as received, and transition the pinger to the `Ready` state if it was in the
     /// `WaitingForPong` state. Unsets the sleep timer.
-    pub fn pong_received(&mut self) -> Result<(), PingerError> {
+    pub(crate) fn pong_received(&mut self) -> Result<(), PingerError> {
         self.interval_stream.as_mut().reset();
         self.pinger_stream.pinger.pong_received()?;
         self.sleep = None;
@@ -247,12 +250,12 @@ impl IntervalTimeoutPinger {
     }
 
     /// Waits until the pinger sends a timeout event by exhausting the stream.
-    pub async fn wait_for_timeout(&mut self) {
+    pub(crate) async fn wait_for_timeout(&mut self) {
         while let Some(Ok(PingerEvent::Ping)) = self.next().await {}
     }
 
     /// Returns the current state of the pinger.
-    pub fn state(&self) -> &PingState {
+    pub(crate) fn state(&self) -> &PingState {
         self.pinger_stream.pinger.state()
     }
 }

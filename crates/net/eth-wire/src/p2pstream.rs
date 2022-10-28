@@ -1,8 +1,7 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{ready, Future, Sink, SinkExt, StreamExt};
+use futures::{ready, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use pin_utils::pin_mut;
 use reth_primitives::H512 as PeerId;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use std::{
@@ -12,13 +11,11 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use thiserror::Error;
-use tokio::time::{interval, sleep, Instant, Interval, Sleep, Timeout};
-use tokio_stream::{wrappers::IntervalStream, Stream};
+use tokio_stream::Stream;
 
 use crate::{
-    error::{P2PHandshakeError, P2PStreamError, PingerError},
-    pinger::IntervalTimeoutPinger,
+    error::{P2PHandshakeError, P2PStreamError},
+    pinger::{IntervalTimeoutPinger, PingerEvent},
 };
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
@@ -311,6 +308,32 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
+        // poll the pinger to determine if we should send a ping
+        let pinger_res = ready!(Pin::new(&mut this.pinger).poll_next(cx));
+        match pinger_res {
+            Some(Ok(PingerEvent::Ping)) => {
+                // encode the ping message
+                let mut ping_bytes = BytesMut::new();
+                P2PMessage::Ping.encode(&mut ping_bytes);
+
+                let send_res = Pin::new(&mut this.inner).send(ping_bytes.into()).poll_unpin(cx)?;
+                ready!(send_res)
+            }
+            // either None (stream ended) or Some(PingEvent::Timeout) or Err(err)
+            _ => {
+                // encode the disconnect message
+                let mut disconnect_bytes = BytesMut::new();
+                P2PMessage::Disconnect(DisconnectReason::PingTimeout).encode(&mut disconnect_bytes);
+
+                let send_res =
+                    Pin::new(&mut this.inner).send(disconnect_bytes.into()).poll_unpin(cx)?;
+                ready!(send_res);
+
+                // since the ping stream has timed out, let's send a None
+                return Poll::Ready(None)
+            }
+        };
+
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
         // return behind any pings we need to respond to
         while let Poll::Ready(res) = this.inner.as_mut().poll_next(cx) {
@@ -322,32 +345,15 @@ where
 
             let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             if id == P2PMessageID::Ping as u8 {
+                // TODO: do we need to decode the ping?
                 // we have received a ping, so we will send a pong
                 let mut pong_bytes = BytesMut::new();
                 P2PMessage::Pong.encode(&mut pong_bytes);
 
-                // make sure the sink is ready before we send the pong
-                match this.inner.as_mut().poll_ready(cx) {
-                    Poll::Ready(Ok(())) => {}
-                    Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Pending => return Poll::Pending,
-                };
-
-                // send the pong
-                match this.inner.as_mut().start_send(pong_bytes.into()) {
-                    Ok(()) => {}
-                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
-                };
-
-                // flush the sink
-                match this.inner.as_mut().poll_flush(cx) {
-                    Poll::Ready(Ok(())) => {}
-                    Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Pending => return Poll::Pending,
-                };
+                let send_res = Pin::new(&mut this.inner).send(pong_bytes.into()).poll_unpin(cx)?;
+                ready!(send_res)
 
                 // continue to the next message if there is one
-                continue
             } else if id == P2PMessageID::Disconnect as u8 {
                 let reason = DisconnectReason::decode(&mut &bytes[1..])?;
                 // TODO: do something with the reason
@@ -359,8 +365,9 @@ where
                     P2PHandshakeError::HelloNotInHandshake,
                 ))))
             } else if id == P2PMessageID::Pong as u8 {
-                // we have received a pong without waiting for a pong
-                return Poll::Ready(Some(Err(PingerError::PongWhileReady.into())))
+                // TODO: do we need to decode the pong?
+                // if we were waiting for a pong, this will reset the pinger state
+                this.pinger.pong_received()?
             } else if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID {
                 // we have received an unknown reserved message
                 return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
@@ -378,7 +385,7 @@ where
     }
 }
 
-impl<S> Sink<P2PMessage> for P2PStream<S>
+impl<S> Sink<Bytes> for P2PStream<S>
 where
     S: Sink<Bytes, Error = io::Error> + Unpin,
 {
@@ -388,19 +395,21 @@ where
         self.project().inner.poll_ready(cx).map_err(Into::into)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: P2PMessage) -> Result<(), Self::Error> {
-        if self.authed && matches!(item, P2PMessage::Hello(_)) {
+    fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+        let id = *item.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+        if self.authed && id == P2PMessageID::Hello as u8 {
             return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
         }
 
-        let mut bytes = BytesMut::new();
-        item.encode(&mut bytes);
+        // TODO: we can remove this if we either accept BytesMut or if we accept something like a
+        // ProtocolMessage
+        let mut encoded = BytesMut::from(&item.to_vec()[..]);
 
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
-        bytes[0] += self.offset;
+        encoded[0] += self.offset;
 
-        self.project().inner.start_send(bytes.into())?;
+        self.project().inner.start_send(encoded.into())?;
         Ok(())
     }
 
@@ -412,6 +421,54 @@ where
         self.project().inner.poll_close(cx).map_err(Into::into)
     }
 }
+
+// TODO: reconsider api, if we want to layer things like ethstream on top of a p2pstream, we need
+// to use the above implementation. however, this might only be possible if we implement a single
+// subprotocol, since ethstream is not aware of other subprotocols and their message id offsets.
+// example: currently, ethstream assumes message ids start at 0x00.
+// in practice this is never the case for `eth` messages over RLPx.
+// can we have different implementations of Sink<EthMessage> depending on what type the underlying
+// sink is?
+// Sink<EthMessage> for EthStream<S> where S: Sink<Bytes, Error = io::Error> would encode the
+// message and send over the inner sink
+// (this would be used in a non-RLPx transport / codec)
+//
+// Sink<EthMessage for EthStream<S> where S: Sink<P2PMessage, Error = io::Error> would use a
+// From<EthMessage> for P2PMessage impl and send that to the inner sink
+// impl<S> Sink<P2PMessage> for P2PStream<S>
+// where
+//     S: Sink<Bytes, Error = io::Error> + Unpin,
+// {
+//     type Error = P2PStreamError;
+
+//     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         self.project().inner.poll_ready(cx).map_err(Into::into)
+//     }
+
+//     fn start_send(self: Pin<&mut Self>, item: P2PMessage) -> Result<(), Self::Error> {
+//         if self.authed && matches!(item, P2PMessage::Hello(_)) {
+//             return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
+//         }
+
+//         let mut bytes = BytesMut::new();
+//         item.encode(&mut bytes);
+
+//         // all messages sent in this stream are subprotocol messages, so we need to switch the
+//         // message id based on the offset
+//         bytes[0] += self.offset;
+
+//         self.project().inner.start_send(bytes.into())?;
+//         Ok(())
+//     }
+
+//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         self.project().inner.poll_flush(cx).map_err(Into::into)
+//     }
+
+//     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         self.project().inner.poll_close(cx).map_err(Into::into)
+//     }
+// }
 
 /// A message indicating a supported capability and capability version.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
