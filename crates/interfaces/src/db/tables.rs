@@ -196,7 +196,7 @@ table!(
 
 table!(
     /// Stores the transaction numbers that changed each storage key.
-    StorageHistory => Address_StorageKey => TxNumberList);
+    StorageHistory => AddressStorageKey => TxNumberList);
 
 dupsort!(
     /// Stores state of an account before a certain transaction changed it.
@@ -241,4 +241,4 @@ pub type RlpTotalDifficulty = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type RlpTxBody = Vec<u8>;
 /// Temporary placeholder type for DB.
-pub type Address_StorageKey = Vec<u8>;
+pub type AddressStorageKey = Vec<u8>;
