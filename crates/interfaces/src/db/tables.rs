@@ -87,6 +87,8 @@ macro_rules! dupsort {
     ($(#[$outer:meta])+ $name:ident => $key:ty => [$subkey:ty] $value:ty) => {
         table!(
             $(#[$outer])+
+            ///
+            #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
             $name => $key => $value
         );
         impl DupSort for $name {
@@ -149,6 +151,47 @@ dupsort!(
 
 table!(
     /// Stores the transaction numbers that changed each account.
+    /// 
+    /// ```
+    /// use reth_primitives::{Address, IntegerList};
+    /// use reth_interfaces::db::{DbTx, DbTxMut, DbCursorRO, Database, models::ShardedKey, tables::AccountHistory};
+    /// use reth_db::{kv::{EnvKind, Env, test_utils}, mdbx::WriteMap};
+    /// use std::str::FromStr;
+    /// 
+    /// fn main() {
+    ///     let db: Env<WriteMap> = test_utils::create_test_db(EnvKind::RW);
+    ///     let account = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+    /// 
+    ///     // Setup if each shard can only take 1 transaction.
+    ///     for i in 1..3 {
+    ///         let key = ShardedKey::new(account, i * 100);
+    ///         let list: IntegerList = vec![i * 100u64].into();
+
+    ///         db.update(|tx| tx.put::<AccountHistory>(key.clone(), list.clone()).expect("")).unwrap();
+    ///     }
+    /// 
+    ///     // Is there any transaction after number 150 that changed this account? 
+    ///     {
+    ///         let tx = db.tx().expect("");
+    ///         let mut cursor = tx.cursor::<AccountHistory>().unwrap();
+
+    ///         // It will seek the one greater or equal to the query. Since we have `Address | 100`,
+    ///         // `Address | 200` in the database and we're querying `Address | 150` it will return us
+    ///         // `Address | 200`.
+    ///         let mut walker = cursor.walk(ShardedKey::new(account, 150)).unwrap();
+    ///         let (key, list) = walker
+    ///             .next()
+    ///             .expect("element should exist.")
+    ///             .expect("should be able to retrieve it.");
+
+    ///         assert_eq!(ShardedKey::new(account, 200), key);
+    ///         let list200: IntegerList = vec![200u64].into();
+    ///         assert_eq!(list200, list);
+    ///         assert!(walker.next().is_none());
+    ///     }
+    /// }
+    /// ```
+    /// 
     AccountHistory => ShardedKey<Address> => TxNumberList);
 
 table!(
