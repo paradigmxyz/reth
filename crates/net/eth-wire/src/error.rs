@@ -92,12 +92,3 @@ pub enum PingerError {
     #[error("pong received while timed out")]
     PongWhileTimedOut,
 }
-
-/// An error that can occur when using the Timeout Pinger.
-#[derive(Debug, thiserror::Error)]
-pub enum TimeoutPingerError {
-    #[error(transparent)]
-    TimeoutError(#[from] tokio::time::error::Elapsed),
-    #[error(transparent)]
-    PingerError(#[from] PingerError),
-}

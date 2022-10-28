@@ -12,6 +12,7 @@ pub use tokio_util::codec::{
 pub mod error;
 mod ethstream;
 mod p2pstream;
+mod pinger;
 pub mod types;
 pub use types::*;
 
