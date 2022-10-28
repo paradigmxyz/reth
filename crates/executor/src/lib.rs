@@ -7,9 +7,9 @@
 
 //! Reth executor executes transaction in block of data.
 
-/// Linking of blocks inside chains
-pub mod blockchain;
-mod config;
+
+pub mod verification;
+pub mod config;
 /// Executor
 pub mod executor;
 /// Wrapper around revm database and types

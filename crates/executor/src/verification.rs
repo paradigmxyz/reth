@@ -1,16 +1,8 @@
-//! Blockchain is used as utility structure to chain multiple blocks into one block
-use crate::{
-    config,
-    revm_wrap::{State, SubState},
-    Config,
-};
+//! ALl functions for verification of block
+use crate::config;
 use auto_impl::auto_impl;
-use eyre::eyre;
-use reth_interfaces::executor::{BlockExecutor, ExecutorDb};
-use reth_primitives::{
-    Block, BlockHash, BlockID, BlockLocked, BlockNumber, Header, HeaderLocked, H256,
-};
-use std::{cmp::max, collections::HashMap, time::SystemTime};
+use reth_primitives::{BlockHash, BlockLocked, BlockNumber, Header, HeaderLocked, H256};
+use std::time::SystemTime;
 
 /// Errors
 #[allow(missing_docs)]
@@ -25,11 +17,11 @@ pub enum Error {
     #[error("Block receipts root ({got:?}) is different then expected: ({expected:?})")]
     BodyReceiptsRootDiff { got: H256, expected: H256 },
     #[error("Block with [hash:{hash:?},number: {number:}] is already known")]
-    BlockUnknown { hash: BlockHash, number: BlockNumber },
+    BlockKnown { hash: BlockHash, number: BlockNumber },
     #[error("Block parent [hash:{hash:?}] is not known")]
     ParentUnknown { hash: BlockHash },
-    #[error("Parent block number {parent_block_number:?} is not in chain of pending block number {block_number:?}")]
-    ParentBlockNumber { parent_block_number: BlockNumber, block_number: BlockNumber },
+    #[error("Block number {block_number:?} is missmatch with parent block number {parent_block_number:?}")]
+    ParentBlockNumberMissmatch { parent_block_number: BlockNumber, block_number: BlockNumber },
     #[error(
         "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}"
     )]
@@ -41,6 +33,10 @@ pub enum Error {
     GasLimitInvalidIncrease { parent_gas_limit: u64, child_gas_limit: u64 },
     #[error("Child gas_limit {child_gas_limit:?} max decrease is {parent_gas_limit}/1024")]
     GasLimitInvalidDecrease { parent_gas_limit: u64, child_gas_limit: u64 },
+    #[error("Base fee missing")]
+    BaseFeeMissing,
+    #[error("Block base fee ({got:?}) is different then expected: ({expected:?})")]
+    BaseFeeDiff { expected: u64, got: u64 },
 }
 
 /// All checks that engine needs to do.
@@ -68,13 +64,14 @@ pub fn validate_header_standalone(header: &HeaderLocked) -> Result<(), Error> {
         })
     }
 
-    // TODO Check if this needs to be configurable
     // Check if timestamp is in future. Clock can drift but this can be consensus issue.
     let present_timestamp =
         SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
     if header.timestamp > present_timestamp {
         return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp })
     }
+
+    // TODO check if base fee is set.
 
     Ok(())
 }
@@ -111,15 +108,41 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     Ok(())
 }
 
+/// Calculate base fee for next block. EIP-1559 spec
+pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u64) -> u64 {
+    let gas_target = gas_limit / config::EIP1559_ELASTICITY_MULTIPLIER;
+
+    if gas_used == gas_target {
+        return base_fee
+    }
+    if gas_used > gas_target {
+        let gas_used_delta = gas_used - gas_target;
+        let base_fee_delta = std::cmp::max(
+            1,
+            base_fee as u128 * gas_used_delta as u128 /
+                gas_target as u128 /
+                config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
+        );
+        base_fee + (base_fee_delta as u64)
+    } else {
+        let gas_used_delta = gas_target - gas_used;
+        let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128 /
+            gas_target as u128 /
+            config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
+
+        base_fee.saturating_sub(base_fee_per_gas_delta as u64)
+    }
+}
+
 /// Validate block in regards to parent
 pub fn validate_header_regarding_parent(
     parent: &HeaderLocked,
     child: &HeaderLocked,
-    config: &Config,
+    config: &config::Config,
 ) -> Result<(), Error> {
     // Parent number is consistent.
     if parent.number + 1 != child.number {
-        return Err(Error::ParentBlockNumber {
+        return Err(Error::ParentBlockNumberMissmatch {
             parent_block_number: parent.number,
             block_number: child.number,
         })
@@ -161,7 +184,23 @@ pub fn validate_header_regarding_parent(
         }
     }
 
-    // basefee
+    // EIP-1559 check base fee
+    if child.number >= config.london_hard_fork_block {
+        let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
+        let expected_base_fee = if config.london_hard_fork_block == child.number {
+            config::EIP1559_INITIAL_BASE_FEE
+        } else {
+            // This BaseFeeMissing should not happen
+            calculate_next_block_base_fee(
+                parent.gas_used,
+                parent.gas_limit,
+                parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
+            )
+        };
+        if expected_base_fee != base_fee {
+            return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
+        }
+    }
 
     // Consensus:
     //  * mix_hash & nonce PoW stuf
@@ -171,6 +210,7 @@ pub fn validate_header_regarding_parent(
 }
 
 /// Provider needs for verification of block agains the chain
+///
 /// TODO wrap all function around `Result` as this can trigger internal db error.
 /// I didn't know what error to put (Probably needs to be database) so i left it for later as it
 /// will be easy to integrate
@@ -182,10 +222,13 @@ pub trait BlockhainProvider {
     /// Get header by block hash
     fn header(&self, block_number: &BlockHash) -> Option<Header>;
 
-    fn config(&self) -> &Config;
+    /// Return blockchain provider config
+    fn config(&self) -> &config::Config;
 }
 
-/// Checks
+/// Validate block in regards to chain (parent)
+/// 
+/// Checks:
 ///     * If we already know the block.
 ///     * If parent is known
 ///
@@ -198,7 +241,7 @@ pub fn validate_block_regarding_chain<PROV: BlockhainProvider>(
 
     // Check if block is known.
     if provider.is_known(&hash) {
-        return Err(Error::BlockUnknown { hash, number: block.header.number })
+        return Err(Error::BlockKnown { hash, number: block.header.number })
     }
 
     // Check if parent is known.
@@ -224,41 +267,34 @@ pub fn full_validation<PROV: BlockhainProvider>(
     Ok(())
 }
 
-/// Before execution do verification on header and body if it can be included
-/// inside blockchain. TODO see where this should be placed.
-pub async fn pre_verification(block: BlockLocked) -> eyre::Result<()> {
-    let id = block.header.hash();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
-    if block.gas_used > block.gas_limit {
-        return Err(eyre!("Block gas used is greater then gas limit"))
+    #[test]
+    fn calculate_base_fee_success() {
+        let base_fee = [
+            1000000000, 1000000000, 1000000000, 1072671875, 1059263476, 1049238967, 1049238967, 0,
+            1, 2,
+        ];
+        let gas_used = [
+            10000000, 10000000, 10000000, 9000000, 10001000, 0, 10000000, 10000000, 10000000,
+            10000000,
+        ];
+        let gas_limit = [
+            10000000, 12000000, 14000000, 10000000, 14000000, 2000000, 18000000, 18000000,
+            18000000, 18000000,
+        ];
+        let next_base_fee = [
+            1125000000, 1083333333, 1053571428, 1179939062, 1116028649, 918084097, 1063811730, 1,
+            2, 3,
+        ];
+
+        for i in 0..base_fee.len() {
+            assert_eq!(
+                next_base_fee[i],
+                calculate_next_block_base_fee(gas_used[i], gas_limit[i], base_fee[i])
+            );
+        }
     }
-
-    // check omners hash
-    let omners_hash = crate::proofs::calculate_omners_root(block.omners.iter().map(|h| h.as_ref()));
-    if block.header.ommers_hash != omners_hash {
-        return Err(eyre!("Omner hash is different"))
-    }
-    let transaction_root = crate::proofs::calculate_transaction_root(block.body.iter());
-
-    // TODO transaction root
-    // TODO receipts_root if present
-
-    // TODO  consensus
-    //  * difficulty
-    //  * gas_limit with basefee
-    //  * timestamp
-    //  * mix_hash & nonce PoW stuf
-    //  * extra_data
-
-    Ok(())
-}
-
-/// Verification after block is executed
-pub async fn post_verification(block: BlockLocked) -> eyre::Result<()> {
-    // TODO block.state_root;
-    // block.logs_bloom;
-
-    // block.gas_used & if limit is hit
-    Ok(())
 }

@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_interfaces::executor::{BlockExecutor, Error, ExecutorDb};
 use reth_primitives::BlockLocked;
-use revm::{AnalysisKind, Env, SpecId, EVM};
+use revm::{AnalysisKind, SpecId, EVM};
 
 /// Main block executor
 pub struct Executor {
