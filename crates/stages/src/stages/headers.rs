@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{
+    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
+};
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     db::{
@@ -28,31 +31,6 @@ pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
     pub client: H,
 }
 
-/// The header stage error
-#[derive(Error, Debug)]
-pub enum HeaderStageError {
-    /// Cannonical hash is missing from db
-    #[error("no cannonical hash for block #{number}")]
-    NoCannonicalHash {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// Cannonical header is missing from db
-    #[error("no cannonical hash for block #{number}")]
-    NoCannonicalHeader {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// Header is missing from db
-    #[error("no header for block #{number} ({hash})")]
-    NoHeader {
-        /// The block number key
-        number: BlockNumber,
-        /// The block hash key
-        hash: H256,
-    },
-}
-
 #[async_trait::async_trait]
 impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
     for HeaderStage<D, C, H>
@@ -78,12 +56,12 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         // TODO: handle input.max_block
         let last_hash =
             tx.get::<tables::CanonicalHeaders>(last_block_num)?.ok_or_else(|| -> StageError {
-                HeaderStageError::NoCannonicalHash { number: last_block_num }.into()
+                DatabaseIntegrityError::NoCannonicalHash { number: last_block_num }.into()
             })?;
         let last_header = tx
             .get::<tables::Headers>((last_block_num, last_hash).into())?
             .ok_or_else(|| -> StageError {
-                HeaderStageError::NoHeader { number: last_block_num, hash: last_hash }.into()
+                DatabaseIntegrityError::NoHeader { number: last_block_num, hash: last_hash }.into()
             })?;
         let head = HeaderLocked::new(last_header, last_hash);
 
@@ -144,7 +122,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         height: BlockNumber,
     ) -> Result<(), StageError> {
         let hash = tx.get::<tables::CanonicalHeaders>(height)?.ok_or_else(|| -> StageError {
-            HeaderStageError::NoCannonicalHeader { number: height }.into()
+            DatabaseIntegrityError::NoCannonicalHeader { number: height }.into()
         })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
@@ -252,7 +230,7 @@ pub(crate) mod tests {
         let rx = execute_stage(db.inner(), input, Ok(vec![]));
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::HeadersStage(HeaderStageError::NoCannonicalHeader { .. }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
         );
     }
 
