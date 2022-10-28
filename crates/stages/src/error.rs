@@ -50,6 +50,14 @@ pub enum DatabaseIntegrityError {
         /// The block hash key
         hash: H256,
     },
+    /// Cumulative transaction count is missing from db
+    #[error("no cumulative tx count for ${number} ({hash})")]
+    NoCumulativeTxCount {
+        /// The block number key
+        number: BlockNumber,
+        /// The block hash key
+        hash: H256,
+    },
 }
 
 /// A pipeline execution error.

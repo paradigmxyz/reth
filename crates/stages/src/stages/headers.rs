@@ -1,12 +1,13 @@
 use crate::{
+    util::unwind::{unwind_table_by_num, unwind_table_by_num_hash},
     DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
     UnwindOutput,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     db::{
-        self, models::blocks::BlockNumHash, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
-        DbCursorRW, DbTx, DbTxMut, Table,
+        models::blocks::BlockNumHash, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
+        DbCursorRW, DbTx, DbTxMut,
     },
     p2p::headers::{
         client::HeadersClient,
@@ -47,20 +48,17 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = db.get_mut();
-        let last_block_num =
-            input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
+        let last_block_num = input.stage_progress.unwrap_or_default();
         self.update_head::<DB>(tx, last_block_num).await?;
 
         // download the headers
         // TODO: handle input.max_block
-        let last_hash =
-            tx.get::<tables::CanonicalHeaders>(last_block_num)?.ok_or_else(|| -> StageError {
-                DatabaseIntegrityError::NoCannonicalHash { number: last_block_num }.into()
-            })?;
-        let last_header = tx
-            .get::<tables::Headers>((last_block_num, last_hash).into())?
-            .ok_or_else(|| -> StageError {
-                DatabaseIntegrityError::NoHeader { number: last_block_num, hash: last_hash }.into()
+        let last_hash = tx
+            .get::<tables::CanonicalHeaders>(last_block_num)?
+            .ok_or_else(|| DatabaseIntegrityError::NoCannonicalHash { number: last_block_num })?;
+        let last_header =
+            tx.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or_else(|| {
+                DatabaseIntegrityError::NoHeader { number: last_block_num, hash: last_hash }
             })?;
         let head = HeaderLocked::new(last_header, last_hash);
 
@@ -105,11 +103,11 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: handle bad block
-        let tx = &mut db.get_mut();
-        self.unwind_table::<DB, tables::CanonicalHeaders, _>(tx, input.unwind_to, |num| num)?;
-        self.unwind_table::<DB, tables::HeaderNumbers, _>(tx, input.unwind_to, |key| key.0 .0)?;
-        self.unwind_table::<DB, tables::Headers, _>(tx, input.unwind_to, |key| key.0 .0)?;
-        self.unwind_table::<DB, tables::HeaderTD, _>(tx, input.unwind_to, |key| key.0 .0)?;
+        let tx = db.get_mut();
+        unwind_table_by_num::<DB, tables::CanonicalHeaders>(tx, input.unwind_to)?;
+        unwind_table_by_num_hash::<DB, tables::HeaderNumbers>(tx, input.unwind_to)?;
+        unwind_table_by_num_hash::<DB, tables::Headers>(tx, input.unwind_to)?;
+        unwind_table_by_num_hash::<DB, tables::HeaderTD>(tx, input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -120,9 +118,9 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         height: BlockNumber,
     ) -> Result<(), StageError> {
-        let hash = tx.get::<tables::CanonicalHeaders>(height)?.ok_or_else(|| -> StageError {
-            DatabaseIntegrityError::NoCannonicalHeader { number: height }.into()
-        })?;
+        let hash = tx
+            .get::<tables::CanonicalHeaders>(height)?
+            .ok_or_else(|| DatabaseIntegrityError::NoCannonicalHeader { number: height })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
         Ok(())
@@ -168,40 +166,16 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             // TODO: investigate default write flags
             cursor_header_number.append(key, header.number)?;
             cursor_header.append(key, header)?;
-            cursor_canonical.append(key.0 .0, key.0 .1)?;
+            cursor_canonical.append(key.number(), key.hash())?;
             cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
         }
 
         Ok(latest)
     }
-
-    /// Unwind the table to a provided block
-    fn unwind_table<DB, T, F>(
-        &self,
-        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
-        block: BlockNumber,
-        mut selector: F,
-    ) -> Result<(), db::Error>
-    where
-        DB: Database,
-        T: Table,
-        F: FnMut(T::Key) -> BlockNumber,
-    {
-        let mut cursor = tx.cursor_mut::<T>()?;
-        let mut entry = cursor.last()?;
-        while let Some((key, _)) = entry {
-            if selector(key) <= block {
-                break
-            }
-            cursor.delete_current()?;
-            entry = cursor.prev()?;
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
@@ -355,11 +329,11 @@ pub(crate) mod tests {
 
         db.check_no_entry_above::<tables::CanonicalHeaders, _>(input.unwind_to, |key| key)
             .expect("failed to check cannonical headers");
-        db.check_no_entry_above::<tables::HeaderNumbers, _>(input.unwind_to, |key| key.0 .0)
+        db.check_no_entry_above::<tables::HeaderNumbers, _>(input.unwind_to, |key| key.number())
             .expect("failed to check header numbers");
-        db.check_no_entry_above::<tables::Headers, _>(input.unwind_to, |key| key.0 .0)
+        db.check_no_entry_above::<tables::Headers, _>(input.unwind_to, |key| key.number())
             .expect("failed to check headers");
-        db.check_no_entry_above::<tables::HeaderTD, _>(input.unwind_to, |key| key.0 .0)
+        db.check_no_entry_above::<tables::HeaderTD, _>(input.unwind_to, |key| key.number())
             .expect("failed to check td");
     }
 

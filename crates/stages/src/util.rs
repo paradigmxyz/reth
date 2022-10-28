@@ -61,3 +61,57 @@ pub(crate) mod opt {
         }
     }
 }
+
+pub(crate) mod unwind {
+    use reth_interfaces::db::{
+        models::BlockNumHash, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTxMut, Error, Table,
+    };
+    use reth_primitives::BlockNumber;
+
+    /// TODO:
+    pub(crate) fn unwind_table_by_num<DB, T>(
+        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        block: BlockNumber,
+    ) -> Result<(), Error>
+    where
+        DB: Database,
+        T: Table<Key = BlockNumber>,
+    {
+        unwind_table::<DB, T, _>(tx, block, |key| key)
+    }
+
+    /// TODO:
+    pub(crate) fn unwind_table_by_num_hash<DB, T>(
+        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        block: BlockNumber,
+    ) -> Result<(), Error>
+    where
+        DB: Database,
+        T: Table<Key = BlockNumHash>,
+    {
+        unwind_table::<DB, T, _>(tx, block, |key| key.number())
+    }
+
+    /// Unwind the table to a provided block
+    pub(crate) fn unwind_table<DB, T, F>(
+        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        block: BlockNumber,
+        mut selector: F,
+    ) -> Result<(), Error>
+    where
+        DB: Database,
+        T: Table,
+        F: FnMut(T::Key) -> BlockNumber,
+    {
+        let mut cursor = tx.cursor_mut::<T>()?;
+        let mut entry = cursor.last()?;
+        while let Some((key, _)) = entry {
+            if selector(key) <= block {
+                break
+            }
+            cursor.delete_current()?;
+            entry = cursor.prev()?;
+        }
+        Ok(())
+    }
+}
