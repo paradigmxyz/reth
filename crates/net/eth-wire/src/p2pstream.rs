@@ -93,7 +93,7 @@ where
         tracing::trace!("waiting for p2p hello from peer ...");
 
         // todo: fix clippy
-        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stream.next())
+        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stream.inner.next())
             .await
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
