@@ -4,6 +4,7 @@ use crate::db::{
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
         blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+        ShardedKey,
     },
     DupSort,
 };
@@ -105,7 +106,7 @@ table!(Logs => TxNumber => Receipt); // Canonical only
 table!(PlainAccountState => Address => Account);
 dupsort!(PlainStorageState => Address => [H256] StorageEntry);
 
-table!(AccountHistory => Address => TxNumberList);
+table!(AccountHistory => ShardedKey<Address> => TxNumberList);
 table!(StorageHistory => Address_StorageKey => TxNumberList);
 
 dupsort!(AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
