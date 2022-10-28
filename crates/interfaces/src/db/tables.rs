@@ -84,9 +84,9 @@ macro_rules! table {
 }
 
 macro_rules! dupsort {
-    ($(#[$outer:meta])+ $name:ident => $key:ty => [$subkey:ty] $value:ty) => {
+    ($(#[$docs:meta])+ $name:ident => $key:ty => [$subkey:ty] $value:ty) => {
         table!(
-            $(#[$outer])+
+            $(#[$docs])+
             ///
             #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
             $name => $key => $value
