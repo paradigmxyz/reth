@@ -14,6 +14,8 @@ pub enum EthStreamError {
     #[error(transparent)]
     Rlp(#[from] reth_rlp::DecodeError),
     #[error(transparent)]
+    P2PStreamError(#[from] P2PStreamError),
+    #[error(transparent)]
     HandshakeError(#[from] HandshakeError),
     #[error("message size ({0}) exceeds max length (10MB)")]
     MessageTooBig(usize),

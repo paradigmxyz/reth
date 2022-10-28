@@ -7,7 +7,6 @@ use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_rlp::{Decodable, Encodable};
 use std::{
-    io,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -35,11 +34,10 @@ impl<S> EthStream<S> {
     }
 }
 
-impl<S> EthStream<S>
+impl<S, E> EthStream<S>
 where
-    S: Stream<Item = Result<bytes::BytesMut, io::Error>>
-        + Sink<bytes::Bytes, Error = io::Error>
-        + Unpin,
+    S: Stream<Item = Result<bytes::BytesMut, E>> + Sink<bytes::Bytes, Error = E> + Unpin,
+    EthStreamError: From<E>,
 {
     /// Given an instantiated transport layer, it proceeds to return an [`EthStream`]
     /// after performing a [`Status`] message handshake as specified in
@@ -105,9 +103,10 @@ where
     }
 }
 
-impl<S> Stream for EthStream<S>
+impl<S, E> Stream for EthStream<S>
 where
-    S: Stream<Item = Result<bytes::BytesMut, io::Error>> + Unpin,
+    S: Stream<Item = Result<bytes::BytesMut, E>> + Unpin,
+    EthStreamError: From<E>,
 {
     type Item = Result<EthMessage, EthStreamError>;
 
@@ -139,9 +138,10 @@ where
     }
 }
 
-impl<S> Sink<EthMessage> for EthStream<S>
+impl<S, E> Sink<EthMessage> for EthStream<S>
 where
-    S: Sink<Bytes, Error = io::Error> + Unpin,
+    S: Sink<Bytes, Error = E> + Unpin,
+    EthStreamError: From<E>,
 {
     type Error = EthStreamError;
 
@@ -175,6 +175,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
+        p2pstream::{CapabilityMessage, HelloMessage, ProtocolVersion, UnauthedP2PStream},
         types::{broadcast::BlockHashNumber, forkid::ForkFilter, EthMessage, Status},
         EthStream, PassthroughCodec,
     };
@@ -292,6 +293,77 @@ mod tests {
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
         let mut client_stream = EthStream::new(outgoing);
+
+        client_stream.send(test_msg).await.unwrap();
+
+        // make sure the server receives the message and asserts before ending the test
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ethstream_over_p2p() {
+        // create a p2p stream and server, then confirm that the two are authed
+        // create tcpstream
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::thread_rng());
+        let test_msg = EthMessage::NewBlockHashes(
+            vec![
+                BlockHashNumber { hash: reth_primitives::H256::random(), number: 5 },
+                BlockHashNumber { hash: reth_primitives::H256::random(), number: 6 },
+            ]
+            .into(),
+        );
+
+        let test_msg_clone = test_msg.clone();
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
+
+            let server_hello = HelloMessage {
+                protocol_version: ProtocolVersion::V5,
+                client_version: "bitcoind/1.0.0".to_string(),
+                capabilities: vec![CapabilityMessage::new(
+                    "eth".to_string(),
+                    EthVersion::Eth67 as usize,
+                )],
+                port: 30303,
+                id: pk2id(&server_key.public_key(SECP256K1)),
+            };
+
+            // TODO: p2p stream replacement
+            let unauthed_stream = UnauthedP2PStream::new(stream);
+            let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
+            let mut eth_stream = EthStream::new(p2p_stream);
+
+            // use the stream to get the next message
+            let message = eth_stream.next().await.unwrap().unwrap();
+            assert_eq!(message, test_msg_clone);
+        });
+
+        // create the server pubkey
+        let server_id = pk2id(&server_key.public_key(SECP256K1));
+
+        let client_key = SecretKey::new(&mut rand::thread_rng());
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+
+        let client_hello = HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "bitcoind/1.0.0".to_string(),
+            capabilities: vec![CapabilityMessage::new(
+                "eth".to_string(),
+                EthVersion::Eth67 as usize,
+            )],
+            port: 30303,
+            id: pk2id(&client_key.public_key(SECP256K1)),
+        };
+
+        let unauthed_stream = UnauthedP2PStream::new(outgoing);
+        let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
+        let mut client_stream = EthStream::new(p2p_stream);
 
         client_stream.send(test_msg).await.unwrap();
 

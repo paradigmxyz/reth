@@ -107,6 +107,7 @@ where
         // get the message id
         let id = *hello_bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
 
+        println!("message received: {:x?}", hello_bytes);
         // the first message sent MUST be the hello message
         if id != P2PMessageID::Hello as u8 {
             return Err(P2PStreamError::HandshakeError(
@@ -139,60 +140,6 @@ impl<S> P2PStream<S> {
     }
 }
 
-impl<S> P2PStream<S>
-where
-    S: Stream<Item = Result<BytesMut, io::Error>> + Sink<Bytes, Error = io::Error> + Unpin,
-{
-    /// Given an instantiated transport layer, it proceeds to return a [`P2PStream`]
-    /// after performing a [`Hello`] message handshake.
-    pub async fn connect(inner: S, hello: HelloMessage) -> Result<Self, P2PStreamError> {
-        let mut this = Self::new(inner);
-        this.handshake(hello).await?;
-        Ok(this)
-    }
-
-    /// Perform a handshake with the peer. This will send a [`Hello`] message and wait for a
-    /// [`Hello`] message in response.
-    pub async fn handshake(&mut self, hello: HelloMessage) -> Result<(), P2PStreamError> {
-        tracing::trace!("sending p2p hello ...");
-        let mut hello_bytes = BytesMut::new();
-        P2PMessage::Hello(hello).encode(&mut hello_bytes);
-        self.inner.send(hello_bytes.into()).await?;
-
-        tracing::trace!("waiting for p2p hello from peer ...");
-
-        // todo: fix clippy
-        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.next())
-            .await
-            .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
-            .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
-
-        // let's check the compressed length first, we will need to check again once confirming
-        // that it contains snappy-compressed data (this will be the case for all non-p2p messages).
-        if hello_bytes.len() > MAX_PAYLOAD_SIZE {
-            return Err(P2PStreamError::MessageTooBig(hello_bytes.len()))
-        }
-
-        // get the message id
-        let id = *hello_bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
-
-        // the first message sent MUST be the hello message
-        if id != P2PMessageID::Hello as u8 {
-            return Err(P2PStreamError::HandshakeError(
-                P2PHandshakeError::NonHelloMessageInHandshake,
-            ))
-        }
-
-        // decode the hello message from the rest of the bytes
-        let their_hello = HelloMessage::decode(&mut &hello_bytes[1..])?;
-
-        // TODO: determine shared capabilities
-
-        self.authed = true;
-        Ok(())
-    }
-}
-
 /// This represents only the reserved `p2p` subprotocol messages.
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
@@ -209,18 +156,32 @@ pub enum P2PMessage {
     Pong,
 }
 
+impl P2PMessage {
+    /// Gets the [`P2PMessageID`] for the given message.
+    pub fn message_id(&self) -> P2PMessageID {
+        match self {
+            P2PMessage::Hello(_) => P2PMessageID::Hello,
+            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
+            P2PMessage::Ping => P2PMessageID::Ping,
+            P2PMessage::Pong => P2PMessageID::Pong,
+        }
+    }
+}
+
 // TODO: snappy stuff for non-hello
 impl Encodable for P2PMessage {
     fn length(&self) -> usize {
-        match self {
+        let payload_len = match self {
             P2PMessage::Hello(msg) => msg.length(),
             P2PMessage::Disconnect(msg) => msg.length(),
             P2PMessage::Ping => 1,
             P2PMessage::Pong => 1,
-        }
+        };
+        payload_len + 1 // (1 for length of p2p message id)
     }
 
     fn encode(&self, out: &mut dyn bytes::BufMut) {
+        out.put_u8(self.message_id() as u8);
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
             P2PMessage::Disconnect(msg) => msg.encode(out),
@@ -479,6 +440,13 @@ pub struct CapabilityMessage {
     pub version: usize,
 }
 
+impl CapabilityMessage {
+    /// Create a new `CapabilityMessage` with the given name and version.
+    pub fn new(name: String, version: usize) -> Self {
+        Self { name, version }
+    }
+}
+
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
@@ -639,53 +607,12 @@ mod tests {
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
 
-    use crate::{BlockHashNumber, EthMessage, EthStream};
+    use crate::{BlockHashNumber, EthMessage, EthStream, EthVersion};
 
     use super::*;
 
-    // #[tokio::test]
-    // async fn ping_pong_test() {
-    //     // create a p2p stream and server, then confirm that the two are authed
-    //     // create tcpstream
-    //     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    //     let local_addr = listener.local_addr().unwrap();
-    //     let server_key = SecretKey::new(&mut rand::thread_rng());
-    //     let test_msg = EthMessage::NewBlockHashes(
-    //         vec![
-    //             BlockHashNumber { hash: reth_primitives::H256::random(), number: 5 },
-    //             BlockHashNumber { hash: reth_primitives::H256::random(), number: 6 },
-    //         ]
-    //         .into(),
-    //     );
-
-    //     let test_msg_clone = test_msg.clone();
-    //     let handle = tokio::spawn(async move {
-    //         // roughly based off of the design of tokio::net::TcpListener
-    //         let (incoming, _) = listener.accept().await.unwrap();
-    //         let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-
-    //         // TODO: p2p stream replacement
-    //         let mut unauthed_stream = UnauthedP2PStream::new(stream);
-    //         let mut p2p_stream = unauthed_stream.handshake(hello).await.unwrap();
-    //         let mut p2p_stream = P2PStream::new(stream);
-
-    //         // use the stream to get the next message
-    //         let message = stream.next().await.unwrap().unwrap();
-    //         assert_eq!(message, test_msg_clone);
-    //     });
-
-    //     // create the server pubkey
-    //     let server_id = pk2id(&server_key.public_key(SECP256K1));
-
-    //     let client_key = SecretKey::new(&mut rand::thread_rng());
-
-    //     let outgoing = TcpStream::connect(local_addr).await.unwrap();
-    //     let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
-    //     let mut client_stream = P2PStream::new(outgoing);
-
-    //     client_stream.send(test_msg).await.unwrap();
-
-    //     // make sure the server receives the message and asserts before ending the test
-    //     handle.await.unwrap();
-    // }
+    #[tokio::test]
+    async fn test_handshake_passthrough() {
+        // TODO
+    }
 }
