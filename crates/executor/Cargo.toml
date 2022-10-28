@@ -13,9 +13,12 @@ reth-interfaces = { path = "../interfaces" }
 reth-rlp = {path = "../common/rlp"}
 
 revm = "2.1"
+
+# common
 async-trait = "0.1.57"
 thiserror = "1.0.37"
 eyre = "0.6.8"
+auto_impl = "1.0"
 
 triehash = "0.8"
 # See to replace hashers to simplify libraries

@@ -3113,6 +3113,7 @@ name = "reth-executor"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "auto_impl",
  "eyre",
  "hash-db",
  "plain_hasher",

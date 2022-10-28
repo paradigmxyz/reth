@@ -9,7 +9,7 @@
 
 /// Linking of blocks inside chains
 pub mod blockchain;
-mod cfg;
+mod config;
 /// Executor
 pub mod executor;
 /// Wrapper around revm database and types
@@ -18,4 +18,4 @@ pub mod revm_wrap;
 /// Helper function for transactions
 pub mod proofs;
 
-pub use cfg::Config;
+pub use config::Config;
