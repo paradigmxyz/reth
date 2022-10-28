@@ -221,18 +221,24 @@ table!(
 ///
 /// Alias Types
 
+/// List with transaction numbers.
 pub type TxNumberList = IntegerList;
+/// Encoded stage id.
+pub type StageId = Vec<u8>;
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
 
+/// Temporary placeholder type for DB.
 pub type ConfigKey = Vec<u8>;
+/// Temporary placeholder type for DB.
 pub type ConfigValue = Vec<u8>;
-#[allow(non_camel_case_types)]
+/// Temporary placeholder type for DB.
 pub type BlockNumHashTxNumber = Vec<u8>;
+/// Temporary placeholder type for DB.
 pub type RlpTotalDifficulty = Vec<u8>;
+/// Temporary placeholder type for DB.
 pub type RlpTxBody = Vec<u8>;
-#[allow(non_camel_case_types)]
+/// Temporary placeholder type for DB.
 pub type Address_StorageKey = Vec<u8>;
-pub type StageId = Vec<u8>;
