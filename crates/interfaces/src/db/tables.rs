@@ -4,7 +4,7 @@ use crate::db::{
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
         blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
-        ShardedKey,
+        ShardedKey, UncompressedUint,
     },
     DupSort,
 };
@@ -90,7 +90,7 @@ macro_rules! dupsort {
 //  TABLE DEFINITIONS
 //
 
-table!(CanonicalHeaders => BlockNumber => HeaderHash);
+table!(CanonicalHeaders => UncompressedUint<BlockNumber> => HeaderHash);
 table!(HeaderTD => BlockNumHash => RlpTotalDifficulty);
 table!(HeaderNumbers => BlockNumHash => BlockNumber);
 table!(Headers => BlockNumHash => Header);
