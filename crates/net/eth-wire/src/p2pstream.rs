@@ -86,9 +86,19 @@ where
     /// completed.
     pub async fn handshake(mut self, hello: HelloMessage) -> Result<P2PStream<S>, P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
-        let mut hello_bytes = BytesMut::new();
-        P2PMessage::Hello(hello).encode(&mut hello_bytes);
-        self.stream.inner.send(hello_bytes.into()).await?;
+        let mut our_hello_bytes = BytesMut::new();
+        P2PMessage::Hello(hello.clone()).encode(&mut our_hello_bytes);
+        println!("sending hello: {:?}", hex::encode(&our_hello_bytes));
+
+        // debugging - raw hello encoding
+        let mut raw_hello_bytes = BytesMut::new();
+        hello.encode(&mut raw_hello_bytes);
+        println!("raw hello: {:?}", hex::encode(&raw_hello_bytes));
+        // try to decode
+        let decoded_hello = HelloMessage::decode(&mut &raw_hello_bytes[..]);
+        println!("decoded hello: {:?}", decoded_hello);
+
+        self.stream.inner.send(our_hello_bytes.into()).await?;
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
@@ -107,7 +117,7 @@ where
         // get the message id
         let id = *hello_bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
 
-        println!("message received: {:x?}", hello_bytes);
+        println!("hello message received: {:x?}", hex::encode(&hello_bytes));
         // the first message sent MUST be the hello message
         if id != P2PMessageID::Hello as u8 {
             return Err(P2PStreamError::HandshakeError(
@@ -197,15 +207,14 @@ impl Decodable for P2PMessage {
         let first = buf.first().expect("cannot decode empty p2p message");
         let id = P2PMessageID::try_from(*first)
             .or(Err(DecodeError::Custom("unknown p2p message id")))?;
+        buf.advance(1);
         match id {
             P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
             P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
             P2PMessageID::Ping => {
-                buf.advance(1);
                 Ok(P2PMessage::Ping)
             }
             P2PMessageID::Pong => {
-                buf.advance(1);
                 Ok(P2PMessage::Pong)
             }
         }
@@ -448,6 +457,7 @@ impl CapabilityMessage {
 }
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
+// TODO: FIX ENCODING / DECODING - see failing tests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
 #[derive(Clone, Debug, RlpEncodable, RlpDecodable)]
