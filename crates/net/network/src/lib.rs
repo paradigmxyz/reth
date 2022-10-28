@@ -15,14 +15,18 @@
 //! port of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 
+mod capability;
 mod config;
 mod listener;
 mod manager;
 mod network;
 mod peers;
+mod request;
 mod session;
 mod state;
 mod swarm;
+mod sync;
+mod transactions;
 
 /// Identifier for a unique node
 pub type NodeId = reth_discv4::NodeId;

@@ -2,6 +2,18 @@
 //!
 //! The [`Network`] contains the state of the network as a whole. It controls how connections are
 //! handled and keeps track of connections to peers.
+//!
+//! ## Capabilities
+//!
+//! The network manages peers depending on their announced capabilities via their RLPx sessions. Most importantly the [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)(`eth`).
+//!
+//! ## Overview
+//!
+//! The [`NetworkManager`] is responsible for advancing the state of the `network`. The `network` is
+//! made up of peer-to-peer connections between nodes that are available on the same network.
+//! Responsible for peer discovery is ethereum's discovery protocol (discv4, discv5). If the address
+//! (IP+port) of our node is published via discovery, remote peers can initiate inbound connections
+//! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
     config::NetworkConfig,
@@ -10,11 +22,11 @@ use crate::{
     NodeId,
 };
 use futures::{Future, StreamExt};
+use reth_interfaces::provider::BlockProvider;
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::error;
 
@@ -22,15 +34,15 @@ use tracing::error;
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
 #[must_use = "The NetworkManager does nothing unless polled"]
-pub struct NetworkManager {
+pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
-    swarm: Swarm,
+    swarm: Swarm<C>,
     /// Underlying network handle that can be shared.
     handle: NetworkHandle,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports.
-    block_sink: (),
+    block_import: (),
 
     /// Local copy of the `NodeId` of the local node.
     local_node_id: NodeId,
@@ -38,7 +50,10 @@ pub struct NetworkManager {
 
 // === impl NetworkManager ===
 
-impl NetworkManager {
+impl<C> NetworkManager<C>
+where
+    C: BlockProvider,
+{
     /// Creates the manager of a new network.
     ///
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
@@ -51,26 +66,15 @@ impl NetworkManager {
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
     ///
     /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-    ///
-    /// ```
-    /// # use reth_network::NetworkManager;
-    /// # async fn f(manager: NetworkManager) {
-    ///
-    ///  let handle = manager.handle().clone();
-    ///  tokio::task::spawn(async move {
-    ///    // use the handle to interact with the `manager`
-    ///    let _handle = handle;
-    /// });
-    ///
-    /// manager.await;
-    /// # }
-    /// ```
     pub fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
 }
 
-impl Future for NetworkManager {
+impl<C> Future for NetworkManager<C>
+where
+    C: BlockProvider,
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

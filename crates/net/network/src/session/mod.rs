@@ -1,5 +1,6 @@
 //! Support for handling peer sessions.
 use crate::{
+    capability::{Capabilities, CapabilityMessage, PeerMessageSender},
     session::handle::{
         ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     },
@@ -10,6 +11,7 @@ use futures::StreamExt;
 use std::{
     future::Future,
     net::SocketAddr,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::{
@@ -123,14 +125,27 @@ pub(crate) enum SessionEvent {
     /// A new session was successfully authenticated.
     ///
     /// This session is now able to exchange data.
-    SessionAuthenticated { session: SessionId, peer: NodeId },
-    /// A session received a message via RLPx
-    ProtocolMessage {
+    SessionAuthenticated {
         session: SessionId,
         peer: NodeId,
-        /// Event produced by the session.
-        // TODO add message enum, e.g. block import etc. request
-        message: (),
+        capabilities: Arc<Capabilities>,
+        messages: PeerMessageSender,
+    },
+    /// A session received a valid message via RLPx.
+    ValidMessage {
+        session: SessionId,
+        peer: NodeId,
+        /// Message received from the peer.
+        message: CapabilityMessage,
+    },
+    /// Received a message that does not match the announced capabilities of the peer.
+    InvalidMessage {
+        session: SessionId,
+        peer: NodeId,
+        /// Announced capabilities of the remote peer.
+        remote_capabilities: Arc<Capabilities>,
+        /// Message received from the peer.
+        message: CapabilityMessage,
     },
     /// Active session was disconnected
     Disconnected { session: SessionId, peer: NodeId, handle: ActiveSessionHandle },

@@ -5,6 +5,7 @@ use crate::{
     NodeId,
 };
 use futures::Stream;
+use reth_interfaces::provider::BlockProvider;
 use std::{
     io,
     net::SocketAddr,
@@ -18,20 +19,23 @@ use tracing::warn;
 ///
 /// A swarm emits [`SwarmEvent`]s when polled.
 #[must_use = "Swarm does nothing unless polled"]
-pub struct Swarm {
+pub struct Swarm<C> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
     sessions: SessionManager,
-    /// Tracks the entire state of the network
-    state: NetworkState,
+    /// Tracks the entire state of the network and handles events received from the sessions.
+    state: NetworkState<C>,
 }
 
 // === impl Swarm ===
 
-impl Swarm {
+impl<C> Swarm<C>
+where
+    C: BlockProvider,
+{
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState {
+    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<C> {
         &mut self.state
     }
 
@@ -59,7 +63,10 @@ impl Swarm {
     }
 }
 
-impl Stream for Swarm {
+impl<C> Stream for Swarm<C>
+where
+    C: BlockProvider,
+{
     type Item = SwarmEvent;
 
     /// This advances all components.

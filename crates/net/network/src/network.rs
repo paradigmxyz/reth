@@ -11,6 +11,7 @@ use tokio::sync::mpsc::UnboundedSender;
 /// See also [`NetworkManager`](crate::NetworkManager).
 #[derive(Clone)]
 pub struct NetworkHandle {
+    /// The Arc'ed delegate that contains the state.
     inner: Arc<NetworkInner>,
 }
 
@@ -35,4 +36,15 @@ pub(crate) enum NetworkHandleMessage {
     // TODO add variants for managing peers
     /// Broadcast event to announce a new block to all nodes.
     AnnounceBlock,
+    // Eth Wire requests
+    // GetBlockHeaders(RequestPair<GetBlockHeaders>),
+    // BlockHeaders(RequestPair<BlockHeaders>),
+    // GetBlockBodies(RequestPair<GetBlockBodies>),
+    // BlockBodies(RequestPair<BlockBodies>),
+    // GetPooledTransactions(RequestPair<GetPooledTransactions>),
+    // PooledTransactions(RequestPair<PooledTransactions>),
+    // GetNodeData(RequestPair<GetNodeData>),
+    // NodeData(RequestPair<NodeData>),
+    // GetReceipts(RequestPair<GetReceipts>),
+    // Receipts(RequestPair<Receipts>),
 }

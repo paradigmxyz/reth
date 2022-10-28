@@ -1,5 +1,9 @@
 //! Session handles
-use std::time::Instant;
+use crate::{
+    capability::{Capabilities, PeerMessageSender},
+    NodeId,
+};
+use std::{sync::Arc, time::Instant};
 use tokio::sync::{mpsc, oneshot};
 
 // TODO: integrate with the actual P2PStream
@@ -10,12 +14,6 @@ use tokio::sync::{mpsc, oneshot};
 /// This session needs to wait until it is authenticated.
 #[derive(Debug)]
 pub struct PendingSessionHandle {
-    /// The sender half that can be used as soon as the session is active, See
-    /// [`ActiveSessionHandle`]
-    // TODO: depending on how the transition from pending -> authenticated will be implemented this
-    // could be removed if on authentication the stream itself is returned and a new session is
-    // spawned.
-    _tx: mpsc::Sender<SessionCommand>,
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
     disconnect: oneshot::Sender<()>,
 }
@@ -26,8 +24,12 @@ pub struct PendingSessionHandle {
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
 pub struct ActiveSessionHandle {
+    /// The identifier of the remote peer
+    remote_id: NodeId,
     /// The timestamp when the session has been established.
     established: Instant,
+    /// Announced capabilities of the peer.
+    capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
     tx: mpsc::Sender<SessionCommand>,
 }
@@ -42,8 +44,8 @@ pub enum PendingSessionEvent {
     /// Initial handshake step was successful <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#initial-handshake>
     SuccessfulHandshake,
     /// Represents a successful `Hello` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
-    /// TODO this could return the authenticated stream
-    Hello,
+    /// TODO this could return the authenticated stream and capabilities
+    Hello { node_id: NodeId, capabilities: Arc<Capabilities>, messages: PeerMessageSender },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected,
 }
