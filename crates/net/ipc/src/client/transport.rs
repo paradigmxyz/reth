@@ -19,7 +19,7 @@ impl TransportSenderT for Sender {
     }
 
     async fn send_ping(&mut self) -> Result<(), Self::Error> {
-        tracing::trace!("send ping - not implemented for wasm");
+        tracing::trace!("send ping - not implemented");
         Err(IpcError::NotSupported)
     }
 

@@ -1,5 +1,9 @@
 //! JSON-RPC IPC server implementation
 
+use crate::server::{
+    connection::IpcConn,
+    future::{ConnectionGuard, FutureDriver, StopHandle},
+};
 use jsonrpsee::{
     core::{
         server::{resource_limiting::Resources, rpc_module::Methods},
@@ -8,11 +12,17 @@ use jsonrpsee::{
     server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerBuilder, ServerHandle},
 };
 use parity_tokio_ipc::Endpoint;
-use std::sync::Arc;
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tokio::sync::watch;
 use tower::layer::util::Identity;
 
 mod connection;
+mod future;
 
 /// Ipc Server implementation
 
@@ -46,13 +56,25 @@ impl IpcServer {
         Ok(ServerHandle::new(stop_tx))
     }
 
-    async fn start_inner(self, methods: Methods, stop_handle: StopHandle) {}
+    async fn start_inner(self, methods: Methods, stop_handle: StopHandle) {
+        let max_request_body_size = self.cfg.max_request_body_size;
+        let resources = self.resources;
+        let logger = self.logger;
+        let id_provider = self.id_provider;
+        let max_subscriptions_per_connection = self.cfg.max_subscriptions_per_connection;
+
+        let mut id: u32 = 0;
+        let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
+        todo!()
+        // let mut connections = FutureDriver::default();
+        // let mut incoming = Monitored::new(Incoming(self.listener), &stop_handle);
+    }
 }
 
 impl std::fmt::Debug for IpcServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcServer")
-            .field("endpoint", &"{{}}")
+            .field("endpoint", &self.endpoint.path())
             .field("cfg", &self.cfg)
             .field("id_provider", &self.id_provider)
             .field("resources", &self.resources)
@@ -60,23 +82,40 @@ impl std::fmt::Debug for IpcServer {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct StopHandle(watch::Receiver<()>);
+/// This is a glorified select listening for new messages, while also checking the `stop_receiver`
+/// signal.
+struct Monitored<'a, F> {
+    future: F,
+    stop_monitor: &'a StopHandle,
+}
 
-impl StopHandle {
-    pub(crate) fn new(rx: watch::Receiver<()>) -> Self {
-        Self(rx)
+impl<'a, F> Monitored<'a, F> {
+    fn new(future: F, stop_monitor: &'a StopHandle) -> Self {
+        Monitored { future, stop_monitor }
     }
+}
 
-    pub(crate) fn shutdown_requested(&self) -> bool {
-        // if a message has been seen, it means that `stop` has been called.
-        self.0.has_changed().unwrap_or(true)
-    }
+enum MonitoredError<E> {
+    Shutdown,
+    Selector(E),
+}
 
-    pub(crate) async fn shutdown(&mut self) {
-        // Err(_) implies that the `sender` has been dropped.
-        // Ok(_) implies that `stop` has been called.
-        let _ = self.0.changed().await;
+struct Incoming<T> {
+    x: T,
+}
+
+impl<'a, T> Future for Monitored<'a, Incoming<T>> {
+    type Output = Result<IpcConn<T>, MonitoredError<std::io::Error>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        todo!()
+        // let this = Pin::into_inner(self);
+        //
+        // if this.stop_monitor.shutdown_requested() {
+        //     return Poll::Ready(Err(MonitoredError::Shutdown));
+        // }
+        //
+        // this.future.0.poll_accept(cx).map_err(MonitoredError::Selector)
     }
 }
 
