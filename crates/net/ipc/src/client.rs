@@ -109,7 +109,7 @@ impl IpcTransportClientBuilder {
 
         Ok((
             Sender { inner: whlf },
-            Receiver { inner: FramedRead::new(rhlf, StreamCodec::default()) },
+            Receiver { inner: FramedRead::new(rhlf, StreamCodec::stream_incoming()) },
         ))
     }
 }
@@ -133,4 +133,19 @@ pub enum IpcError {
     },
     #[error(transparent)]
     Io(#[from] io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parity_tokio_ipc::{dummy_endpoint, Endpoint};
+
+    #[tokio::test]
+    async fn test_connect() {
+        let endpoint = dummy_endpoint();
+        let _incoming = Endpoint::new(endpoint.clone()).incoming().unwrap();
+
+        let (tx, rx) = IpcTransportClientBuilder::default().build(endpoint).await.unwrap();
+        let _ = IpcClientBuilder::default().build_with_tokio(tx, rx);
+    }
 }

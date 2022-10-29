@@ -51,8 +51,10 @@ where
         let this = self.project();
         let res = match ready!(this.inner.poll_next(cx)) {
             Some(Ok(item)) => {
-                let framed =
-                    IpcConn(tokio_util::codec::Decoder::framed(StreamCodec::default(), item));
+                let framed = IpcConn(tokio_util::codec::Decoder::framed(
+                    StreamCodec::stream_incoming(),
+                    item,
+                ));
                 Ok(framed)
             }
             Some(Err(err)) => Err(err),
@@ -94,7 +96,7 @@ where
     type Error = io::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // NOTE: we always flush here this prevents any backpressure buffer in the underlying
+        // NOTE: we always flush here this prevents buffering in the underlying
         // `Framed` impl that would cause stalled requests
         self.project().0.poll_flush(cx)
     }

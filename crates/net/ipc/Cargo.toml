@@ -27,5 +27,8 @@ tracing = "0.1.37"
 bytes = "1.2.1"
 thiserror = "1.0.37"
 
+[dev-dependencies]
+tracing-test = "0.2"
+
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]

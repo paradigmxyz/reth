@@ -22,9 +22,10 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{watch, OwnedSemaphorePermit},
+    sync::{oneshot, watch, OwnedSemaphorePermit},
 };
 use tower::{layer::util::Identity, Service};
+use tracing::{trace, warn};
 
 mod connection;
 mod future;
@@ -56,7 +57,7 @@ impl IpcServer {
     ///     let server = Builder::default().build("/tmp/my-uds")?;
     ///     let mut module = RpcModule::new(());
     ///     module.register_method("say_hello", |_, _| Ok("lo"))?;
-    ///     let handle = server.start(module)?;
+    ///     let handle = server.start(module).await?;
     ///
     ///     // In this example we don't care about doing shutdown so let's it run forever.
     ///     // You may use the `ServerHandle` to shut it down or manage it yourself.
@@ -65,22 +66,40 @@ impl IpcServer {
     ///     Ok(())
     /// }
     /// ```
-    pub fn start(mut self, methods: impl Into<Methods>) -> Result<ServerHandle, Error> {
+    pub async fn start(mut self, methods: impl Into<Methods>) -> Result<ServerHandle, Error> {
         let methods = methods.into().initialize_resources(&self.resources)?;
         let (stop_tx, stop_rx) = watch::channel(());
 
         let stop_handle = StopHandle::new(stop_rx);
 
+        // use a signal channel to wait until we're ready to accept connections
+        let (tx, rx) = oneshot::channel();
+
         match self.cfg.tokio_runtime.take() {
-            Some(rt) => rt.spawn(self.start_inner(methods, stop_handle)),
-            None => tokio::spawn(self.start_inner(methods, stop_handle)),
+            Some(rt) => rt.spawn(self.start_inner(methods, stop_handle, tx)),
+            None => tokio::spawn(self.start_inner(methods, stop_handle, tx)),
         };
+        rx.await.expect("channel is open").map_err(Error::Custom)?;
 
         Ok(ServerHandle::new(stop_tx))
     }
 
     #[allow(clippy::let_unit_value)]
-    async fn start_inner(self, methods: Methods, stop_handle: StopHandle) -> io::Result<()> {
+    async fn start_inner(
+        self,
+        methods: Methods,
+        stop_handle: StopHandle,
+        on_ready: oneshot::Sender<Result<(), String>>,
+    ) -> io::Result<()> {
+        trace!( endpoint=?self.endpoint.path(), "starting ipc server" );
+
+        if cfg!(unix) {
+            // ensure the file does not exist
+            if std::fs::remove_file(self.endpoint.path()).is_ok() {
+                warn!( endpoint=?self.endpoint.path(), "removed existing file");
+            }
+        }
+
         let max_request_body_size = self.cfg.max_request_body_size;
         let max_response_body_size = self.cfg.max_response_body_size;
         let max_log_length = self.cfg.max_log_length;
@@ -95,17 +114,25 @@ impl IpcServer {
         let mut connections = FutureDriver::default();
         let incoming = match self.endpoint.incoming() {
             Ok(connections) => Incoming::new(connections),
-            Err(err) => return Err(err),
+            Err(err) => {
+                on_ready.send(Err(err.to_string())).ok();
+                return Err(err)
+            }
         };
+        // signal that we're ready to accept connections
+        on_ready.send(Ok(())).ok();
+
         let mut incoming = Monitored::new(incoming, &stop_handle);
 
+        trace!("accepting ipc connections");
         loop {
             match connections.select_with(&mut incoming).await {
                 Ok(ipc) => {
+                    trace!("established new connection");
                     let conn = match connection_guard.try_acquire() {
                         Some(conn) => conn,
                         None => {
-                            tracing::warn!("Too many connections. Please try again later.");
+                            warn!("Too many connections. Please try again later.");
                             connections.add(ipc.reject_connection().boxed());
                             continue
                         }
@@ -207,7 +234,7 @@ impl<L: Logger> Service<String> for TowerService<L> {
     }
 
     fn call(&mut self, request: String) -> Self::Future {
-        tracing::trace!("{:?}", request);
+        trace!("{:?}", request);
 
         // handle the request
         let data = ipc::HandleRequest {
@@ -267,7 +294,7 @@ async fn spawn_connection<S, T>(
 
             // send back
             if let Err(err) = conn.send(resp).await {
-                tracing::warn!("Failed to send response: {:?}", err);
+                warn!("Failed to send response: {:?}", err);
                 break
             }
         }
@@ -502,5 +529,30 @@ impl<B, L> Builder<B, L> {
             id_provider: self.id_provider,
             service_builder: self.service_builder,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::IpcClientBuilder;
+    use jsonrpsee::{core::client::ClientT, rpc_params, RpcModule};
+    use parity_tokio_ipc::dummy_endpoint;
+    use tracing_test::traced_test;
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_rpc_request() {
+        let endpoint = dummy_endpoint();
+        let server = Builder::default().build(&endpoint).unwrap();
+        let mut module = RpcModule::new(());
+        let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
+        module.register_method("eth_chainId", move |_, _| Ok(msg)).unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
+        assert_eq!(response, msg);
     }
 }
