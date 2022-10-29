@@ -13,7 +13,6 @@ use jsonrpsee::{
     server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerHandle},
 };
 use parity_tokio_ipc::Endpoint;
-
 use std::{
     future::Future,
     io,
@@ -49,6 +48,24 @@ impl IpcServer {
     ///
     /// This will run on the tokio runtime until the server is stopped or the ServerHandle is
     /// dropped.
+    ///
+    /// ```
+    /// use jsonrpsee::RpcModule;
+    /// use reth_ipc::server::Builder;
+    /// async fn run_server() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
+    /// 	let server = Builder::default().build("/tmp/my-uds")?;
+    /// 	let mut module = RpcModule::new(());
+    /// 	module.register_method("say_hello", |_, _| Ok("lo"))?;
+    /// 	let handle = server.start(module)?;
+    ///
+    /// 	// In this example we don't care about doing shutdown so let's it run forever.
+    /// 	// You may use the `ServerHandle` to shut it down or manage it yourself.
+    /// 	let server = tokio::spawn(handle.stopped());
+    ///
+    ///     server.await.unwrap();
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn start(mut self, methods: impl Into<Methods>) -> Result<ServerHandle, Error> {
         let methods = methods.into().initialize_resources(&self.resources)?;
         let (stop_tx, stop_rx) = watch::channel(());
@@ -396,50 +413,7 @@ impl<B, L> Builder<B, L> {
         Ok(self)
     }
 
-    /// Add a logger to the builder [`Logger`](../jsonrpsee_core/logger/trait.Logger.html).
-    ///
-    /// ```
-    /// use std::{time::Instant, net::SocketAddr};
-    /// use jsonrpsee::server::logger::{HttpRequest, Logger, MethodKind, TransportProtocol};
-    /// use jsonrpsee::types::Params;
-    ///
-    /// use jsonrpsee_server::logger::{Logger, HttpRequest, MethodKind, Params, TransportProtocol};
-    /// use jsonrpsee_server::ServerBuilder;
-    /// use reth_ipc::server::{Builder, IpcServer};
-    ///
-    /// #[derive(Clone)]
-    /// struct MyLogger;
-    ///
-    /// impl Logger for MyLogger {
-    ///     type Instant = Instant;
-    ///
-    ///     fn on_connect(&self, remote_addr: SocketAddr, request: &HttpRequest, transport: TransportProtocol) {
-    ///          println!("[MyLogger::on_call] remote_addr: {:?}, headers: {:?}, transport: {}", remote_addr, request, transport);
-    ///     }
-    ///
-    ///     fn on_request(&self, transport: TransportProtocol) -> Self::Instant {
-    ///          Instant::now()
-    ///     }
-    ///
-    ///     fn on_call(&self, method_name: &str, params: Params, kind: MethodKind, transport: TransportProtocol) {
-    ///          println!("[MyLogger::on_call] method: '{}' params: {:?}, kind: {:?}, transport: {}", method_name, params, kind, transport);
-    ///     }
-    ///
-    ///     fn on_result(&self, method_name: &str, success: bool, started_at: Self::Instant, transport: TransportProtocol) {
-    ///          println!("[MyLogger::on_result] '{}', worked? {}, time elapsed {:?}, transport: {}", method_name, success, started_at.elapsed(), transport);
-    ///     }
-    ///
-    ///     fn on_response(&self, result: &str, started_at: Self::Instant, transport: TransportProtocol) {
-    ///          println!("[MyLogger::on_response] result: {}, time elapsed {:?}, transport: {}", result, started_at.elapsed(), transport);
-    ///     }
-    ///
-    ///     fn on_disconnect(&self, remote_addr: SocketAddr, transport: TransportProtocol) {
-    ///          println!("[MyLogger::on_disconnect] remote_addr: {:?}, transport: {}", remote_addr, transport);
-    ///     }
-    /// }
-    ///
-    /// let builder = Builder::default().set_logger(MyLogger);
-    /// ```
+    /// Add a logger to the builder [`Logger`].
     pub fn set_logger<T: Logger>(self, logger: T) -> Builder<B, T> {
         Builder {
             settings: self.settings,
@@ -492,17 +466,13 @@ impl<B, L> Builder<B, L> {
     ///
     /// ```rust
     /// 
-    /// use std::time::Duration;
-    /// use std::net::SocketAddr;
-    ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let builder = tower::ServiceBuilder::new().timeout(Duration::from_secs(2));
+    ///     let builder = tower::ServiceBuilder::new();
     ///
     ///     let server = reth_ipc::server::Builder::default()
     ///         .set_middleware(builder)
-    ///         .build()
-    ///         .await
+    ///         .build("/tmp/my-uds")
     ///         .unwrap();
     /// }
     /// ```
@@ -517,7 +487,20 @@ impl<B, L> Builder<B, L> {
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub async fn build(self) -> Result<IpcServer<B, L>, Error> {
-        todo!()
+    pub fn build(self, endpoint: impl AsRef<str>) -> Result<IpcServer<B, L>, Error> {
+        let endpoint = Endpoint::new(endpoint.as_ref().to_string());
+        self.build_with_endpoint(endpoint)
+    }
+
+    /// Finalize the configuration of the server. Consumes the [`Builder`].
+    pub fn build_with_endpoint(self, endpoint: Endpoint) -> Result<IpcServer<B, L>, Error> {
+        Ok(IpcServer {
+            endpoint,
+            cfg: self.settings,
+            resources: self.resources,
+            logger: self.logger,
+            id_provider: self.id_provider,
+            service_builder: self.service_builder,
+        })
     }
 }
