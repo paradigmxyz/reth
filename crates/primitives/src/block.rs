@@ -47,4 +47,3 @@ impl Deref for BlockLocked {
         self.header.as_ref()
     }
 }
-

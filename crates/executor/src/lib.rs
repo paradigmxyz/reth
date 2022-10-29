@@ -7,13 +7,12 @@
 
 //! Reth executor executes transaction in block of data.
 
-
-pub mod verification;
 pub mod config;
 /// Executor
 pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
+pub mod verification;
 
 /// Helper function for transactions
 pub mod proofs;

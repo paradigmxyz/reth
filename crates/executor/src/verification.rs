@@ -1,5 +1,5 @@
 //! ALl functions for verification of block
-use crate::config;
+use crate::{config, Config};
 use auto_impl::auto_impl;
 use reth_primitives::{BlockHash, BlockLocked, BlockNumber, Header, HeaderLocked, H256};
 use std::time::SystemTime;
@@ -39,23 +39,11 @@ pub enum Error {
     BaseFeeDiff { expected: u64, got: u64 },
 }
 
-/// All checks that engine needs to do.
-/// They are deviden on two big parts:
-/// * Pre execution:
-///     * Header:
-///         * Check all fields and hashed
-///         * Check link to parent block: base_fee, block_hash,block_number
-///     * Body (Block):
-///         * Omners: Check Omners
-///         * Transaction: calculate transaction root
-///
-/// * Post execution
-///     * Body (Block):
-///         * Receipts: calculate root.
-///         * gas used
-
 /// Validate header standalone
-pub fn validate_header_standalone(header: &HeaderLocked) -> Result<(), Error> {
+pub fn validate_header_standalone(
+    header: &HeaderLocked,
+    config: &config::Config,
+) -> Result<(), Error> {
     // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
     if header.gas_used > header.gas_limit {
         return Err(Error::HeaderGasUsedExceedsGasLimit {
@@ -71,7 +59,10 @@ pub fn validate_header_standalone(header: &HeaderLocked) -> Result<(), Error> {
         return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp })
     }
 
-    // TODO check if base fee is set.
+    // Check if base fee is set.
+    if config.paris_hard_fork_block >= header.number && header.base_fee_per_gas.is_some() {
+        return Err(Error::BaseFeeMissing)
+    }
 
     Ok(())
 }
@@ -156,12 +147,14 @@ pub fn validate_header_regarding_parent(
         })
     }
 
-    // TODO add configurable diffuculty check. Disable after The Merge.
-    // difficulty check is done by consensus
+    // difficulty check is done by consensus.
+    if config.paris_hard_fork_block > child.number {
+        // TODO how this needs to be checked? As ice age did increment it by some formula
+    }
 
     let mut parent_gas_limit = parent.gas_limit;
 
-    // By consensus gas_limit is multiplied by elasticity (*2) to make a full block on
+    // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
     if config.london_hard_fork_block == child.number {
         parent_gas_limit = parent.gas_limit * config::EIP1559_ELASTICITY_MULTIPLIER;
@@ -187,10 +180,11 @@ pub fn validate_header_regarding_parent(
     // EIP-1559 check base fee
     if child.number >= config.london_hard_fork_block {
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
+
         let expected_base_fee = if config.london_hard_fork_block == child.number {
             config::EIP1559_INITIAL_BASE_FEE
         } else {
-            // This BaseFeeMissing should not happen
+            // This BaseFeeMissing will not happen as previous blocks are checked to have them.
             calculate_next_block_base_fee(
                 parent.gas_used,
                 parent.gas_limit,
@@ -202,7 +196,7 @@ pub fn validate_header_regarding_parent(
         }
     }
 
-    // Consensus:
+    // TODO Consensus checks for:
     //  * mix_hash & nonce PoW stuf
     //  * extra_data
 
@@ -221,16 +215,13 @@ pub trait BlockhainProvider {
 
     /// Get header by block hash
     fn header(&self, block_number: &BlockHash) -> Option<Header>;
-
-    /// Return blockchain provider config
-    fn config(&self) -> &config::Config;
 }
 
 /// Validate block in regards to chain (parent)
-/// 
+///
 /// Checks:
-///     * If we already know the block.
-///     * If parent is known
+///  If we already know the block.
+///  If parent is known
 ///
 /// Returns parent block header  
 pub fn validate_block_regarding_chain<PROV: BlockhainProvider>(
@@ -257,13 +248,12 @@ pub fn validate_block_regarding_chain<PROV: BlockhainProvider>(
 pub fn full_validation<PROV: BlockhainProvider>(
     block: &BlockLocked,
     provider: PROV,
+    config: &Config,
 ) -> Result<(), Error> {
-    validate_header_standalone(&block.header)?;
+    validate_header_standalone(&block.header, config)?;
     validate_block_standalone(&block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
-    let config = provider.config();
     validate_header_regarding_parent(&parent, &block.header, config)?;
-
     Ok(())
 }
 
