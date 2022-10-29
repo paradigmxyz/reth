@@ -27,7 +27,6 @@
 //! Utilities for handling async code.
 
 use futures::FutureExt;
-use jsonrpsee::core::Error;
 use std::{
     future::Future,
     pin::Pin,
@@ -174,27 +173,13 @@ impl StopHandle {
 /// When all [`StopHandle`]'s have been `dropped` or `stop` has been called
 /// the server will be stopped.
 #[derive(Debug, Clone)]
-pub struct ServerHandle(Arc<watch::Sender<()>>);
+pub(crate) struct ServerHandle(Arc<watch::Sender<()>>);
 
 impl ServerHandle {
-    /// Create a new server handle.
-    pub fn new(tx: watch::Sender<()>) -> Self {
-        Self(Arc::new(tx))
-    }
-
-    /// Tell the server to stop without waiting for the server to stop.
-    pub fn stop(&self) -> Result<(), Error> {
-        self.0.send(()).map_err(|_| Error::AlreadyStopped)
-    }
-
     /// Wait for the server to stop.
-    pub async fn stopped(self) {
+    #[allow(unused)]
+    pub(crate) async fn stopped(self) {
         self.0.closed().await
-    }
-
-    /// Check if the server has been stopped.
-    pub fn is_stopped(&self) -> bool {
-        self.0.is_closed()
     }
 }
 
@@ -216,6 +201,7 @@ impl ConnectionGuard {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn available_connections(&self) -> usize {
         self.0.available_permits()
     }

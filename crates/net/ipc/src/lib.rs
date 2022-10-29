@@ -9,4 +9,6 @@
 
 pub mod client;
 pub mod server;
-mod stream_codec;
+
+/// Json codec implementation
+pub mod stream_codec;

@@ -1,28 +1,35 @@
 //! JSON-RPC IPC server implementation
 
 use crate::server::{
-    connection::IpcConn,
+    connection::{Incoming, IpcConn, JsonRpcStream},
     future::{ConnectionGuard, FutureDriver, StopHandle},
 };
+use futures::{FutureExt, SinkExt, Stream, StreamExt};
 use jsonrpsee::{
     core::{
         server::{resource_limiting::Resources, rpc_module::Methods},
         Error, TEN_MB_SIZE_BYTES,
     },
-    server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerBuilder, ServerHandle},
+    server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerHandle},
 };
 use parity_tokio_ipc::Endpoint;
+
 use std::{
     future::Future,
+    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::watch;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::{watch, OwnedSemaphorePermit},
+};
 use tower::layer::util::Identity;
 
 mod connection;
 mod future;
+mod ipc;
 
 /// Ipc Server implementation
 
@@ -56,18 +63,67 @@ impl IpcServer {
         Ok(ServerHandle::new(stop_tx))
     }
 
-    async fn start_inner(self, methods: Methods, stop_handle: StopHandle) {
+    async fn start_inner(self, methods: Methods, stop_handle: StopHandle) -> io::Result<()> {
         let max_request_body_size = self.cfg.max_request_body_size;
+        let max_response_body_size = self.cfg.max_response_body_size;
+        let max_log_length = self.cfg.max_log_length;
         let resources = self.resources;
-        let logger = self.logger;
         let id_provider = self.id_provider;
         let max_subscriptions_per_connection = self.cfg.max_subscriptions_per_connection;
+        let logger = self.logger;
 
         let mut id: u32 = 0;
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
-        todo!()
-        // let mut connections = FutureDriver::default();
-        // let mut incoming = Monitored::new(Incoming(self.listener), &stop_handle);
+
+        let mut connections = FutureDriver::default();
+        let incoming = match self.endpoint.incoming() {
+            Ok(connections) => Incoming::new(connections),
+            Err(err) => return Err(err),
+        };
+        let mut incoming = Monitored::new(incoming, &stop_handle);
+
+        loop {
+            match connections.select_with(&mut incoming).await {
+                Ok(ipc) => {
+                    let conn = match connection_guard.try_acquire() {
+                        Some(conn) => conn,
+                        None => {
+                            tracing::warn!("Too many connections. Please try again later.");
+                            connections.add(ipc.reject_connection().boxed());
+                            continue
+                        }
+                    };
+
+                    let tower_service = TowerService {
+                        inner: ServiceData {
+                            methods: methods.clone(),
+                            resources: resources.clone(),
+                            max_request_body_size,
+                            max_response_body_size,
+                            max_log_length,
+                            id_provider: id_provider.clone(),
+                            stop_handle: stop_handle.clone(),
+                            max_subscriptions_per_connection,
+                            conn_id: id,
+                            logger: logger.clone(),
+                            conn: Arc::new(conn),
+                        },
+                    };
+
+                    let service = self.service_builder.service(tower_service);
+                    connections.add(Box::pin(spawn_connection(ipc, service, stop_handle.clone())));
+
+                    id = id.wrapping_add(1);
+                }
+                Err(MonitoredError::Selector(err)) => {
+                    tracing::error!("Error while awaiting a new connection: {:?}", err);
+                }
+                Err(MonitoredError::Shutdown) => break,
+            }
+        }
+
+        connections.await;
+        Ok(())
     }
 }
 
@@ -80,6 +136,127 @@ impl std::fmt::Debug for IpcServer {
             .field("resources", &self.resources)
             .finish()
     }
+}
+
+/// Data required by the server to handle requests.
+#[derive(Debug, Clone)]
+#[allow(unused)]
+pub(crate) struct ServiceData<L: Logger> {
+    /// Registered server methods.
+    pub(crate) methods: Methods,
+    /// Tracker for currently used resources on the server.
+    pub(crate) resources: Resources,
+    /// Max request body size.
+    pub(crate) max_request_body_size: u32,
+    /// Max request body size.
+    pub(crate) max_response_body_size: u32,
+    /// Max length for logging for request and response
+    ///
+    /// Logs bigger than this limit will be truncated.
+    pub(crate) max_log_length: u32,
+    /// Subscription ID provider.
+    pub(crate) id_provider: Arc<dyn IdProvider>,
+    /// Stop handle.
+    pub(crate) stop_handle: StopHandle,
+    /// Max subscriptions per connection.
+    pub(crate) max_subscriptions_per_connection: u32,
+    /// Connection ID
+    pub(crate) conn_id: u32,
+    /// Logger.
+    pub(crate) logger: L,
+    /// Handle to hold a `connection permit`.
+    pub(crate) conn: Arc<OwnedSemaphorePermit>,
+}
+
+/// JsonRPSee service compatible with `tower`.
+///
+/// # Note
+/// This is similar to [`hyper::service::service_fn`].
+#[derive(Debug)]
+pub struct TowerService<L: Logger> {
+    inner: ServiceData<L>,
+}
+
+impl<L: Logger> hyper::service::Service<String> for TowerService<L> {
+    type Response = String;
+
+    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    /// Opens door for back pressure implementation.
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: String) -> Self::Future {
+        tracing::trace!("{:?}", request);
+
+        // handle the request
+        let data = ipc::HandleRequest {
+            methods: self.inner.methods.clone(),
+            resources: self.inner.resources.clone(),
+            max_request_body_size: self.inner.max_request_body_size,
+            max_response_body_size: self.inner.max_response_body_size,
+            max_log_length: self.inner.max_log_length,
+            batch_requests_supported: true,
+            logger: self.inner.logger.clone(),
+            conn: self.inner.conn.clone(),
+        };
+        Box::pin(ipc::handle_request(request, data).map(Ok))
+    }
+}
+
+/// Spawns the connection in a new task
+async fn spawn_connection<S, T>(
+    conn: IpcConn<JsonRpcStream<T>>,
+    mut service: S,
+    mut stop_handle: StopHandle,
+) where
+    S: hyper::service::Service<String, Response = String> + Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Future: Send,
+    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let task = tokio::task::spawn(async move {
+        tokio::pin!(conn);
+
+        loop {
+            let request = tokio::select! {
+                res = conn.next() => {
+                    match res {
+                        Some(Ok(request)) => {
+                            request
+                        },
+                        Some(Err(e)) => {
+                             tracing::warn!("Request failed: {:?}", e);
+                             break
+                        }
+                        None => {
+                            return
+                        }
+                    }
+                }
+                _ = stop_handle.shutdown() => {
+                    break
+                }
+            };
+
+            // handle the RPC request
+            let resp = match service.call(request).await {
+                Ok(resp) => resp,
+                Err(err) => err.into().to_string(),
+            };
+
+            // send back
+            if let Err(err) = conn.send(resp).await {
+                tracing::warn!("Failed to send response: {:?}", err);
+                break
+            }
+        }
+    });
+
+    task.await.ok();
 }
 
 /// This is a glorified select listening for new messages, while also checking the `stop_receiver`
@@ -100,22 +277,21 @@ enum MonitoredError<E> {
     Selector(E),
 }
 
-struct Incoming<T> {
-    x: T,
-}
-
-impl<'a, T> Future for Monitored<'a, Incoming<T>> {
-    type Output = Result<IpcConn<T>, MonitoredError<std::io::Error>>;
+impl<'a, T, Item> Future for Monitored<'a, Incoming<T, Item>>
+where
+    T: Stream<Item = io::Result<Item>> + Unpin + 'static,
+    Item: AsyncRead + AsyncWrite,
+{
+    type Output = Result<IpcConn<JsonRpcStream<Item>>, MonitoredError<io::Error>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
-        // let this = Pin::into_inner(self);
-        //
-        // if this.stop_monitor.shutdown_requested() {
-        //     return Poll::Ready(Err(MonitoredError::Shutdown));
-        // }
-        //
-        // this.future.0.poll_accept(cx).map_err(MonitoredError::Selector)
+        let this = self.get_mut();
+
+        if this.stop_monitor.shutdown_requested() {
+            return Poll::Ready(Err(MonitoredError::Shutdown))
+        }
+
+        this.future.poll_accept(cx).map_err(MonitoredError::Selector)
     }
 }
 
@@ -124,6 +300,12 @@ impl<'a, T> Future for Monitored<'a, Incoming<T>> {
 pub struct Settings {
     /// Maximum size in bytes of a request.
     max_request_body_size: u32,
+    /// Maximum size in bytes of a response.
+    max_response_body_size: u32,
+    /// Max length for logging for requests and responses
+    ///
+    /// Logs bigger than this limit will be truncated.
+    max_log_length: u32,
     /// Maximum number of incoming connections allowed.
     max_connections: u32,
     /// Maximum number of subscriptions per connection.
@@ -136,6 +318,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             max_request_body_size: TEN_MB_SIZE_BYTES,
+            max_response_body_size: TEN_MB_SIZE_BYTES,
+            max_log_length: 4096,
             max_connections: 100,
             max_subscriptions_per_connection: 1024,
             tokio_runtime: None,
@@ -169,6 +353,18 @@ impl<B, L> Builder<B, L> {
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
     pub fn max_request_body_size(mut self, size: u32) -> Self {
         self.settings.max_request_body_size = size;
+        self
+    }
+
+    /// Set the maximum size of a response body in bytes. Default is 10 MiB.
+    pub fn max_response_body_size(mut self, size: u32) -> Self {
+        self.settings.max_response_body_size = size;
+        self
+    }
+
+    /// Set the maximum size of a log
+    pub fn max_log_length(mut self, size: u32) -> Self {
+        self.settings.max_log_length = size;
         self
     }
 
