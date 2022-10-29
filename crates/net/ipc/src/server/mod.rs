@@ -52,16 +52,15 @@ impl IpcServer {
     /// ```
     /// use jsonrpsee::RpcModule;
     /// use reth_ipc::server::Builder;
-    /// async fn run_server() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
-    /// 	let server = Builder::default().build("/tmp/my-uds")?;
-    /// 	let mut module = RpcModule::new(());
-    /// 	module.register_method("say_hello", |_, _| Ok("lo"))?;
-    /// 	let handle = server.start(module)?;
+    /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ///     let server = Builder::default().build("/tmp/my-uds")?;
+    ///     let mut module = RpcModule::new(());
+    ///     module.register_method("say_hello", |_, _| Ok("lo"))?;
+    ///     let handle = server.start(module)?;
     ///
-    /// 	// In this example we don't care about doing shutdown so let's it run forever.
-    /// 	// You may use the `ServerHandle` to shut it down or manage it yourself.
-    /// 	let server = tokio::spawn(handle.stopped());
-    ///
+    ///     // In this example we don't care about doing shutdown so let's it run forever.
+    ///     // You may use the `ServerHandle` to shut it down or manage it yourself.
+    ///     let server = tokio::spawn(handle.stopped());
     ///     server.await.unwrap();
     ///     Ok(())
     /// }
@@ -80,6 +79,7 @@ impl IpcServer {
         Ok(ServerHandle::new(stop_tx))
     }
 
+    #[allow(clippy::let_unit_value)]
     async fn start_inner(self, methods: Methods, stop_handle: StopHandle) -> io::Result<()> {
         let max_request_body_size = self.cfg.max_request_body_size;
         let max_response_body_size = self.cfg.max_response_body_size;
@@ -122,7 +122,7 @@ impl IpcServer {
                             stop_handle: stop_handle.clone(),
                             max_subscriptions_per_connection,
                             conn_id: id,
-                            logger: logger.clone(),
+                            logger,
                             conn: Arc::new(conn),
                         },
                     };
