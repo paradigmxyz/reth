@@ -25,7 +25,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{watch, OwnedSemaphorePermit},
 };
-use tower::layer::util::Identity;
+use tower::{layer::util::Identity, Service};
 
 mod connection;
 mod future;
@@ -177,7 +177,7 @@ pub struct TowerService<L: Logger> {
     inner: ServiceData<L>,
 }
 
-impl<L: Logger> hyper::service::Service<String> for TowerService<L> {
+impl<L: Logger> Service<String> for TowerService<L> {
     type Response = String;
 
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -213,7 +213,7 @@ async fn spawn_connection<S, T>(
     mut service: S,
     mut stop_handle: StopHandle,
 ) where
-    S: hyper::service::Service<String, Response = String> + Send + 'static,
+    S: Service<String, Response = String> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     S::Future: Send,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,

@@ -1912,54 +1912,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpc-core"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
-dependencies = [
- "futures",
- "futures-executor",
- "futures-util",
- "log",
- "serde",
- "serde_derive",
- "serde_json",
-]
-
-[[package]]
-name = "jsonrpc-ipc-server"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "382bb0206323ca7cda3dcd7e245cea86d37d02457a02a975e3378fb149a48845"
-dependencies = [
- "futures",
- "jsonrpc-core",
- "jsonrpc-server-utils",
- "log",
- "parity-tokio-ipc",
- "parking_lot 0.11.2",
- "tower-service",
-]
-
-[[package]]
-name = "jsonrpc-server-utils"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa4fdea130485b572c39a460d50888beb00afb3e35de23ccd7fad8ff19f0e0d4"
-dependencies = [
- "bytes",
- "futures",
- "globset",
- "jsonrpc-core",
- "lazy_static",
- "log",
- "tokio",
- "tokio-stream",
- "tokio-util 0.6.10",
- "unicase",
-]
-
-[[package]]
 name = "jsonrpsee"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1968,7 +1920,7 @@ dependencies = [
  "jsonrpsee-core 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonrpsee-http-client 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonrpsee-http-server",
- "jsonrpsee-proc-macros 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "jsonrpsee-proc-macros",
  "jsonrpsee-types 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonrpsee-wasm-client 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonrpsee-ws-client 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1984,12 +1936,10 @@ dependencies = [
  "jsonrpsee-client-transport 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
  "jsonrpsee-core 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
  "jsonrpsee-http-client 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
- "jsonrpsee-proc-macros 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
  "jsonrpsee-server",
  "jsonrpsee-types 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
  "jsonrpsee-wasm-client 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
  "jsonrpsee-ws-client 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
- "tracing",
 ]
 
 [[package]]
@@ -2163,17 +2113,6 @@ name = "jsonrpsee-proc-macros"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd67957d4280217247588ac86614ead007b301ca2fa9f19c19f880a536f029e3"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "jsonrpsee-proc-macros"
-version = "0.15.1"
-source = "git+https://github.com/paritytech/jsonrpsee#e649f38efe0b496280d557a4fd062e76e345605a"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3366,7 +3305,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
- "jsonrpc-ipc-server",
  "jsonrpsee 0.15.1 (git+https://github.com/paritytech/jsonrpsee)",
  "parity-tokio-ipc",
  "pin-project",

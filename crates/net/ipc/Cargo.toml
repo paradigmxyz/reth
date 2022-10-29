@@ -15,14 +15,13 @@ IPC support for reth
 futures = "0.3"
 parity-tokio-ipc = "0.9.0"
 tokio = { version = "1", features = ["net", "time", "rt-multi-thread"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["codec"] }
 async-trait = "0.1"
 pin-project = "1.0"
 tower = "0.4"
-hyper = { version = "0.14", features = ["server"] }
 
 # misc
-jsonrpsee = { git = "https://github.com/paritytech/jsonrpsee", features = ["full"] }
+jsonrpsee = { git = "https://github.com/paritytech/jsonrpsee", features = ["server", "client"] }
 serde_json = "1.0"
 tracing = "0.1.37"
 bytes = "1.2.1"
