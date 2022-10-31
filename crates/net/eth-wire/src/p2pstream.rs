@@ -199,12 +199,12 @@ impl Encodable for P2PMessage {
                 out.put_u8(0x01);
                 out.put_u8(0x00);
                 out.put_u8(0x80);
-            },
+            }
             P2PMessage::Pong => {
                 out.put_u8(0x01);
                 out.put_u8(0x00);
                 out.put_u8(0x80);
-            },
+            }
         }
     }
 }
@@ -616,14 +616,14 @@ impl Decodable for DisconnectReason {
         let first = *buf.first().expect("disconnect reason should have at least 1 byte");
         buf.advance(1);
         if first != 0x01 {
-            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"));
+            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
         }
 
         let second = *buf.first().expect("disconnect reason should have at least 2 bytes");
         buf.advance(1);
         if second != 0x00 {
             // TODO: make sure this error message is correct
-            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"));
+            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
         }
 
         let reason = *buf.first().expect("disconnect reason should have 3 bytes");
@@ -664,7 +664,11 @@ mod tests {
         ping_expected.extend(&ping_compressed);
 
         // ensure that the two encodings are equal
-        assert_eq!(ping_expected, ping_encoded, "left: {:#x?}, right: {:#x?}", ping_expected, ping_encoded);
+        assert_eq!(
+            ping_expected, ping_encoded,
+            "left: {:#x?}, right: {:#x?}",
+            ping_expected, ping_encoded
+        );
 
         // also ensure that the length is correct
         assert_eq!(ping_expected.len(), P2PMessage::Ping.length());
@@ -697,7 +701,11 @@ mod tests {
         pong_expected.extend(&pong_compressed);
 
         // ensure that the two encodings are equal
-        assert_eq!(pong_expected, pong_encoded, "left: {:#x?}, right: {:#x?}", pong_expected, pong_encoded);
+        assert_eq!(
+            pong_expected, pong_encoded,
+            "left: {:#x?}, right: {:#x?}",
+            pong_expected, pong_encoded
+        );
 
         // also ensure that the length is correct
         assert_eq!(pong_expected.len(), P2PMessage::Pong.length());
