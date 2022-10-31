@@ -22,6 +22,7 @@ pub struct UncompressedUint<T> {
     pub inner: T,
 }
 
+/// Macro to ensure that UncompressedUint<uintN> keys are saved in raw and big-endian format.
 macro_rules! impl_uints {
     ($(($name:tt, $size:tt)),+) => {
         $(
