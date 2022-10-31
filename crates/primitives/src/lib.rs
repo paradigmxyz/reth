@@ -61,6 +61,7 @@ pub use ethers_core::{
 mod __reexport {
     pub use hex;
     pub use tiny_keccak;
+    pub use hex_literal;
 }
 
 // Useful reexports

@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 /// Errors
 #[allow(missing_docs)]
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum Error {
     #[error("Block used gas ({gas_used:?}) is greater then gas limit ({gas_limit:?})")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
@@ -70,7 +70,7 @@ pub fn validate_header_standalone(
 /// Validate block standalone
 pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     // check omners hash
-    let omners_hash = crate::proofs::calculate_omners_root(block.omners.iter().map(|h| h.as_ref()));
+    let omners_hash = crate::proofs::calculate_omners_root(block.ommers.iter().map(|h| h.as_ref()));
     if block.header.ommers_hash != omners_hash {
         return Err(Error::BodyOmmnersHashDiff {
             got: omners_hash,
@@ -259,6 +259,8 @@ pub fn full_validation<PROV: BlockhainProvider>(
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::{hex_literal::hex, Block, Bytes, Transaction};
+
     use super::*;
 
     #[test]
@@ -286,5 +288,77 @@ mod tests {
                 calculate_next_block_base_fee(gas_used[i], gas_limit[i], base_fee[i])
             );
         }
+    }
+
+    struct Provider {
+        is_known: bool,
+        parent: Option<Header>,
+    }
+
+    impl Provider {
+        /// New provider with parent
+        fn new(parent: Option<Header>) -> Self {
+            Self { is_known: false, parent }
+        }
+        /// New provider where is_known is always true
+        fn new_known() -> Self {
+            Self { is_known: true, parent: None }
+        }
+    }
+
+    impl BlockhainProvider for Provider {
+        fn is_known(&self, _block_hash: &BlockHash) -> bool {
+            self.is_known
+        }
+
+        fn header(&self, _block_number: &BlockHash) -> Option<Header> {
+            self.parent.clone()
+        }
+    }
+    /// got test block
+    fn mock_block() -> (BlockLocked, Header) {
+        // https://etherscan.io/block/15867168 where transaction root and receipts root are cleared
+        // empty merkle tree: 0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
+
+        let header = Header {
+            parent_hash: hex!("859fad46e75d9be177c2584843501f2270c7e5231711e90848290d12d7c6dcdd").into(),
+            ommers_hash: hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").into(),
+            beneficiary: hex!("4675c7e5baafbffbca748158becba61ef3b0a263").into(),
+            state_root: hex!("8337403406e368b3e40411138f4868f79f6d835825d55fd0c2f6e17b1a3948e9").into(),
+            transactions_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
+            receipts_root: hex!("75d8d1e1be58408a738d107a15dc7ab93107808cd4aca0569de6bb8594bf1624").into(),
+            logs_bloom: hex!("002400000000004000220000800002000000000000000000000000000000100000000000000000100000000000000021020000000800000006000000002100040000000c0004000000000008000008200000000000000000000000008000000001040000020000020000002000000800000002000020000000022010000000000000010002001000000000020200000000000001000200880000004000000900020000000000020000000040000000000000000000000000000080000000000001000002000000000000012000200020000000000000001000000000000020000010321400000000100000000000000000000000000000400000000000000000").into(),
+            difficulty: 0x00.into(), // total diffuculty: 0xc70d815d562d3cfa955).into(),
+            number: 0xf21d20,
+            gas_limit: 0x1c9c380,
+            gas_used: 0x6e813,
+            timestamp: 0x635f9657,
+            extra_data: hex!("")[..].into(),
+            mix_hash: hex!("f8c29910a0a2fd65b260d83ffa2547a6db279095d109a6e64527d14035263cfc").into(),
+            nonce: 0x0000000000000000,
+            base_fee_per_gas: 0x28f0001df.into(),
+        };
+        // size: 0x9b5
+
+        let mut parent = header.clone();
+        parent.gas_used = 17763076;
+        parent.gas_limit = 30000000;
+        parent.base_fee_per_gas = Some(0x28041f7f5);
+        parent.number = parent.number - 1;
+
+        let ommers = Vec::new();
+        let receipts = Vec::new();
+        let body = Vec::new();
+
+        (BlockLocked { header: header.lock(), body, receipts, ommers }, parent)
+    }
+
+    #[test]
+    fn sanity_check() {
+        let (block, parent) = mock_block();
+        let provider = Provider::new(Some(parent));
+        let config = Config::default();
+
+        assert_eq!(full_validation(&block, provider, &config), Ok(()), "Validation should pass");
     }
 }

@@ -16,3 +16,12 @@ pub struct Config {
     /// The Merge/Paris hard fork block number
     pub paris_hard_fork_block: BlockNumber,
 }
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            london_hard_fork_block: 0,
+            paris_hard_fork_block: 0,
+        }
+    }
+}

@@ -10,8 +10,8 @@ pub struct Block {
     pub body: Vec<Transaction>,
     /// Block receipts.
     pub receipts: Vec<Receipt>,
-    /// Omners/uncles header
-    pub omners: Vec<HeaderLocked>,
+    /// Ommers/uncles header
+    pub ommers: Vec<HeaderLocked>,
 }
 
 impl Deref for Block {
@@ -31,7 +31,7 @@ pub struct BlockLocked {
     /// Block receipts.
     pub receipts: Vec<Receipt>,
     /// Omners/uncles header
-    pub omners: Vec<HeaderLocked>,
+    pub ommers: Vec<HeaderLocked>,
 }
 
 impl BlockLocked {
