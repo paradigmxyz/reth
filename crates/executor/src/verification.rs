@@ -91,8 +91,8 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     let receipts_root = crate::proofs::calculate_receipt_root(block.receipts.iter());
     if block.header.receipts_root != receipts_root {
         return Err(Error::BodyReceiptsRootDiff {
-            got: transaction_root,
-            expected: block.header.transactions_root,
+            got: receipts_root,
+            expected: block.header.receipts_root,
         })
     }
 
@@ -259,7 +259,7 @@ pub fn full_validation<PROV: BlockhainProvider>(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{hex_literal::hex, Block, Bytes, Transaction};
+    use reth_primitives::hex_literal::hex;
 
     use super::*;
 
@@ -326,7 +326,7 @@ mod tests {
             beneficiary: hex!("4675c7e5baafbffbca748158becba61ef3b0a263").into(),
             state_root: hex!("8337403406e368b3e40411138f4868f79f6d835825d55fd0c2f6e17b1a3948e9").into(),
             transactions_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
-            receipts_root: hex!("75d8d1e1be58408a738d107a15dc7ab93107808cd4aca0569de6bb8594bf1624").into(),
+            receipts_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
             logs_bloom: hex!("002400000000004000220000800002000000000000000000000000000000100000000000000000100000000000000021020000000800000006000000002100040000000c0004000000000008000008200000000000000000000000008000000001040000020000020000002000000800000002000020000000022010000000000000010002001000000000020200000000000001000200880000004000000900020000000000020000000040000000000000000000000000000080000000000001000002000000000000012000200020000000000000001000000000000020000010321400000000100000000000000000000000000000400000000000000000").into(),
             difficulty: 0x00.into(), // total diffuculty: 0xc70d815d562d3cfa955).into(),
             number: 0xf21d20,
@@ -360,5 +360,18 @@ mod tests {
         let config = Config::default();
 
         assert_eq!(full_validation(&block, provider, &config), Ok(()), "Validation should pass");
+    }
+
+    #[test]
+    fn validate_known_block() {
+        let (block, _) = mock_block();
+        let provider = Provider::new_known();
+        let config = Config::default();
+
+        assert_eq!(
+            full_validation(&block, provider, &config),
+            Err(Error::BlockKnown { hash: block.hash(), number: block.number }),
+            "Should fail with error"
+        );
     }
 }
