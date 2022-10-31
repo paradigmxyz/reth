@@ -568,9 +568,9 @@ mod tests {
 
         pinger.pong_received().unwrap();
 
-        // let's wait for the timeout to elapse (3 ping timeouts + interval + 7ms for flake
+        // let's wait for the timeout to elapse (3 ping timeouts + interval + 10ms for flake
         // protection)
-        let sleep = tokio::time::sleep(Duration::from_millis(57));
+        let sleep = tokio::time::sleep(Duration::from_millis(60));
         let wait_for_timeout = pinger.wait_for_timeout();
 
         select! {

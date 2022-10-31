@@ -151,6 +151,7 @@ impl<S> P2PStream<S> {
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
+#[derive(Debug, PartialEq, Eq)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
     Hello(HelloMessage),
@@ -178,14 +179,13 @@ impl P2PMessage {
     }
 }
 
-// TODO: snappy stuff for non-hello
 impl Encodable for P2PMessage {
     fn length(&self) -> usize {
         let payload_len = match self {
             P2PMessage::Hello(msg) => msg.length(),
             P2PMessage::Disconnect(msg) => msg.length(),
-            P2PMessage::Ping => 1,
-            P2PMessage::Pong => 1,
+            P2PMessage::Ping => 3, // len([0x01, 0x00, 0x80]) = 3
+            P2PMessage::Pong => 3, // len([0x01, 0x00, 0x80]) = 3
         };
         payload_len + 1 // (1 for length of p2p message id)
     }
@@ -195,13 +195,20 @@ impl Encodable for P2PMessage {
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
             P2PMessage::Disconnect(msg) => msg.encode(out),
-            P2PMessage::Ping => out.put_u8(P2PMessageID::Ping as u8),
-            P2PMessage::Pong => out.put_u8(P2PMessageID::Pong as u8),
+            P2PMessage::Ping => {
+                out.put_u8(0x01);
+                out.put_u8(0x00);
+                out.put_u8(0x80);
+            },
+            P2PMessage::Pong => {
+                out.put_u8(0x01);
+                out.put_u8(0x00);
+                out.put_u8(0x80);
+            },
         }
     }
 }
 
-// TODO: snappy stuff for non-hello
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         let first = buf.first().expect("cannot decode empty p2p message");
@@ -212,9 +219,13 @@ impl Decodable for P2PMessage {
             P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
             P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
             P2PMessageID::Ping => {
+                // len([0x01, 0x00, 0x80]) = 3
+                buf.advance(3);
                 Ok(P2PMessage::Ping)
             }
             P2PMessageID::Pong => {
+                // len([0x01, 0x00, 0x80]) = 3
+                buf.advance(3);
                 Ok(P2PMessage::Pong)
             }
         }
@@ -260,12 +271,6 @@ impl TryFrom<u8> for P2PMessageID {
         }
     }
 }
-
-// snappy encodings of ping/pong/discreason:
-// snappy::encode(ping): [0x01, 0x00, 0x80]
-// snappy::encode(pong): [0x01, 0x00, 0x80]
-// snappy::encode(reason): [0x01, 0x00, reason as u8]
-// TODOs referring to snappy are for encoding/decoding these messages
 
 // S must also be `Sink` because we need to be able to respond with ping messages to follow the
 // protocol
@@ -457,10 +462,9 @@ impl CapabilityMessage {
 }
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
-// TODO: FIX ENCODING / DECODING - see failing tests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
-#[derive(Clone, Debug, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.
     pub protocol_version: ProtocolVersion,
@@ -476,7 +480,7 @@ pub struct HelloMessage {
 }
 
 /// RLPx `p2p` protocol version
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,
@@ -487,16 +491,16 @@ pub enum ProtocolVersion {
 impl Encodable for ProtocolVersion {
     fn length(&self) -> usize {
         // the version should be a single byte
-        1
+        (*self as u8).length()
     }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        out.put_u8(*self as u8);
+        (*self as u8).encode(out)
     }
 }
 
 impl Decodable for ProtocolVersion {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let version = buf.first().ok_or(DecodeError::Custom("protocol version cannot be empty"))?;
+        let version = u8::decode(buf)?;
         match version {
             4 => Ok(ProtocolVersion::V4),
             5 => Ok(ProtocolVersion::V5),
@@ -506,7 +510,7 @@ impl Decodable for ProtocolVersion {
 }
 
 /// RLPx disconnect reason.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
     DisconnectRequested = 0x00,
@@ -592,20 +596,39 @@ impl TryFrom<u8> for DisconnectReason {
 
 impl Encodable for DisconnectReason {
     fn length(&self) -> usize {
-        // the reason should be a single byte
-        1
+        // disconnect reasons are snappy encoded as follows:
+        // [0x01, 0x00, reason as u8]
+        // this is 3 bytes
+        3
     }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
+        // disconnect reasons are snappy encoded as follows:
+        // [0x01, 0x00, reason as u8]
+        // this is 3 bytes
+        out.put_u8(0x01);
+        out.put_u8(0x00);
         out.put_u8(*self as u8);
-        // TODO: switch to snappy format
     }
 }
 
-// TODO: switch to snappy format
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let reason = buf.first().ok_or(DecodeError::Custom("disconnect reason cannot be empty"))?;
-        DisconnectReason::try_from(*reason)
+        let first = *buf.first().expect("disconnect reason should have at least 1 byte");
+        buf.advance(1);
+        if first != 0x01 {
+            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"));
+        }
+
+        let second = *buf.first().expect("disconnect reason should have at least 2 bytes");
+        buf.advance(1);
+        if second != 0x00 {
+            // TODO: make sure this error message is correct
+            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"));
+        }
+
+        let reason = *buf.first().expect("disconnect reason should have 3 bytes");
+        buf.advance(1);
+        DisconnectReason::try_from(reason)
             .map_err(|_| DecodeError::Custom("unknown disconnect reason"))
     }
 }
@@ -613,16 +636,184 @@ impl Decodable for DisconnectReason {
 // TODO: test ping pong stuff
 #[cfg(test)]
 mod tests {
-    use reth_ecies::{stream::ECIESStream, util::pk2id};
+    use reth_ecies::util::pk2id;
+    use reth_rlp::EMPTY_STRING_CODE;
     use secp256k1::{SecretKey, SECP256K1};
-    use tokio::net::{TcpListener, TcpStream};
 
-    use crate::{BlockHashNumber, EthMessage, EthStream, EthVersion};
+    use crate::EthVersion;
 
     use super::*;
 
     #[tokio::test]
     async fn test_handshake_passthrough() {
         // TODO
+    }
+
+    #[test]
+    fn test_ping_snappy_encoding_parity() {
+        // encode ping using our `Encodable` implementation
+        let ping = P2PMessage::Ping;
+        let mut ping_encoded = Vec::new();
+        ping.encode(&mut ping_encoded);
+
+        // the definition of ping is 0x80 (an empty rlp string)
+        let ping_raw = vec![EMPTY_STRING_CODE];
+        let mut snappy_encoder = snap::raw::Encoder::new();
+        let ping_compressed = snappy_encoder.compress_vec(&ping_raw).unwrap();
+        let mut ping_expected = vec![P2PMessageID::Ping as u8];
+        ping_expected.extend(&ping_compressed);
+
+        // ensure that the two encodings are equal
+        assert_eq!(ping_expected, ping_encoded, "left: {:#x?}, right: {:#x?}", ping_expected, ping_encoded);
+
+        // also ensure that the length is correct
+        assert_eq!(ping_expected.len(), P2PMessage::Ping.length());
+
+        // try to decode using Decodable
+        let p2p_message = P2PMessage::decode(&mut &ping_expected[..]).unwrap();
+        assert_eq!(p2p_message, P2PMessage::Ping);
+
+        // finally decode the encoded message with snappy
+        let mut snappy_decoder = snap::raw::Decoder::new();
+
+        // the message id is not compressed, only compress the latest bits
+        let decompressed = snappy_decoder.decompress_vec(&ping_encoded[1..]).unwrap();
+
+        assert_eq!(decompressed, ping_raw);
+    }
+
+    #[test]
+    fn test_pong_snappy_encoding_parity() {
+        // encode pong using our `Encodable` implementation
+        let pong = P2PMessage::Pong;
+        let mut pong_encoded = Vec::new();
+        pong.encode(&mut pong_encoded);
+
+        // the definition of pong is 0x80 (an empty rlp string)
+        let pong_raw = vec![EMPTY_STRING_CODE];
+        let mut snappy_encoder = snap::raw::Encoder::new();
+        let pong_compressed = snappy_encoder.compress_vec(&pong_raw).unwrap();
+        let mut pong_expected = vec![P2PMessageID::Pong as u8];
+        pong_expected.extend(&pong_compressed);
+
+        // ensure that the two encodings are equal
+        assert_eq!(pong_expected, pong_encoded, "left: {:#x?}, right: {:#x?}", pong_expected, pong_encoded);
+
+        // also ensure that the length is correct
+        assert_eq!(pong_expected.len(), P2PMessage::Pong.length());
+
+        // try to decode using Decodable
+        let p2p_message = P2PMessage::decode(&mut &pong_expected[..]).unwrap();
+        assert_eq!(p2p_message, P2PMessage::Pong);
+
+        // finally decode the encoded message with snappy
+        let mut snappy_decoder = snap::raw::Decoder::new();
+
+        // the message id is not compressed, only compress the latest bits
+        let decompressed = snappy_decoder.decompress_vec(&pong_encoded[1..]).unwrap();
+
+        assert_eq!(decompressed, pong_raw);
+    }
+
+    #[test]
+    fn test_hello_encoding_round_trip() {
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = P2PMessage::Hello(HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "reth/0.1.0".to_string(),
+            capabilities: vec![CapabilityMessage::new(
+                "eth".to_string(),
+                EthVersion::Eth67 as usize,
+            )],
+            port: 30303,
+            id,
+        });
+
+        let mut hello_encoded = Vec::new();
+        hello.encode(&mut hello_encoded);
+
+        let hello_decoded = P2PMessage::decode(&mut &hello_encoded[..]).unwrap();
+
+        assert_eq!(hello, hello_decoded);
+    }
+
+    #[test]
+    fn hello_encoding_length() {
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = P2PMessage::Hello(HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "reth/0.1.0".to_string(),
+            capabilities: vec![CapabilityMessage::new(
+                "eth".to_string(),
+                EthVersion::Eth67 as usize,
+            )],
+            port: 30303,
+            id,
+        });
+
+        let mut hello_encoded = Vec::new();
+        hello.encode(&mut hello_encoded);
+
+        assert_eq!(hello_encoded.len(), hello.length());
+    }
+
+    #[test]
+    fn disconnect_round_trip() {
+        let all_reasons = vec![
+            DisconnectReason::DisconnectRequested,
+            DisconnectReason::TcpSubsystemError,
+            DisconnectReason::ProtocolBreach,
+            DisconnectReason::UselessPeer,
+            DisconnectReason::TooManyPeers,
+            DisconnectReason::AlreadyConnected,
+            DisconnectReason::IncompatibleP2PProtocolVersion,
+            DisconnectReason::NullNodeIdentity,
+            DisconnectReason::ClientQuitting,
+            DisconnectReason::UnexpectedHandshakeIdentity,
+            DisconnectReason::ConnectedToSelf,
+            DisconnectReason::PingTimeout,
+            DisconnectReason::SubprotocolSpecific,
+        ];
+
+        for reason in all_reasons {
+            let disconnect = P2PMessage::Disconnect(reason);
+
+            let mut disconnect_encoded = Vec::new();
+            disconnect.encode(&mut disconnect_encoded);
+
+            let disconnect_decoded = P2PMessage::decode(&mut &disconnect_encoded[..]).unwrap();
+
+            assert_eq!(disconnect, disconnect_decoded);
+        }
+    }
+
+    #[test]
+    fn disconnect_encoding_length() {
+        let all_reasons = vec![
+            DisconnectReason::DisconnectRequested,
+            DisconnectReason::TcpSubsystemError,
+            DisconnectReason::ProtocolBreach,
+            DisconnectReason::UselessPeer,
+            DisconnectReason::TooManyPeers,
+            DisconnectReason::AlreadyConnected,
+            DisconnectReason::IncompatibleP2PProtocolVersion,
+            DisconnectReason::NullNodeIdentity,
+            DisconnectReason::ClientQuitting,
+            DisconnectReason::UnexpectedHandshakeIdentity,
+            DisconnectReason::ConnectedToSelf,
+            DisconnectReason::PingTimeout,
+            DisconnectReason::SubprotocolSpecific,
+        ];
+
+        for reason in all_reasons {
+            let disconnect = P2PMessage::Disconnect(reason);
+
+            let mut disconnect_encoded = Vec::new();
+            disconnect.encode(&mut disconnect_encoded);
+
+            assert_eq!(disconnect_encoded.len(), disconnect.length());
+        }
     }
 }
