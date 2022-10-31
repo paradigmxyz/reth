@@ -371,11 +371,6 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        let id = *item.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
-        if self.authed && id == P2PMessageID::Hello as u8 {
-            return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
-        }
-
         // TODO: we can remove this if we either accept BytesMut or if we accept something like a
         // ProtocolMessage
         let mut encoded = BytesMut::from(&item.to_vec()[..]);

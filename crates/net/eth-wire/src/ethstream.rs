@@ -315,6 +315,21 @@ mod tests {
             .into(),
         );
 
+        let genesis = H256::random();
+        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+
+        let status = Status {
+            version: EthVersion::Eth67 as u8,
+            chain: Chain::Mainnet.into(),
+            total_difficulty: U256::from(0),
+            blockhash: H256::random(),
+            genesis,
+            // Pass the current fork id.
+            forkid: fork_filter.current(),
+        };
+
+        let status_copy = status;
+        let fork_filter_clone = fork_filter.clone();
         let test_msg_clone = test_msg.clone();
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
@@ -336,6 +351,7 @@ mod tests {
             let unauthed_stream = UnauthedP2PStream::new(stream);
             let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
             let mut eth_stream = EthStream::new(p2p_stream);
+            eth_stream.handshake(status_copy, fork_filter_clone).await.unwrap();
 
             // use the stream to get the next message
             let message = eth_stream.next().await.unwrap().unwrap();
@@ -364,6 +380,7 @@ mod tests {
         let unauthed_stream = UnauthedP2PStream::new(outgoing);
         let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
         let mut client_stream = EthStream::new(p2p_stream);
+        client_stream.handshake(status, fork_filter).await.unwrap();
 
         client_stream.send(test_msg).await.unwrap();
 
