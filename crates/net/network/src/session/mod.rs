@@ -170,7 +170,12 @@ impl SessionManager {
                         "successful handshake"
                     );
                 }
-                PendingSessionEvent::Hello { session_id, node_id: _, capabilities: _, stream: _ } => {
+                PendingSessionEvent::Hello {
+                    session_id,
+                    node_id: _,
+                    capabilities: _,
+                    stream: _,
+                } => {
                     // move from pending to established.
                     let _ = self.pending_sessions.remove(&session_id);
 

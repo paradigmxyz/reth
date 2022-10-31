@@ -118,10 +118,10 @@ where
                     trace!(?remote_addr, target = "net", "Starting outbound connection.");
                 }
                 SwarmEvent::SessionEstablished { node_id, remote_addr } => {
-                    trace!(?remote_addr,?node_id, target = "net", "Session established");
+                    trace!(?remote_addr, ?node_id, target = "net", "Session established");
                 }
                 SwarmEvent::SessionClosed { node_id, remote_addr } => {
-                    trace!(?remote_addr,?node_id, target = "net", "Session disconnected");
+                    trace!(?remote_addr, ?node_id, target = "net", "Session disconnected");
                 }
             }
         }

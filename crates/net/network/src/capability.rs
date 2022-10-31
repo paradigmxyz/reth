@@ -3,7 +3,6 @@
 //! An RLPx stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the RLPx `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-
 use bytes::Bytes;
 use std::collections::HashMap;
 

@@ -4,7 +4,8 @@ use crate::{
     capability::{Capabilities, CapabilityMessage},
     discovery::{Discovery, DiscoveryEvent},
     peers::{PeerAction, PeersManager},
-    session::{PeerMessageSender},
+    session::PeerMessageSender,
+    sync::StateSync,
     NodeId,
 };
 use reth_eth_wire::{BlockHeaders, GetBlockHeaders};
@@ -39,7 +40,7 @@ pub struct NetworkState<C> {
     ///
     /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
     /// then queue in the request and notify the fetcher once the result has been received.
-    sync_fetcher: (),
+    state_sync: Box<dyn StateSync>,
 }
 
 impl<C> NetworkState<C>
@@ -75,7 +76,6 @@ where
 
     /// Propagates Block to peers.
     pub fn announce_block(&mut self, _hash: H256, _block: ()) {
-
         // TODO propagate the newblock messages to all connected peers that haven't seen the block
         // yet
 
