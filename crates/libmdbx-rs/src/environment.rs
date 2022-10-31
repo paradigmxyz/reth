@@ -172,8 +172,8 @@ where
     /// of used pages as well as free pages in this environment.
     ///
     /// ```
-    /// # use libmdbx::Environment;
-    /// # use libmdbx::NoWriteMap;
+    /// # use reth_libmdbx::Environment;
+    /// # use reth_libmdbx::NoWriteMap;
     /// let dir = tempfile::tempdir().unwrap();
     /// let env = Environment::<NoWriteMap>::new().open(dir.path()).unwrap();
     /// let info = env.info().unwrap();
