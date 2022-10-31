@@ -131,15 +131,15 @@ table!(
 
 table!(
     /// Stores the transaction body from canonical transactions. Canonical only
-    Transactions => TxNumber => RlpTxBody);
+    Transactions =>  UncompressedUint<TxNumber> => RlpTxBody);
 
 table!(
     /// Stores transaction receipts. Canonical only
-    Receipts => TxNumber => Receipt);
+    Receipts =>  UncompressedUint<TxNumber> => Receipt);
 
 table!(
     /// Stores transaction logs. Canonical only
-    Logs => TxNumber => Receipt);
+    Logs =>  UncompressedUint<TxNumber> => Receipt);
 
 table!(
     /// Stores the current state of an Account.
@@ -200,7 +200,7 @@ table!(
 
 dupsort!(
     /// Stores state of an account before a certain transaction changed it.
-    AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
+    AccountChangeSet =>  UncompressedUint<TxNumber> => [Address] AccountBeforeTx);
 
 dupsort!(
     /// Stores state of a storage key before a certain transaction changed it.
@@ -208,7 +208,7 @@ dupsort!(
 
 table!(
     /// Stores the transaction sender from each transaction.
-    TxSenders => TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
+    TxSenders =>  UncompressedUint<TxNumber> => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
 
 table!(
     /// Config.
