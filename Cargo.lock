@@ -3005,6 +3005,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-consensus"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "auto_impl",
+ "eyre",
+ "hash-db",
+ "plain_hasher",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rlp",
+ "rlp",
+ "sha3",
+ "thiserror",
+ "tokio",
+ "triehash",
+]
+
+[[package]]
 name = "reth-crate-template"
 version = "0.1.0"
 

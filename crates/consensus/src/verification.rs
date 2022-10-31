@@ -1,43 +1,9 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
 use auto_impl::auto_impl;
-use reth_primitives::{BlockHash, BlockLocked, BlockNumber, Header, HeaderLocked, H256};
+use reth_interfaces::consensus::Error;
+use reth_primitives::{BlockHash, BlockLocked, Header, HeaderLocked};
 use std::time::SystemTime;
-
-/// Errors
-#[allow(missing_docs)]
-#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
-pub enum Error {
-    #[error("Block used gas ({gas_used:?}) is greater then gas limit ({gas_limit:?})")]
-    HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
-    #[error("Block ommner hash ({got:?}) is different then expected: ({expected:?})")]
-    BodyOmmnersHashDiff { got: H256, expected: H256 },
-    #[error("Block transaction root ({got:?}) is different then expected: ({expected:?})")]
-    BodyTransactionRootDiff { got: H256, expected: H256 },
-    #[error("Block receipts root ({got:?}) is different then expected: ({expected:?})")]
-    BodyReceiptsRootDiff { got: H256, expected: H256 },
-    #[error("Block with [hash:{hash:?},number: {number:}] is already known")]
-    BlockKnown { hash: BlockHash, number: BlockNumber },
-    #[error("Block parent [hash:{hash:?}] is not known")]
-    ParentUnknown { hash: BlockHash },
-    #[error("Block number {block_number:?} is missmatch with parent block number {parent_block_number:?}")]
-    ParentBlockNumberMissmatch { parent_block_number: BlockNumber, block_number: BlockNumber },
-    #[error(
-        "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}"
-    )]
-    TimestampIsInPast { parent_timestamp: u64, timestamp: u64 },
-    #[error("Block timestamp {timestamp:?} is in future in comparison of our clock time {present_timestamp:?}")]
-    TimestampIsInFuture { timestamp: u64, present_timestamp: u64 },
-    // TODO make better error msg :)
-    #[error("Child gas_limit {child_gas_limit:?} max increase is {parent_gas_limit}/1024")]
-    GasLimitInvalidIncrease { parent_gas_limit: u64, child_gas_limit: u64 },
-    #[error("Child gas_limit {child_gas_limit:?} max decrease is {parent_gas_limit}/1024")]
-    GasLimitInvalidDecrease { parent_gas_limit: u64, child_gas_limit: u64 },
-    #[error("Base fee missing")]
-    BaseFeeMissing,
-    #[error("Block base fee ({got:?}) is different then expected: ({expected:?})")]
-    BaseFeeDiff { expected: u64, got: u64 },
-}
 
 /// Validate header standalone
 pub fn validate_header_standalone(
@@ -168,13 +134,11 @@ pub fn validate_header_regarding_parent(
                 child_gas_limit: child.gas_limit,
             })
         }
-    } else {
-        if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
-            return Err(Error::GasLimitInvalidDecrease {
-                parent_gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        }
+    } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
+        return Err(Error::GasLimitInvalidDecrease {
+            parent_gas_limit,
+            child_gas_limit: child.gas_limit,
+        })
     }
 
     // EIP-1559 check base fee
@@ -195,10 +159,6 @@ pub fn validate_header_regarding_parent(
             return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
         }
     }
-
-    // TODO Consensus checks for:
-    //  * mix_hash & nonce PoW stuf
-    //  * extra_data
 
     Ok(())
 }
@@ -251,7 +211,7 @@ pub fn full_validation<PROV: BlockhainProvider>(
     config: &Config,
 ) -> Result<(), Error> {
     validate_header_standalone(&block.header, config)?;
-    validate_block_standalone(&block)?;
+    validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
     Ok(())

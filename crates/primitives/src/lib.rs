@@ -60,8 +60,8 @@ pub use ethers_core::{
 #[doc(hidden)]
 mod __reexport {
     pub use hex;
-    pub use tiny_keccak;
     pub use hex_literal;
+    pub use tiny_keccak;
 }
 
 // Useful reexports

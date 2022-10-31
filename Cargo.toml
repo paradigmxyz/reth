@@ -4,6 +4,7 @@ members = [
     "crate-template",
     "crates/common/rlp",
     "crates/common/rlp-derive",
+    "crates/consensus",
     "crates/db",
     "crates/executor",
     "crates/interfaces",
