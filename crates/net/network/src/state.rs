@@ -1,17 +1,20 @@
 //! Keeps track of the state of the network.
 
 use crate::{
-    capability::{CapabilityMessage, PeerMessageSender},
-    peers::PeersManager,
-    session::SessionId,
+    capability::{Capabilities, CapabilityMessage},
+    discovery::{Discovery, DiscoveryEvent},
+    peers::{PeerAction, PeersManager},
+    session::{PeerMessageSender},
     NodeId,
 };
 use reth_eth_wire::{BlockHeaders, GetBlockHeaders};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{H256, U256};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
+    net::SocketAddr,
     sync::Arc,
+    task::{Context, Poll},
     time::Instant,
 };
 use tokio::sync::oneshot;
@@ -21,7 +24,7 @@ use tokio::sync::oneshot;
 /// This determines how to interact with peers.
 pub struct NetworkState<C> {
     /// All connected peers and their state.
-    peers_info: HashMap<NodeId, PeerInfo>,
+    connected_peers: HashMap<NodeId, ConnectedPeer>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Tracks the state of connected peers
@@ -31,7 +34,7 @@ pub struct NetworkState<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Network discovery.
-    discovery: (),
+    discovery: Discovery,
     /// The type that handles sync requests.
     ///
     /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
@@ -44,40 +47,104 @@ where
     C: BlockProvider,
 {
     /// Event hook for an authenticated session for the peer.
-    pub fn on_session_authenticated(&mut self, _peer: NodeId, _session: SessionId) {}
+    pub fn on_session_authenticated(
+        &mut self,
+        _node_id: NodeId,
+        _capabilities: Arc<Capabilities>,
+        _messages: PeerMessageSender,
+    ) {
+    }
+
     /// Event hook for a disconnected session for the peer.
-    pub fn on_session_closed(&mut self, _peer: NodeId, _session: SessionId) {}
+    pub(crate) fn on_session_closed(&mut self, _node_id: NodeId) {}
+
+    /// Event hook for an unexpected message from the peer.
+    pub(crate) fn on_invalid_message(
+        &self,
+        _node_id: NodeId,
+        _capabilities: Arc<Capabilities>,
+        _message: CapabilityMessage,
+    ) {
+    }
 
     /// Handles a received [`CapabilityMessage`] from the peer.
-    pub fn on_capability_message(
-        &mut self,
-        _peer: NodeId,
-        _session: SessionId,
-        _msg: CapabilityMessage,
-    ) {
+    pub fn on_capability_message(&mut self, _node_id: NodeId, _msg: CapabilityMessage) {
         // TODO needs capability+state depended decoding and handling of the message.
         // if this is a request
     }
 
-    /// Returns all nodes that we discovered on the network.
-    pub fn known_peers(&mut self) -> HashSet<NodeId> {
+    /// Propagates Block to peers.
+    pub fn announce_block(&mut self, _hash: H256, _block: ()) {
+
+        // TODO propagate the newblock messages to all connected peers that haven't seen the block
+        // yet
+
         todo!()
     }
 
-    /// Propagates Block to peers.
-    pub fn announce_block(&mut self, _hash: H256, _block: ()) {
-        todo!()
+    /// Event hook for events received from the discovery service.
+    fn on_discovery_event(&mut self, event: DiscoveryEvent) {
+        match event {
+            DiscoveryEvent::Discovered(node, addr) => {
+                self.peers_manager.add_discovered_node(node, addr);
+            }
+        }
+    }
+
+    /// Event hook for new actions derived from the peer management set.
+    fn on_peer_action(&mut self, action: PeerAction) {
+        match action {
+            PeerAction::Connect { node_id, remote_addr } => {
+                self.peers_state.insert(node_id, PeerSessionState::Connecting);
+                self.queued_messages.push_back(StateMessage::Connect { node_id, remote_addr });
+            }
+            PeerAction::Disconnect { node_id } => {
+                self.peers_state.remove(&node_id);
+                self.queued_messages.push_back(StateMessage::Disconnect { node_id });
+            }
+        }
+    }
+
+    /// Advances the state
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateMessage> {
+        loop {
+            // drain buffered messages
+            if let Some(message) = self.queued_messages.pop_front() {
+                return Poll::Ready(message)
+            }
+
+            while let Poll::Ready(discovery) = self.discovery.poll(cx) {
+                self.on_discovery_event(discovery);
+            }
+
+            // TODO poll all connected peers and handle responses
+
+            // poll peer manager
+            while let Poll::Ready(action) = self.peers_manager.poll(cx) {
+                self.on_peer_action(action);
+            }
+
+            if self.queued_messages.is_empty() {
+                return Poll::Pending
+            }
+        }
     }
 }
 
 /// Tracks the state of a Peer.
 ///
 /// For example known blocks,so we can decide what to announce.
-pub struct PeerInfo {
+pub struct ConnectedPeer {
     /// Best block of the peer.
-    pub best_hash: H256,
+    pub(crate) best_hash: H256,
     /// Best block number of the peer.
-    pub best_number: U256,
+    pub(crate) best_number: U256,
+    /// A communication channel directly to the session service.
+    pub(crate) message_tx: PeerMessageSender,
+    /// The response receiver for a currently active request to that peer.
+    ///
+    /// TODO the `CapabilityMessage` should be an enum with possible variants
+    pub(crate) inflight_request: Option<oneshot::Sender<Result<CapabilityMessage, ()>>>,
 }
 
 /// Tracks the current state of the peer session
@@ -102,13 +169,17 @@ pub enum PeerSessionState {
 
 /// Message variants triggered by the [`State`]
 pub enum StateMessage {
-    // TODO add request variants, like `GetBlockHeaders` which is then delegated to the peer
+    /// Create a new connection to the given node.
+    Connect { node_id: NodeId, remote_addr: SocketAddr },
+    /// Disconnect an existing connection
+    Disconnect { node_id: NodeId },
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockHeaders {
         peer: NodeId,
         request: GetBlockHeaders,
+        /// TODO the `CapabilityMessage` should be an enum with possible variants
         response: oneshot::Sender<BlockHeaders>,
     },
 }

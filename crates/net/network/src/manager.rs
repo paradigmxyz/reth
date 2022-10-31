@@ -18,7 +18,7 @@
 use crate::{
     config::NetworkConfig,
     network::{NetworkHandle, NetworkHandleMessage},
-    swarm::Swarm,
+    swarm::{ProtocolEvent, Swarm, SwarmEvent},
     NodeId,
 };
 use futures::{Future, StreamExt};
@@ -28,7 +28,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::error;
+use tracing::{error, trace};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -59,7 +59,7 @@ where
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
 
-    pub fn new(_config: NetworkConfig) -> Self {
+    pub fn new(_config: NetworkConfig<C>) -> Self {
         todo!()
     }
 
@@ -69,6 +69,9 @@ where
     pub fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
+
+    /// Handles an event related to RLPx.
+    fn on_protocol_event(&mut self, _event: ProtocolEvent) {}
 }
 
 impl<C> Future for NetworkManager<C>
@@ -80,7 +83,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // process incoming messages
+        // process incoming messages from a handle
         loop {
             let _msg = match this.from_handle_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(msg)) => msg,
@@ -92,13 +95,35 @@ where
                     return Poll::Ready(())
                 }
             };
-            {}
+            {
+                {}
+            }
         }
 
-        // poll the stream
-        while let Poll::Ready(Some(_event)) = this.swarm.poll_next_unpin(cx) {
+        // advance the swarm
+        while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
             // handle event
-            {}
+            match event {
+                SwarmEvent::ProtocolEvent(event) => this.on_protocol_event(event),
+                SwarmEvent::TcpListenerClosed { remote_addr } => {
+                    trace!(?remote_addr, target = "net", "TCP listener closed.");
+                }
+                SwarmEvent::TcpListenerError(err) => {
+                    trace!(?err, target = "net", "TCP connection error.");
+                }
+                SwarmEvent::IncomingTcpConnection { remote_addr, .. } => {
+                    trace!(?remote_addr, target = "net", "Incoming connection");
+                }
+                SwarmEvent::OutgoingTcpConnection { remote_addr } => {
+                    trace!(?remote_addr, target = "net", "Starting outbound connection.");
+                }
+                SwarmEvent::SessionEstablished { node_id, remote_addr } => {
+                    trace!(?remote_addr,?node_id, target = "net", "Session established");
+                }
+                SwarmEvent::SessionClosed { node_id, remote_addr } => {
+                    trace!(?remote_addr,?node_id, target = "net", "Session disconnected");
+                }
+            }
         }
 
         todo!()

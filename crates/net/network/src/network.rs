@@ -1,5 +1,6 @@
-use crate::NodeId;
+use crate::{peers::PeersHandle, NodeId};
 use parking_lot::Mutex;
+use reth_primitives::{H256, U256};
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
@@ -17,7 +18,12 @@ pub struct NetworkHandle {
 
 // === impl NetworkHandle ===
 
-impl NetworkHandle {}
+impl NetworkHandle {
+    /// Creates a single new instance.
+    pub fn new() {
+        todo!()
+    }
+}
 
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
@@ -28,23 +34,14 @@ struct NetworkInner {
     local_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
     local_node_id: NodeId,
-    // TODO need something to access
+    /// Access to the all the nodes
+    peers: PeersHandle, // TODO need something to access
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 pub(crate) enum NetworkHandleMessage {
-    // TODO add variants for managing peers
     /// Broadcast event to announce a new block to all nodes.
     AnnounceBlock,
-    // Eth Wire requests
-    // GetBlockHeaders(RequestPair<GetBlockHeaders>),
-    // BlockHeaders(RequestPair<BlockHeaders>),
-    // GetBlockBodies(RequestPair<GetBlockBodies>),
-    // BlockBodies(RequestPair<BlockBodies>),
-    // GetPooledTransactions(RequestPair<GetPooledTransactions>),
-    // PooledTransactions(RequestPair<PooledTransactions>),
-    // GetNodeData(RequestPair<GetNodeData>),
-    // NodeData(RequestPair<NodeData>),
-    // GetReceipts(RequestPair<GetReceipts>),
-    // Receipts(RequestPair<Receipts>),
+    /// Returns the newest imported block by the network.
+    NewestBlock(H256, U256),
 }

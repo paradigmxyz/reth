@@ -17,6 +17,7 @@
 
 mod capability;
 mod config;
+mod discovery;
 mod listener;
 mod manager;
 mod network;

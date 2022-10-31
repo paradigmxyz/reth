@@ -1,6 +1,6 @@
 //! Support for handling peer sessions.
 use crate::{
-    capability::{Capabilities, CapabilityMessage, PeerMessageSender},
+    capability::{Capabilities, CapabilityMessage},
     session::handle::{
         ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     },
@@ -8,6 +8,7 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use futures::StreamExt;
+pub use handle::PeerMessageSender;
 use std::{
     future::Future,
     net::SocketAddr,
@@ -20,11 +21,12 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::trace;
 
 mod handle;
 
 /// Internal identifier for active sessions.
-#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
 
 /// Manages a set of sessions.
@@ -85,11 +87,41 @@ impl SessionManager {
     /// Returns an error if the configured limit has been reached.
     pub(crate) fn on_incoming(
         &mut self,
-        _stream: TcpStream,
-        _remote_addr: SocketAddr,
+        stream: TcpStream,
+        remote_addr: SocketAddr,
     ) -> Result<SessionId, ExceedsSessionLimit> {
-        // TODO spawn the pending task and track handle
-        todo!()
+        // TODO check limits
+        let session_id = self.next_id();
+        let (disconnect_tx, disconnect_rx) = oneshot::channel();
+        let pending_events = self.pending_sessions_tx.clone();
+        self.spawn(start_pending_incoming_session(
+            session_id,
+            stream,
+            disconnect_rx,
+            pending_events,
+            remote_addr,
+        ));
+
+        let handle = PendingSessionHandle { disconnect_tx };
+        self.pending_sessions.insert(session_id, handle);
+        Ok(session_id)
+    }
+
+    /// Starts a new pending session from the local node to the given remote node.
+    pub(crate) fn start_outbound(&mut self, remote_addr: SocketAddr, node_id: NodeId) {
+        let session_id = self.next_id();
+        let (disconnect_tx, disconnect_rx) = oneshot::channel();
+        let pending_events = self.pending_sessions_tx.clone();
+        self.spawn(start_pending_outbound_session(
+            session_id,
+            disconnect_rx,
+            pending_events,
+            remote_addr,
+            node_id,
+        ));
+
+        let handle = PendingSessionHandle { disconnect_tx };
+        self.pending_sessions.insert(session_id, handle);
     }
 
     /// This polls all the session handles and returns [`SessionEvent`].
@@ -102,18 +134,72 @@ impl SessionManager {
             Poll::Ready(None) => {
                 unreachable!("Manager holds both channel halves.")
             }
-            Poll::Ready(Some(_event)) => {}
+            Poll::Ready(Some(event)) => match event {
+                ActiveSessionMessage::Closed { node_id, remote_addr } => {
+                    trace!(?node_id, target = "net::session", "closed active session.");
+                    let _ = self.active_sessions.remove(&node_id);
+                    return Poll::Ready(SessionEvent::Disconnected { node_id, remote_addr })
+                }
+                ActiveSessionMessage::ValidMessage { node_id, message } => {
+                    // TODO: since all messages are known they should be decoded in the session
+                    return Poll::Ready(SessionEvent::ValidMessage { node_id, message })
+                }
+                ActiveSessionMessage::InvalidMessage { node_id, capabilities, message } => {
+                    return Poll::Ready(SessionEvent::InvalidMessage {
+                        node_id,
+                        message,
+                        capabilities,
+                    })
+                }
+            },
         }
 
         // Poll the pending session event stream
         loop {
-            let _event = match self.pending_session_rx.poll_next_unpin(cx) {
+            let event = match self.pending_session_rx.poll_next_unpin(cx) {
                 Poll::Pending => break,
                 Poll::Ready(None) => unreachable!("Manager holds both channel halves."),
                 Poll::Ready(Some(event)) => event,
             };
+            match event {
+                PendingSessionEvent::SuccessfulHandshake { remote_addr, session_id } => {
+                    trace!(
+                        ?session_id,
+                        ?remote_addr,
+                        target = "net::session",
+                        "successful handshake"
+                    );
+                }
+                PendingSessionEvent::Hello { session_id, node_id: _, capabilities: _, stream: _ } => {
+                    // move from pending to established.
+                    let _ = self.pending_sessions.remove(&session_id);
 
-            {}
+                    // TODO spawn the authenticated session
+                    // let session = ActiveSessionHandle {
+                    //     session_id,
+                    //     remote_id: node_id,
+                    //     established: Instant::now(),
+                    //     capabilities,
+                    //     commands
+                    // };
+                    // self.active_sessions.insert(node_id, session);
+                    // return Poll::Ready(SessionEvent::SessionAuthenticated {
+                    //     node_id,
+                    //     capabilities,
+                    //     messages: ()
+                    // })
+                }
+                PendingSessionEvent::Disconnected { remote_addr, session_id } => {
+                    trace!(
+                        ?session_id,
+                        ?remote_addr,
+                        target = "net::session",
+                        "disconnected pending session"
+                    );
+                    let _ = self.pending_sessions.remove(&session_id);
+                    return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
+                }
+            }
         }
 
         Poll::Pending
@@ -126,29 +212,29 @@ pub(crate) enum SessionEvent {
     ///
     /// This session is now able to exchange data.
     SessionAuthenticated {
-        session: SessionId,
-        peer: NodeId,
+        node_id: NodeId,
+        remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         messages: PeerMessageSender,
     },
     /// A session received a valid message via RLPx.
     ValidMessage {
-        session: SessionId,
-        peer: NodeId,
+        node_id: NodeId,
         /// Message received from the peer.
         message: CapabilityMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
-        session: SessionId,
-        peer: NodeId,
+        node_id: NodeId,
         /// Announced capabilities of the remote peer.
-        remote_capabilities: Arc<Capabilities>,
+        capabilities: Arc<Capabilities>,
         /// Message received from the peer.
         message: CapabilityMessage,
     },
-    /// Active session was disconnected
-    Disconnected { session: SessionId, peer: NodeId, handle: ActiveSessionHandle },
+    /// Disconnected during pending state.
+    DisconnectedPending { remote_addr: SocketAddr },
+    /// Active session was disconnected.
+    Disconnected { node_id: NodeId, remote_addr: SocketAddr },
 }
 
 /// The error thrown when the max configured limit has been reached and no more connections are
@@ -163,8 +249,19 @@ async fn start_pending_incoming_session(
     _stream: TcpStream,
     _disconnect_rx: oneshot::Receiver<()>,
     _events: mpsc::Sender<PendingSessionEvent>,
+    _remote_addr: SocketAddr,
 ) {
     // Authenticates the stream, sends `PendingSessionEvent` updates back, sends Disconnect if
     // disconnect trigger was fired.
     todo!()
+}
+
+/// Starts the authentication process for a connection initiated by a remote peer.
+async fn start_pending_outbound_session(
+    _session_id: SessionId,
+    _disconnect_rx: oneshot::Receiver<()>,
+    _events: mpsc::Sender<PendingSessionEvent>,
+    _remote_addr: SocketAddr,
+    _node_id: NodeId,
+) {
 }

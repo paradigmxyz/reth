@@ -1,6 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    session::{SessionId, SessionManager},
+    session::{SessionEvent, SessionId, SessionManager},
     state::NetworkState,
     NodeId,
 };
@@ -39,6 +39,32 @@ where
         &mut self.state
     }
 
+    /// Triggers a new outgoing connection to the given node
+    pub fn initiate_outbound(&mut self, _remote_addr: SocketAddr, _remote_id: NodeId) {}
+
+    /// Handles a polled [`SessionEvent`]
+    fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
+        match event {
+            SessionEvent::SessionAuthenticated { node_id, remote_addr, capabilities, messages } => {
+                self.state.on_session_authenticated(node_id, capabilities, messages);
+                return Some(SwarmEvent::SessionEstablished { node_id, remote_addr })
+            }
+            SessionEvent::ValidMessage { node_id, message } => {
+                self.state.on_capability_message(node_id, message);
+            }
+            SessionEvent::InvalidMessage { node_id, capabilities, message } => {
+                self.state.on_invalid_message(node_id, capabilities, message);
+            }
+            SessionEvent::DisconnectedPending { .. } => {}
+            SessionEvent::Disconnected { node_id, remote_addr } => {
+                self.state.on_session_closed(node_id);
+                return Some(SwarmEvent::SessionClosed { node_id, remote_addr })
+            }
+        }
+
+        None
+    }
+
     /// Callback for events produced by [`ConnectionListener`].
     ///
     /// Depending on the event, this will produce a new [`SwarmEvent`].
@@ -46,7 +72,7 @@ where
         match event {
             ListenerEvent::Error(err) => return Some(SwarmEvent::TcpListenerError(err)),
             ListenerEvent::ListenerClosed { local_address: address } => {
-                return Some(SwarmEvent::TcpListenerClosed { address })
+                return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
                 match self.sessions.on_incoming(stream, remote_addr) {
@@ -82,8 +108,11 @@ where
             // poll all sessions
             match this.sessions.poll(cx) {
                 Poll::Pending => {}
-                Poll::Ready(_event) => {
-                    // handle event
+                Poll::Ready(event) => {
+                    if let Some(event) = this.on_session_event(event) {
+                        return Poll::Ready(Some(event))
+                    }
+                    continue
                 }
             }
 
@@ -106,14 +135,14 @@ where
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
 pub enum SwarmEvent {
-    /// Events related to the actual protocol
+    /// Events related to the actual network protocol.
     ///
     /// TODO this could be requests for eth-wire, or general protocol related info
     ProtocolEvent(ProtocolEvent),
     /// The underlying tcp listener closed.
     TcpListenerClosed {
         /// Address of the closed listener.
-        address: SocketAddr,
+        remote_addr: SocketAddr,
     },
     /// The underlying tcp listener encountered an error that we bubble up.
     TcpListenerError(io::Error),
@@ -127,7 +156,19 @@ pub enum SwarmEvent {
         /// Address of the remote peer.
         remote_addr: SocketAddr,
     },
-    // TODO variants for discovered peers so they get bubbled up to the manager
+    /// An outbound connection is initiated.
+    OutgoingTcpConnection {
+        /// Address of the remote peer.
+        remote_addr: SocketAddr,
+    },
+    SessionEstablished {
+        node_id: NodeId,
+        remote_addr: SocketAddr,
+    },
+    SessionClosed {
+        node_id: NodeId,
+        remote_addr: SocketAddr,
+    }, // TODO variants for discovered peers so they get bubbled up to the manager
 }
 
 /// Various protocol related event types bubbled up from a session that need to be handled by the

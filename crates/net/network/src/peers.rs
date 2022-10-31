@@ -2,7 +2,8 @@ use reth_discv4::NodeId;
 
 use futures::StreamExt;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    net::SocketAddr,
     task::{Context, Poll},
 };
 use tokio::{sync::mpsc, time::Interval};
@@ -21,7 +22,7 @@ pub struct PeersHandle {
 /// The [`PeersManager`] will be notified on peer related changes
 pub(crate) struct PeersManager {
     /// All peers known to the network
-    peers: HashMap<NodeId, Peer>,
+    peers: HashMap<NodeId, Node>,
     /// Copy of the receiver half, so new [`PeersHandle`] can be created on demand.
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
     /// Receiver half of the command channel.
@@ -35,8 +36,19 @@ pub(crate) struct PeersManager {
 }
 
 impl PeersManager {
+    pub(crate) fn add_discovered_node(&mut self, node: NodeId, addr: SocketAddr) {
+        match self.peers.entry(node) {
+            Entry::Occupied(_) => {}
+            Entry::Vacant(entry) => {
+                entry.insert(Node::new(addr));
+            }
+        }
+    }
+
+    pub(crate) fn remove_discovered_node(&mut self, _node: NodeId) {}
+
     /// If there's capacity for new outbound connections, this will queue new
-    /// [`PeerAction::Connect`] actions
+    /// [`PeerAction::Connect`] actions.
     fn fill_outbound_slots(&mut self) {
         // This checks if there are free slots for new outbound connections available that can be
         // filled
@@ -46,7 +58,7 @@ impl PeersManager {
     ///
     /// Event hooks invoked externally may trigger a new [`PeerAction`] that are buffered until
     /// [`PeersManager::poll_next`] is called.
-    pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<PeerAction> {
+    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PeerAction> {
         loop {
             // drain buffered actions
             if let Some(action) = self.actions.pop_front() {
@@ -75,9 +87,20 @@ struct ConnectionInfo {
     max_inbound: usize,
 }
 
-/// Tracks stats about a single peer.
-struct Peer {
-    // TODO needs reputation etc..
+/// Tracks info about a single node.
+struct Node {
+    /// Where to reach the node
+    addr: SocketAddr,
+    /// Reputation of the node.
+    reputation: i32,
+}
+
+// === impl Node ===
+
+impl Node {
+    fn new(addr: SocketAddr) -> Self {
+        Self { addr, reputation: 0 }
+    }
 }
 
 /// Commands the [`PeersManager`] listens for.
@@ -87,13 +110,16 @@ pub enum PeerCommand {
     // TODO reputation change
 }
 
+/// Actions the peer manager can trigger.
 #[derive(Debug)]
 pub enum PeerAction {
     /// Start a new connection to a peer.
     Connect {
         /// The peer to connect to.
-        peer: NodeId,
+        node_id: NodeId,
+        /// Where to reach the node
+        remote_addr: SocketAddr,
     },
     /// Disconnect an existing connection.
-    Disconnect { peer: NodeId },
+    Disconnect { node_id: NodeId },
 }
