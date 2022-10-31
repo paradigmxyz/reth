@@ -1,6 +1,6 @@
-use crate::{pipeline::PipelineEvent, stages::headers::HeaderStageError};
+use crate::pipeline::PipelineEvent;
 use reth_interfaces::db::Error as DbError;
-use reth_primitives::BlockNumber;
+use reth_primitives::{BlockNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -16,14 +16,40 @@ pub enum StageError {
         block: BlockNumber,
     },
     /// The stage encountered a database error.
-    #[error("A database error occurred.")]
+    #[error("An internal database error occurred.")]
     Database(#[from] DbError),
-    /// The headers stage encountered an error.
-    #[error("Headers stage error.")]
-    HeadersStage(#[from] HeaderStageError),
+    /// The stage encountered a database integrity error.
+    #[error("A database integrity error occurred.")]
+    DatabaseIntegrity(#[from] DatabaseIntegrityError),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+/// A database integrity error.
+/// The sender stage error
+#[derive(Error, Debug)]
+pub enum DatabaseIntegrityError {
+    /// Cannonical hash is missing from db
+    #[error("no cannonical hash for block #{number}")]
+    NoCannonicalHash {
+        /// The block number key
+        number: BlockNumber,
+    },
+    /// Cannonical header is missing from db
+    #[error("no cannonical hash for block #{number}")]
+    NoCannonicalHeader {
+        /// The block number key
+        number: BlockNumber,
+    },
+    /// Header is missing from db
+    #[error("no header for block #{number} ({hash})")]
+    NoHeader {
+        /// The block number key
+        number: BlockNumber,
+        /// The block hash key
+        hash: H256,
+    },
 }
 
 /// A pipeline execution error.
