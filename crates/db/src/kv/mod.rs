@@ -135,11 +135,12 @@ pub mod test_utils {
 mod tests {
     use super::{test_utils, Env, EnvKind};
     use reth_interfaces::db::{
-        tables::{Headers, PlainAccountState, PlainStorageState},
+        models::ShardedKey,
+        tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
         Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
-    use reth_primitives::{Account, Address, Header, StorageEntry, H256, U256};
+    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -264,7 +265,7 @@ mod tests {
             assert!(Some(value22) == cursor.next_dup_val().unwrap());
         }
 
-        // Seek value with subkey
+        // Seek value with exact subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
@@ -276,6 +277,38 @@ mod tests {
                     .expect("element should exist.")
                     .expect("should be able to retrieve it.")
             );
+        }
+    }
+
+    #[test]
+    fn db_sharded_key() {
+        let db: Env<WriteMap> = test_utils::create_test_db(EnvKind::RW);
+        let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+
+        for i in 1..5 {
+            let key = ShardedKey::new(real_key, i * 100);
+            let list: IntegerList = vec![i * 100u64].into();
+
+            db.update(|tx| tx.put::<AccountHistory>(key.clone(), list.clone()).expect("")).unwrap();
+        }
+
+        // Seek value with non existing key.
+        {
+            let tx = db.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor::<AccountHistory>().unwrap();
+
+            // It will seek the one greater or equal to the query. Since we have `Address | 100`,
+            // `Address | 200` in the database and we're querying `Address | 150` it will return us
+            // `Address | 200`.
+            let mut walker = cursor.walk(ShardedKey::new(real_key, 150)).unwrap();
+            let (key, list) = walker
+                .next()
+                .expect("element should exist.")
+                .expect("should be able to retrieve it.");
+
+            assert_eq!(ShardedKey::new(real_key, 200), key);
+            let list200: IntegerList = vec![200u64].into();
+            assert_eq!(list200, list);
         }
     }
 }
