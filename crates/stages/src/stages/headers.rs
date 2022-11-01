@@ -217,8 +217,8 @@ pub(crate) mod tests {
     use tokio::sync::oneshot;
 
     const TEST_STAGE: StageId = StageId("HEADERS");
-    static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::default());
-    static CLIENT: Lazy<TestHeadersClient> = Lazy::new(|| TestHeadersClient::default());
+    static CONSENSUS: Lazy<TestConsensus> = Lazy::new(TestConsensus::default);
+    static CLIENT: Lazy<TestHeadersClient> = Lazy::new(TestHeadersClient::default);
 
     #[tokio::test]
     // Check that the execution errors on empty database or
@@ -343,7 +343,7 @@ pub(crate) mod tests {
         let db = HeadersDB::default();
         db.insert_header(&head).expect("failed to insert header");
         for header in first_range.iter().chain(second_range.iter()) {
-            db.insert_header(&header).expect("failed to insert header");
+            db.insert_header(header).expect("failed to insert header");
         }
 
         let input = UnwindInput { bad_block: None, stage_progress: 15, unwind_to: 15 };
@@ -456,7 +456,7 @@ pub(crate) mod tests {
 
                 let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
                 let td =
-                    U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap_or(vec![]));
+                    U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap_or_default());
                 cursor_td
                     .append(key, H256::from_uint(&(td + header.difficulty)).as_bytes().to_vec())?;
 
@@ -479,8 +479,7 @@ pub(crate) mod tests {
                 let db_header = tx.get::<tables::Headers>(key)?;
                 assert_eq!(db_header, Some(header.clone().unlock()));
 
-                let db_canonical_header =
-                    tx.get::<tables::CanonicalHeaders>(header.number.into())?;
+                let db_canonical_header = tx.get::<tables::CanonicalHeaders>(header.number)?;
                 assert_eq!(db_canonical_header, Some(header.hash()));
 
                 if header.number != 0 {
