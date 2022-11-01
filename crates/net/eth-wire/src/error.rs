@@ -48,9 +48,11 @@ pub enum P2PStreamError {
     #[error(transparent)]
     Rlp(#[from] reth_rlp::DecodeError),
     #[error(transparent)]
+    Snap(#[from] snap::Error),
+    #[error(transparent)]
     HandshakeError(#[from] P2PHandshakeError),
-    #[error("message size ({0}) exceeds max length (16MB)")]
-    MessageTooBig(usize),
+    #[error("message size ({message_size}) exceeds max length ({max_size})")]
+    MessageTooBig { message_size: usize, max_size: usize },
     #[error("unknown reserved p2p message id: {0}")]
     UnknownReservedMessageId(u8),
     #[error("empty protocol message received")]

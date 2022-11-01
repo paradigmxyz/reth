@@ -103,7 +103,10 @@ where
         // let's check the compressed length first, we will need to check again once confirming
         // that it contains snappy-compressed data (this will be the case for all non-p2p messages).
         if hello_bytes.len() > MAX_PAYLOAD_SIZE {
-            return Err(P2PStreamError::MessageTooBig(hello_bytes.len()))
+            return Err(P2PStreamError::MessageTooBig {
+                message_size: hello_bytes.len(),
+                max_size: MAX_PAYLOAD_SIZE,
+            })
         }
 
         // get the message id
@@ -371,7 +374,23 @@ where
                 // without being aware of the p2p stream's state (shared capabilities / the message
                 // id offset)
                 bytes[0] -= *this.offset;
-                return Poll::Ready(Some(Ok(bytes)))
+
+                // first check that the compressed message length does not exceed the max message
+                // size
+                let compressed_len = snap::raw::decompress_len(&bytes[1..])?;
+                if compressed_len > MAX_PAYLOAD_SIZE {
+                    return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
+                        message_size: compressed_len,
+                        max_size: MAX_PAYLOAD_SIZE,
+                    })))
+                }
+
+                // then decompress the message
+                let mut decompress_buf = BytesMut::with_capacity(compressed_len + 1);
+                decompress_buf[0] = bytes[0];
+                this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
+
+                return Poll::Ready(Some(Ok(decompress_buf)))
             }
         }
 
@@ -390,15 +409,16 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        // TODO: we can remove this if we either accept BytesMut or if we accept something like a
-        // ProtocolMessage
-        let mut encoded = BytesMut::from(&item.to_vec()[..]);
+        let this = self.project();
+
+        let mut compressed = BytesMut::with_capacity(1 + snap::raw::max_compress_len(item.len()));
+        this.encoder.compress(&item[1..], &mut compressed[1..])?;
 
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
-        encoded[0] += self.offset;
+        compressed[0] = item[0] + *this.offset;
 
-        self.project().inner.start_send(encoded.into())?;
+        this.inner.start_send(compressed.freeze())?;
         Ok(())
     }
 
