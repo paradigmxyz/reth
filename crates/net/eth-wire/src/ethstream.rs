@@ -347,7 +347,6 @@ mod tests {
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
 
-            // TODO: p2p stream replacement
             let unauthed_stream = UnauthedP2PStream::new(stream);
             let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
             let mut eth_stream = EthStream::new(p2p_stream);

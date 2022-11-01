@@ -18,6 +18,19 @@ pub enum EthVersion {
     Eth67 = 67,
 }
 
+impl EthVersion {
+    /// Returns the total number of messages the protocol version supports.
+    pub fn total_messages(&self) -> usize {
+        match self {
+            EthVersion::Eth66 => 15,
+            EthVersion::Eth67 => {
+                // eth/67 is eth/66 minus GetNodeData and NodeData messages
+                13
+            }
+        }
+    }
+}
+
 /// Allow for converting from a `&str` to an `EthVersion`.
 ///
 /// # Example
