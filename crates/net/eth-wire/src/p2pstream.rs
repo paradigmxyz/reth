@@ -73,9 +73,9 @@ where
     pub async fn handshake(mut self, hello: HelloMessage) -> Result<P2PStream<S>, P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
 
-        // debugging - raw hello encoding
+        // send our hello message with the Sink
         let mut raw_hello_bytes = BytesMut::new();
-        hello.encode(&mut raw_hello_bytes);
+        P2PMessage::Hello(hello.clone()).encode(&mut raw_hello_bytes);
         self.stream.inner.send(raw_hello_bytes.into()).await?;
 
         tracing::trace!("waiting for p2p hello from peer ...");
@@ -761,6 +761,28 @@ mod tests {
         hello.encode(&mut hello_encoded);
 
         assert_eq!(hello_encoded.len(), hello.length());
+    }
+
+    #[test]
+    fn hello_message_id_prefix() {
+        // ensure that the hello message id is prefixed
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = P2PMessage::Hello(HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "reth/0.1.0".to_string(),
+            capabilities: vec![CapabilityMessage::new(
+                "eth".to_string(),
+                EthVersion::Eth67 as usize,
+            )],
+            port: 30303,
+            id,
+        });
+
+        let mut hello_encoded = Vec::new();
+        hello.encode(&mut hello_encoded);
+
+        assert_eq!(hello_encoded[0], P2PMessageID::Hello as u8);
     }
 
     #[test]
