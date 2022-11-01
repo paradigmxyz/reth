@@ -1,5 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
+    message::CapabilityMessage,
     session::{SessionEvent, SessionId, SessionManager},
     state::NetworkState,
     NodeId,
@@ -34,6 +35,15 @@ impl<C> Swarm<C>
 where
     C: BlockProvider,
 {
+    /// Configures a new swarm instance.
+    pub(crate) fn new(
+        incoming: ConnectionListener,
+        sessions: SessionManager,
+        state: NetworkState<C>,
+    ) -> Self {
+        Self { incoming, sessions, state }
+    }
+
     /// Mutable access to the state.
     pub(crate) fn state_mut(&mut self) -> &mut NetworkState<C> {
         &mut self.state
@@ -136,9 +146,7 @@ where
 /// network.
 pub enum SwarmEvent {
     /// Events related to the actual network protocol.
-    ///
-    /// TODO this could be requests for eth-wire, or general protocol related info
-    ProtocolEvent(ProtocolEvent),
+    CapabilityMessage(CapabilityMessage),
     /// The underlying tcp listener closed.
     TcpListenerClosed {
         /// Address of the closed listener.
@@ -169,12 +177,6 @@ pub enum SwarmEvent {
         node_id: NodeId,
         remote_addr: SocketAddr,
     }, // TODO variants for discovered peers so they get bubbled up to the manager
-}
-
-/// Various protocol related event types bubbled up from a session that need to be handled by the
-/// network.
-pub enum ProtocolEvent {
-    EthWire(EthWireMessage),
 }
 
 pub enum EthWireMessage {

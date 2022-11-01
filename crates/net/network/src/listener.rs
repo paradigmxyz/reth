@@ -25,6 +25,13 @@ pub struct ConnectionListener {
 }
 
 impl ConnectionListener {
+    /// Creates a new [`TcpListener`] that listens for incoming connections.
+    pub async fn bind(addr: SocketAddr) -> io::Result<Self> {
+        let listener = TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        Ok(Self::new(listener, local_addr))
+    }
+
     /// Creates a new connection listener stream.
     pub(crate) fn new(listener: TcpListener, local_address: SocketAddr) -> Self {
         Self { local_address, incoming: TcpListenerStream { inner: listener } }

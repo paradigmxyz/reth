@@ -15,11 +15,12 @@
 //! port of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 
-mod capability;
 mod config;
 mod discovery;
+pub mod error;
 mod listener;
 mod manager;
+mod message;
 mod network;
 mod peers;
 mod request;
@@ -32,5 +33,7 @@ mod transactions;
 /// Identifier for a unique node
 pub type NodeId = reth_discv4::NodeId;
 
+pub use config::NetworkConfig;
 pub use manager::NetworkManager;
 pub use network::NetworkHandle;
+pub use peers::PeersConfig;

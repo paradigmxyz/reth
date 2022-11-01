@@ -5,8 +5,12 @@ use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     net::SocketAddr,
     task::{Context, Poll},
+    time::Duration,
 };
-use tokio::{sync::mpsc, time::Interval};
+use tokio::{
+    sync::mpsc,
+    time::{Instant, Interval},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A communication channel to the [`PeersManager`] to apply changes to the peer set.
@@ -36,6 +40,28 @@ pub(crate) struct PeersManager {
 }
 
 impl PeersManager {
+    /// Create a new instance with the given config
+    pub(crate) fn new(config: PeersConfig) -> Self {
+        let PeersConfig { refill_slots_interval, connection_info } = config;
+        let (manager_tx, handle_rx) = mpsc::unbounded_channel();
+        Self {
+            peers: Default::default(),
+            manager_tx,
+            handle_rx: UnboundedReceiverStream::new(handle_rx),
+            actions: Default::default(),
+            refill_slots_interval: tokio::time::interval_at(
+                Instant::now() + refill_slots_interval,
+                refill_slots_interval,
+            ),
+            connection_info,
+        }
+    }
+
+    /// Returns a new [`PeersHandle`] that can send commands to this type
+    pub(crate) fn handle(&self) -> PeersHandle {
+        PeersHandle { manager_tx: self.manager_tx.clone() }
+    }
+
     pub(crate) fn add_discovered_node(&mut self, node: NodeId, addr: SocketAddr) {
         match self.peers.entry(node) {
             Entry::Occupied(_) => {}
@@ -76,7 +102,8 @@ impl PeersManager {
 }
 
 /// Tracks stats about connected nodes
-struct ConnectionInfo {
+#[derive(Debug)]
+pub struct ConnectionInfo {
     /// Currently occupied slots for outbound connections.
     num_outbound: usize,
     /// Currently occupied slots for inbound connections.
@@ -122,4 +149,27 @@ pub enum PeerAction {
     },
     /// Disconnect an existing connection.
     Disconnect { node_id: NodeId },
+}
+
+/// Config type for initiating a [`PeersManager`] instance
+#[derive(Debug)]
+pub struct PeersConfig {
+    /// How even to recheck free slots for outbound connections
+    pub refill_slots_interval: Duration,
+    /// Restrictions on connections
+    pub connection_info: ConnectionInfo,
+}
+
+impl Default for PeersConfig {
+    fn default() -> Self {
+        Self {
+            refill_slots_interval: Duration::from_millis(1_000),
+            connection_info: ConnectionInfo {
+                num_outbound: 0,
+                num_inbound: 0,
+                max_outbound: 70,
+                max_inbound: 30,
+            },
+        }
+    }
 }

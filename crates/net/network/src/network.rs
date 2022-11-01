@@ -20,8 +20,21 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
-    pub fn new() {
-        todo!()
+    pub(crate) fn new(
+        num_active_peers: Arc<AtomicUsize>,
+        listener_address: Arc<Mutex<SocketAddr>>,
+        to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+        local_node_id: NodeId,
+        peers: PeersHandle,
+    ) -> Self {
+        let inner = NetworkInner {
+            num_active_peers,
+            to_manager_tx,
+            listener_address,
+            local_node_id,
+            peers,
+        };
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -31,7 +44,7 @@ struct NetworkInner {
     /// Sender half of the message channel to the [`NetworkManager`].
     to_manager_tx: UnboundedSender<NetworkHandleMessage>,
     /// The local address that accepts incoming connections.
-    local_address: Arc<Mutex<SocketAddr>>,
+    listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
     local_node_id: NodeId,
     /// Access to the all the nodes

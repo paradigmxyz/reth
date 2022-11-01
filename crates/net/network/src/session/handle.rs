@@ -1,6 +1,6 @@
 //! Session handles
 use crate::{
-    capability::{Capabilities, CapabilityMessage},
+    message::{Capabilities, CapabilityMessage},
     session::SessionId,
     NodeId,
 };
@@ -53,7 +53,9 @@ pub enum PendingSessionEvent {
 /// Commands that can be sent to the spawned session.
 #[derive(Debug)]
 pub(crate) enum SessionCommand {
+    /// Disconnect the connection
     Disconnect,
+    Message(CapabilityMessage),
 }
 
 /// Message variants an active session can produce and send back to the
@@ -64,13 +66,16 @@ pub enum ActiveSessionMessage {
     Closed { node_id: NodeId, remote_addr: SocketAddr },
     /// A session received a valid message via RLPx.
     ValidMessage {
+        /// Identifier of the remote peer.
         node_id: NodeId,
         /// Message received from the peer.
         message: CapabilityMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
+        /// Identifier of the remote peer.
         node_id: NodeId,
+        /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
         message: CapabilityMessage,

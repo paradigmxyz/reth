@@ -1,8 +1,8 @@
 //! Keeps track of the state of the network.
 
 use crate::{
-    capability::{Capabilities, CapabilityMessage},
     discovery::{Discovery, DiscoveryEvent},
+    message::{Capabilities, CapabilityMessage},
     peers::{PeerAction, PeersManager},
     session::PeerMessageSender,
     sync::StateSync,
@@ -47,6 +47,24 @@ impl<C> NetworkState<C>
 where
     C: BlockProvider,
 {
+    /// Create a new state instance with the given params
+    pub(crate) fn new(
+        client: Arc<C>,
+        discovery: Discovery,
+        state_sync: Box<dyn StateSync>,
+        peers_manager: PeersManager,
+    ) -> Self {
+        Self {
+            connected_peers: Default::default(),
+            peers_manager,
+            peers_state: Default::default(),
+            queued_messages: Default::default(),
+            client,
+            discovery,
+            state_sync,
+        }
+    }
+
     /// Event hook for an authenticated session for the peer.
     pub fn on_session_authenticated(
         &mut self,

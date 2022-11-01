@@ -1,6 +1,6 @@
 //! Support for handling peer sessions.
 use crate::{
-    capability::{Capabilities, CapabilityMessage},
+    message::{Capabilities, CapabilityMessage},
     session::handle::{
         ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     },
@@ -10,6 +10,7 @@ use fnv::FnvHashMap;
 use futures::StreamExt;
 pub use handle::PeerMessageSender;
 use std::{
+    collections::HashMap,
     future::Future,
     net::SocketAddr,
     sync::Arc,
@@ -34,6 +35,8 @@ pub struct SessionId(usize);
 pub(crate) struct SessionManager {
     /// Tracks the identifier for the next session.
     next_id: usize,
+    /// Size of the command buffer per session.
+    session_command_buffer: usize,
     /// All spawned session tasks.
     ///
     /// Note: If dropped, the session tasks are aborted.
@@ -44,7 +47,7 @@ pub(crate) struct SessionManager {
     /// session is authenticated, it can be moved to the `active_session` set.
     pending_sessions: FnvHashMap<SessionId, PendingSessionHandle>,
     /// All active sessions that are ready to exchange messages.
-    active_sessions: FnvHashMap<NodeId, ActiveSessionHandle>,
+    active_sessions: HashMap<NodeId, ActiveSessionHandle>,
     /// The original Sender half of the [`PendingSessionEvent`] channel.
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
@@ -66,6 +69,24 @@ pub(crate) struct SessionManager {
 // === impl SessionManager ===
 
 impl SessionManager {
+    /// Creates a new empty [`SessionManager`].
+    pub(crate) fn new(config: SessionsConfig) -> Self {
+        let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
+        let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
+
+        Self {
+            next_id: 0,
+            session_command_buffer: config.session_command_buffer,
+            spawned_tasks: Default::default(),
+            pending_sessions: Default::default(),
+            active_sessions: Default::default(),
+            pending_sessions_tx,
+            pending_session_rx: ReceiverStream::new(pending_sessions_rx),
+            active_session_tx,
+            active_session_rx: ReceiverStream::new(active_session_rx),
+        }
+    }
+
     /// Returns the next unique [`SessionId`].
     fn next_id(&mut self) -> SessionId {
         let id = self.next_id;
@@ -208,6 +229,41 @@ impl SessionManager {
         }
 
         Poll::Pending
+    }
+}
+
+/// Configuration options when creating a [`SessionsManager`].
+pub struct SessionsConfig {
+    /// Size of the session command buffer (per session task).
+    pub session_command_buffer: usize,
+    /// Size of the session event channel buffer.
+    pub session_event_buffer: usize,
+}
+
+impl Default for SessionsConfig {
+    fn default() -> Self {
+        SessionsConfig {
+            // This should be sufficient to slots for handling commands sent to the session task,
+            // since the manager is the sender.
+            session_command_buffer: 10,
+            // This should be greater since the manager is the receiver. The total size will be
+            // `buffer + num sessions`. Each session can therefor fit at least 1 message in the
+            // channel. The buffer size is additional capacity. The channel is always drained on
+            // `poll`.
+            session_event_buffer: 64,
+        }
+    }
+}
+
+impl SessionsConfig {
+    /// Sets the buffer size for the bounded communication channel between the manager and its
+    /// sessions for events emitted by the sessions.
+    ///
+    /// It is expected, that the background session task will stall if they outpace the manager. The
+    /// buffer size provides backpressure on the network I/O.
+    pub fn with_session_event_buffer(mut self, n: usize) -> Self {
+        self.session_event_buffer = n;
+        self
     }
 }
 
