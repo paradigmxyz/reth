@@ -295,7 +295,6 @@ pub(crate) mod tests {
     // Validate that all necessary tables are updated after the
     // header download with some previous progress.
     async fn headers_stage_prev_progress() {
-        // TODO: set bigger range once `MDBX_EKEYMISMATCH` issue is resolved
         let (start, end) = (10000, 10241);
         let head = gen_random_header(start, None);
         let headers = gen_random_header_range(start + 1..end, head.hash());
