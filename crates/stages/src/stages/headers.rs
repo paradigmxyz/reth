@@ -53,11 +53,10 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
 
         // download the headers
         // TODO: handle input.max_block
-        let last_hash = tx.get::<tables::CanonicalHeaders>(last_block_num.into())?.ok_or_else(
-            || -> StageError {
+        let last_hash =
+            tx.get::<tables::CanonicalHeaders>(last_block_num)?.ok_or_else(|| -> StageError {
                 DatabaseIntegrityError::NoCannonicalHash { number: last_block_num }.into()
-            },
-        )?;
+            })?;
         let last_header = tx
             .get::<tables::Headers>((last_block_num, last_hash).into())?
             .ok_or_else(|| -> StageError {
@@ -107,9 +106,7 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: handle bad block
         let tx = &mut db.get_mut();
-        self.unwind_table::<DB, tables::CanonicalHeaders, _>(tx, input.unwind_to, |num| {
-            num.into()
-        })?;
+        self.unwind_table::<DB, tables::CanonicalHeaders, _>(tx, input.unwind_to, |num| num)?;
         self.unwind_table::<DB, tables::HeaderNumbers, _>(tx, input.unwind_to, |key| key.0 .0)?;
         self.unwind_table::<DB, tables::Headers, _>(tx, input.unwind_to, |key| key.0 .0)?;
         self.unwind_table::<DB, tables::HeaderTD, _>(tx, input.unwind_to, |key| key.0 .0)?;
@@ -123,10 +120,9 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         height: BlockNumber,
     ) -> Result<(), StageError> {
-        let hash =
-            tx.get::<tables::CanonicalHeaders>(height.into())?.ok_or_else(|| -> StageError {
-                DatabaseIntegrityError::NoCannonicalHeader { number: height }.into()
-            })?;
+        let hash = tx.get::<tables::CanonicalHeaders>(height)?.ok_or_else(|| -> StageError {
+            DatabaseIntegrityError::NoCannonicalHeader { number: height }.into()
+        })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
         Ok(())
@@ -172,7 +168,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             // TODO: investigate default write flags
             cursor_header_number.append(key, header.number)?;
             cursor_header.append(key, header)?;
-            cursor_canonical.append(key.0 .0.into(), key.0 .1)?;
+            cursor_canonical.append(key.0 .0, key.0 .1)?;
             cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
         }
 
@@ -357,7 +353,7 @@ pub(crate) mod tests {
             Ok(UnwindOutput {stage_progress} ) if stage_progress == input.unwind_to
         );
 
-        db.check_no_entry_above::<tables::CanonicalHeaders, _>(input.unwind_to, |key| key.into())
+        db.check_no_entry_above::<tables::CanonicalHeaders, _>(input.unwind_to, |key| key)
             .expect("failed to check cannonical headers");
         db.check_no_entry_above::<tables::HeaderNumbers, _>(input.unwind_to, |key| key.0 .0)
             .expect("failed to check header numbers");
@@ -456,7 +452,7 @@ pub(crate) mod tests {
                 let key: BlockNumHash = (header.number, header.hash()).into();
                 tx.put::<tables::HeaderNumbers>(key, header.number)?;
                 tx.put::<tables::Headers>(key, header.clone().unlock())?;
-                tx.put::<tables::CanonicalHeaders>(header.number.into(), header.hash())?;
+                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
 
                 let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
                 let td =
