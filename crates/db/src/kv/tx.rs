@@ -1,7 +1,9 @@
 //! Transaction wrapper for libmdbx-sys.
 
 use crate::{kv::cursor::Cursor, utils::decode_one};
-use reth_interfaces::db::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT, DupSort, Encode, Error, Table};
+use reth_interfaces::db::{
+    Compress, DbTx, DbTxGAT, DbTxMut, DbTxMutGAT, DupSort, Encode, Error, Table,
+};
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use std::marker::PhantomData;
 
@@ -82,7 +84,7 @@ impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
             .put(
                 &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Internal(e.into()))?,
                 &key.encode(),
-                &value.encode(),
+                &value.compress(),
                 WriteFlags::UPSERT,
             )
             .map_err(|e| Error::Internal(e.into()))
@@ -91,7 +93,7 @@ impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error> {
         let mut data = None;
 
-        let value = value.map(Encode::encode);
+        let value = value.map(Compress::compress);
         if let Some(value) = &value {
             data = Some(value.as_ref());
         };

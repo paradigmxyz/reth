@@ -4,7 +4,7 @@ use crate::db::{
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
         blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
-        ShardedKey, UncompressedUint,
+        ShardedKey,
     },
     DupSort,
 };
@@ -103,7 +103,7 @@ macro_rules! dupsort {
 
 table!(
     /// Stores the header hashes belonging to the canonical chain.
-    CanonicalHeaders => UncompressedUint<BlockNumber> => HeaderHash);
+    CanonicalHeaders => BlockNumber => HeaderHash);
 
 table!(
     /// Stores the total difficulty from a block header.
@@ -131,15 +131,15 @@ table!(
 
 table!(
     /// Stores the transaction body from canonical transactions. Canonical only
-    Transactions =>  UncompressedUint<TxNumber> => RlpTxBody);
+    Transactions =>  TxNumber => RlpTxBody);
 
 table!(
     /// Stores transaction receipts. Canonical only
-    Receipts =>  UncompressedUint<TxNumber> => Receipt);
+    Receipts =>  TxNumber => Receipt);
 
 table!(
     /// Stores transaction logs. Canonical only
-    Logs =>  UncompressedUint<TxNumber> => Receipt);
+    Logs =>  TxNumber => Receipt);
 
 table!(
     /// Stores the current state of an Account.
@@ -200,7 +200,7 @@ table!(
 
 dupsort!(
     /// Stores state of an account before a certain transaction changed it.
-    AccountChangeSet =>  UncompressedUint<TxNumber> => [Address] AccountBeforeTx);
+    AccountChangeSet =>  TxNumber => [Address] AccountBeforeTx);
 
 dupsort!(
     /// Stores state of a storage key before a certain transaction changed it.
@@ -208,7 +208,7 @@ dupsort!(
 
 table!(
     /// Stores the transaction sender from each transaction.
-    TxSenders =>  UncompressedUint<TxNumber> => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
+    TxSenders =>  TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
 
 table!(
     /// Config.

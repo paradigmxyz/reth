@@ -1,22 +1,22 @@
-//! Implements [`Encode`] and [`Decode`] for [`IntegerList`]
+//! Implements [`Compress`] and [`Uncompress`] for [`IntegerList`]
 
 use crate::db::{
     error::Error,
-    table::{Decode, Encode},
+    table::{Compress, Uncompress},
 };
 use bytes::Bytes;
 use reth_primitives::IntegerList;
 
-impl Encode for IntegerList {
-    type Encoded = Vec<u8>;
+impl Compress for IntegerList {
+    type Compressed = Vec<u8>;
 
-    fn encode(self) -> Self::Encoded {
+    fn compress(self) -> Self::Compressed {
         self.to_bytes()
     }
 }
 
-impl Decode for IntegerList {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
+impl Uncompress for IntegerList {
+    fn uncompress<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         IntegerList::from_bytes(&value.into()).map_err(|e| Error::Decode(eyre::eyre!("{e}")))
     }
 }
