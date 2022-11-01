@@ -5,7 +5,7 @@ use crate::{
 use reth_interfaces::db::{tables, DBContainer, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut};
 use std::fmt::Debug;
 
-const TX_INDEX: StageId = StageId("TX_INDEX");
+const TX_INDEX: StageId = StageId("TxIndex");
 
 /// The cumulative transaction index stage
 /// implementation for staged sync.
@@ -67,5 +67,98 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let tx = db.get_mut();
         unwind_table_by_num_hash::<DB, tables::CumulativeTxCount>(tx, input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::test_utils::{StageTestDB, StageTestRunner};
+    use assert_matches::assert_matches;
+    use reth_interfaces::{
+        db::models::BlockNumHash,
+        test_utils::{gen_random_header, gen_random_header_range},
+    };
+    use reth_primitives::H256;
+    use std::borrow::Borrow;
+    use tokio::sync::oneshot;
+
+    const TEST_STAGE: StageId = StageId("PrevStage");
+
+    #[tokio::test]
+    async fn execute_empty_db() {
+        let runner = TxIndexTestRunner::default();
+        let rx = runner.execute(TxIndex {}, ExecInput::default());
+        assert_matches!(
+            rx.await.unwrap(),
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_no_prev_tx_count() {
+        let runner = TxIndexTestRunner::default();
+        let headers = gen_random_header_range(0..10, H256::zero());
+        runner
+            .db()
+            .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
+            .expect("failed to insert");
+
+        let (head, tail) = (headers.first().unwrap(), headers.last().unwrap());
+        let input = ExecInput {
+            previous_stage: Some((TEST_STAGE, tail.number)),
+            stage_progress: Some(head.number),
+        };
+        let rx = runner.execute(TxIndex {}, input);
+        assert_matches!(
+            rx.await.unwrap(),
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCumulativeTxCount { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn unwind_empty_db() {
+        let runner = TxIndexTestRunner::default();
+        let rx = runner.unwind(TxIndex {}, UnwindInput::default());
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == 0
+        );
+    }
+
+    #[tokio::test]
+    async fn unwind_empty_db_no_input() {
+        let runner = TxIndexTestRunner::default();
+        let headers = gen_random_header_range(0..10, H256::zero());
+        runner
+            .db()
+            .transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
+                (
+                    BlockNumHash((h.number, h.hash())),
+                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
+                )
+            })
+            .expect("failed to insert");
+
+        let rx = runner.unwind(TxIndex {}, UnwindInput::default());
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == 0
+        );
+        runner
+            .db()
+            .check_no_entry_above::<tables::CumulativeTxCount, _>(0, |h| h.number())
+            .expect("failed to check tx count");
+    }
+
+    #[derive(Default)]
+    pub(crate) struct TxIndexTestRunner {
+        db: StageTestDB,
+    }
+
+    impl StageTestRunner for TxIndexTestRunner {
+        fn db(&self) -> &StageTestDB {
+            &self.db
+        }
     }
 }

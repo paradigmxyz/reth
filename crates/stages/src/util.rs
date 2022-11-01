@@ -68,7 +68,7 @@ pub(crate) mod unwind {
     };
     use reth_primitives::BlockNumber;
 
-    /// TODO:
+    /// Unwind table by block number key
     pub(crate) fn unwind_table_by_num<DB, T>(
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         block: BlockNumber,
@@ -80,7 +80,7 @@ pub(crate) mod unwind {
         unwind_table::<DB, T, _>(tx, block, |key| key)
     }
 
-    /// TODO:
+    /// Unwind table by composite block number hash key
     pub(crate) fn unwind_table_by_num_hash<DB, T>(
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         block: BlockNumber,
@@ -113,5 +113,139 @@ pub(crate) mod unwind {
             entry = cursor.prev()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use reth_db::{
+        kv::{test_utils::create_test_db, Env, EnvKind},
+        mdbx::WriteMap,
+    };
+    use reth_interfaces::db::{DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table};
+    use reth_primitives::BlockNumber;
+    use std::{borrow::Borrow, sync::Arc};
+    use tokio::sync::oneshot;
+
+    use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+
+    pub(crate) struct StageTestDB {
+        db: Arc<Env<WriteMap>>,
+    }
+
+    impl Default for StageTestDB {
+        fn default() -> Self {
+            Self { db: Arc::new(create_test_db::<WriteMap>(EnvKind::RW)) }
+        }
+    }
+
+    impl StageTestDB {
+        pub(crate) fn inner(&self) -> Arc<Env<WriteMap>> {
+            self.db.clone()
+        }
+
+        pub(crate) fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
+            DBContainer::new(self.db.borrow()).expect("failed to create db container")
+        }
+
+        pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), Error>
+        where
+            T: Table,
+            S: Clone,
+            F: FnMut(&S) -> (T::Key, T::Value),
+        {
+            let mut db = self.container();
+            let tx = db.get_mut();
+            values.iter().try_for_each(|src| {
+                let (k, v) = map(src);
+                tx.put::<T>(k, v)
+            })?;
+            db.commit()?;
+            Ok(())
+        }
+
+        pub(crate) fn transform_append<T, S, F>(
+            &self,
+            values: &[S],
+            mut transform: F,
+        ) -> Result<(), Error>
+        where
+            T: Table,
+            <T as Table>::Value: Clone,
+            S: Clone,
+            F: FnMut(&Option<<T as Table>::Value>, &S) -> (T::Key, T::Value),
+        {
+            let mut db = self.container();
+            let tx = db.get_mut();
+            let mut cursor = tx.cursor_mut::<T>()?;
+            let mut last = cursor.last()?.map(|(_, v)| v);
+            values.iter().try_for_each(|src| {
+                let (k, v) = transform(&last, src);
+                cursor.append(k, v.clone())?;
+                last = Some(v);
+                Ok(())
+            })?;
+            db.commit()?;
+            Ok(())
+        }
+
+        /// Check there there is no table entry above given block
+        pub(crate) fn check_no_entry_above<T: Table, F>(
+            &self,
+            block: BlockNumber,
+            mut selector: F,
+        ) -> Result<(), Error>
+        where
+            T: Table,
+            F: FnMut(T::Key) -> BlockNumber,
+        {
+            let db = self.container();
+            let tx = db.get();
+
+            let mut cursor = tx.cursor::<T>()?;
+            if let Some((key, _)) = cursor.last()? {
+                assert!(selector(key) <= block);
+            }
+
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    pub(crate) trait StageTestRunner {
+        fn db(&self) -> &StageTestDB;
+
+        fn execute<S: Stage<Env<WriteMap>> + 'static>(
+            &self,
+            mut stage: S,
+            input: ExecInput,
+        ) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
+            let (tx, rx) = oneshot::channel();
+            let db = self.db().inner();
+            tokio::spawn(async move {
+                let mut db = DBContainer::new(db.borrow()).expect("failed to create db container");
+                let result = stage.execute(&mut db, input).await;
+                db.commit().expect("failed to commit");
+                tx.send(result).expect("failed to send message")
+            });
+            rx
+        }
+
+        fn unwind<S: Stage<Env<WriteMap>> + 'static>(
+            &self,
+            mut stage: S,
+            input: UnwindInput,
+        ) -> oneshot::Receiver<Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>>
+        {
+            let (tx, rx) = oneshot::channel();
+            let db = self.db().inner();
+            tokio::spawn(async move {
+                let mut db = DBContainer::new(db.borrow()).expect("failed to create db container");
+                let result = stage.unwind(&mut db, input).await;
+                db.commit().expect("failed to commit");
+                tx.send(result).expect("failed to send result");
+            });
+            rx
+        }
     }
 }

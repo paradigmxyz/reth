@@ -4,7 +4,7 @@ use reth_interfaces::db::{DBContainer, Database};
 use reth_primitives::BlockNumber;
 
 /// Stage execution input, see [Stage::execute].
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
     /// The stage that was run before the current stage and the block number it reached.
     pub previous_stage: Option<(StageId, BlockNumber)>,
@@ -13,7 +13,7 @@ pub struct ExecInput {
 }
 
 /// Stage unwind input, see [Stage::unwind].
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
     /// The current highest block of the stage.
     pub stage_progress: BlockNumber,

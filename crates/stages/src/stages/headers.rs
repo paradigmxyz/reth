@@ -18,7 +18,7 @@ use reth_primitives::{rpc::BigEndianHash, BlockNumber, HeaderLocked, H256, U256}
 use std::fmt::Debug;
 use tracing::*;
 
-const HEADERS: StageId = StageId("HEADERS");
+const HEADERS: StageId = StageId("Headers");
 
 /// The headers stage implementation for staged sync
 #[derive(Debug)]
@@ -177,20 +177,15 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::test_utils::StageTestRunner;
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
-    use reth_db::{kv::Env, mdbx::WriteMap};
-    use reth_interfaces::{
-        db::DBContainer,
-        test_utils::{
-            gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
-        },
+    use reth_interfaces::test_utils::{
+        gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
     };
-    use std::{borrow::Borrow, sync::Arc};
-    use test_utils::HeadersDB;
-    use tokio::sync::oneshot;
+    use test_utils::{HeadersTestRunner, TestDownloader};
 
-    const TEST_STAGE: StageId = StageId("HEADERS");
+    const TEST_STAGE: StageId = StageId("Headers");
     static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::default());
     static CLIENT: Lazy<TestHeadersClient> = Lazy::new(|| TestHeadersClient::default());
 
@@ -198,9 +193,9 @@ mod tests {
     // Check that the execution errors on empty database or
     // prev progress missing from the database.
     async fn headers_execute_empty_db() {
-        let db = HeadersDB::default();
-        let input = ExecInput { previous_stage: None, stage_progress: None };
-        let rx = execute_stage(db.inner(), input, Ok(vec![]));
+        let runner = HeadersTestRunner::default();
+        let stage = create_stage(Ok(vec![]));
+        let rx = runner.execute(stage, ExecInput::default());
         assert_matches!(
             rx.await.unwrap(),
             Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
@@ -210,12 +205,12 @@ mod tests {
     #[tokio::test]
     // Check that the execution exits on downloader timeout.
     async fn headers_execute_timeout() {
+        let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
-        let db = HeadersDB::default();
-        db.insert_header(&head).expect("failed to insert header");
+        runner.insert_header(&head).expect("failed to insert header");
 
-        let input = ExecInput { previous_stage: None, stage_progress: None };
-        let rx = execute_stage(db.inner(), input, Err(DownloadError::Timeout { request_id: 0 }));
+        let stage = create_stage(Err(DownloadError::Timeout { request_id: 0 }));
+        let rx = runner.execute(stage, ExecInput::default());
         CONSENSUS.update_tip(H256::from_low_u64_be(1));
         assert_matches!(rx.await.unwrap(), Ok(ExecOutput { done, .. }) if !done);
     }
@@ -223,16 +218,15 @@ mod tests {
     #[tokio::test]
     // Check that validation error is propagated during the execution.
     async fn headers_execute_validation_error() {
+        let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
-        let db = HeadersDB::default();
-        db.insert_header(&head).expect("failed to insert header");
+        runner.insert_header(&head).expect("failed to insert header");
 
-        let input = ExecInput { previous_stage: None, stage_progress: None };
-        let rx = execute_stage(
-            db.inner(),
-            input,
-            Err(DownloadError::HeaderValidation { hash: H256::zero(), details: "".to_owned() }),
-        );
+        let stage = create_stage(Err(DownloadError::HeaderValidation {
+            hash: H256::zero(),
+            details: "".to_owned(),
+        }));
+        let rx = runner.execute(stage, ExecInput::default());
         CONSENSUS.update_tip(H256::from_low_u64_be(1));
 
         assert_matches!(rx.await.unwrap(), Err(StageError::Validation { block }) if block == 0);
@@ -242,15 +236,14 @@ mod tests {
     // Validate that all necessary tables are updated after the
     // header download on no previous progress.
     async fn headers_execute_no_progress() {
+        let runner = HeadersTestRunner::default();
         let (start, end) = (0, 100);
         let head = gen_random_header(start, None);
-        let headers = gen_random_header_range(start + 1..end, head.hash());
-        let db = HeadersDB::default();
-        db.insert_header(&head).expect("failed to insert header");
+        runner.insert_header(&head).expect("failed to insert header");
 
-        let result: Vec<_> = headers.iter().rev().cloned().collect();
-        let input = ExecInput { previous_stage: None, stage_progress: None };
-        let rx = execute_stage(db.inner(), input, Ok(result));
+        let headers = gen_random_header_range(start + 1..end, head.hash());
+        let stage = create_stage(Ok(headers.iter().rev().cloned().collect::<Vec<_>>()));
+        let rx = runner.execute(stage, ExecInput::default());
         let tip = headers.last().unwrap();
         CONSENSUS.update_tip(tip.hash());
 
@@ -261,7 +254,7 @@ mod tests {
         assert_eq!(result.stage_progress, tip.number);
 
         for header in headers {
-            assert!(db.validate_db_header(&header).is_ok());
+            assert!(runner.validate_db_header(&header).is_ok());
         }
     }
 
@@ -269,19 +262,19 @@ mod tests {
     // Validate that all necessary tables are updated after the
     // header download with some previous progress.
     async fn headers_stage_prev_progress() {
+        let runner = HeadersTestRunner::default();
         // TODO: set bigger range once `MDBX_EKEYMISMATCH` issue is resolved
         let (start, end) = (10000, 10240);
         let head = gen_random_header(start, None);
         let headers = gen_random_header_range(start + 1..end, head.hash());
-        let db = HeadersDB::default();
-        db.insert_header(&head).expect("failed to insert header");
+        runner.insert_header(&head).expect("failed to insert header");
 
-        let result: Vec<_> = headers.iter().rev().cloned().collect();
+        let stage = create_stage(Ok(headers.iter().rev().cloned().collect::<Vec<_>>()));
         let input = ExecInput {
             previous_stage: Some((TEST_STAGE, head.number)),
             stage_progress: Some(head.number),
         };
-        let rx = execute_stage(db.inner(), input, Ok(result));
+        let rx = runner.execute(stage, input);
         let tip = headers.last().unwrap();
         CONSENSUS.update_tip(tip.hash());
 
@@ -292,16 +285,16 @@ mod tests {
         assert_eq!(result.stage_progress, tip.number);
 
         for header in headers {
-            assert!(db.validate_db_header(&header).is_ok());
+            assert!(runner.validate_db_header(&header).is_ok());
         }
     }
 
     #[tokio::test]
     // Check that unwind does not panic on empty database.
     async fn headers_unwind_empty_db() {
-        let db = HeadersDB::default();
+        let runner = HeadersTestRunner::default();
         let input = UnwindInput { bad_block: None, stage_progress: 100, unwind_to: 100 };
-        let rx = unwind_stage(db.inner(), input);
+        let rx = runner.unwind(create_stage(Ok(vec![])), input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput {stage_progress} ) if stage_progress == input.unwind_to
@@ -311,130 +304,105 @@ mod tests {
     #[tokio::test]
     // Check that unwind can remove headers across gaps
     async fn headers_unwind_db_gaps() {
+        let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
         let first_range = gen_random_header_range(1..20, head.hash());
         let second_range = gen_random_header_range(50..100, H256::zero());
-        let db = HeadersDB::default();
-        db.insert_header(&head).expect("failed to insert header");
-        for header in first_range.iter().chain(second_range.iter()) {
-            db.insert_header(&header).expect("failed to insert header");
-        }
+        runner.insert_header(&head).expect("failed to insert header");
+        runner
+            .insert_headers(first_range.iter().chain(second_range.iter()))
+            .expect("failed to insert headers");
 
+        let stage = create_stage(Ok(vec![]));
         let input = UnwindInput { bad_block: None, stage_progress: 15, unwind_to: 15 };
-        let rx = unwind_stage(db.inner(), input);
+        let rx = runner.unwind(stage, input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput {stage_progress} ) if stage_progress == input.unwind_to
         );
 
-        db.check_no_entry_above::<tables::CanonicalHeaders, _>(input.unwind_to, |key| key)
+        runner
+            .db()
+            .check_no_entry_above::<tables::CanonicalHeaders, _>(input.unwind_to, |key| key)
             .expect("failed to check cannonical headers");
-        db.check_no_entry_above::<tables::HeaderNumbers, _>(input.unwind_to, |key| key.number())
+        runner
+            .db()
+            .check_no_entry_above::<tables::HeaderNumbers, _>(input.unwind_to, |key| key.number())
             .expect("failed to check header numbers");
-        db.check_no_entry_above::<tables::Headers, _>(input.unwind_to, |key| key.number())
+        runner
+            .db()
+            .check_no_entry_above::<tables::Headers, _>(input.unwind_to, |key| key.number())
             .expect("failed to check headers");
-        db.check_no_entry_above::<tables::HeaderTD, _>(input.unwind_to, |key| key.number())
+        runner
+            .db()
+            .check_no_entry_above::<tables::HeaderTD, _>(input.unwind_to, |key| key.number())
             .expect("failed to check td");
     }
 
-    // A helper function to run [HeaderStage::execute]
-    fn execute_stage(
-        db: Arc<Env<WriteMap>>,
-        input: ExecInput,
-        download_result: Result<Vec<HeaderLocked>, DownloadError>,
-    ) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
-        let (tx, rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let db = db.clone();
-            let mut db = DBContainer::<Env<WriteMap>>::new(db.borrow()).unwrap();
-            let mut stage = HeaderStage {
-                client: &*CLIENT,
-                consensus: &*CONSENSUS,
-                downloader: test_utils::TestDownloader::new(download_result),
-            };
-            let result = stage.execute(&mut db, input).await;
-            db.commit().expect("failed to commit");
-            tx.send(result).expect("failed to send result");
-        });
-        rx
+    // Create an instance of [HeaderStage]
+    fn create_stage<'a>(
+        result: Result<Vec<HeaderLocked>, DownloadError>,
+    ) -> HeaderStage<TestDownloader, &'a TestConsensus, &'a TestHeadersClient> {
+        HeaderStage {
+            client: &*CLIENT,
+            consensus: &*CONSENSUS,
+            downloader: test_utils::TestDownloader::new(result),
+        }
     }
 
-    // A helper function to run [HeaderStage::unwind]
-    fn unwind_stage(
-        db: Arc<Env<WriteMap>>,
-        input: UnwindInput,
-    ) -> oneshot::Receiver<Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>> {
-        let (tx, rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let db = db.clone();
-            let mut db = DBContainer::<Env<WriteMap>>::new(db.borrow()).unwrap();
-            let mut stage = HeaderStage {
-                client: &*CLIENT,
-                consensus: &*CONSENSUS,
-                downloader: test_utils::TestDownloader::new(Ok(vec![])),
-            };
-            let result = stage.unwind(&mut db, input).await;
-            db.commit().expect("failed to commit");
-            tx.send(result).expect("failed to send result");
-        });
-        rx
-    }
-
-    pub(crate) mod test_utils {
+    mod test_utils {
+        use crate::util::test_utils::{StageTestDB, StageTestRunner};
         use async_trait::async_trait;
-        use reth_db::{
-            kv::{test_utils::create_test_db, Env, EnvKind},
-            mdbx,
-            mdbx::WriteMap,
-        };
         use reth_interfaces::{
             consensus::ForkchoiceState,
-            db::{
-                self, models::blocks::BlockNumHash, tables, DBContainer, DbCursorRO, DbCursorRW,
-                DbTx, DbTxMut, Table,
-            },
+            db::{self, models::blocks::BlockNumHash, tables, DbTx},
             p2p::headers::downloader::{DownloadError, Downloader},
             test_utils::{TestConsensus, TestHeadersClient},
         };
-        use reth_primitives::{rpc::BigEndianHash, BlockNumber, HeaderLocked, H256, U256};
-        use std::{borrow::Borrow, sync::Arc, time::Duration};
+        use reth_primitives::{rpc::BigEndianHash, HeaderLocked, H256, U256};
+        use std::{ops::Deref, time::Duration};
 
-        pub(crate) struct HeadersDB {
-            db: Arc<Env<WriteMap>>,
+        #[derive(Default)]
+        pub(crate) struct HeadersTestRunner {
+            db: StageTestDB,
         }
 
-        impl Default for HeadersDB {
-            fn default() -> Self {
-                Self { db: Arc::new(create_test_db::<mdbx::WriteMap>(EnvKind::RW)) }
+        impl StageTestRunner for HeadersTestRunner {
+            fn db(&self) -> &StageTestDB {
+                &self.db
             }
         }
 
-        impl HeadersDB {
-            pub(crate) fn inner(&self) -> Arc<Env<WriteMap>> {
-                self.db.clone()
-            }
-
-            fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
-                DBContainer::new(self.db.borrow()).expect("failed to create db container")
-            }
-
+        impl HeadersTestRunner {
             /// Insert header into tables
             pub(crate) fn insert_header(&self, header: &HeaderLocked) -> Result<(), db::Error> {
-                let mut db = self.container();
-                let tx = db.get_mut();
+                self.insert_headers(std::iter::once(header))
+            }
 
-                let key: BlockNumHash = (header.number, header.hash()).into();
-                tx.put::<tables::HeaderNumbers>(key, header.number)?;
-                tx.put::<tables::Headers>(key, header.clone().unlock())?;
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+            /// Insert headers into tables
+            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
+            where
+                I: Iterator<Item = &'a HeaderLocked>,
+            {
+                let headers = headers.collect::<Vec<_>>();
+                self.db.map_put::<tables::HeaderNumbers, _, _>(&headers, |h| {
+                    (BlockNumHash((h.number, h.hash())), h.number)
+                })?;
+                self.db.map_put::<tables::Headers, _, _>(&headers, |h| {
+                    (BlockNumHash((h.number, h.hash())), h.deref().clone().unlock())
+                })?;
+                self.db.map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| {
+                    (h.number, h.hash())
+                })?;
 
-                let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
-                let td =
-                    U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap_or(vec![]));
-                cursor_td
-                    .append(key, H256::from_uint(&(td + header.difficulty)).as_bytes().to_vec())?;
+                self.db.transform_append::<tables::HeaderTD, _, _>(&headers, |prev, h| {
+                    let prev_td = U256::from_big_endian(&prev.clone().unwrap_or_default());
+                    (
+                        BlockNumHash((h.number, h.hash())),
+                        H256::from_uint(&(prev_td + h.difficulty)).as_bytes().to_vec(),
+                    )
+                })?;
 
-                db.commit()?;
                 Ok(())
             }
 
@@ -443,7 +411,7 @@ mod tests {
                 &self,
                 header: &HeaderLocked,
             ) -> Result<(), db::Error> {
-                let db = self.container();
+                let db = self.db.container();
                 let tx = db.get();
                 let key: BlockNumHash = (header.number, header.hash()).into();
 
@@ -464,27 +432,6 @@ mod tests {
                         parent_td.map(|td| U256::from_big_endian(&td) + header.difficulty),
                         Some(td)
                     );
-                }
-
-                Ok(())
-            }
-
-            /// Check there there is no table entry above given block
-            pub(crate) fn check_no_entry_above<T: Table, F>(
-                &self,
-                block: BlockNumber,
-                mut selector: F,
-            ) -> Result<(), db::Error>
-            where
-                T: Table,
-                F: FnMut(T::Key) -> BlockNumber,
-            {
-                let db = self.container();
-                let tx = db.get();
-
-                let mut cursor = tx.cursor::<T>()?;
-                if let Some((key, _)) = cursor.last()? {
-                    assert!(selector(key) <= block);
                 }
 
                 Ok(())
