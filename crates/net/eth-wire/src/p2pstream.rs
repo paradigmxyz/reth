@@ -86,19 +86,11 @@ where
     /// completed.
     pub async fn handshake(mut self, hello: HelloMessage) -> Result<P2PStream<S>, P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
-        let mut our_hello_bytes = BytesMut::new();
-        P2PMessage::Hello(hello.clone()).encode(&mut our_hello_bytes);
-        println!("sending hello: {:?}", hex::encode(&our_hello_bytes));
 
         // debugging - raw hello encoding
         let mut raw_hello_bytes = BytesMut::new();
         hello.encode(&mut raw_hello_bytes);
-        println!("raw hello: {:?}", hex::encode(&raw_hello_bytes));
-        // try to decode
-        let decoded_hello = HelloMessage::decode(&mut &raw_hello_bytes[..]);
-        println!("decoded hello: {:?}", decoded_hello);
-
-        self.stream.inner.send(our_hello_bytes.into()).await?;
+        self.stream.inner.send(raw_hello_bytes.into()).await?;
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
@@ -117,16 +109,12 @@ where
         // get the message id
         let id = *hello_bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
 
-        println!("hello message received: {:x?}", hex::encode(&hello_bytes));
         // the first message sent MUST be the hello message
         if id != P2PMessageID::Hello as u8 {
             return Err(P2PStreamError::HandshakeError(
                 P2PHandshakeError::NonHelloMessageInHandshake,
             ))
         }
-
-        // decode the hello message from the rest of the bytes
-        let their_hello = HelloMessage::decode(&mut &hello_bytes[1..])?;
 
         // TODO: determine shared capabilities
 
