@@ -59,6 +59,8 @@ pub enum P2PStreamError {
     PingerError(#[from] PingerError),
     #[error("ping timed out with {0} retries")]
     PingTimeout(u8),
+    #[error("mismatched protocol version in Hello message. expected: {expected:?}, got: {got:?}")]
+    MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("started ping task before the handshake completed")]
     PingBeforeHandshake,
     // TODO: remove / reconsider

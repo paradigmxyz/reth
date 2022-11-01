@@ -116,10 +116,41 @@ where
             ))
         }
 
-        // TODO: determine shared capabilities
+        let their_hello = match P2PMessage::decode(&mut &hello_bytes[..])? {
+            P2PMessage::Hello(hello) => Ok(hello),
+            _ => {
+                // TODO: this should never occur due to the id check
+                Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
+            }
+        }?;
+
+        self.set_capability_offsets(hello.capabilities, their_hello.capabilities);
+
+        // TODO: explicitly document that we only support v5.
+        if their_hello.protocol_version != ProtocolVersion::V5 {
+            // TODO: do we want to send a `Disconnect` message here?
+            return Err(P2PStreamError::MismatchedProtocolVersion {
+                expected: ProtocolVersion::V5 as u8,
+                got: their_hello.protocol_version as u8,
+            })
+        }
 
         self.stream.authed = true;
         Ok(self.stream)
+    }
+
+    /// Determines the offsets for each shared capability between the input list of peer
+    /// capabilities and the input list of locally supported capabilities.
+    pub fn set_capability_offsets(
+        &self,
+        local_capabilities: Vec<CapabilityMessage>,
+        peer_capabilities: Vec<CapabilityMessage>,
+    ) {
+        // find intersection of capabilities
+        // find highest shared version of each shared capability
+        // order versions based on capability name (alphabetical) and select offsets based on
+        // BASE_OFFSET + prev_total_messages
+        todo!()
     }
 }
 
