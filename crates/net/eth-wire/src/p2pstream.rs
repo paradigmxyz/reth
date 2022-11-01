@@ -32,36 +32,22 @@ const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
 /// [`HANDSHAKE_TIMEOUT`] determines the amount of time to wait before determining that a `p2p`
 /// handshake has timed out.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// [`PING_TIMEOUT`] determines the amount of time to wait before determining that a `p2p` ping has
+/// timed out.
 const PING_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// [`PING_INTERVAL`] determines the amount of time to wait between sending `p2p` ping messages
+/// when the peer is responsive.
 const PING_INTERVAL: Duration = Duration::from_secs(60);
+
+/// [`GRACE_PERIOD`] determines the amount of time to wait for a peer to disconnect after sending a
+/// [`P2PMessage::Disconnect`] message.
 const GRACE_PERIOD: Duration = Duration::from_secs(2);
+
+/// [`MAX_FAILED_PINGS`] determines the maximum number of failed ping attempts before disconnecting
+/// from a peer.
 const MAX_FAILED_PINGS: u8 = 3;
-
-/// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
-/// protocol messages.
-#[pin_project]
-pub struct P2PStream<S> {
-    #[pin]
-    inner: S,
-
-    /// Whether the `Hello` handshake has been completed
-    authed: bool,
-
-    /// The snappy encoder used for compressing outgoing messages
-    encoder: snap::raw::Encoder,
-
-    /// The snappy decoder used for decompressing incoming messages
-    decoder: snap::raw::Decoder,
-
-    /// The state machine used for keeping track of the peer's ping status.
-    pinger: IntervalTimeoutPinger,
-
-    // currently starts at 0x10
-    // maybe we need an array of offsets and lengths for each subprotocol and can just subtract
-    // based on the range of the message id / protocol length
-    /// The offset? TODO: revisit when implementing shared capabilities
-    offset: u8,
-}
 
 /// An un-authenticated `P2PStream`. This is consumed and returns a [`P2PStream`] after the `Hello`
 /// handshake is completed.
@@ -94,7 +80,6 @@ where
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
-        // todo: fix clippy
         let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stream.inner.next())
             .await
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
@@ -157,6 +142,32 @@ where
     }
 }
 
+/// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
+/// protocol messages.
+#[pin_project]
+pub struct P2PStream<S> {
+    #[pin]
+    inner: S,
+
+    /// Whether the `Hello` handshake has been completed
+    authed: bool,
+
+    /// The snappy encoder used for compressing outgoing messages
+    encoder: snap::raw::Encoder,
+
+    /// The snappy decoder used for decompressing incoming messages
+    decoder: snap::raw::Decoder,
+
+    /// The state machine used for keeping track of the peer's ping status.
+    pinger: IntervalTimeoutPinger,
+
+    // currently starts at 0x10
+    // maybe we need an array of offsets and lengths for each subprotocol and can just subtract
+    // based on the range of the message id / protocol length
+    /// The offset? TODO: revisit when implementing shared capabilities
+    offset: u8,
+}
+
 impl<S> P2PStream<S> {
     /// Create a new unauthed [`P2PStream`] from the provided stream. You will need to manually
     /// handshake with a peer.
@@ -168,128 +179,6 @@ impl<S> P2PStream<S> {
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
             pinger: IntervalTimeoutPinger::new(MAX_FAILED_PINGS, PING_INTERVAL, PING_TIMEOUT),
-        }
-    }
-}
-
-/// This represents only the reserved `p2p` subprotocol messages.
-#[derive(Debug, PartialEq, Eq)]
-pub enum P2PMessage {
-    /// The first packet sent over the connection, and sent once by both sides.
-    Hello(HelloMessage),
-
-    /// Inform the peer that a disconnection is imminent; if received, a peer should disconnect
-    /// immediately.
-    Disconnect(DisconnectReason),
-
-    /// Requests an immediate reply of [`Pong`] from the peer.
-    Ping,
-
-    /// Reply to the peer's [`Ping`] packet.
-    Pong,
-}
-
-impl P2PMessage {
-    /// Gets the [`P2PMessageID`] for the given message.
-    pub fn message_id(&self) -> P2PMessageID {
-        match self {
-            P2PMessage::Hello(_) => P2PMessageID::Hello,
-            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
-            P2PMessage::Ping => P2PMessageID::Ping,
-            P2PMessage::Pong => P2PMessageID::Pong,
-        }
-    }
-}
-
-impl Encodable for P2PMessage {
-    fn length(&self) -> usize {
-        let payload_len = match self {
-            P2PMessage::Hello(msg) => msg.length(),
-            P2PMessage::Disconnect(msg) => msg.length(),
-            P2PMessage::Ping => 3, // len([0x01, 0x00, 0x80]) = 3
-            P2PMessage::Pong => 3, // len([0x01, 0x00, 0x80]) = 3
-        };
-        payload_len + 1 // (1 for length of p2p message id)
-    }
-
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        out.put_u8(self.message_id() as u8);
-        match self {
-            P2PMessage::Hello(msg) => msg.encode(out),
-            P2PMessage::Disconnect(msg) => msg.encode(out),
-            P2PMessage::Ping => {
-                out.put_u8(0x01);
-                out.put_u8(0x00);
-                out.put_u8(0x80);
-            }
-            P2PMessage::Pong => {
-                out.put_u8(0x01);
-                out.put_u8(0x00);
-                out.put_u8(0x80);
-            }
-        }
-    }
-}
-
-impl Decodable for P2PMessage {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let first = buf.first().expect("cannot decode empty p2p message");
-        let id = P2PMessageID::try_from(*first)
-            .or(Err(DecodeError::Custom("unknown p2p message id")))?;
-        buf.advance(1);
-        match id {
-            P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
-            P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
-            P2PMessageID::Ping => {
-                // len([0x01, 0x00, 0x80]) = 3
-                buf.advance(3);
-                Ok(P2PMessage::Ping)
-            }
-            P2PMessageID::Pong => {
-                // len([0x01, 0x00, 0x80]) = 3
-                buf.advance(3);
-                Ok(P2PMessage::Pong)
-            }
-        }
-    }
-}
-
-/// Message IDs for `p2p` subprotocol messages.
-pub enum P2PMessageID {
-    /// Message ID for the [`P2PMessage::Hello`] message.
-    Hello = 0x00,
-
-    /// Message ID for the [`P2PMessage::Disconnect`] message.
-    Disconnect = 0x01,
-
-    /// Message ID for the [`P2PMessage::Ping`] message.
-    Ping = 0x02,
-
-    /// Message ID for the [`P2PMessage::Pong`] message.
-    Pong = 0x03,
-}
-
-impl From<P2PMessage> for P2PMessageID {
-    fn from(msg: P2PMessage) -> Self {
-        match msg {
-            P2PMessage::Hello(_) => P2PMessageID::Hello,
-            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
-            P2PMessage::Ping => P2PMessageID::Ping,
-            P2PMessage::Pong => P2PMessageID::Pong,
-        }
-    }
-}
-
-impl TryFrom<u8> for P2PMessageID {
-    type Error = P2PStreamError;
-
-    fn try_from(id: u8) -> Result<Self, Self::Error> {
-        match id {
-            0x00 => Ok(P2PMessageID::Hello),
-            0x01 => Ok(P2PMessageID::Disconnect),
-            0x02 => Ok(P2PMessageID::Ping),
-            0x03 => Ok(P2PMessageID::Pong),
-            _ => Err(P2PStreamError::UnknownReservedMessageId(id)),
         }
     }
 }
@@ -431,53 +320,127 @@ where
     }
 }
 
-// TODO: reconsider api, if we want to layer things like ethstream on top of a p2pstream, we need
-// to use the above implementation. however, this might only be possible if we implement a single
-// subprotocol, since ethstream is not aware of other subprotocols and their message id offsets.
-// example: currently, ethstream assumes message ids start at 0x00.
-// in practice this is never the case for `eth` messages over RLPx.
-// can we have different implementations of Sink<EthMessage> depending on what type the underlying
-// sink is?
-// Sink<EthMessage> for EthStream<S> where S: Sink<Bytes, Error = io::Error> would encode the
-// message and send over the inner sink
-// (this would be used in a non-RLPx transport / codec)
-//
-// Sink<EthMessage for EthStream<S> where S: Sink<P2PMessage, Error = io::Error> would use a
-// From<EthMessage> for P2PMessage impl and send that to the inner sink
-// impl<S> Sink<P2PMessage> for P2PStream<S>
-// where
-//     S: Sink<Bytes, Error = io::Error> + Unpin,
-// {
-//     type Error = P2PStreamError;
+/// This represents only the reserved `p2p` subprotocol messages.
+#[derive(Debug, PartialEq, Eq)]
+pub enum P2PMessage {
+    /// The first packet sent over the connection, and sent once by both sides.
+    Hello(HelloMessage),
 
-//     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//         self.project().inner.poll_ready(cx).map_err(Into::into)
-//     }
+    /// Inform the peer that a disconnection is imminent; if received, a peer should disconnect
+    /// immediately.
+    Disconnect(DisconnectReason),
 
-//     fn start_send(self: Pin<&mut Self>, item: P2PMessage) -> Result<(), Self::Error> {
-//         if self.authed && matches!(item, P2PMessage::Hello(_)) {
-//             return Err(P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake))
-//         }
+    /// Requests an immediate reply of [`Pong`] from the peer.
+    Ping,
 
-//         let mut bytes = BytesMut::new();
-//         item.encode(&mut bytes);
+    /// Reply to the peer's [`Ping`] packet.
+    Pong,
+}
 
-//         // all messages sent in this stream are subprotocol messages, so we need to switch the
-//         // message id based on the offset
-//         bytes[0] += self.offset;
+impl P2PMessage {
+    /// Gets the [`P2PMessageID`] for the given message.
+    pub fn message_id(&self) -> P2PMessageID {
+        match self {
+            P2PMessage::Hello(_) => P2PMessageID::Hello,
+            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
+            P2PMessage::Ping => P2PMessageID::Ping,
+            P2PMessage::Pong => P2PMessageID::Pong,
+        }
+    }
+}
 
-//         self.project().inner.start_send(bytes.into())?;
-//         Ok(())
-//     }
+impl Encodable for P2PMessage {
+    fn length(&self) -> usize {
+        let payload_len = match self {
+            P2PMessage::Hello(msg) => msg.length(),
+            P2PMessage::Disconnect(msg) => msg.length(),
+            P2PMessage::Ping => 3, // len([0x01, 0x00, 0x80]) = 3
+            P2PMessage::Pong => 3, // len([0x01, 0x00, 0x80]) = 3
+        };
+        payload_len + 1 // (1 for length of p2p message id)
+    }
 
-//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//         self.project().inner.poll_flush(cx).map_err(Into::into)
-//     }
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        out.put_u8(self.message_id() as u8);
+        match self {
+            P2PMessage::Hello(msg) => msg.encode(out),
+            P2PMessage::Disconnect(msg) => msg.encode(out),
+            P2PMessage::Ping => {
+                out.put_u8(0x01);
+                out.put_u8(0x00);
+                out.put_u8(0x80);
+            }
+            P2PMessage::Pong => {
+                out.put_u8(0x01);
+                out.put_u8(0x00);
+                out.put_u8(0x80);
+            }
+        }
+    }
+}
 
-//     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//         self.project().inner.poll_close(cx).map_err(Into::into)
-//     }
-// }
+impl Decodable for P2PMessage {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let first = buf.first().expect("cannot decode empty p2p message");
+        let id = P2PMessageID::try_from(*first)
+            .or(Err(DecodeError::Custom("unknown p2p message id")))?;
+        buf.advance(1);
+        match id {
+            P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
+            P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
+            P2PMessageID::Ping => {
+                // len([0x01, 0x00, 0x80]) = 3
+                buf.advance(3);
+                Ok(P2PMessage::Ping)
+            }
+            P2PMessageID::Pong => {
+                // len([0x01, 0x00, 0x80]) = 3
+                buf.advance(3);
+                Ok(P2PMessage::Pong)
+            }
+        }
+    }
+}
+
+/// Message IDs for `p2p` subprotocol messages.
+pub enum P2PMessageID {
+    /// Message ID for the [`P2PMessage::Hello`] message.
+    Hello = 0x00,
+
+    /// Message ID for the [`P2PMessage::Disconnect`] message.
+    Disconnect = 0x01,
+
+    /// Message ID for the [`P2PMessage::Ping`] message.
+    Ping = 0x02,
+
+    /// Message ID for the [`P2PMessage::Pong`] message.
+    Pong = 0x03,
+}
+
+impl From<P2PMessage> for P2PMessageID {
+    fn from(msg: P2PMessage) -> Self {
+        match msg {
+            P2PMessage::Hello(_) => P2PMessageID::Hello,
+            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
+            P2PMessage::Ping => P2PMessageID::Ping,
+            P2PMessage::Pong => P2PMessageID::Pong,
+        }
+    }
+}
+
+impl TryFrom<u8> for P2PMessageID {
+    type Error = P2PStreamError;
+
+    fn try_from(id: u8) -> Result<Self, Self::Error> {
+        match id {
+            0x00 => Ok(P2PMessageID::Hello),
+            0x01 => Ok(P2PMessageID::Disconnect),
+            0x02 => Ok(P2PMessageID::Ping),
+            0x03 => Ok(P2PMessageID::Pong),
+            _ => Err(P2PStreamError::UnknownReservedMessageId(id)),
+        }
+    }
+}
 
 /// A message indicating a supported capability and capability version.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
@@ -667,7 +630,6 @@ impl Decodable for DisconnectReason {
     }
 }
 
-// TODO: test ping pong stuff
 #[cfg(test)]
 mod tests {
     use reth_ecies::util::pk2id;
