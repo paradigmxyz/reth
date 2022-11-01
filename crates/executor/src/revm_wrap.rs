@@ -29,7 +29,7 @@ impl<DB: ExecutorDb> State<DB> {
     }
 
     /// Consume State and return inner DbExecutable.
-    pub fn unwrap(self) -> DB {
+    pub fn into_inner(self) -> DB {
         self.0
     }
 }

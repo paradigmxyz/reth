@@ -1,8 +1,7 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
-use auto_impl::auto_impl;
-use reth_interfaces::consensus::Error;
-use reth_primitives::{BlockHash, BlockLocked, Header, HeaderLocked};
+use reth_interfaces::{consensus::Error, provider::HeaderProvider, Result as RethResult};
+use reth_primitives::{BlockLocked, HeaderLocked, TransactionSigned};
 use std::time::SystemTime;
 
 /// Validate header standalone
@@ -33,6 +32,15 @@ pub fn validate_header_standalone(
     Ok(())
 }
 
+/// Validate transactions standlone
+pub fn validate_transactions_standalone(
+    _transactions: &[TransactionSigned],
+    _config: &Config,
+) -> Result<(), Error> {
+    // TODO
+    Ok(())
+}
+
 /// Validate block standalone
 pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     // check omners hash
@@ -52,6 +60,11 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
             expected: block.header.transactions_root,
         })
     }
+
+    // TODO transaction verification, Maybe make it configurable as in check only
+    // signatures/limits/types
+
+    // check if all transactions limit does not goes over block limit
 
     // check receipts root
     let receipts_root = crate::proofs::calculate_receipt_root(block.receipts.iter());
@@ -163,20 +176,6 @@ pub fn validate_header_regarding_parent(
     Ok(())
 }
 
-/// Provider needs for verification of block agains the chain
-///
-/// TODO wrap all function around `Result` as this can trigger internal db error.
-/// I didn't know what error to put (Probably needs to be database) so i left it for later as it
-/// will be easy to integrate
-#[auto_impl(&)]
-pub trait BlockhainProvider {
-    /// Check if block is known
-    fn is_known(&self, block_hash: &BlockHash) -> bool;
-
-    /// Get header by block hash
-    fn header(&self, block_number: &BlockHash) -> Option<Header>;
-}
-
 /// Validate block in regards to chain (parent)
 ///
 /// Checks:
@@ -184,20 +183,20 @@ pub trait BlockhainProvider {
 ///  If parent is known
 ///
 /// Returns parent block header  
-pub fn validate_block_regarding_chain<PROV: BlockhainProvider>(
+pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
     block: &BlockLocked,
-    provider: PROV,
-) -> Result<HeaderLocked, Error> {
+    provider: &PROV,
+) -> RethResult<HeaderLocked> {
     let hash = block.header.hash();
 
     // Check if block is known.
-    if provider.is_known(&hash) {
-        return Err(Error::BlockKnown { hash, number: block.header.number })
+    if provider.is_known(&hash)? {
+        return Err(Error::BlockKnown { hash, number: block.header.number }.into())
     }
 
     // Check if parent is known.
     let parent = provider
-        .header(&block.parent_hash)
+        .header(&block.parent_hash)?
         .ok_or(Error::ParentUnknown { hash: block.parent_hash })?;
 
     // Return parent header.
@@ -205,11 +204,11 @@ pub fn validate_block_regarding_chain<PROV: BlockhainProvider>(
 }
 
 /// Full validation of block before execution.
-pub fn full_validation<PROV: BlockhainProvider>(
+pub fn full_validation<PROV: HeaderProvider>(
     block: &BlockLocked,
     provider: PROV,
     config: &Config,
-) -> Result<(), Error> {
+) -> RethResult<()> {
     validate_header_standalone(&block.header, config)?;
     validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
@@ -219,7 +218,8 @@ pub fn full_validation<PROV: BlockhainProvider>(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::hex_literal::hex;
+    use reth_interfaces::Result;
+    use reth_primitives::{hex_literal::hex, BlockHash, Header};
 
     use super::*;
 
@@ -266,13 +266,13 @@ mod tests {
         }
     }
 
-    impl BlockhainProvider for Provider {
-        fn is_known(&self, _block_hash: &BlockHash) -> bool {
-            self.is_known
+    impl HeaderProvider for Provider {
+        fn is_known(&self, _block_hash: &BlockHash) -> Result<bool> {
+            Ok(self.is_known)
         }
 
-        fn header(&self, _block_number: &BlockHash) -> Option<Header> {
-            self.parent.clone()
+        fn header(&self, _block_number: &BlockHash) -> Result<Option<Header>> {
+            Ok(self.parent.clone())
         }
     }
     /// got test block
@@ -330,7 +330,7 @@ mod tests {
 
         assert_eq!(
             full_validation(&block, provider, &config),
-            Err(Error::BlockKnown { hash: block.hash(), number: block.number }),
+            Err(Error::BlockKnown { hash: block.hash(), number: block.number }.into()),
             "Should fail with error"
         );
     }
