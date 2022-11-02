@@ -1,21 +1,43 @@
 use reth_interfaces::executor::ExecutorDb;
 use reth_primitives::{BlockLocked, Transaction, TransactionKind, H160, H256, U256};
 use revm::{
-    db::{CacheDB, Database, EmptyDB},
+    db::{CacheDB, DatabaseRef},
     BlockEnv, TransactTo, TxEnv,
 };
 use std::convert::Infallible;
 
-/// Temporary stateDB TODO
-pub type TempStateDb = CacheDB<EmptyDB>;
+/// SubState of database. Uses revm internal cache with binding to reth DbExecutor trait.
+pub type SubState<DB> = CacheDB<State<DB>>;
 
 /// Wrapper around ExeuctorDb that implements revm database trait
-pub struct Wrapper<'a>(&'a dyn ExecutorDb);
+pub struct State<DB: ExecutorDb>(DB);
 
-impl<'a> Database for Wrapper<'a> {
+impl<DB: ExecutorDb> State<DB> {
+    /// Create new State with generic ExecutorDb.
+    pub fn new(db: DB) -> Self {
+        Self(db)
+    }
+
+    /// Return inner state reference
+    pub fn state(&self) -> &DB {
+        &self.0
+    }
+
+    /// Return inner state mutable reference
+    pub fn state_mut(&mut self) -> &mut DB {
+        &mut self.0
+    }
+
+    /// Consume State and return inner DbExecutable.
+    pub fn into_inner(self) -> DB {
+        self.0
+    }
+}
+
+impl<DB: ExecutorDb> DatabaseRef for State<DB> {
     type Error = Infallible;
 
-    fn basic(&mut self, address: H160) -> Result<Option<revm::AccountInfo>, Self::Error> {
+    fn basic(&self, address: H160) -> Result<Option<revm::AccountInfo>, Self::Error> {
         Ok(self.0.basic_account(address).map(|account| revm::AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
@@ -24,19 +46,19 @@ impl<'a> Database for Wrapper<'a> {
         }))
     }
 
-    fn code_by_hash(&mut self, code_hash: H256) -> Result<revm::Bytecode, Self::Error> {
+    fn code_by_hash(&self, code_hash: H256) -> Result<revm::Bytecode, Self::Error> {
         let (bytecode, size) = self.0.bytecode_by_hash(code_hash).unwrap_or_default();
         Ok(unsafe { revm::Bytecode::new_checked(bytecode.0, size, Some(code_hash)) })
     }
 
-    fn storage(&mut self, address: H160, index: U256) -> Result<U256, Self::Error> {
+    fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
         let mut h_index = H256::zero();
         index.to_big_endian(h_index.as_bytes_mut());
 
         Ok(U256::from_big_endian(self.0.storage(address, h_index).unwrap_or_default().as_ref()))
     }
 
-    fn block_hash(&mut self, number: U256) -> Result<H256, Self::Error> {
+    fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
         Ok(self.0.block_hash(number).unwrap_or_default())
     }
 }

@@ -1,8 +1,21 @@
 use crate::Result;
+use auto_impl::auto_impl;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, H256, U256,
+    Block, BlockHash, Header, H256, U256,
 };
+
+/// Client trait for fetching `Header` related data.
+#[auto_impl(&)]
+pub trait HeaderProvider: Send + Sync + 'static {
+    /// Check if block is known
+    fn is_known(&self, block_hash: &BlockHash) -> Result<bool> {
+        self.header(block_hash).map(|header| header.is_some())
+    }
+
+    /// Get header by block hash
+    fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>>;
+}
 
 /// Client trait for fetching `Block` related data.
 pub trait BlockProvider: Send + Sync + 'static {

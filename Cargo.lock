@@ -1569,6 +1569,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
+name = "hash-db"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
+
+[[package]]
 name = "hash32"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2620,6 +2626,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "plain_hasher"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e19e6491bdde87c2c43d70f4c194bc8a758f2eb732df00f61e43f7362e3b4cc"
+dependencies = [
+ "crunchy",
+]
+
+[[package]]
 name = "plotters"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2990,6 +3005,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-consensus"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "auto_impl",
+ "eyre",
+ "hash-db",
+ "plain_hasher",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rlp",
+ "rlp",
+ "sha3",
+ "thiserror",
+ "tokio",
+ "triehash",
+]
+
+[[package]]
 name = "reth-crate-template"
 version = "0.1.0"
 
@@ -3098,11 +3132,18 @@ name = "reth-executor"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "auto_impl",
  "eyre",
+ "hash-db",
+ "plain_hasher",
  "reth-interfaces",
  "reth-primitives",
+ "reth-rlp",
  "revm",
+ "rlp",
+ "sha3",
  "thiserror",
+ "triehash",
 ]
 
 [[package]]
@@ -4391,6 +4432,16 @@ dependencies = [
  "lazy_static",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "triehash"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1631b201eb031b563d2e85ca18ec8092508e262a3196ce9bd10a67ec87b9f5c"
+dependencies = [
+ "hash-db",
+ "rlp",
 ]
 
 [[package]]
