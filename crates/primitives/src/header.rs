@@ -1,4 +1,4 @@
-use crate::{BlockNumber, Bloom, H160, H256, U256};
+use crate::{BlockHash, BlockNumber, Bloom, H160, H256, U256};
 use bytes::{BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
 use reth_codecs::main_codec;
@@ -180,7 +180,7 @@ pub struct HeaderLocked {
     /// Locked Header fields.
     header: Header,
     /// Locked Header hash.
-    hash: H256,
+    hash: BlockHash,
 }
 
 impl AsRef<Header> for HeaderLocked {
@@ -211,7 +211,7 @@ impl HeaderLocked {
     }
 
     /// Return header/block hash.
-    pub fn hash(&self) -> H256 {
+    pub fn hash(&self) -> BlockHash {
         self.hash
     }
 }
