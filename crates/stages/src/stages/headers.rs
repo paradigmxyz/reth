@@ -55,9 +55,9 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         // TODO: handle input.max_block
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block_num)?
-            .ok_or_else(|| DatabaseIntegrityError::NoCannonicalHash { number: last_block_num })?;
+            .ok_or(DatabaseIntegrityError::NoCannonicalHash { number: last_block_num })?;
         let last_header =
-            tx.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or_else(|| {
+            tx.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or({
                 DatabaseIntegrityError::NoHeader { number: last_block_num, hash: last_hash }
             })?;
         let head = HeaderLocked::new(last_header, last_hash);

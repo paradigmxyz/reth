@@ -30,20 +30,19 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or_else(|| DatabaseIntegrityError::NoCannonicalHeader { number: last_block })?;
+            .ok_or(DatabaseIntegrityError::NoCannonicalHeader { number: last_block })?;
 
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or_else(|| DatabaseIntegrityError::NoCannonicalHeader { number: start_block })?;
+            .ok_or(DatabaseIntegrityError::NoCannonicalHeader { number: start_block })?;
 
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
 
         let mut cursor = tx.cursor_mut::<tables::CumulativeTxCount>()?;
-        let (_, mut count) =
-            cursor.seek_exact((last_block, last_hash).into())?.ok_or_else(|| {
-                DatabaseIntegrityError::NoCumulativeTxCount { number: last_block, hash: last_hash }
-            })?;
+        let (_, mut count) = cursor.seek_exact((last_block, last_hash).into())?.ok_or(
+            DatabaseIntegrityError::NoCumulativeTxCount { number: last_block, hash: last_hash },
+        )?;
 
         let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
         let walker = body_cursor.walk((start_block, start_hash).into())?;
