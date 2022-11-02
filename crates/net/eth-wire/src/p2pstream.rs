@@ -5,7 +5,7 @@ use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fmt::Display,
     io,
     pin::Pin,
@@ -16,7 +16,7 @@ use tokio_stream::Stream;
 
 use crate::{
     capability::SharedCapability,
-    error::{HandshakeError, P2PHandshakeError, P2PStreamError},
+    error::{P2PHandshakeError, P2PStreamError},
     pinger::{IntervalTimeoutPinger, PingerEvent},
 };
 
@@ -185,6 +185,7 @@ where
                 let mut ping_bytes = BytesMut::new();
                 P2PMessage::Ping.encode(&mut ping_bytes);
 
+                // TODO: fix use of Sink API
                 let send_res = Pin::new(&mut this.inner).send(ping_bytes.into()).poll_unpin(cx)?;
                 ready!(send_res)
             }
@@ -194,6 +195,7 @@ where
                 let mut disconnect_bytes = BytesMut::new();
                 P2PMessage::Disconnect(DisconnectReason::PingTimeout).encode(&mut disconnect_bytes);
 
+                // TODO: fix use of Sink API
                 let send_res =
                     Pin::new(&mut this.inner).send(disconnect_bytes.into()).poll_unpin(cx)?;
                 ready!(send_res);
@@ -219,6 +221,7 @@ where
                 let mut pong_bytes = BytesMut::new();
                 P2PMessage::Pong.encode(&mut pong_bytes);
 
+                // TODO: fix use of Sink API
                 let send_res = Pin::new(&mut this.inner).send(pong_bytes.into()).poll_unpin(cx)?;
                 ready!(send_res)
 
