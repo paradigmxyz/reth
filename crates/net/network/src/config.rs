@@ -1,4 +1,4 @@
-use crate::{peers::PeersConfig, session::SessionsConfig, sync::StateSync};
+use crate::{peers::PeersConfig, session::SessionsConfig};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use secp256k1::SecretKey;
 use std::{
@@ -18,8 +18,6 @@ pub struct NetworkConfig<C> {
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
-    /// The sync instance to use
-    pub state_sync: Box<dyn StateSync>,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
     /// How to configure the [`SessionManager`]
@@ -30,17 +28,13 @@ pub struct NetworkConfig<C> {
 
 impl<C> NetworkConfig<C> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
-    pub fn new(client: Arc<C>, secret_key: SecretKey, state_sync: Box<dyn StateSync>) -> Self {
-        Self::builder(client, secret_key, state_sync).build()
+    pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
+        Self::builder(client, secret_key).build()
     }
 
     /// Convenience method for creating the corresponding builder type
-    pub fn builder(
-        client: Arc<C>,
-        secret_key: SecretKey,
-        state_sync: Box<dyn StateSync>,
-    ) -> NetworkConfigBuilder<C> {
-        NetworkConfigBuilder::new(client, secret_key, state_sync)
+    pub fn builder(client: Arc<C>, secret_key: SecretKey) -> NetworkConfigBuilder<C> {
+        NetworkConfigBuilder::new(client, secret_key)
     }
 
     /// Sets the config to use for the discovery v4 protocol.
@@ -68,8 +62,6 @@ pub struct NetworkConfigBuilder<C> {
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
     listener_addr: Option<SocketAddr>,
-    /// Sync type to use
-    state_sync: Box<dyn StateSync>,
     /// How to instantiate peer manager.
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
@@ -80,14 +72,13 @@ pub struct NetworkConfigBuilder<C> {
 
 #[allow(missing_docs)]
 impl<C> NetworkConfigBuilder<C> {
-    pub fn new(client: Arc<C>, secret_key: SecretKey, state_sync: Box<dyn StateSync>) -> Self {
+    pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
         Self {
             client,
             secret_key,
             discovery_v4_builder: Default::default(),
             discovery_addr: None,
             listener_addr: None,
-            state_sync,
             peers_config: None,
             sessions_config: None,
         }
@@ -101,7 +92,6 @@ impl<C> NetworkConfigBuilder<C> {
             discovery_v4_builder,
             discovery_addr,
             listener_addr,
-            state_sync,
             peers_config,
             sessions_config,
         } = self;
@@ -115,7 +105,6 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr: listener_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
             }),
-            state_sync,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
         }

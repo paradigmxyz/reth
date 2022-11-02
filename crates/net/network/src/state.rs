@@ -2,10 +2,10 @@
 
 use crate::{
     discovery::{Discovery, DiscoveryEvent},
+    fetch::StateFetcher,
     message::{Capabilities, CapabilityMessage},
     peers::{PeerAction, PeersManager},
     session::PeerMessageSender,
-    sync::StateSync,
     NodeId,
 };
 use reth_eth_wire::{BlockHeaders, GetBlockHeaders};
@@ -36,11 +36,11 @@ pub struct NetworkState<C> {
     client: Arc<C>,
     /// Network discovery.
     discovery: Discovery,
-    /// The type that handles sync requests.
+    /// The type that handles requests.
     ///
     /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
     /// then queue in the request and notify the fetcher once the result has been received.
-    state_sync: Box<dyn StateSync>,
+    state_fetcher: StateFetcher,
 }
 
 impl<C> NetworkState<C>
@@ -48,12 +48,7 @@ where
     C: BlockProvider,
 {
     /// Create a new state instance with the given params
-    pub(crate) fn new(
-        client: Arc<C>,
-        discovery: Discovery,
-        state_sync: Box<dyn StateSync>,
-        peers_manager: PeersManager,
-    ) -> Self {
+    pub(crate) fn new(client: Arc<C>, discovery: Discovery, peers_manager: PeersManager) -> Self {
         Self {
             connected_peers: Default::default(),
             peers_manager,
@@ -61,7 +56,7 @@ where
             queued_messages: Default::default(),
             client,
             discovery,
-            state_sync,
+            state_fetcher: StateFetcher::new(),
         }
     }
 
@@ -76,21 +71,6 @@ where
 
     /// Event hook for a disconnected session for the peer.
     pub(crate) fn on_session_closed(&mut self, _node_id: NodeId) {}
-
-    /// Event hook for an unexpected message from the peer.
-    pub(crate) fn on_invalid_message(
-        &self,
-        _node_id: NodeId,
-        _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage,
-    ) {
-    }
-
-    /// Handles a received [`CapabilityMessage`] from the peer.
-    pub fn on_capability_message(&mut self, _node_id: NodeId, _msg: CapabilityMessage) {
-        // TODO needs capability+state depended decoding and handling of the message.
-        // if this is a request
-    }
 
     /// Propagates Block to peers.
     pub fn announce_block(&mut self, _hash: H256, _block: ()) {

@@ -1,11 +1,11 @@
-use crate::{peers::PeersHandle, NodeId};
+use crate::{manager::NetworkEvent, peers::PeersHandle, NodeId};
 use parking_lot::Mutex;
 use reth_primitives::{H256, U256};
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
 };
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{mpsc, mpsc::UnboundedSender};
 
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
@@ -36,6 +36,17 @@ impl NetworkHandle {
         };
         Self { inner: Arc::new(inner) }
     }
+
+    fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {
+        &self.inner.to_manager_tx
+    }
+
+    /// Creates a new [`NetworkEvent`] listener channel.
+    pub fn event_listener(&self) -> mpsc::UnboundedReceiver<NetworkEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
+        rx
+    }
 }
 
 struct NetworkInner {
@@ -53,6 +64,8 @@ struct NetworkInner {
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 pub(crate) enum NetworkHandleMessage {
+    /// Add a new listener for [`NetworkEvent`].
+    EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
     AnnounceBlock,
     /// Returns the newest imported block by the network.

@@ -3189,6 +3189,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
+ "reth-transaction-pool",
  "secp256k1",
  "smol_str",
  "thiserror",

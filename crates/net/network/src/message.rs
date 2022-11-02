@@ -8,8 +8,7 @@ use reth_eth_wire::{BlockHeaders, EthMessage, GetBlockHeaders};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use smol_str::SmolStr;
-
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;
@@ -18,12 +17,26 @@ pub type RequestResult<T> = Result<T, RequestError>;
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum RequestError {
+    #[error("Closed channel.")]
+    ChannelClosed,
     #[error("Not connected to the node.")]
     NotConnected,
     #[error("Capability Message is not supported by remote peer.")]
     UnsupportedCapability,
     #[error("Network error: {0}")]
     Io(String),
+}
+
+impl<T> From<mpsc::error::SendError<T>> for RequestError {
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        RequestError::ChannelClosed
+    }
+}
+
+impl From<oneshot::error::RecvError> for RequestError {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        RequestError::ChannelClosed
+    }
 }
 
 /// Represents all capabilities of a node.

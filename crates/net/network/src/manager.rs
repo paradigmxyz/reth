@@ -20,7 +20,7 @@ use crate::{
     discovery::Discovery,
     error::NetworkError,
     listener::ConnectionListener,
-    message::CapabilityMessage,
+    message::{Capabilities, CapabilityMessage},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     session::SessionManager,
@@ -30,6 +30,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
+use reth_eth_wire::EthMessage;
 use reth_interfaces::provider::BlockProvider;
 use std::{
     net::SocketAddr,
@@ -59,6 +60,8 @@ pub struct NetworkManager<C> {
     block_import_sink: (),
     /// The address of this node that listens for incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
+    /// All listeners for [`Network`] events.
+    event_listeners: NetworkEventListeners,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -85,7 +88,6 @@ where
             discovery_v4_config,
             discovery_addr,
             listener_addr,
-            state_sync,
             peers_config,
             sessions_config,
         } = config;
@@ -97,11 +99,12 @@ where
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
         let discovery = Discovery::new(discovery_addr, discovery_v4_config, secret_key).await?;
+        // need to retrieve the addr here since provided port could be `0`
         let local_node_id = discovery.local_id();
 
         // TODO this should also need sk for encrypted sessions
-        let sessions = SessionManager::new(sessions_config);
-        let state = NetworkState::new(client, discovery, state_sync, peers_manger);
+        let sessions = SessionManager::new(secret_key, sessions_config);
+        let state = NetworkState::new(client, discovery, peers_manger);
 
         let swarm = Swarm::new(incoming, sessions, state);
 
@@ -122,6 +125,7 @@ where
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import_sink: (),
             listener_address,
+            event_listeners: Default::default(),
             num_active_peers,
             local_node_id,
         })
@@ -134,8 +138,20 @@ where
         &self.handle
     }
 
-    /// Handles an event related to RLPx.
-    fn on_capability_message(&mut self, _msg: CapabilityMessage) {}
+    /// Event hook for an unexpected message from the peer.
+    fn on_invalid_message(
+        &self,
+        _node_id: NodeId,
+        _capabilities: Arc<Capabilities>,
+        _message: CapabilityMessage,
+    ) {
+    }
+
+    /// Handles a received [`CapabilityMessage`] from the peer.
+    fn on_capability_message(&mut self, _node_id: NodeId, _msg: CapabilityMessage) {
+        // TODO needs capability+state depended decoding and handling of the message.
+        // if this is a request
+    }
 }
 
 impl<C> Future for NetworkManager<C>
@@ -168,7 +184,12 @@ where
         while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
             // handle event
             match event {
-                SwarmEvent::CapabilityMessage(msg) => this.on_capability_message(msg),
+                SwarmEvent::CapabilityMessage { node_id, message } => {
+                    this.on_capability_message(node_id, message)
+                }
+                SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message } => {
+                    this.on_invalid_message(node_id, capabilities, message)
+                }
                 SwarmEvent::TcpListenerClosed { remote_addr } => {
                     trace!(?remote_addr, target = "net", "TCP listener closed.");
                 }
@@ -205,5 +226,35 @@ where
         }
 
         todo!()
+    }
+}
+
+/// Events emitted by the network that are of interest for subscribers.
+#[derive(Debug, Clone)]
+pub enum NetworkEvent {
+    EthMessage { node_id: NodeId, message: EthMessage },
+}
+
+/// Bundles all listeners for [`NetworkEvent`]s.
+#[derive(Default)]
+struct NetworkEventListeners {
+    /// All listeners for an event
+    listeners: Vec<mpsc::UnboundedSender<NetworkEvent>>,
+}
+
+// === impl NetworkEventListeners ===
+
+impl NetworkEventListeners {
+    /// Sends  the event to all listeners.
+    ///
+    /// Remove channels that got closed.
+    fn send(&mut self, event: NetworkEvent) {
+        self.listeners.retain(|listener| {
+            let open = listener.send(event.clone()).is_ok();
+            if !open {
+                trace!(target = "net", "event listener channel closed",);
+            }
+            open
+        });
     }
 }

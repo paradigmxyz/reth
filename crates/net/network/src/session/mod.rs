@@ -9,6 +9,7 @@ use crate::{
 use fnv::FnvHashMap;
 use futures::StreamExt;
 pub use handle::PeerMessageSender;
+use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
     future::Future,
@@ -35,6 +36,8 @@ pub struct SessionId(usize);
 pub(crate) struct SessionManager {
     /// Tracks the identifier for the next session.
     next_id: usize,
+    /// The secret key used for authenticating sessions.
+    secret_key: SecretKey,
     /// Size of the command buffer per session.
     session_command_buffer: usize,
     /// All spawned session tasks.
@@ -70,12 +73,13 @@ pub(crate) struct SessionManager {
 
 impl SessionManager {
     /// Creates a new empty [`SessionManager`].
-    pub(crate) fn new(config: SessionsConfig) -> Self {
+    pub(crate) fn new(secret_key: SecretKey, config: SessionsConfig) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
 
         Self {
             next_id: 0,
+            secret_key,
             session_command_buffer: config.session_command_buffer,
             spawned_tasks: Default::default(),
             pending_sessions: Default::default(),
@@ -129,7 +133,7 @@ impl SessionManager {
     }
 
     /// Starts a new pending session from the local node to the given remote node.
-    pub(crate) fn start_outbound(&mut self, remote_addr: SocketAddr, node_id: NodeId) {
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, node_id: NodeId) {
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
@@ -155,24 +159,22 @@ impl SessionManager {
             Poll::Ready(None) => {
                 unreachable!("Manager holds both channel halves.")
             }
-            Poll::Ready(Some(event)) => match event {
-                ActiveSessionMessage::Closed { node_id, remote_addr } => {
-                    trace!(?node_id, target = "net::session", "closed active session.");
-                    let _ = self.active_sessions.remove(&node_id);
-                    return Poll::Ready(SessionEvent::Disconnected { node_id, remote_addr })
+            Poll::Ready(Some(event)) => {
+                return match event {
+                    ActiveSessionMessage::Closed { node_id, remote_addr } => {
+                        trace!(?node_id, target = "net::session", "closed active session.");
+                        let _ = self.active_sessions.remove(&node_id);
+                        Poll::Ready(SessionEvent::Disconnected { node_id, remote_addr })
+                    }
+                    ActiveSessionMessage::ValidMessage { node_id, message } => {
+                        // TODO: since all messages are known they should be decoded in the session
+                        Poll::Ready(SessionEvent::ValidMessage { node_id, message })
+                    }
+                    ActiveSessionMessage::InvalidMessage { node_id, capabilities, message } => {
+                        Poll::Ready(SessionEvent::InvalidMessage { node_id, message, capabilities })
+                    }
                 }
-                ActiveSessionMessage::ValidMessage { node_id, message } => {
-                    // TODO: since all messages are known they should be decoded in the session
-                    return Poll::Ready(SessionEvent::ValidMessage { node_id, message })
-                }
-                ActiveSessionMessage::InvalidMessage { node_id, capabilities, message } => {
-                    return Poll::Ready(SessionEvent::InvalidMessage {
-                        node_id,
-                        message,
-                        capabilities,
-                    })
-                }
-            },
+            }
         }
 
         // Poll the pending session event stream

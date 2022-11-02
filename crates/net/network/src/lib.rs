@@ -18,6 +18,7 @@
 mod config;
 mod discovery;
 pub mod error;
+mod fetch;
 mod listener;
 mod manager;
 mod message;
@@ -27,7 +28,6 @@ mod request;
 mod session;
 mod state;
 mod swarm;
-mod sync;
 mod transactions;
 
 /// Identifier for a unique node

@@ -1,6 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    message::CapabilityMessage,
+    message::{Capabilities, CapabilityMessage},
     session::{SessionEvent, SessionId, SessionManager},
     state::NetworkState,
     NodeId,
@@ -11,9 +11,9 @@ use std::{
     io,
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::oneshot;
 use tracing::warn;
 
 /// Contains the connectivity related state of the network.
@@ -50,7 +50,9 @@ where
     }
 
     /// Triggers a new outgoing connection to the given node
-    pub fn initiate_outbound(&mut self, _remote_addr: SocketAddr, _remote_id: NodeId) {}
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: NodeId) {
+        self.sessions.dial_outbound(remote_addr, remote_id)
+    }
 
     /// Handles a polled [`SessionEvent`]
     fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
@@ -60,10 +62,10 @@ where
                 return Some(SwarmEvent::SessionEstablished { node_id, remote_addr })
             }
             SessionEvent::ValidMessage { node_id, message } => {
-                self.state.on_capability_message(node_id, message);
+                return Some(SwarmEvent::CapabilityMessage { node_id, message })
             }
             SessionEvent::InvalidMessage { node_id, capabilities, message } => {
-                self.state.on_invalid_message(node_id, capabilities, message);
+                return Some(SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message })
             }
             SessionEvent::DisconnectedPending { .. } => {}
             SessionEvent::Disconnected { node_id, remote_addr } => {
@@ -146,7 +148,20 @@ where
 /// network.
 pub enum SwarmEvent {
     /// Events related to the actual network protocol.
-    CapabilityMessage(CapabilityMessage),
+    CapabilityMessage {
+        /// The peer that sent the message
+        node_id: NodeId,
+        /// Message received from the peer
+        message: CapabilityMessage,
+    },
+    /// Received a message that does not match the announced capabilities of the peer.
+    InvalidCapabilityMessage {
+        node_id: NodeId,
+        /// Announced capabilities of the remote peer.
+        capabilities: Arc<Capabilities>,
+        /// Message received from the peer.
+        message: CapabilityMessage,
+    },
     /// The underlying tcp listener closed.
     TcpListenerClosed {
         /// Address of the closed listener.
@@ -176,17 +191,5 @@ pub enum SwarmEvent {
     SessionClosed {
         node_id: NodeId,
         remote_addr: SocketAddr,
-    }, // TODO variants for discovered peers so they get bubbled up to the manager
-}
-
-pub enum EthWireMessage {
-    NewBlock,
-
-    /// Received a `GetBlockHeaders` that needs to be answered
-    GetBlockHeadersRequest {
-        /// Node that requested the headers
-        target: NodeId,
-        /// sender half of the channel to send the response back to the session
-        response: oneshot::Sender<()>,
-    }, // TODO all variants
+    },
 }
