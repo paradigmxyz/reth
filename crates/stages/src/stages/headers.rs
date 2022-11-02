@@ -120,7 +120,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     ) -> Result<(), StageError> {
         let hash = tx
             .get::<tables::CanonicalHeaders>(height)?
-            .ok_or_else(|| DatabaseIntegrityError::NoCannonicalHeader { number: height })?;
+            .ok_or(DatabaseIntegrityError::NoCannonicalHeader { number: height })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
         Ok(())
