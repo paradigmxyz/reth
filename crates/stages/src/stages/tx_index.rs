@@ -55,7 +55,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
             cursor.append(key, count)?;
         }
 
-        Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 0 })
+        Ok(ExecOutput { done: true, reached_tip: true, stage_progress: max_block })
     }
 
     /// Unwind the stage.
@@ -75,13 +75,8 @@ mod tests {
     use super::*;
     use crate::util::test_utils::{StageTestDB, StageTestRunner};
     use assert_matches::assert_matches;
-    use reth_interfaces::{
-        db::models::BlockNumHash,
-        test_utils::{gen_random_header, gen_random_header_range},
-    };
+    use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
     use reth_primitives::H256;
-    use std::borrow::Borrow;
-    use tokio::sync::oneshot;
 
     const TEST_STAGE: StageId = StageId("PrevStage");
 
@@ -117,6 +112,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute() {
+        let runner = TxIndexTestRunner::default();
+        let (start, pivot, end) = (0, 100, 200);
+        let headers = gen_random_header_range(start..end, H256::zero());
+        runner
+            .db()
+            .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
+            .expect("failed to insert");
+        runner
+            .db()
+            .transform_append::<tables::CumulativeTxCount, _, _>(&headers[..=pivot], |prev, h| {
+                (
+                    BlockNumHash((h.number, h.hash())),
+                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
+                )
+            })
+            .expect("failed to insert");
+
+        let (pivot, tail) = (headers.get(pivot).unwrap(), headers.last().unwrap());
+        let input = ExecInput {
+            previous_stage: Some((TEST_STAGE, tail.number)),
+            stage_progress: Some(pivot.number),
+        };
+        let rx = runner.execute(TxIndex {}, input);
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(ExecOutput { stage_progress, done, reached_tip })
+                if done && reached_tip && stage_progress == tail.number
+        );
+    }
+
+    #[tokio::test]
     async fn unwind_empty_db() {
         let runner = TxIndexTestRunner::default();
         let rx = runner.unwind(TxIndex {}, UnwindInput::default());
@@ -127,7 +154,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unwind_empty_db_no_input() {
+    async fn unwind_no_input() {
         let runner = TxIndexTestRunner::default();
         let headers = gen_random_header_range(0..10, H256::zero());
         runner
@@ -148,6 +175,37 @@ mod tests {
         runner
             .db()
             .check_no_entry_above::<tables::CumulativeTxCount, _>(0, |h| h.number())
+            .expect("failed to check tx count");
+    }
+
+    #[tokio::test]
+    async fn unwind_with_db_gaps() {
+        let runner = TxIndexTestRunner::default();
+        let first_range = gen_random_header_range(0..20, H256::zero());
+        let second_range = gen_random_header_range(50..100, H256::zero());
+        runner
+            .db()
+            .transform_append::<tables::CumulativeTxCount, _, _>(
+                &first_range.iter().chain(second_range.iter()).collect::<Vec<_>>(),
+                |prev, h| {
+                    (
+                        BlockNumHash((h.number, h.hash())),
+                        prev.unwrap_or_default() + (rand::random::<u8>() as u64),
+                    )
+                },
+            )
+            .expect("failed to insert");
+
+        let unwind_to = 10;
+        let input = UnwindInput { unwind_to, ..Default::default() };
+        let rx = runner.unwind(TxIndex {}, input);
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
+        );
+        runner
+            .db()
+            .check_no_entry_above::<tables::CumulativeTxCount, _>(unwind_to, |h| h.number())
             .expect("failed to check tx count");
     }
 

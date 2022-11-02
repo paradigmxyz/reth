@@ -192,7 +192,7 @@ mod tests {
     #[tokio::test]
     // Check that the execution errors on empty database or
     // prev progress missing from the database.
-    async fn headers_execute_empty_db() {
+    async fn execute_empty_db() {
         let runner = HeadersTestRunner::default();
         let stage = create_stage(Ok(vec![]));
         let rx = runner.execute(stage, ExecInput::default());
@@ -204,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     // Check that the execution exits on downloader timeout.
-    async fn headers_execute_timeout() {
+    async fn execute_timeout() {
         let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
         runner.insert_header(&head).expect("failed to insert header");
@@ -217,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     // Check that validation error is propagated during the execution.
-    async fn headers_execute_validation_error() {
+    async fn execute_validation_error() {
         let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
         runner.insert_header(&head).expect("failed to insert header");
@@ -235,7 +235,7 @@ mod tests {
     #[tokio::test]
     // Validate that all necessary tables are updated after the
     // header download on no previous progress.
-    async fn headers_execute_no_progress() {
+    async fn execute_no_progress() {
         let runner = HeadersTestRunner::default();
         let (start, end) = (0, 100);
         let head = gen_random_header(start, None);
@@ -261,7 +261,7 @@ mod tests {
     #[tokio::test]
     // Validate that all necessary tables are updated after the
     // header download with some previous progress.
-    async fn headers_stage_prev_progress() {
+    async fn stage_prev_progress() {
         let runner = HeadersTestRunner::default();
         // TODO: set bigger range once `MDBX_EKEYMISMATCH` issue is resolved
         let (start, end) = (10000, 10240);
@@ -291,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     // Check that unwind does not panic on empty database.
-    async fn headers_unwind_empty_db() {
+    async fn unwind_empty_db() {
         let runner = HeadersTestRunner::default();
         let input = UnwindInput { bad_block: None, stage_progress: 100, unwind_to: 100 };
         let rx = runner.unwind(create_stage(Ok(vec![])), input);
@@ -303,7 +303,7 @@ mod tests {
 
     #[tokio::test]
     // Check that unwind can remove headers across gaps
-    async fn headers_unwind_db_gaps() {
+    async fn unwind_db_gaps() {
         let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
         let first_range = gen_random_header_range(1..20, head.hash());
