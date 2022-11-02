@@ -3,7 +3,7 @@ use std::io;
 
 use reth_primitives::{Chain, H256};
 
-use crate::types::forkid::ValidationError;
+use crate::{capability::SharedCapabilityError, types::forkid::ValidationError};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
@@ -61,6 +61,8 @@ pub enum P2PStreamError {
     PingerError(#[from] PingerError),
     #[error("ping timed out with {0} retries")]
     PingTimeout(u8),
+    #[error(transparent)]
+    ParseVersionError(#[from] SharedCapabilityError),
     #[error("mismatched protocol version in Hello message. expected: {expected:?}, got: {got:?}")]
     MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("started ping task before the handshake completed")]
@@ -77,6 +79,8 @@ pub enum P2PHandshakeError {
     HelloNotInHandshake,
     #[error("received non-hello message when trying to handshake")]
     NonHelloMessageInHandshake,
+    #[error("no capabilities shared with peer")]
+    NoSharedCapabilities,
     #[error("no response received when sending out handshake")]
     NoResponse,
     #[error("handshake timed out")]

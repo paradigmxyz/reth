@@ -5,6 +5,7 @@ use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use std::{
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     io,
     pin::Pin,
@@ -14,7 +15,8 @@ use std::{
 use tokio_stream::Stream;
 
 use crate::{
-    error::{P2PHandshakeError, P2PStreamError},
+    capability::SharedCapability,
+    error::{HandshakeError, P2PHandshakeError, P2PStreamError},
     pinger::{IntervalTimeoutPinger, PingerEvent},
 };
 
@@ -54,13 +56,13 @@ const MAX_FAILED_PINGS: u8 = 3;
 #[pin_project]
 pub struct UnauthedP2PStream<S> {
     #[pin]
-    stream: P2PStream<S>,
+    inner: S,
 }
 
 impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a `Stream` of bytes.
     pub fn new(inner: S) -> Self {
-        Self { stream: P2PStream::new(inner) }
+        Self { inner }
     }
 }
 
@@ -76,11 +78,11 @@ where
         // send our hello message with the Sink
         let mut raw_hello_bytes = BytesMut::new();
         P2PMessage::Hello(hello.clone()).encode(&mut raw_hello_bytes);
-        self.stream.inner.send(raw_hello_bytes.into()).await?;
+        self.inner.send(raw_hello_bytes.into()).await?;
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
-        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stream.inner.next())
+        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
             .await
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
@@ -112,8 +114,6 @@ where
             }
         }?;
 
-        self.set_capability_offsets(hello.capabilities, their_hello.capabilities);
-
         // TODO: explicitly document that we only support v5.
         if their_hello.protocol_version != ProtocolVersion::V5 {
             // TODO: do we want to send a `Disconnect` message here?
@@ -123,22 +123,12 @@ where
             })
         }
 
-        self.stream.authed = true;
-        Ok(self.stream)
-    }
+        // determine shared capabilities (currently returns only one capability)
+        let capability = set_capability_offsets(hello.capabilities, their_hello.capabilities)?;
 
-    /// Determines the offsets for each shared capability between the input list of peer
-    /// capabilities and the input list of locally supported capabilities.
-    pub fn set_capability_offsets(
-        &self,
-        local_capabilities: Vec<CapabilityMessage>,
-        peer_capabilities: Vec<CapabilityMessage>,
-    ) {
-        // find intersection of capabilities
-        // find highest shared version of each shared capability
-        // order versions based on capability name (alphabetical) and select offsets based on
-        // BASE_OFFSET + prev_total_messages
-        todo!()
+        let stream = P2PStream::new(self.inner, capability);
+
+        Ok(stream)
     }
 }
 
@@ -149,9 +139,6 @@ pub struct P2PStream<S> {
     #[pin]
     inner: S,
 
-    /// Whether the `Hello` handshake has been completed
-    authed: bool,
-
     /// The snappy encoder used for compressing outgoing messages
     encoder: snap::raw::Encoder,
 
@@ -161,24 +148,20 @@ pub struct P2PStream<S> {
     /// The state machine used for keeping track of the peer's ping status.
     pinger: IntervalTimeoutPinger,
 
-    // currently starts at 0x10
-    // maybe we need an array of offsets and lengths for each subprotocol and can just subtract
-    // based on the range of the message id / protocol length
-    /// The offset? TODO: revisit when implementing shared capabilities
-    offset: u8,
+    /// The supported capability for this stream.
+    shared_capability: SharedCapability,
 }
 
 impl<S> P2PStream<S> {
     /// Create a new unauthed [`P2PStream`] from the provided stream. You will need to manually
     /// handshake with a peer.
-    pub fn new(inner: S) -> Self {
+    pub fn new(inner: S, capability: SharedCapability) -> Self {
         Self {
             inner,
-            authed: false,
-            offset: 0x10,
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
             pinger: IntervalTimeoutPinger::new(MAX_FAILED_PINGS, PING_INTERVAL, PING_TIMEOUT),
+            shared_capability: capability,
         }
     }
 }
@@ -262,7 +245,7 @@ where
                 // first, switch the message id based on offset so the next layer can decode it
                 // without being aware of the p2p stream's state (shared capabilities / the message
                 // id offset)
-                bytes[0] -= *this.offset;
+                bytes[0] -= this.shared_capability.offset();
 
                 // first check that the compressed message length does not exceed the max message
                 // size
@@ -305,7 +288,7 @@ where
 
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
-        compressed[0] = item[0] + *this.offset;
+        compressed[0] = item[0] + this.shared_capability.offset();
 
         this.inner.start_send(compressed.freeze())?;
         Ok(())
@@ -318,6 +301,82 @@ where
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_close(cx).map_err(Into::into)
     }
+}
+
+/// Determines the offsets for each shared capability between the input list of peer
+/// capabilities and the input list of locally supported capabilities.
+///
+/// Currently only `eth` versions 66 and 67 are supported.
+pub fn set_capability_offsets(
+    local_capabilities: Vec<CapabilityMessage>,
+    peer_capabilities: Vec<CapabilityMessage>,
+) -> Result<SharedCapability, P2PStreamError> {
+    // find intersection of capabilities
+    let our_capabilities_map =
+        local_capabilities.into_iter().map(|c| (c.name, c.version)).collect::<HashMap<_, _>>();
+
+    // map of capability name to version
+    let mut shared_capabilities = HashMap::new();
+
+    // sorted list of capability names
+    let mut shared_capability_names = BTreeSet::new();
+
+    // find highest shared version of each shared capability
+    for capability in peer_capabilities {
+        // if this is Some, we share this capability
+        if let Some(version) = our_capabilities_map.get(&capability.name) {
+            if capability.version <= *version {
+                shared_capabilities.insert(capability.name.clone(), capability.version);
+                shared_capability_names.insert(capability.name);
+            }
+        }
+    }
+
+    // disconnect if we don't share any capabilities
+    if shared_capabilities.is_empty() {
+        // TODO: send a disconnect message? if we want to do this, this will need to be a member
+        // method of `UnauthedP2PStream`
+        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+    }
+
+    // order versions based on capability name (alphabetical) and select offsets based on
+    // BASE_OFFSET + prev_total_message
+    let mut shared_with_offsets = Vec::new();
+    let mut offset = MAX_RESERVED_MESSAGE_ID;
+    for name in shared_capability_names {
+        let version = shared_capabilities.get(&name).unwrap();
+
+        let shared_capability = SharedCapability::new(&name, *version as u8, offset)?;
+
+        match shared_capability {
+            SharedCapability::UnknownCapability { .. } => {
+                // do nothing with this capability
+                tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
+            }
+            SharedCapability::Les { .. } => {
+                // do nothing with les because the protocol is not implemented
+                tracing::warn!("unsupported capability: name={:?}, version={}", name, version,);
+            }
+            SharedCapability::Eth { .. } => {
+                shared_with_offsets.push(shared_capability.clone());
+
+                // increment the offset if the capability is known
+                offset += shared_capability.num_messages()?;
+            }
+        }
+    }
+
+    // TODO: support multiple capabilities - we would need a new Stream type to go on top of
+    // `P2PStream` containing its capability. `P2PStream` would still send pings and handle
+    // pongs, but instead contain a map of capabilities to their respective stream / channel.
+    // Each channel would be responsible for containing the offset for that stream and would
+    // only increment / decrement message IDs.
+    // NOTE: since the `P2PStream` currently only supports one capability, we set the
+    // capability with the lowest offset.
+    Ok(shared_with_offsets
+        .first()
+        .ok_or_else(|| P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))?
+        .clone())
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
