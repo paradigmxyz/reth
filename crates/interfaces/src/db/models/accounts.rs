@@ -66,7 +66,7 @@ impl Decode for TxNumberAddress {
                 .try_into()
                 .map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
         );
-        let hash = Address::decode(value.slice(8..))?;
+        let hash = Address::from_slice(&value.slice(8..));
 
         Ok(TxNumberAddress((num, hash)))
     }

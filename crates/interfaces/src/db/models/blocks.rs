@@ -65,7 +65,7 @@ impl Decode for BlockNumHash {
                 .try_into()
                 .map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
         );
-        let hash = H256::decode(value.slice(8..))?;
+        let hash = H256::from_slice(&value.slice(8..));
 
         Ok(BlockNumHash((num, hash)))
     }
