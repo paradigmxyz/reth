@@ -1,7 +1,6 @@
 use crate::{error::mdbx_result, Error, TransactionKind};
 use derive_more::*;
 use std::{borrow::Cow, slice};
-use thiserror::Error;
 
 /// Implement this to be able to decode data values
 pub trait TableObject<'tx> {
@@ -96,13 +95,8 @@ impl<'tx, const LEN: usize> TableObject<'tx> for [u8; LEN] {
     where
         Self: Sized,
     {
-        #[derive(Clone, Debug, Display, Error)]
-        struct InvalidSize<const LEN: usize> {
-            got: usize,
-        }
-
         if data_val.len() != LEN {
-            return Err(Error::DecodeError(Box::new(InvalidSize::<LEN> { got: data_val.len() })))
+            return Err(Error::DecodeErrorLenDiff)
         }
         let mut a = [0; LEN];
         a[..].copy_from_slice(data_val);

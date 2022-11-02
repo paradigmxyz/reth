@@ -17,6 +17,6 @@ impl Encode for IntegerList {
 
 impl Decode for IntegerList {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        IntegerList::from_bytes(&value.into()).map_err(|e| Error::Decode(eyre::eyre!("{e}")))
+        IntegerList::from_bytes(&value.into()).map_err(|_| Error::DecodeError)
     }
 }
