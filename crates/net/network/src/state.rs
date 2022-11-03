@@ -3,11 +3,12 @@
 use crate::{
     discovery::{Discovery, DiscoveryEvent},
     fetch::StateFetcher,
-    message::{Capabilities, CapabilityMessage},
+    message::{Capabilities, CapabilityMessage, CapabilityResponse, RequestResult},
     peers::{PeerAction, PeersManager},
     session::PeerMessageSender,
     NodeId,
 };
+use futures::FutureExt;
 use reth_eth_wire::{BlockHeaders, GetBlockHeaders};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{H256, U256};
@@ -18,7 +19,8 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, oneshot::error::RecvError};
+use tracing::trace;
 
 /// Maintains the state of all peers in the network.
 ///
@@ -56,24 +58,25 @@ where
             queued_messages: Default::default(),
             client,
             discovery,
-            state_fetcher: StateFetcher::new(),
+            state_fetcher: Default::default(),
         }
     }
 
     /// Event hook for an authenticated session for the peer.
     pub fn on_session_authenticated(
         &mut self,
-        _node_id: NodeId,
-        _capabilities: Arc<Capabilities>,
-        _messages: PeerMessageSender,
+        node_id: NodeId,
+        capabilities: Arc<Capabilities>,
+        messages: PeerMessageSender,
     ) {
+        // TODO notify fetecher as well
     }
 
     /// Event hook for a disconnected session for the peer.
     pub(crate) fn on_session_closed(&mut self, _node_id: NodeId) {}
 
     /// Propagates Block to peers.
-    pub fn announce_block(&mut self, _hash: H256, _block: ()) {
+    pub(crate) fn announce_block(&mut self, _hash: H256, _block: ()) {
         // TODO propagate the newblock messages to all connected peers that haven't seen the block
         // yet
 
@@ -103,6 +106,12 @@ where
         }
     }
 
+    /// Disconnect the session
+    fn disconnect_session(&mut self, node: NodeId) {}
+
+    /// Invoked when received a response from a connected peer.
+    fn on_response(&mut self, node: NodeId, resp: CapabilityResponse) {}
+
     /// Advances the state
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateMessage> {
         loop {
@@ -115,7 +124,36 @@ where
                 self.on_discovery_event(discovery);
             }
 
-            // TODO poll all connected peers and handle responses
+            let mut disconnect_sessions = Vec::new();
+            let mut received_responses = Vec::new();
+            // poll all connected peers for responses
+            for (id, peer) in self.connected_peers.iter_mut() {
+                if let Some(response) = peer.pending_response.as_mut() {
+                    match response.poll_unpin(cx) {
+                        Poll::Ready(Ok(resp)) => received_responses.push((*id, resp)),
+                        Poll::Ready(Err(_)) => {
+                            trace!(
+                                ?id,
+                                target = "net",
+                                "Request canceled, response channel closed."
+                            );
+                            disconnect_sessions.push(*id);
+                        }
+                        Poll::Pending => continue,
+                    };
+                }
+
+                // request has either returned a response or was canceled here
+                peer.pending_response.take();
+            }
+
+            for node in disconnect_sessions {
+                self.disconnect_session(node)
+            }
+
+            for (id, resp) in received_responses {
+                self.on_response(id, resp);
+            }
 
             // poll peer manager
             while let Poll::Ready(action) = self.peers_manager.poll(cx) {
@@ -140,9 +178,7 @@ pub struct ConnectedPeer {
     /// A communication channel directly to the session service.
     pub(crate) message_tx: PeerMessageSender,
     /// The response receiver for a currently active request to that peer.
-    ///
-    /// TODO the `CapabilityMessage` should be an enum with possible variants
-    pub(crate) inflight_request: Option<oneshot::Sender<Result<CapabilityMessage, ()>>>,
+    pub(crate) pending_response: Option<oneshot::Receiver<CapabilityResponse>>,
 }
 
 /// Tracks the current state of the peer session

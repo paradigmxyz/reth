@@ -124,7 +124,7 @@ pub enum CapabilityMessage {
     Other(RawCapabilityMessage),
 }
 
-/// Protocol related request messages that expect an response
+/// Protocol related request messages that expect a response
 #[derive(Debug)]
 pub enum CapabilityRequest {
     /// Request Block headers from the peer.
@@ -134,4 +134,10 @@ pub enum CapabilityRequest {
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     },
+}
+
+/// The actual response object
+#[derive(Debug)]
+pub enum CapabilityResponse {
+    GetBlockHeaders(RequestResult<BlockHeaders>),
 }

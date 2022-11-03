@@ -1,14 +1,9 @@
 //! Fetch data from the network.
 
-use crate::{
-    message::{RequestResult},
-    NodeId,
-};
-use futures::{StreamExt};
+use crate::{message::RequestResult, NodeId};
+use futures::StreamExt;
 use reth_eth_wire::{BlockBody, EthMessage};
-use reth_interfaces::p2p::headers::{
-    client::{HeadersRequest},
-};
+use reth_interfaces::p2p::headers::client::HeadersRequest;
 use reth_primitives::{Header, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
@@ -16,11 +11,12 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
-use tokio_stream::wrappers::{UnboundedReceiverStream};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Manages data fetching operations.
 ///
-/// This type is hooked into the staged sync pipeline.
+/// This type is hooked into the staged sync pipeline and delegates download request to available
+/// peers and sends the response once ready.
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
     inflight_headers_requests: HashMap<NodeId, Request<HeadersRequest, RequestResult<Vec<Header>>>>,
@@ -44,17 +40,6 @@ impl StateFetcher {
         _best_hash: H256,
         _best_number: U256,
     ) {
-    }
-
-    pub(crate) fn new() -> Self {
-        let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
-        Self {
-            inflight_headers_requests: Default::default(),
-            peers: Default::default(),
-            queued_requests: Default::default(),
-            download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
-            download_requests_tx,
-        }
     }
 
     /// Returns the next action to return
@@ -117,6 +102,19 @@ impl StateFetcher {
     /// Returns a new [`HeadersDownloader`] that can send requests to this type
     pub(crate) fn headers_downloader(&self) -> HeadersDownloader {
         HeadersDownloader { request_tx: self.download_requests_tx.clone() }
+    }
+}
+
+impl Default for StateFetcher {
+    fn default() -> Self {
+        let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
+        Self {
+            inflight_headers_requests: Default::default(),
+            peers: Default::default(),
+            queued_requests: Default::default(),
+            download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
+            download_requests_tx,
+        }
     }
 }
 
