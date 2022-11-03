@@ -1,5 +1,5 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::{ready, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
@@ -208,7 +208,7 @@ where
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
         // return behind any pings we need to respond to
         while let Poll::Ready(res) = this.inner.as_mut().poll_next(cx) {
-            let mut bytes = match res {
+            let bytes = match res {
                 Some(Ok(bytes)) => bytes,
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 None => return Poll::Ready(None),
