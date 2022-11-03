@@ -129,25 +129,42 @@ pub(crate) mod test_utils {
 
     use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 
+    /// The [StageTestDB] is used as an internal
+    /// database for testing stage implementation.
+    ///
+    /// ```rust
+    /// let db = StageTestDB::default();
+    /// stage.execute(&mut db.container(), input);
+    /// ```
     pub(crate) struct StageTestDB {
         db: Arc<Env<WriteMap>>,
     }
 
     impl Default for StageTestDB {
+        /// Create a new instance of [StageTestDB]
         fn default() -> Self {
             Self { db: Arc::new(create_test_db::<WriteMap>(EnvKind::RW)) }
         }
     }
 
     impl StageTestDB {
+        /// Get a pointer to an internal database.
         pub(crate) fn inner(&self) -> Arc<Env<WriteMap>> {
             self.db.clone()
         }
 
+        /// Return a database wrapped in [DBContainer].
         pub(crate) fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
             DBContainer::new(self.db.borrow()).expect("failed to create db container")
         }
 
+        /// Map a collection of values and store them in the database.
+        /// This function commits the transaction before exiting.
+        ///
+        /// ```rust
+        /// let db = StageTestDB::default();
+        /// db.map_put::<Table, _, _>(&items, |item| item)?;
+        /// ```
         pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), Error>
         where
             T: Table,
@@ -164,6 +181,15 @@ pub(crate) mod test_utils {
             Ok(())
         }
 
+        /// Transform a collection of values using a callback and store
+        /// them in the database. The callback additionally accepts the
+        /// optional last element that was stored.
+        /// This function commits the transaction before exiting.
+        ///
+        /// ```rust
+        /// let db = StageTestDB::default();
+        /// db.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
+        /// ```
         pub(crate) fn transform_append<T, S, F>(
             &self,
             values: &[S],
@@ -181,15 +207,14 @@ pub(crate) mod test_utils {
             let mut last = cursor.last()?.map(|(_, v)| v);
             values.iter().try_for_each(|src| {
                 let (k, v) = transform(&last, src);
-                cursor.append(k, v.clone())?;
-                last = Some(v);
-                Ok(())
+                last = Some(v.clone());
+                cursor.append(k, v)
             })?;
             db.commit()?;
             Ok(())
         }
 
-        /// Check there there is no table entry above given block
+        /// Check there there is no table entry above a given block
         pub(crate) fn check_no_entry_above<T: Table, F>(
             &self,
             block: BlockNumber,
@@ -211,13 +236,18 @@ pub(crate) mod test_utils {
         }
     }
 
+    /// A generic test runner for stages.
     #[async_trait::async_trait]
     pub(crate) trait StageTestRunner {
         type S: Stage<Env<WriteMap>> + 'static;
 
+        /// Return a reference to the database.
         fn db(&self) -> &StageTestDB;
+
+        /// Return an instance of a Stage.
         fn stage(&self) -> Self::S;
 
+        /// Run [Stage::execute] and return a receiver for the result.
         fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
             let (tx, rx) = oneshot::channel();
             let (db, mut stage) = (self.db().inner(), self.stage());
@@ -230,6 +260,7 @@ pub(crate) mod test_utils {
             rx
         }
 
+        /// Run [Stage::unwind] and return a receiver for the result.
         fn unwind(
             &self,
             input: UnwindInput,

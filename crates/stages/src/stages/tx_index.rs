@@ -8,7 +8,13 @@ use std::fmt::Debug;
 const TX_INDEX: StageId = StageId("TxIndex");
 
 /// The cumulative transaction index stage
-/// implementation for staged sync.
+/// implementation for staged sync. This stage
+/// updates the cumulative transaction count per block.
+///
+/// e.g. [key, value] entries in [tables::CumulativeTxCount]
+/// block #1 with 24 transactions - [1, 24]
+/// block #2 with 42 transactions - [2, 66]
+/// block #3 with 33 transaction  - [3, 99]
 #[derive(Debug)]
 pub struct TxIndex;
 
@@ -30,18 +36,18 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or(DatabaseIntegrityError::NoCannonicalHeader { number: last_block })?;
+            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: last_block })?;
 
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or(DatabaseIntegrityError::NoCannonicalHeader { number: start_block })?;
+            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: start_block })?;
 
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
 
         let mut cursor = tx.cursor_mut::<tables::CumulativeTxCount>()?;
         let (_, mut count) = cursor.seek_exact((last_block, last_hash).into())?.ok_or(
-            DatabaseIntegrityError::NoCumulativeTxCount { number: last_block, hash: last_hash },
+            DatabaseIntegrityError::CumulativeTxCount { number: last_block, hash: last_hash },
         )?;
 
         let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
@@ -85,7 +91,7 @@ mod tests {
         let rx = runner.execute(ExecInput::default());
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CannonicalHeader { .. }))
         );
     }
 
@@ -106,7 +112,7 @@ mod tests {
         let rx = runner.execute(input);
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCumulativeTxCount { .. }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CumulativeTxCount { .. }))
         );
     }
 
