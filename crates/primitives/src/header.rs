@@ -1,13 +1,14 @@
 use crate::{BlockHash, BlockNumber, Bloom, H160, H256, U256};
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
-use reth_codecs::main_codec;
+use modular_bitfield::prelude::*;
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::ops::Deref;
 
 /// Block header
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, Compact)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.
@@ -218,13 +219,13 @@ impl HeaderLocked {
 
 #[cfg(test)]
 mod tests {
-    use crate::Address;
-
     use super::{Decodable, Encodable, Header, H256};
+    use crate::Address;
     use ethers_core::{
-        types::Bytes,
+        types::{Bloom, Bytes},
         utils::hex::{self, FromHex},
     };
+    use reth_codecs::Compact;
     use std::str::FromStr;
 
     #[test]
@@ -270,7 +271,14 @@ mod tests {
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
         };
-        assert_eq!(header.hash_slow(), expected_hash);
+
+        dbg!("###########");
+        dbg!(header.clone().to_compact().1.len());
+        let (len, h) = header.clone().to_compact();
+        let (h, _) = Header::from_compact(&h, dbg!(len));
+        let test = parity_scale_codec::Encode::encode(&header);
+        dbg!(test.len());
+        assert!(header == h);
     }
 
     #[test]

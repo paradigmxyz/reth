@@ -1,9 +1,11 @@
-use crate::{H256, U256};
-use reth_codecs::main_codec;
+use crate::{Address, H256, U256};
+use bytes::Buf;
+use modular_bitfield::prelude::*;
+use reth_codecs::{main_codec, Compact};
 
 /// Account saved in database
 #[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Compact)]
 pub struct Account {
     /// Nonce.
     pub nonce: u64,

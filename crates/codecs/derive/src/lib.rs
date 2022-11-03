@@ -2,6 +2,13 @@ use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
+mod compact;
+
+#[proc_macro_derive(Compact)]
+pub fn derive(input: TokenStream) -> TokenStream {
+    compact::derive(input)
+}
+
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
