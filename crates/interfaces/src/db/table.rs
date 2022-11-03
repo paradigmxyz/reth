@@ -5,12 +5,27 @@ use std::{
     marker::{Send, Sync},
 };
 
+/// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
+pub trait Compress: Send + Sync + Sized + Debug {
+    /// Compressed type.
+    type Compressed: AsRef<[u8]> + Send + Sync;
+
+    /// Compresses data going into the database.
+    fn compress(self) -> Self::Compressed;
+}
+
+/// Trait that will transform the data to be read from the DB.
+pub trait Decompress: Send + Sync + Sized + Debug {
+    /// Decompresses data coming from the database.
+    fn decompress<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
+}
+
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
     type Encoded: AsRef<[u8]> + Send + Sync;
 
-    /// Decodes data going into the database.
+    /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;
 }
 
@@ -20,10 +35,15 @@ pub trait Decode: Send + Sync + Sized + Debug {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
 }
 
-/// Generic trait that enforces the database value to implement [`Encode`] and [`Decode`].
-pub trait Object: Encode + Decode {}
+/// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
+pub trait Key: Encode + Decode {}
 
-impl<T> Object for T where T: Encode + Decode {}
+impl<T> Key for T where T: Encode + Decode {}
+
+/// Generic trait that enforces the database value to implement [`Compress`] and [`Decompress`].
+pub trait Value: Compress + Decompress {}
+
+impl<T> Value for T where T: Compress + Decompress {}
 
 /// Generic trait that a database table should follow.
 ///
@@ -39,11 +59,11 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.
-    type Key: Object;
+    type Key: Key;
     /// Value element of `Table`.
-    type Value: Object;
+    type Value: Value;
     /// Seek Key element of `Table`.
-    type SeekKey: Object;
+    type SeekKey: Key;
 }
 
 /// DupSort allows for keys not to be repeated in the database,
@@ -52,5 +72,5 @@ pub trait DupSort: Table {
     /// Subkey type. For more check https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
     ///
     /// Sorting should be taken into account when encoding this.
-    type SubKey: Object;
+    type SubKey: Key;
 }

@@ -297,8 +297,7 @@ pub mod tests {
     // Validate that all necessary tables are updated after the
     // header download with some previous progress.
     async fn headers_stage_prev_progress() {
-        // TODO: set bigger range once `MDBX_EKEYMISMATCH` issue is resolved
-        let (start, end) = (10000, 10240);
+        let (start, end) = (10000, 10241);
         let head = gen_random_header(start, None);
         let headers = gen_random_header_range(start + 1..end, head.hash());
         let db = HeadersDB::default();
@@ -374,7 +373,7 @@ pub mod tests {
         let db = HeadersDB::default();
         db.insert_header(&head).expect("failed to insert header");
         for header in first_range.iter().chain(second_range.iter()) {
-            db.insert_header(&header).expect("failed to insert header");
+            db.insert_header(header).expect("failed to insert header");
         }
 
         let input = UnwindInput { bad_block: None, stage_progress: 15, unwind_to: 15 };
@@ -408,8 +407,7 @@ pub mod tests {
         let consensus = Arc::new(TestConsensus::default());
         let downloader = test_utils::TestDownloader::new(download_result);
 
-        let mut stage =
-            HeaderStage { consensus: consensus.clone(), client: client.clone(), downloader };
+        let mut stage = HeaderStage { consensus: consensus.clone(), client, downloader };
         tokio::spawn(async move {
             let mut db = DBContainer::<Env<WriteMap>>::new(db.borrow()).unwrap();
             let result = stage.execute(&mut db, input).await;
@@ -525,7 +523,7 @@ pub mod tests {
 
                 let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
                 let td =
-                    U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap_or(vec![]));
+                    U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap_or_default());
                 cursor_td
                     .append(key, H256::from_uint(&(td + header.difficulty)).as_bytes().to_vec())?;
 
