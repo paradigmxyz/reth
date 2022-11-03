@@ -31,6 +31,8 @@ pub fn pk2id(pk: &PublicKey) -> PeerId {
 /// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
 /// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
 pub(crate) fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
+    // NOTE: H512 is used as a PeerId not because it represents a hash, but because 512 bits is
+    // enough to represent an uncompressed public key.
     let mut s = [0_u8; 65];
     // SECP256K1_TAG_PUBKEY_UNCOMPRESSED = 0x04
     // see: https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211

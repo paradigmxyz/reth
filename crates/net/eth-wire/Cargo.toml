@@ -26,7 +26,9 @@ tokio-stream = "0.1.11"
 secp256k1 = { version = "0.24.0", features = ["global-context", "rand-std", "recovery"] }
 tokio-util = { version = "0.7.4", features = ["io"] }
 pin-project = "1.0"
+pin-utils = "0.1.0"
 tracing = "0.1.37"
+snap = "1.0.5"
 
 [dev-dependencies]
 hex-literal = "0.3"

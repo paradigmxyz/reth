@@ -3,7 +3,7 @@ use std::io;
 
 use reth_primitives::{Chain, H256};
 
-use crate::types::forkid::ValidationError;
+use crate::{capability::SharedCapabilityError, types::forkid::ValidationError};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
@@ -13,6 +13,8 @@ pub enum EthStreamError {
     Io(#[from] io::Error),
     #[error(transparent)]
     Rlp(#[from] reth_rlp::DecodeError),
+    #[error(transparent)]
+    P2PStreamError(#[from] P2PStreamError),
     #[error(transparent)]
     HandshakeError(#[from] HandshakeError),
     #[error("message size ({0}) exceeds max length (10MB)")]
@@ -36,4 +38,67 @@ pub enum HandshakeError {
     MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]
     MismatchedChain { expected: Chain, got: Chain },
+}
+
+/// Errors when sending/receiving p2p messages. These should result in kicking the peer.
+#[derive(thiserror::Error, Debug)]
+pub enum P2PStreamError {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Rlp(#[from] reth_rlp::DecodeError),
+    #[error(transparent)]
+    Snap(#[from] snap::Error),
+    #[error(transparent)]
+    HandshakeError(#[from] P2PHandshakeError),
+    #[error("message size ({message_size}) exceeds max length ({max_size})")]
+    MessageTooBig { message_size: usize, max_size: usize },
+    #[error("unknown reserved p2p message id: {0}")]
+    UnknownReservedMessageId(u8),
+    #[error("empty protocol message received")]
+    EmptyProtocolMessage,
+    #[error(transparent)]
+    PingerError(#[from] PingerError),
+    #[error("ping timed out with {0} retries")]
+    PingTimeout(u8),
+    #[error(transparent)]
+    ParseVersionError(#[from] SharedCapabilityError),
+    #[error("mismatched protocol version in Hello message. expected: {expected:?}, got: {got:?}")]
+    MismatchedProtocolVersion { expected: u8, got: u8 },
+    #[error("started ping task before the handshake completed")]
+    PingBeforeHandshake,
+    // TODO: remove / reconsider
+    #[error("disconnected")]
+    Disconnected,
+}
+
+/// Errors when conducting a p2p handshake
+#[derive(thiserror::Error, Debug)]
+pub enum P2PHandshakeError {
+    #[error("hello message can only be recv/sent in handshake")]
+    HelloNotInHandshake,
+    #[error("received non-hello message when trying to handshake")]
+    NonHelloMessageInHandshake,
+    #[error("no capabilities shared with peer")]
+    NoSharedCapabilities,
+    #[error("no response received when sending out handshake")]
+    NoResponse,
+    #[error("handshake timed out")]
+    Timeout,
+}
+
+/// An error that can occur when interacting with a [`Pinger`].
+#[derive(Debug, thiserror::Error)]
+pub enum PingerError {
+    /// A ping was sent while the pinger was in the `TimedOut` state.
+    #[error("ping sent while timed out")]
+    PingWhileTimedOut,
+
+    /// A pong was received while the pinger was in the `Ready` state.
+    #[error("pong received while ready")]
+    PongWhileReady,
+
+    /// A pong was received while the pinger was in the `TimedOut` state.
+    #[error("pong received while timed out")]
+    PongWhileTimedOut,
 }
