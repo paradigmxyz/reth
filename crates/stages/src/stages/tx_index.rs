@@ -33,27 +33,37 @@ impl<DB: Database> Stage<DB> for TxIndex {
     ) -> Result<ExecOutput, StageError> {
         let tx = db.get_mut();
 
+        // The progress of this stage during last iteration
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
             .ok_or(DatabaseIntegrityError::CannonicalHeader { number: last_block })?;
 
+        // The start block for this iteration
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
             .ok_or(DatabaseIntegrityError::CannonicalHeader { number: start_block })?;
 
+        // The maximum block that this stage should insert to
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
 
+        // Get the cursor over the table
         let mut cursor = tx.cursor_mut::<tables::CumulativeTxCount>()?;
+        // Find the last count that was inserted during previous iteration
         let (_, mut count) = cursor.seek_exact((last_block, last_hash).into())?.ok_or(
             DatabaseIntegrityError::CumulativeTxCount { number: last_block, hash: last_hash },
         )?;
 
+        // Get the cursor over block bodies
         let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
         let walker = body_cursor.walk((start_block, start_hash).into())?;
+
+        // Walk the block body entries up to maximum block (including)
         let entries = walker
             .take_while(|b| b.as_ref().map(|(k, _)| k.number() <= max_block).unwrap_or_default());
+
+        // Aggregate and insert cumulative transaction count for each block number
         for entry in entries {
             let (key, tx_count) = entry?;
             count += tx_count as u64;
@@ -69,8 +79,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
         db: &mut DBContainer<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let tx = db.get_mut();
-        unwind_table_by_num_hash::<DB, tables::CumulativeTxCount>(tx, input.unwind_to)?;
+        unwind_table_by_num_hash::<DB, tables::CumulativeTxCount>(db.get_mut(), input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
