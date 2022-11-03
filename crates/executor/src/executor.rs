@@ -1,41 +1,53 @@
-use crate::{revm_wrap, Config};
-use reth_interfaces::{
-    consensus::Consensus,
-    executor::{BlockExecutor, Error, ExecutorDb},
+use crate::{
+    revm_wrap::{self, State, SubState},
+    Config,
 };
+use reth_interfaces::executor::{BlockExecutor, Error, ExecutorDb};
 use reth_primitives::BlockLocked;
-use revm::{db::EmptyDB, AnalysisKind, Env, SpecId};
+use revm::{AnalysisKind, SpecId, EVM};
 
 /// Main block executor
 pub struct Executor {
     /// Configuration, Spec and optional flags.
     pub config: Config,
-    /// Database
-    pub db: Box<dyn ExecutorDb>,
-    /// Consensus
-    pub consensus: Box<dyn Consensus>,
 }
 
 impl Executor {
     /// Create new Executor
-    pub fn new(config: Config, db: Box<dyn ExecutorDb>, consensus: Box<dyn Consensus>) -> Self {
-        Self { config, db, consensus }
+    pub fn new(config: Config) -> Self {
+        Self { config }
     }
 
     /// Verify block. Execute all transaction and compare results.
-    pub fn verify(&self, block: &BlockLocked) -> Result<(), Error> {
-        let mut env = Env::default();
-        env.cfg.chain_id = 1.into();
-        env.cfg.spec_id = SpecId::LATEST;
-        env.cfg.perf_all_precompiles_have_balance = true;
-        env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
+    pub fn verify<DB: ExecutorDb>(&self, block: &BlockLocked, db: DB) -> Result<(), Error> {
+        let db = SubState::new(State::new(db));
+        let mut evm = EVM::new();
+        evm.database(db);
 
-        revm_wrap::fill_block_env(&mut env.block, block);
+        evm.env.cfg.chain_id = 1.into();
+        evm.env.cfg.spec_id = SpecId::LATEST;
+        evm.env.cfg.perf_all_precompiles_have_balance = true;
+        evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
-        let _database = revm_wrap::TempStateDb::new(EmptyDB::default());
+        revm_wrap::fill_block_env(&mut evm.env.block, block);
 
         for transaction in block.body.iter() {
-            revm_wrap::fill_tx_env(&mut env.tx, transaction.as_ref());
+            // TODO Check if Transaction is new
+            revm_wrap::fill_tx_env(&mut evm.env.tx, transaction.as_ref());
+
+            let res = evm.transact_commit();
+
+            if res.exit_reason == revm::Return::FatalExternalError {
+                // stop executing. Fatal error thrown from database
+            }
+
+            // calculate commulative gas used
+
+            // create receipt
+            // bloom filter from logs
+
+            // Receipt outcome EIP-658: Embedding transaction status code in receipts
+            // EIP-658 supperseeded EIP-98 in Byzantium fork
         }
 
         Err(Error::VerificationFailed)

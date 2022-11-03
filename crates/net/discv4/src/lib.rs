@@ -159,7 +159,7 @@ impl Discv4 {
     ///  let(discv4, mut service) = Discv4::bind(socket, local_enr, secret_key, config).await.unwrap();
     ///
     ///   // get an update strea
-    ///   let mut updates = service.update_stream();
+    ///   let updates = service.update_stream();
     ///
     ///   let _handle = service.spawn();
     ///

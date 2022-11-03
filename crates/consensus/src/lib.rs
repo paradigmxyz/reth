@@ -5,11 +5,14 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Reth executor executes transaction in block of data.
-
+//! Reth consensus.
 pub mod config;
-/// Executor
-pub mod executor;
-/// Wrapper around revm database and types
-pub mod revm_wrap;
+pub mod consensus;
+pub mod verification;
+
+/// Helper function for calculating Merkle proofs and hashes
+pub mod proofs;
+
 pub use config::Config;
+pub use consensus::EthConsensus;
+pub use reth_interfaces::consensus::Error;

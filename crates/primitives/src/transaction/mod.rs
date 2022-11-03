@@ -632,10 +632,10 @@ mod tests {
 
     use crate::{
         transaction::{signature::Signature, TransactionKind},
-        Address, Transaction, TransactionSigned, H256, U256,
+        Address, Bytes, Transaction, TransactionSigned, H256, U256,
     };
     use bytes::BytesMut;
-    use ethers_core::{types::Bytes, utils::hex};
+    use ethers_core::utils::hex;
     use reth_rlp::{Decodable, Encodable};
 
     #[test]

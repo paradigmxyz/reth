@@ -2,7 +2,7 @@
 
 //suse crate::kv::Error;
 use bytes::Bytes;
-use reth_interfaces::db::{Decode, Error, Table};
+use reth_interfaces::db::{Decode, Decompress, Error, Table};
 use std::borrow::Cow;
 
 /// Returns the default page size that can be used in this OS.
@@ -26,10 +26,11 @@ pub(crate) fn decoder<'a, T>(
 where
     T: Table,
     T::Key: Decode,
+    T::Value: Decompress,
 {
     Ok((
         Decode::decode(Bytes::from(kv.0.into_owned()))?,
-        Decode::decode(Bytes::from(kv.1.into_owned()))?,
+        Decompress::decompress(Bytes::from(kv.1.into_owned()))?,
     ))
 }
 
@@ -38,7 +39,7 @@ pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> Result<
 where
     T: Table,
 {
-    Decode::decode(Bytes::from(kv.1.into_owned()))
+    Decompress::decompress(Bytes::from(kv.1.into_owned()))
 }
 
 /// Helper function to decode a value. It can be a key or subkey.
@@ -46,5 +47,5 @@ pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, Error>
 where
     T: Table,
 {
-    Decode::decode(Bytes::from(value.into_owned()))
+    Decompress::decompress(Bytes::from(value.into_owned()))
 }
