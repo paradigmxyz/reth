@@ -1,5 +1,5 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::{ready, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
@@ -244,25 +244,24 @@ where
                 // we have received an unknown reserved message
                 return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
             } else {
-                // we have a subprotocol message that needs to be sent in the stream.
-                // first, switch the message id based on offset so the next layer can decode it
-                // without being aware of the p2p stream's state (shared capabilities / the message
-                // id offset)
-                bytes[0] -= this.shared_capability.offset();
-
                 // first check that the compressed message length does not exceed the max message
                 // size
-                let compressed_len = snap::raw::decompress_len(&bytes[1..])?;
-                if compressed_len > MAX_PAYLOAD_SIZE {
+                let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
+                if decompressed_len > MAX_PAYLOAD_SIZE {
                     return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
-                        message_size: compressed_len,
+                        message_size: decompressed_len,
                         max_size: MAX_PAYLOAD_SIZE,
                     })))
                 }
 
                 // then decompress the message
-                let mut decompress_buf = BytesMut::with_capacity(compressed_len + 1);
-                decompress_buf[0] = bytes[0];
+                let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
+
+                // we have a subprotocol message that needs to be sent in the stream.
+                // first, switch the message id based on offset so the next layer can decode it
+                // without being aware of the p2p stream's state (shared capabilities / the message
+                // id offset)
+                decompress_buf[0] = bytes[0] - this.shared_capability.offset();
                 this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
 
                 return Poll::Ready(Some(Ok(decompress_buf)))
@@ -286,12 +285,16 @@ where
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let this = self.project();
 
-        let mut compressed = BytesMut::with_capacity(1 + snap::raw::max_compress_len(item.len()));
-        this.encoder.compress(&item[1..], &mut compressed[1..])?;
+        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
 
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
         compressed[0] = item[0] + this.shared_capability.offset();
+        let compressed_size = this.encoder.compress(&item[1..], &mut compressed[1..])?;
+
+        // truncate the compressed buffer to the actual compressed size (plus one for the message
+        // id)
+        compressed.truncate(compressed_size + 1);
 
         this.inner.start_send(compressed.freeze())?;
         Ok(())
@@ -322,12 +325,19 @@ pub fn set_capability_offsets(
     let mut shared_capabilities = HashMap::new();
 
     // sorted list of capability names
+    // TODO: the Ord implementation for strings says the following:
+    // > Strings are ordered lexicographically by their byte values. This orders Unicode code
+    // points based on their positions in the code charts. This is not necessarily the same as
+    // “alphabetical” order.
+    // We need to implement a case-sensitive alphabetical sort
     let mut shared_capability_names = BTreeSet::new();
 
     // find highest shared version of each shared capability
     for capability in peer_capabilities {
         // if this is Some, we share this capability
         if let Some(version) = our_capabilities_map.get(&capability.name) {
+            // If multiple versions are shared of the same (equal name) capability, the numerically
+            // highest wins, others are ignored
             if capability.version <= *version {
                 shared_capabilities.insert(capability.name.clone(), capability.version);
                 shared_capability_names.insert(capability.name);
@@ -338,14 +348,18 @@ pub fn set_capability_offsets(
     // disconnect if we don't share any capabilities
     if shared_capabilities.is_empty() {
         // TODO: send a disconnect message? if we want to do this, this will need to be a member
-        // method of `UnauthedP2PStream`
+        // method of `UnauthedP2PStream` so it can access the inner stream
         return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
     }
 
     // order versions based on capability name (alphabetical) and select offsets based on
     // BASE_OFFSET + prev_total_message
     let mut shared_with_offsets = Vec::new();
-    let mut offset = MAX_RESERVED_MESSAGE_ID;
+
+    // Message IDs are assumed to be compact from ID 0x10 onwards (0x00-0x0f is reserved for the
+    // "p2p" capability) and given to each shared (equal-version, equal-name) capability in
+    // alphabetic order.
+    let mut offset = MAX_RESERVED_MESSAGE_ID + 1;
     for name in shared_capability_names {
         let version = shared_capabilities.get(&name).unwrap();
 
@@ -353,7 +367,7 @@ pub fn set_capability_offsets(
 
         match shared_capability {
             SharedCapability::UnknownCapability { .. } => {
-                // do nothing with this capability
+                // Capabilities which are not shared are ignored
                 tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
             }
             SharedCapability::Eth { .. } => {
@@ -693,6 +707,8 @@ mod tests {
     use reth_ecies::util::pk2id;
     use reth_rlp::EMPTY_STRING_CODE;
     use secp256k1::{SecretKey, SECP256K1};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_util::codec::Decoder;
 
     use crate::EthVersion;
 
@@ -700,7 +716,65 @@ mod tests {
 
     #[tokio::test]
     async fn test_handshake_passthrough() {
-        // TODO
+        // create a p2p stream and server, then confirm that the two are authed
+        // create tcpstream
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+
+            let server_key = SecretKey::new(&mut rand::thread_rng());
+            let server_hello = HelloMessage {
+                protocol_version: ProtocolVersion::V5,
+                client_version: "bitcoind/1.0.0".to_string(),
+                capabilities: vec![EthVersion::Eth67.into()],
+                port: 30303,
+                id: pk2id(&server_key.public_key(SECP256K1)),
+            };
+
+            let unauthed_stream = UnauthedP2PStream::new(stream);
+            let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
+
+            // ensure that the two share a single capability, eth67
+            assert_eq!(
+                p2p_stream.shared_capability,
+                SharedCapability::Eth {
+                    version: EthVersion::Eth67,
+                    offset: MAX_RESERVED_MESSAGE_ID + 1
+                }
+            );
+        });
+
+        let client_key = SecretKey::new(&mut rand::thread_rng());
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = crate::PassthroughCodec::default().framed(outgoing);
+
+        let client_hello = HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "bitcoind/1.0.0".to_string(),
+            capabilities: vec![EthVersion::Eth67.into()],
+            port: 30303,
+            id: pk2id(&client_key.public_key(SECP256K1)),
+        };
+
+        let unauthed_stream = UnauthedP2PStream::new(sink);
+        let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
+
+        // ensure that the two share a single capability, eth67
+        assert_eq!(
+            p2p_stream.shared_capability,
+            SharedCapability::Eth {
+                version: EthVersion::Eth67,
+                offset: MAX_RESERVED_MESSAGE_ID + 1
+            }
+        );
+
+        // make sure the server receives the message and asserts before ending the test
+        handle.await.unwrap();
     }
 
     #[test]

@@ -363,7 +363,7 @@ mod tests {
         let client_key = SecretKey::new(&mut rand::thread_rng());
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let sink = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
 
         let client_hello = HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -376,7 +376,7 @@ mod tests {
             id: pk2id(&client_key.public_key(SECP256K1)),
         };
 
-        let unauthed_stream = UnauthedP2PStream::new(outgoing);
+        let unauthed_stream = UnauthedP2PStream::new(sink);
         let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
         let mut client_stream = EthStream::new(p2p_stream);
         client_stream.handshake(status, fork_filter).await.unwrap();
