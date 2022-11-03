@@ -61,7 +61,7 @@ impl Decode for BlockNumHash {
 
         let num =
             u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
-        let hash = H256::decode(value.slice(8..))?;
+        let hash = H256::from_slice(&value.slice(8..));
 
         Ok(BlockNumHash((num, hash)))
     }
@@ -84,7 +84,7 @@ mod test {
         bytes[..8].copy_from_slice(&num.to_be_bytes());
         bytes[8..].copy_from_slice(&hash.0);
 
-        let encoded = Encode::encode(key.clone());
+        let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
         let decoded: BlockNumHash = Decode::decode(encoded.to_vec()).unwrap();

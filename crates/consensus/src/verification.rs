@@ -304,7 +304,7 @@ mod tests {
         parent.gas_used = 17763076;
         parent.gas_limit = 30000000;
         parent.base_fee_per_gas = Some(0x28041f7f5);
-        parent.number = parent.number - 1;
+        parent.number -= 1;
 
         let ommers = Vec::new();
         let receipts = Vec::new();

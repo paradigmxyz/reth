@@ -4,8 +4,8 @@ use std::marker::PhantomData;
 
 use crate::utils::*;
 use reth_interfaces::db::{
-    DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode, Error, Table,
-    Walker,
+    Compress, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode,
+    Error, Table, Walker,
 };
 use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 
@@ -124,13 +124,13 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         // Default `WriteFlags` is UPSERT
         self.inner
-            .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::UPSERT)
+            .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::UPSERT)
             .map_err(|e| Error::Write(e.into()))
     }
 
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
-            .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::APPEND)
+            .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND)
             .map_err(|e| Error::Write(e.into()))
     }
 
@@ -146,7 +146,7 @@ impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
-            .put(key.encode().as_ref(), value.encode().as_ref(), WriteFlags::APPEND_DUP)
+            .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND_DUP)
             .map_err(|e| Error::Write(e.into()))
     }
 }

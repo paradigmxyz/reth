@@ -269,7 +269,7 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
-            let mut walker = cursor.walk_dup(key.into(), H256::from_low_u64_be(1)).unwrap();
+            let mut walker = cursor.walk_dup(key, H256::from_low_u64_be(1)).unwrap();
             assert_eq!(
                 value11,
                 walker

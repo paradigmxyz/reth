@@ -62,7 +62,7 @@ impl Decode for TxNumberAddress {
 
         let num =
             u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
-        let hash = Address::decode(value.slice(8..))?;
+        let hash = Address::from_slice(&value.slice(8..));
 
         Ok(TxNumberAddress((num, hash)))
     }

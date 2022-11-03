@@ -1,6 +1,8 @@
 use std::str::FromStr;
 use thiserror::Error;
 
+use crate::p2pstream::CapabilityMessage;
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("Unknown eth protocol version: {0}")]
 pub struct ParseVersionError(String);
@@ -14,6 +16,19 @@ pub enum EthVersion {
 
     /// The `eth` protocol version 67.
     Eth67 = 67,
+}
+
+impl EthVersion {
+    /// Returns the total number of messages the protocol version supports.
+    pub fn total_messages(&self) -> u8 {
+        match self {
+            EthVersion::Eth66 => 15,
+            EthVersion::Eth67 => {
+                // eth/67 is eth/66 minus GetNodeData and NodeData messages
+                13
+            }
+        }
+    }
 }
 
 /// Allow for converting from a `&str` to an `EthVersion`.
@@ -83,6 +98,13 @@ impl From<EthVersion> for &'static str {
             EthVersion::Eth66 => "66",
             EthVersion::Eth67 => "67",
         }
+    }
+}
+
+impl From<EthVersion> for CapabilityMessage {
+    #[inline]
+    fn from(v: EthVersion) -> CapabilityMessage {
+        CapabilityMessage { name: String::from("eth"), version: v as usize }
     }
 }
 
