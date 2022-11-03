@@ -1262,17 +1262,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastrlp"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "089263294bb1c38ac73649a6ad563dd9a5142c8dc0482be15b8b9acb22a1611e"
-dependencies = [
- "arrayvec",
- "auto_impl",
- "bytes",
-]
-
-[[package]]
 name = "ff"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3342,8 +3331,8 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
- "fastrlp",
  "reth-primitives",
+ "reth-rlp",
  "serde",
  "serde_json",
 ]

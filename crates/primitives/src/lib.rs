@@ -12,6 +12,7 @@ mod block;
 mod chain;
 mod error;
 mod header;
+mod hex_bytes;
 mod integer_list;
 mod jsonu256;
 mod log;
@@ -23,6 +24,7 @@ pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
 pub use header::{Header, HeaderLocked};
+pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
@@ -51,10 +53,9 @@ pub type StorageKey = H256;
 /// Storage value
 pub type StorageValue = H256;
 
-// NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 #[doc(hidden)]
