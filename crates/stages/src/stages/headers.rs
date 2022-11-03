@@ -498,7 +498,7 @@ pub mod tests {
 
         impl Default for HeadersDB {
             fn default() -> Self {
-                Self { db: Arc::new(create_test_db::<mdbx::WriteMap>(EnvKind::RW)) }
+                Self { db: create_test_db::<mdbx::WriteMap>(EnvKind::RW) }
             }
         }
 
