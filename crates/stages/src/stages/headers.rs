@@ -407,8 +407,7 @@ pub mod tests {
         let consensus = Arc::new(TestConsensus::default());
         let downloader = test_utils::TestDownloader::new(download_result);
 
-        let mut stage =
-            HeaderStage { consensus: consensus.clone(), client: client.clone(), downloader };
+        let mut stage = HeaderStage { consensus: consensus.clone(), client, downloader };
         tokio::spawn(async move {
             let mut db = DBContainer::<Env<WriteMap>>::new(db.borrow()).unwrap();
             let result = stage.execute(&mut db, input).await;
