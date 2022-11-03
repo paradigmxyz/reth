@@ -3,8 +3,8 @@
 //! json input of an RPC call. Depending on what fields are set, it can be converted into the
 //! container type [`TypedTransactionRequest`].
 
-use fastrlp::{RlpDecodable, RlpEncodable};
-use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U256};
+use reth_primitives::{AccessList, Address, Bytes, U256};
+use reth_rlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests
@@ -42,7 +42,7 @@ pub struct EIP2930TransactionRequest {
     pub kind: TransactionKind,
     pub value: U256,
     pub input: Bytes,
-    pub access_list: Vec<AccessListItem>,
+    pub access_list: AccessList,
 }
 
 /// Represents an EIP-1559 transaction request
@@ -56,7 +56,7 @@ pub struct EIP1559TransactionRequest {
     pub kind: TransactionKind,
     pub value: U256,
     pub input: Bytes,
-    pub access_list: Vec<AccessListItem>,
+    pub access_list: AccessList,
 }
 
 /// Represents the `to` field of a transaction request
@@ -82,14 +82,14 @@ impl TransactionKind {
     }
 }
 
-impl fastrlp::Encodable for TransactionKind {
+impl Encodable for TransactionKind {
     fn length(&self) -> usize {
         match self {
             TransactionKind::Call(to) => to.length(),
             TransactionKind::Create => ([]).length(),
         }
     }
-    fn encode(&self, out: &mut dyn fastrlp::BufMut) {
+    fn encode(&self, out: &mut dyn BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => ([]).encode(out),
@@ -97,18 +97,18 @@ impl fastrlp::Encodable for TransactionKind {
     }
 }
 
-impl fastrlp::Decodable for TransactionKind {
-    fn decode(buf: &mut &[u8]) -> Result<Self, fastrlp::DecodeError> {
+impl Decodable for TransactionKind {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         if let Some(&first) = buf.first() {
             if first == 0x80 {
                 *buf = &buf[1..];
                 Ok(TransactionKind::Create)
             } else {
-                let addr = <Address as fastrlp::Decodable>::decode(buf)?;
+                let addr = <Address as Decodable>::decode(buf)?;
                 Ok(TransactionKind::Call(addr))
             }
         } else {
-            Err(fastrlp::DecodeError::InputTooShort)
+            Err(DecodeError::InputTooShort)
         }
     }
 }
