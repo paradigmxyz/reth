@@ -14,7 +14,6 @@ use reth_primitives::*;
 // }
 //
 // impl_heapless_postcard!(T, MaxSize(T))
-
 macro_rules! impl_postcard {
     ($($name:tt),+) => {
         $(
