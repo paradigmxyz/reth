@@ -2,7 +2,7 @@ use libc::c_int;
 use std::{ffi::CStr, fmt, result, str};
 
 /// An MDBX error kind.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum Error {
     KeyExist,
     NotFound,
@@ -29,11 +29,11 @@ pub enum Error {
     Multival,
     WannaRecovery,
     KeyMismatch,
-    InvalidValue,
+    DecodeError,
     Access,
     TooLarge,
-    DecodeError(Box<dyn std::error::Error + Send + Sync + 'static>),
-    Other(c_int),
+    DecodeErrorLenDiff,
+    Other(u32),
 }
 
 impl Error {
@@ -65,16 +65,16 @@ impl Error {
             ffi::MDBX_EMULTIVAL => Error::Multival,
             ffi::MDBX_WANNA_RECOVERY => Error::WannaRecovery,
             ffi::MDBX_EKEYMISMATCH => Error::KeyMismatch,
-            ffi::MDBX_EINVAL => Error::InvalidValue,
+            ffi::MDBX_EINVAL => Error::DecodeError,
             ffi::MDBX_EACCESS => Error::Access,
             ffi::MDBX_TOO_LARGE => Error::TooLarge,
-            other => Error::Other(other),
+            other => Error::Other(other as u32),
         }
     }
 
     /// Converts an [Error] to the raw error code.
-    fn to_err_code(&self) -> c_int {
-        match self {
+    pub fn to_err_code(&self) -> u32 {
+        let err_code = match self {
             Error::KeyExist => ffi::MDBX_KEYEXIST,
             Error::NotFound => ffi::MDBX_NOTFOUND,
             Error::PageNotFound => ffi::MDBX_PAGE_NOTFOUND,
@@ -99,30 +99,30 @@ impl Error {
             Error::Multival => ffi::MDBX_EMULTIVAL,
             Error::WannaRecovery => ffi::MDBX_WANNA_RECOVERY,
             Error::KeyMismatch => ffi::MDBX_EKEYMISMATCH,
-            Error::InvalidValue => ffi::MDBX_EINVAL,
+            Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
-            Error::Other(err_code) => *err_code,
+            Error::Other(err_code) => *err_code as i32,
             _ => unreachable!(),
-        }
+        };
+        err_code as u32
+    }
+}
+
+impl From<Error> for u32 {
+    fn from(value: Error) -> Self {
+        value.to_err_code()
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::DecodeError(reason) => write!(fmt, "{reason}"),
-            other => {
-                write!(fmt, "{}", unsafe {
-                    let err = ffi::mdbx_strerror(other.to_err_code());
-                    str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
-                })
-            }
-        }
+        write!(fmt, "{}", unsafe {
+            let err = ffi::mdbx_strerror(self.to_err_code() as i32);
+            str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
+        })
     }
 }
-
-impl std::error::Error for Error {}
 
 /// An MDBX result.
 pub type Result<T> = result::Result<T, Error>;

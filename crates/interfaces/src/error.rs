@@ -10,4 +10,7 @@ pub enum Error {
 
     #[error(transparent)]
     Consensus(#[from] crate::consensus::Error),
+
+    #[error(transparent)]
+    Database(#[from] crate::db::Error),
 }
