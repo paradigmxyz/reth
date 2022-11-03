@@ -6,9 +6,6 @@ pub enum SharedCapability {
     /// The `eth` capability.
     Eth { version: EthVersion, offset: u8 },
 
-    /// The `les` capability.
-    Les { version: u8, offset: u8 },
-
     /// An unknown capability.
     UnknownCapability { name: String, version: u8, offset: u8 },
 }
@@ -18,7 +15,6 @@ impl SharedCapability {
     pub(crate) fn new(name: &str, version: u8, offset: u8) -> Result<Self, SharedCapabilityError> {
         match name {
             "eth" => Ok(Self::Eth { version: EthVersion::try_from(version)?, offset }),
-            "les" => Ok(Self::Les { version, offset }),
             _ => Ok(Self::UnknownCapability { name: name.to_string(), version, offset }),
         }
     }
@@ -27,7 +23,6 @@ impl SharedCapability {
     pub(crate) fn name(&self) -> &str {
         match self {
             SharedCapability::Eth { .. } => "eth",
-            SharedCapability::Les { .. } => "les",
             SharedCapability::UnknownCapability { name, .. } => name,
         }
     }
@@ -36,7 +31,6 @@ impl SharedCapability {
     pub(crate) fn version(&self) -> u8 {
         match self {
             SharedCapability::Eth { version, .. } => *version as u8,
-            SharedCapability::Les { version, .. } => *version,
             SharedCapability::UnknownCapability { version, .. } => *version,
         }
     }
@@ -45,7 +39,6 @@ impl SharedCapability {
     pub(crate) fn offset(&self) -> u8 {
         match self {
             SharedCapability::Eth { offset, .. } => *offset,
-            SharedCapability::Les { offset, .. } => *offset,
             SharedCapability::UnknownCapability { offset, .. } => *offset,
         }
     }

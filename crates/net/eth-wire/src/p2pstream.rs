@@ -356,10 +356,6 @@ pub fn set_capability_offsets(
                 // do nothing with this capability
                 tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
             }
-            SharedCapability::Les { .. } => {
-                // do nothing with les because the protocol is not implemented
-                tracing::warn!("unsupported capability: name={:?}, version={}", name, version,);
-            }
             SharedCapability::Eth { .. } => {
                 shared_with_offsets.push(shared_capability.clone());
 
