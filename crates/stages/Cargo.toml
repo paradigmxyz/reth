@@ -22,8 +22,8 @@ metrics = "0.20.1"
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-headers-downloaders = { path = "../net/headers-downloaders" }
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tokio-stream = "0.1.10"
-once_cell = "1.15.0"
 tempfile = "3.3.0"
 assert_matches = "1.5.0"
