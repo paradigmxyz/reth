@@ -64,23 +64,23 @@ macro_rules! impl_fuzzer_key {
     };
 }
 
-/// Fuzzer generates a random instance of the object and proceeds to compress and uncompress it. It
+/// Fuzzer generates a random instance of the object and proceeds to compress and decompress it. It
 /// then makes sure that it matches the original object.
 macro_rules! impl_fuzzer_value {
     ($($name:tt),+) => {
         $(
-            impl_fuzzer_with_input!(($name, $name, Compress, compress, Uncompress, uncompress));
+            impl_fuzzer_with_input!(($name, $name, Compress, compress, Decompress, decompress));
         )+
     };
 }
 
-/// Fuzzer generates a random instance of the object and proceeds to compress and uncompress it. It
+/// Fuzzer generates a random instance of the object and proceeds to compress and decompress it. It
 /// then makes sure that it matches the original object. It supports being fed a different kind of
 /// input, as long as it supports Into<T>.
 macro_rules! impl_fuzzer_value_with_input {
     ($(($name:tt, $input:tt)),+) => {
         $(
-            impl_fuzzer_with_input!(($name, $input, Compress, compress, Uncompress, uncompress));
+            impl_fuzzer_with_input!(($name, $input, Compress, compress, Decompress, decompress));
         )+
     };
 }

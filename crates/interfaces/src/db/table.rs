@@ -15,9 +15,9 @@ pub trait Compress: Send + Sync + Sized + Debug {
 }
 
 /// Trait that will transform the data to be read from the DB.
-pub trait Uncompress: Send + Sync + Sized + Debug {
-    /// Uncompresses data coming from the database.
-    fn uncompress<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
+pub trait Decompress: Send + Sync + Sized + Debug {
+    /// Decompresses data coming from the database.
+    fn decompress<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
 }
 
 /// Trait that will transform the data to be saved in the DB.
@@ -40,10 +40,10 @@ pub trait Key: Encode + Decode {}
 
 impl<T> Key for T where T: Encode + Decode {}
 
-/// Generic trait that enforces the database value to implement [`Compress`] and [`Uncompress`].
-pub trait Value: Compress + Uncompress {}
+/// Generic trait that enforces the database value to implement [`Compress`] and [`Decompress`].
+pub trait Value: Compress + Decompress {}
 
-impl<T> Value for T where T: Compress + Uncompress {}
+impl<T> Value for T where T: Compress + Decompress {}
 
 /// Generic trait that a database table should follow.
 ///

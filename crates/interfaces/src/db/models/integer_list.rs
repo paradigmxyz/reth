@@ -1,8 +1,8 @@
-//! Implements [`Compress`] and [`Uncompress`] for [`IntegerList`]
+//! Implements [`Compress`] and [`Decompress`] for [`IntegerList`]
 
 use crate::db::{
     error::Error,
-    table::{Compress, Uncompress},
+    table::{Compress, Decompress},
 };
 use bytes::Bytes;
 use reth_primitives::IntegerList;
@@ -15,8 +15,8 @@ impl Compress for IntegerList {
     }
 }
 
-impl Uncompress for IntegerList {
-    fn uncompress<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
+impl Decompress for IntegerList {
+    fn decompress<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         IntegerList::from_bytes(&value.into()).map_err(|e| Error::Decode(eyre::eyre!("{e}")))
     }
 }

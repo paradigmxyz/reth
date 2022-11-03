@@ -1,4 +1,4 @@
-use crate::db::{models::accounts::AccountBeforeTx, Compress, Error, Uncompress};
+use crate::db::{models::accounts::AccountBeforeTx, Compress, Decompress, Error};
 use parity_scale_codec::decode_from_bytes;
 use reth_primitives::*;
 
@@ -6,7 +6,7 @@ mod sealed {
     pub trait Sealed {}
 }
 
-/// Marker trait type to restrict the [`Compress`] and [`Uncompress`] with scale to chosen types.
+/// Marker trait type to restrict the [`Compress`] and [`Decompress`] with scale to chosen types.
 pub trait ScaleValue: sealed::Sealed {}
 
 impl<T> Compress for T
@@ -20,11 +20,11 @@ where
     }
 }
 
-impl<T> Uncompress for T
+impl<T> Decompress for T
 where
     T: ScaleValue + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
-    fn uncompress<B: Into<bytes::Bytes>>(value: B) -> Result<T, Error> {
+    fn decompress<B: Into<bytes::Bytes>>(value: B) -> Result<T, Error> {
         decode_from_bytes(value.into()).map_err(|e| Error::Decode(e.into()))
     }
 }
