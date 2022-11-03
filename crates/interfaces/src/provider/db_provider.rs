@@ -1,7 +1,6 @@
 use crate::{
     db::{tables, Database, DbTx},
     provider::HeaderProvider,
-    Error,
 };
 
 /// Provider
