@@ -15,7 +15,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{rpc::BigEndianHash, BlockNumber, HeaderLocked, H256, U256};
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
 const HEADERS: StageId = StageId("Headers");
@@ -26,9 +26,9 @@ pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
-    pub consensus: C,
+    pub consensus: Arc<C>,
     /// Downloader client implementation
-    pub client: H,
+    pub client: Arc<H>,
 }
 
 #[async_trait::async_trait]
@@ -179,23 +179,17 @@ mod tests {
     use super::*;
     use crate::util::test_utils::StageTestRunner;
     use assert_matches::assert_matches;
-    use once_cell::sync::Lazy;
-    use reth_interfaces::test_utils::{
-        gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
-    };
+    use reth_interfaces::test_utils::{gen_random_header, gen_random_header_range};
     use test_utils::{HeadersTestRunner, TestDownloader};
 
     const TEST_STAGE: StageId = StageId("Headers");
-    static CONSENSUS: Lazy<TestConsensus> = Lazy::new(|| TestConsensus::default());
-    static CLIENT: Lazy<TestHeadersClient> = Lazy::new(|| TestHeadersClient::default());
 
     #[tokio::test]
     // Check that the execution errors on empty database or
     // prev progress missing from the database.
     async fn execute_empty_db() {
         let runner = HeadersTestRunner::default();
-        let stage = create_stage(Ok(vec![]));
-        let rx = runner.execute(stage, ExecInput::default());
+        let rx = runner.execute(ExecInput::default());
         assert_matches!(
             rx.await.unwrap(),
             Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
@@ -205,30 +199,29 @@ mod tests {
     #[tokio::test]
     // Check that the execution exits on downloader timeout.
     async fn execute_timeout() {
-        let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
+        let runner =
+            HeadersTestRunner::with_downloader(TestDownloader::new(Err(DownloadError::Timeout {
+                request_id: 0,
+            })));
         runner.insert_header(&head).expect("failed to insert header");
 
-        let stage = create_stage(Err(DownloadError::Timeout { request_id: 0 }));
-        let rx = runner.execute(stage, ExecInput::default());
-        CONSENSUS.update_tip(H256::from_low_u64_be(1));
+        let rx = runner.execute(ExecInput::default());
+        runner.consensus.update_tip(H256::from_low_u64_be(1));
         assert_matches!(rx.await.unwrap(), Ok(ExecOutput { done, .. }) if !done);
     }
 
     #[tokio::test]
     // Check that validation error is propagated during the execution.
     async fn execute_validation_error() {
-        let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
+        let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Err(
+            DownloadError::HeaderValidation { hash: H256::zero(), details: "".to_owned() },
+        )));
         runner.insert_header(&head).expect("failed to insert header");
 
-        let stage = create_stage(Err(DownloadError::HeaderValidation {
-            hash: H256::zero(),
-            details: "".to_owned(),
-        }));
-        let rx = runner.execute(stage, ExecInput::default());
-        CONSENSUS.update_tip(H256::from_low_u64_be(1));
-
+        let rx = runner.execute(ExecInput::default());
+        runner.consensus.update_tip(H256::from_low_u64_be(1));
         assert_matches!(rx.await.unwrap(), Err(StageError::Validation { block }) if block == 0);
     }
 
@@ -236,16 +229,17 @@ mod tests {
     // Validate that all necessary tables are updated after the
     // header download on no previous progress.
     async fn execute_no_progress() {
-        let runner = HeadersTestRunner::default();
         let (start, end) = (0, 100);
         let head = gen_random_header(start, None);
+        let headers = gen_random_header_range(start + 1..end, head.hash());
+
+        let result = headers.iter().rev().cloned().collect::<Vec<_>>();
+        let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Ok(result)));
         runner.insert_header(&head).expect("failed to insert header");
 
-        let headers = gen_random_header_range(start + 1..end, head.hash());
-        let stage = create_stage(Ok(headers.iter().rev().cloned().collect::<Vec<_>>()));
-        let rx = runner.execute(stage, ExecInput::default());
+        let rx = runner.execute(ExecInput::default());
         let tip = headers.last().unwrap();
-        CONSENSUS.update_tip(tip.hash());
+        runner.consensus.update_tip(tip.hash());
 
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { .. }));
@@ -261,28 +255,69 @@ mod tests {
     #[tokio::test]
     // Validate that all necessary tables are updated after the
     // header download with some previous progress.
-    async fn stage_prev_progress() {
-        let runner = HeadersTestRunner::default();
-        // TODO: set bigger range once `MDBX_EKEYMISMATCH` issue is resolved
-        let (start, end) = (10000, 10240);
+    async fn execute_prev_progress() {
+        let (start, end) = (10000, 10241);
         let head = gen_random_header(start, None);
         let headers = gen_random_header_range(start + 1..end, head.hash());
+
+        let result = headers.iter().rev().cloned().collect::<Vec<_>>();
+        let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Ok(result)));
         runner.insert_header(&head).expect("failed to insert header");
 
-        let stage = create_stage(Ok(headers.iter().rev().cloned().collect::<Vec<_>>()));
-        let input = ExecInput {
+        let rx = runner.execute(ExecInput {
             previous_stage: Some((TEST_STAGE, head.number)),
             stage_progress: Some(head.number),
-        };
-        let rx = runner.execute(stage, input);
+        });
         let tip = headers.last().unwrap();
-        CONSENSUS.update_tip(tip.hash());
+        runner.consensus.update_tip(tip.hash());
 
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { .. }));
         let result = result.unwrap();
         assert!(result.done && result.reached_tip);
         assert_eq!(result.stage_progress, tip.number);
+
+        // TODO: try_for_each
+        for header in headers {
+            assert!(runner.validate_db_header(&header).is_ok());
+        }
+    }
+
+    #[tokio::test]
+    // Execute the stage with linear downloader
+    async fn execute_with_linear_downloader() {
+        let (start, end) = (1000, 1200);
+        let head = gen_random_header(start, None);
+        let headers = gen_random_header_range(start + 1..end, head.hash());
+
+        let runner = HeadersTestRunner::with_linear_downloader();
+        runner.insert_header(&head).expect("failed to insert header");
+        let rx = runner.execute(ExecInput {
+            previous_stage: Some((TEST_STAGE, head.number)),
+            stage_progress: Some(head.number),
+        });
+
+        let tip = headers.last().unwrap();
+        runner.consensus.update_tip(tip.hash());
+
+        let mut download_result = headers.clone();
+        download_result.insert(0, head);
+        runner
+            .client
+            .on_header_request(1, |id, _| {
+                runner.client.send_header_response(
+                    id,
+                    download_result.clone().into_iter().map(|h| h.unlock()).collect(),
+                )
+            })
+            .await;
+
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, reached_tip, stage_progress })
+                if done && reached_tip && stage_progress == tip.number
+        );
 
         for header in headers {
             assert!(runner.validate_db_header(&header).is_ok());
@@ -292,12 +327,13 @@ mod tests {
     #[tokio::test]
     // Check that unwind does not panic on empty database.
     async fn unwind_empty_db() {
+        let unwind_to = 100;
         let runner = HeadersTestRunner::default();
-        let input = UnwindInput { bad_block: None, stage_progress: 100, unwind_to: 100 };
-        let rx = runner.unwind(create_stage(Ok(vec![])), input);
+        let rx =
+            runner.unwind(UnwindInput { bad_block: None, stage_progress: unwind_to, unwind_to });
         assert_matches!(
             rx.await.unwrap(),
-            Ok(UnwindOutput {stage_progress} ) if stage_progress == input.unwind_to
+            Ok(UnwindOutput {stage_progress} ) if stage_progress == unwind_to
         );
     }
 
@@ -313,46 +349,39 @@ mod tests {
             .insert_headers(first_range.iter().chain(second_range.iter()))
             .expect("failed to insert headers");
 
-        let stage = create_stage(Ok(vec![]));
-        let input = UnwindInput { bad_block: None, stage_progress: 15, unwind_to: 15 };
-        let rx = runner.unwind(stage, input);
+        let unwind_to = 15;
+        let rx =
+            runner.unwind(UnwindInput { bad_block: None, stage_progress: unwind_to, unwind_to });
         assert_matches!(
             rx.await.unwrap(),
-            Ok(UnwindOutput {stage_progress} ) if stage_progress == input.unwind_to
+            Ok(UnwindOutput {stage_progress} ) if stage_progress == unwind_to
         );
 
         runner
             .db()
-            .check_no_entry_above::<tables::CanonicalHeaders, _>(input.unwind_to, |key| key)
+            .check_no_entry_above::<tables::CanonicalHeaders, _>(unwind_to, |key| key)
             .expect("failed to check cannonical headers");
         runner
             .db()
-            .check_no_entry_above::<tables::HeaderNumbers, _>(input.unwind_to, |key| key.number())
+            .check_no_entry_above::<tables::HeaderNumbers, _>(unwind_to, |key| key.number())
             .expect("failed to check header numbers");
         runner
             .db()
-            .check_no_entry_above::<tables::Headers, _>(input.unwind_to, |key| key.number())
+            .check_no_entry_above::<tables::Headers, _>(unwind_to, |key| key.number())
             .expect("failed to check headers");
         runner
             .db()
-            .check_no_entry_above::<tables::HeaderTD, _>(input.unwind_to, |key| key.number())
+            .check_no_entry_above::<tables::HeaderTD, _>(unwind_to, |key| key.number())
             .expect("failed to check td");
     }
 
-    // Create an instance of [HeaderStage]
-    fn create_stage<'a>(
-        result: Result<Vec<HeaderLocked>, DownloadError>,
-    ) -> HeaderStage<TestDownloader, &'a TestConsensus, &'a TestHeadersClient> {
-        HeaderStage {
-            client: &*CLIENT,
-            consensus: &*CONSENSUS,
-            downloader: test_utils::TestDownloader::new(result),
-        }
-    }
-
     mod test_utils {
-        use crate::util::test_utils::{StageTestDB, StageTestRunner};
+        use crate::{
+            stages::headers::HeaderStage,
+            util::test_utils::{StageTestDB, StageTestRunner},
+        };
         use async_trait::async_trait;
+        use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
             consensus::ForkchoiceState,
             db::{self, models::blocks::BlockNumHash, tables, DbTx},
@@ -360,20 +389,62 @@ mod tests {
             test_utils::{TestConsensus, TestHeadersClient},
         };
         use reth_primitives::{rpc::BigEndianHash, HeaderLocked, H256, U256};
-        use std::{ops::Deref, time::Duration};
+        use std::{ops::Deref, sync::Arc, time::Duration};
 
-        #[derive(Default)]
-        pub(crate) struct HeadersTestRunner {
+        pub(crate) struct HeadersTestRunner<D: Downloader> {
+            pub(crate) consensus: Arc<TestConsensus>,
+            pub(crate) client: Arc<TestHeadersClient>,
+            downloader: Arc<D>,
             db: StageTestDB,
         }
 
-        impl StageTestRunner for HeadersTestRunner {
-            fn db(&self) -> &StageTestDB {
-                &self.db
+        impl Default for HeadersTestRunner<TestDownloader> {
+            fn default() -> Self {
+                Self {
+                    client: Arc::new(TestHeadersClient::default()),
+                    consensus: Arc::new(TestConsensus::default()),
+                    downloader: Arc::new(TestDownloader::new(Ok(Vec::default()))),
+                    db: StageTestDB::default(),
+                }
             }
         }
 
-        impl HeadersTestRunner {
+        impl<D: Downloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+            type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
+
+            fn db(&self) -> &StageTestDB {
+                &self.db
+            }
+
+            fn stage(&self) -> Self::S {
+                HeaderStage {
+                    consensus: self.consensus.clone(),
+                    client: self.client.clone(),
+                    downloader: self.downloader.clone(),
+                }
+            }
+        }
+
+        impl HeadersTestRunner<LinearDownloader<TestConsensus, TestHeadersClient>> {
+            pub(crate) fn with_linear_downloader() -> Self {
+                let client = Arc::new(TestHeadersClient::default());
+                let consensus = Arc::new(TestConsensus::default());
+                let downloader =
+                    Arc::new(LinearDownloadBuilder::new().build(consensus.clone(), client.clone()));
+                Self { client, consensus, downloader, db: StageTestDB::default() }
+            }
+        }
+
+        impl<D: Downloader> HeadersTestRunner<D> {
+            pub(crate) fn with_downloader(downloader: D) -> Self {
+                HeadersTestRunner {
+                    client: Arc::new(TestHeadersClient::default()),
+                    consensus: Arc::new(TestConsensus::default()),
+                    downloader: Arc::new(downloader),
+                    db: StageTestDB::default(),
+                }
+            }
+
             /// Insert header into tables
             pub(crate) fn insert_header(&self, header: &HeaderLocked) -> Result<(), db::Error> {
                 self.insert_headers(std::iter::once(header))

@@ -82,7 +82,7 @@ mod tests {
     #[tokio::test]
     async fn execute_empty_db() {
         let runner = TxIndexTestRunner::default();
-        let rx = runner.execute(TxIndex {}, ExecInput::default());
+        let rx = runner.execute(ExecInput::default());
         assert_matches!(
             rx.await.unwrap(),
             Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
@@ -103,7 +103,7 @@ mod tests {
             previous_stage: Some((TEST_STAGE, tail.number)),
             stage_progress: Some(head.number),
         };
-        let rx = runner.execute(TxIndex {}, input);
+        let rx = runner.execute(input);
         assert_matches!(
             rx.await.unwrap(),
             Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCumulativeTxCount { .. }))
@@ -134,7 +134,7 @@ mod tests {
             previous_stage: Some((TEST_STAGE, tail.number)),
             stage_progress: Some(pivot.number),
         };
-        let rx = runner.execute(TxIndex {}, input);
+        let rx = runner.execute(input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(ExecOutput { stage_progress, done, reached_tip })
@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn unwind_empty_db() {
         let runner = TxIndexTestRunner::default();
-        let rx = runner.unwind(TxIndex {}, UnwindInput::default());
+        let rx = runner.unwind(UnwindInput::default());
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput { stage_progress }) if stage_progress == 0
@@ -166,7 +166,7 @@ mod tests {
             })
             .expect("failed to insert");
 
-        let rx = runner.unwind(TxIndex {}, UnwindInput::default());
+        let rx = runner.unwind(UnwindInput::default());
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput { stage_progress }) if stage_progress == 0
@@ -197,7 +197,7 @@ mod tests {
 
         let unwind_to = 10;
         let input = UnwindInput { unwind_to, ..Default::default() };
-        let rx = runner.unwind(TxIndex {}, input);
+        let rx = runner.unwind(input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
@@ -214,8 +214,14 @@ mod tests {
     }
 
     impl StageTestRunner for TxIndexTestRunner {
+        type S = TxIndex;
+
         fn db(&self) -> &StageTestDB {
             &self.db
+        }
+
+        fn stage(&self) -> Self::S {
+            TxIndex {}
         }
     }
 }

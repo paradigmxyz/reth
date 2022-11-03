@@ -14,7 +14,7 @@ pub trait BlockExecutor {
 }
 
 /// BlockExecutor Errors
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Example of error
     #[error("Example of error.")]

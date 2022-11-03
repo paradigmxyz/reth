@@ -213,15 +213,14 @@ pub(crate) mod test_utils {
 
     #[async_trait::async_trait]
     pub(crate) trait StageTestRunner {
-        fn db(&self) -> &StageTestDB;
+        type S: Stage<Env<WriteMap>> + 'static;
 
-        fn execute<S: Stage<Env<WriteMap>> + 'static>(
-            &self,
-            mut stage: S,
-            input: ExecInput,
-        ) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
+        fn db(&self) -> &StageTestDB;
+        fn stage(&self) -> Self::S;
+
+        fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
             let (tx, rx) = oneshot::channel();
-            let db = self.db().inner();
+            let (db, mut stage) = (self.db().inner(), self.stage());
             tokio::spawn(async move {
                 let mut db = DBContainer::new(db.borrow()).expect("failed to create db container");
                 let result = stage.execute(&mut db, input).await;
@@ -231,14 +230,13 @@ pub(crate) mod test_utils {
             rx
         }
 
-        fn unwind<S: Stage<Env<WriteMap>> + 'static>(
+        fn unwind(
             &self,
-            mut stage: S,
             input: UnwindInput,
         ) -> oneshot::Receiver<Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>>
         {
             let (tx, rx) = oneshot::channel();
-            let db = self.db().inner();
+            let (db, mut stage) = (self.db().inner(), self.stage());
             tokio::spawn(async move {
                 let mut db = DBContainer::new(db.borrow()).expect("failed to create db container");
                 let result = stage.unwind(&mut db, input).await;

@@ -261,7 +261,7 @@ fn test_concurrent_writers() {
         threads.push(thread::spawn(move || {
             let txn = writer_env.begin_rw_txn().unwrap();
             let db = txn.open_db(None).unwrap();
-            txn.put(&db, &format!("{}{}", key, i), &format!("{}{}", val, i), WriteFlags::empty())
+            txn.put(&db, format!("{}{}", key, i), format!("{}{}", val, i), WriteFlags::empty())
                 .unwrap();
             txn.commit().is_ok()
         }));

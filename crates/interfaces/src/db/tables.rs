@@ -20,6 +20,7 @@ pub enum TableType {
     /// Duplicate key value table
     DupSort,
 }
+
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); 19] = [
     (TableType::Table, CanonicalHeaders::const_name()),
@@ -46,8 +47,11 @@ pub const TABLES: [(TableType, &str); 19] = [
 #[macro_export]
 /// Macro to declare all necessary tables.
 macro_rules! table {
-    ($name:ident => $key:ty => $value:ty => $seek:ty) => {
-        /// $name MDBX table.
+    (
+    $(#[$docs:meta])+ $name:ident => $key:ty => $value:ty => $seek:ty) => {
+        $(#[$docs])+
+        ///
+        #[doc = concat!("Takes [`", stringify!($key), "`] as a key and returns [`", stringify!($value), "`]")]
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $name;
 
@@ -56,11 +60,10 @@ macro_rules! table {
             type Key = $key;
             type Value = $value;
             type SeekKey = $seek;
-
         }
 
         impl $name {
-            /// Return $name as it is present inside the database.
+            #[doc=concat!("Return ", stringify!($name), " as it is present inside the database.")]
             pub const fn const_name() -> &'static str {
                 stringify!($name)
             }
@@ -72,14 +75,22 @@ macro_rules! table {
             }
         }
     };
-    ($name:ident => $key:ty => $value:ty) => {
-        table!($name => $key => $value => $key);
+    ($(#[$docs:meta])+ $name:ident => $key:ty => $value:ty) => {
+        table!(
+            $(#[$docs])+
+            $name => $key => $value => $key
+        );
     };
 }
 
 macro_rules! dupsort {
-    ($name:ident => $key:ty => [$subkey:ty] $value:ty) => {
-        table!($name => $key => $value);
+    ($(#[$docs:meta])+ $name:ident => $key:ty => [$subkey:ty] $value:ty) => {
+        table!(
+            $(#[$docs])+
+            ///
+            #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
+            $name => $key => $value
+        );
         impl DupSort for $name {
             type SubKey = $subkey;
         }
@@ -90,48 +101,144 @@ macro_rules! dupsort {
 //  TABLE DEFINITIONS
 //
 
-table!(CanonicalHeaders => BlockNumber => HeaderHash);
-table!(HeaderTD => BlockNumHash => RlpTotalDifficulty);
-table!(HeaderNumbers => BlockNumHash => BlockNumber);
-table!(Headers => BlockNumHash => Header);
+table!(
+    /// Stores the header hashes belonging to the canonical chain.
+    CanonicalHeaders => BlockNumber => HeaderHash);
 
-table!(BlockBodies => BlockNumHash => NumTxesInBlock);
-table!(CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
+table!(
+    /// Stores the total difficulty from a block header.
+    HeaderTD => BlockNumHash => RlpTotalDifficulty);
 
-table!(NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
-table!(Transactions => TxNumber => RlpTxBody); // Canonical only
-table!(Receipts => TxNumber => Receipt); // Canonical only
-table!(Logs => TxNumber => Receipt); // Canonical only
+table!(
+    /// Stores the block number corresponding to an header.
+    HeaderNumbers => BlockNumHash => BlockNumber);
 
-table!(PlainAccountState => Address => Account);
-dupsort!(PlainStorageState => Address => [H256] StorageEntry);
+table!(
+    /// Stores header bodies.
+    Headers => BlockNumHash => Header);
 
-table!(AccountHistory => ShardedKey<Address> => TxNumberList);
-table!(StorageHistory => Address_StorageKey => TxNumberList);
+table!(
+    /// Stores the number of transactions of a block.
+    BlockBodies => BlockNumHash => NumTxesInBlock);
 
-dupsort!(AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
-dupsort!(StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
+table!(
+    /// Stores the maximum [`TxNumber`] from which this particular block starts.
+    CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
 
-table!(TxSenders => TxNumber => Address); // Is it necessary?
-table!(Config => ConfigKey => ConfigValue);
+table!(
+    /// Stores the transaction body from non canonical transactions.
+    NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
 
-table!(SyncStage => StageId => BlockNumber);
+table!(
+    /// Stores the transaction body from canonical transactions. Canonical only
+    Transactions => TxNumber => RlpTxBody);
+
+table!(
+    /// Stores transaction receipts. Canonical only
+    Receipts => TxNumber => Receipt);
+
+table!(
+    /// Stores transaction logs. Canonical only
+    Logs => TxNumber => Receipt);
+
+table!(
+    /// Stores the current state of an Account.
+    PlainAccountState => Address => Account);
+
+dupsort!(
+    /// Stores the current value of a storage key.
+    PlainStorageState => Address => [H256] StorageEntry);
+
+table!(
+    /// Stores the transaction numbers that changed each account.
+    /// 
+    /// ```
+    /// use reth_primitives::{Address, IntegerList};
+    /// use reth_interfaces::db::{DbTx, DbTxMut, DbCursorRO, Database, models::ShardedKey, tables::AccountHistory};
+    /// use reth_db::{kv::{EnvKind, Env, test_utils}, mdbx::WriteMap};
+    /// use std::str::FromStr;
+    /// 
+    /// fn main() {
+    ///     let db: Env<WriteMap> = test_utils::create_test_db(EnvKind::RW);
+    ///     let account = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+    /// 
+    ///     // Setup if each shard can only take 1 transaction.
+    ///     for i in 1..3 {
+    ///         let key = ShardedKey::new(account, i * 100);
+    ///         let list: IntegerList = vec![i * 100u64].into();
+
+    ///         db.update(|tx| tx.put::<AccountHistory>(key.clone(), list.clone()).expect("")).unwrap();
+    ///     }
+    /// 
+    ///     // Is there any transaction after number 150 that changed this account? 
+    ///     {
+    ///         let tx = db.tx().expect("");
+    ///         let mut cursor = tx.cursor::<AccountHistory>().unwrap();
+
+    ///         // It will seek the one greater or equal to the query. Since we have `Address | 100`,
+    ///         // `Address | 200` in the database and we're querying `Address | 150` it will return us
+    ///         // `Address | 200`.
+    ///         let mut walker = cursor.walk(ShardedKey::new(account, 150)).unwrap();
+    ///         let (key, list) = walker
+    ///             .next()
+    ///             .expect("element should exist.")
+    ///             .expect("should be able to retrieve it.");
+
+    ///         assert_eq!(ShardedKey::new(account, 200), key);
+    ///         let list200: IntegerList = vec![200u64].into();
+    ///         assert_eq!(list200, list);
+    ///         assert!(walker.next().is_none());
+    ///     }
+    /// }
+    /// ```
+    /// 
+    AccountHistory => ShardedKey<Address> => TxNumberList);
+
+table!(
+    /// Stores the transaction numbers that changed each storage key.
+    StorageHistory => AddressStorageKey => TxNumberList);
+
+dupsort!(
+    /// Stores state of an account before a certain transaction changed it.
+    AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
+
+dupsort!(
+    /// Stores state of a storage key before a certain transaction changed it.
+    StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
+
+table!(
+    /// Stores the transaction sender from each transaction.
+    TxSenders => TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
+
+table!(
+    /// Config.
+    Config => ConfigKey => ConfigValue);
+
+table!(
+    /// Stores the block number of each stage id.
+    SyncStage => StageId => BlockNumber);
 
 ///
 /// Alias Types
 
-type TxNumberList = IntegerList;
+/// List with transaction numbers.
+pub type TxNumberList = IntegerList;
+/// Encoded stage id.
+pub type StageId = Vec<u8>;
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
 
-type ConfigKey = Vec<u8>;
-type ConfigValue = Vec<u8>;
-#[allow(non_camel_case_types)]
-type BlockNumHashTxNumber = Vec<u8>;
-type RlpTotalDifficulty = Vec<u8>;
-type RlpTxBody = Vec<u8>;
-#[allow(non_camel_case_types)]
-type Address_StorageKey = Vec<u8>;
-type StageId = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type ConfigKey = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type ConfigValue = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type BlockNumHashTxNumber = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type RlpTotalDifficulty = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type RlpTxBody = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type AddressStorageKey = Vec<u8>;

@@ -79,6 +79,9 @@ impl core::fmt::Display for DecodeError {
 }
 
 impl Header {
+    /// Returns the decoded header.
+    ///
+    /// Returns an error if the given `buf`'s len is less than the expected payload.
     pub fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         if !buf.has_remaining() {
             return Err(DecodeError::InputTooShort)
@@ -352,21 +355,39 @@ where
     }
 }
 
+#[cfg(feature = "smol_str")]
+impl Decodable for smol_str::SmolStr {
+    fn decode(from: &mut &[u8]) -> Result<Self, DecodeError> {
+        let h = Header::decode(from)?;
+        if h.list {
+            return Err(DecodeError::UnexpectedList)
+        }
+        let data = &from[..h.payload_length];
+        let s = match core::str::from_utf8(data) {
+            Ok(s) => Ok(smol_str::SmolStr::from(s)),
+            Err(_) => Err(DecodeError::Custom("invalid string")),
+        };
+        from.advance(h.payload_length);
+        s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
 
     use super::*;
+    use crate::Encodable;
     use alloc::vec;
     use core::fmt::Debug;
     use ethereum_types::{U128, U256, U512, U64};
     use ethnum::AsU256;
     use hex_literal::hex;
 
-    fn check_decode<T, IT>(fixtures: IT)
+    fn check_decode<'a, T, IT>(fixtures: IT)
     where
         T: Decodable + PartialEq + Debug,
-        IT: IntoIterator<Item = (Result<T, DecodeError>, &'static [u8])>,
+        IT: IntoIterator<Item = (Result<T, DecodeError>, &'a [u8])>,
     {
         for (expected, mut input) in fixtures {
             assert_eq!(T::decode(&mut input), expected);
@@ -555,6 +576,18 @@ mod tests {
         check_decode_list(vec![
             (Ok(vec![]), &hex!("C0")[..]),
             (Ok(vec![0xBBCCB5_u64, 0xFFC0B5_u64]), &hex!("C883BBCCB583FFC0B5")[..]),
+        ])
+    }
+
+    #[cfg(feature = "smol_str")]
+    #[test]
+    fn rlp_smol_str() {
+        use smol_str::SmolStr;
+        let mut b = BytesMut::new();
+        "test smol str".to_string().encode(&mut b);
+        check_decode::<SmolStr, _>(vec![
+            (Ok(SmolStr::new("test smol str")), b.as_ref()),
+            (Err(DecodeError::UnexpectedList), &hex!("C0")[..]),
         ])
     }
 }
