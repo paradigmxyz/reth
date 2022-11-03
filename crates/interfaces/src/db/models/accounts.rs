@@ -8,7 +8,6 @@ use crate::{
     impl_fixed_arbitrary,
 };
 use bytes::Bytes;
-use eyre::eyre;
 use reth_codecs::main_codec;
 use reth_primitives::{Account, Address, TxNumber};
 use serde::{Deserialize, Serialize};
@@ -61,11 +60,8 @@ impl Decode for TxNumberAddress {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         let value: bytes::Bytes = value.into();
 
-        let num = u64::from_be_bytes(
-            value.as_ref()[..8]
-                .try_into()
-                .map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
-        );
+        let num =
+            u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
         let hash = Address::from_slice(&value.slice(8..));
 
         Ok(TxNumberAddress((num, hash)))

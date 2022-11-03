@@ -14,7 +14,6 @@ use crate::db::{
     table::{Decode, Encode},
     Error,
 };
-use eyre::eyre;
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
@@ -35,7 +34,7 @@ macro_rules! impl_uints {
                     let value: bytes::Bytes = value.into();
                     Ok(
                         $name::from_be_bytes(
-                            value.as_ref().try_into().map_err(|_| Error::Decode(eyre!("Into bytes error.")))?
+                            value.as_ref().try_into().map_err(|_| Error::DecodeError)?
                         )
                     )
                 }

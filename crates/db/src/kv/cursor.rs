@@ -36,7 +36,7 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
 #[macro_export]
 macro_rules! decode {
     ($v:expr) => {
-        $v.map_err(|e| Error::Decode(e.into()))?.map(decoder::<T>).transpose()
+        $v.map_err(|e| Error::Read(e.into()))?.map(decoder::<T>).transpose()
     };
 }
 
@@ -79,7 +79,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         let start = self
             .inner
             .set_range(start_key.encode().as_ref())
-            .map_err(|e| Error::Internal(e.into()))?
+            .map_err(|e| Error::Read(e.into()))?
             .map(decoder::<T>);
 
         Ok(Walker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
@@ -99,11 +99,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
-        self.inner
-            .next_dup()
-            .map_err(|e| Error::Internal(e.into()))?
-            .map(decode_value::<T>)
-            .transpose()
+        self.inner.next_dup().map_err(|e| Error::Read(e.into()))?.map(decode_value::<T>).transpose()
     }
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
@@ -115,7 +111,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
         let start = self
             .inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
-            .map_err(|e| Error::Internal(e.into()))?
+            .map_err(|e| Error::Read(e.into()))?
             .map(decode_one::<T>);
 
         Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
@@ -129,28 +125,28 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
         // Default `WriteFlags` is UPSERT
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::UPSERT)
-            .map_err(|e| Error::Internal(e.into()))
+            .map_err(|e| Error::Write(e.into()))
     }
 
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND)
-            .map_err(|e| Error::Internal(e.into()))
+            .map_err(|e| Error::Write(e.into()))
     }
 
     fn delete_current(&mut self) -> Result<(), Error> {
-        self.inner.del(WriteFlags::CURRENT).map_err(|e| Error::Internal(e.into()))
+        self.inner.del(WriteFlags::CURRENT).map_err(|e| Error::Delete(e.into()))
     }
 }
 
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), Error> {
-        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| Error::Internal(e.into()))
+        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| Error::Delete(e.into()))
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND_DUP)
-            .map_err(|e| Error::Internal(e.into()))
+            .map_err(|e| Error::Write(e.into()))
     }
 }
