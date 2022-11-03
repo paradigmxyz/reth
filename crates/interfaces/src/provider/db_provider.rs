@@ -22,10 +22,7 @@ impl<DB: Database> HeaderProvider for DbProvider<DB> {
         &self,
         block_hash: &reth_primitives::BlockHash,
     ) -> crate::Result<Option<reth_primitives::Header>> {
-        self.db
-            .view(|tx| tx.get::<tables::Headers>((0, *block_hash).into()))
-            .map_err(Error::Database)?
-            .map_err(Into::into)
+        self.db.view(|tx| tx.get::<tables::Headers>((0, *block_hash).into()))?.map_err(Into::into)
     }
 
     fn is_known(&self, block_hash: &reth_primitives::BlockHash) -> crate::Result<bool> {
