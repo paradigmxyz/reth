@@ -51,7 +51,7 @@ const GRACE_PERIOD: Duration = Duration::from_secs(2);
 /// from a peer.
 const MAX_FAILED_PINGS: u8 = 3;
 
-/// An un-authenticated `P2PStream`. This is consumed and returns a [`P2PStream`] after the `Hello`
+/// An un-authenticated [`P2PStream`]. This is consumed and returns a [`P2PStream`] after the `Hello`
 /// handshake is completed.
 #[pin_project]
 pub struct UnauthedP2PStream<S> {
@@ -71,7 +71,7 @@ where
     S: Stream<Item = Result<BytesMut, io::Error>> + Sink<Bytes, Error = io::Error> + Unpin,
 {
     /// Consumes the `UnauthedP2PStream` and returns a `P2PStream` after the `Hello` handshake is
-    /// completed.
+    /// completed successfully. This also returns the `Hello` message sent by the remote peer.
     pub async fn handshake(
         mut self,
         hello: HelloMessage,
@@ -157,8 +157,9 @@ pub struct P2PStream<S> {
 }
 
 impl<S> P2PStream<S> {
-    /// Create a new unauthed [`P2PStream`] from the provided stream. You will need to manually
-    /// handshake with a peer.
+    /// Create a new [`P2PStream`] from the provided stream.
+    /// New [`P2PStream`]s are assumed to have completed the `p2p` handshake successfully and are
+    /// ready to send and receive subprotocol messages.
     pub fn new(inner: S, capability: SharedCapability) -> Self {
         Self {
             inner,
