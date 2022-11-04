@@ -4,10 +4,8 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::{
-    time::{Instant, Interval, Sleep},
-};
-use tokio_stream::{Stream};
+use tokio::time::{Instant, Interval, Sleep};
+use tokio_stream::Stream;
 
 /// The pinger is a state machine that is created with a maximum number of pongs that can be
 /// missed.
@@ -26,14 +24,14 @@ pub(crate) struct Pinger {
 // === impl Pinger ===
 
 impl Pinger {
-    /// Creates a new [`IntervalTimeoutPinger`], interval duration,
+    /// Creates a new [`Pinger`] with the given ping interval duration,
     /// and timeout duration.
-    pub(crate) fn new(interval_duration: Duration, timeout_duration: Duration) -> Self {
+    pub(crate) fn new(ping_interval: Duration, timeout_duration: Duration) -> Self {
         let now = Instant::now();
         let timeout_timer = tokio::time::sleep(timeout_duration);
         Self {
             state: PingState::Ready,
-            ping_interval: tokio::time::interval_at(now + interval_duration, interval_duration),
+            ping_interval: tokio::time::interval_at(now + ping_interval, ping_interval),
             timeout_timer: Box::pin(timeout_timer),
             timeout: timeout_duration,
         }
@@ -105,14 +103,12 @@ impl Stream for Pinger {
 /// This represents the possible states of the pinger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PingState {
-    /// There are no pings in flight, or all pings have been responded to and we are ready to send
+    /// There are no pings in flight, or all pings have been responded to, and we are ready to send
     /// a ping at a later point.
     Ready,
-
     /// We have sent a ping and are waiting for a pong, but the peer has missed n pongs.
     WaitingForPong,
-
-    /// The peer has missed n pongs and is considered timed out.
+    /// The peer has failed to respond to a ping.
     TimedOut,
 }
 
@@ -129,8 +125,8 @@ pub(crate) enum PingerEvent {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
     use super::*;
+    use futures::StreamExt;
 
     #[tokio::test]
     async fn test_ping_timeout() {
