@@ -100,7 +100,7 @@ where
         }
 
         // get the message id
-        let id = *hello_bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
+        let id = *hello_bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
 
         // the first message sent MUST be the hello message
         if id != P2PMessageID::Hello as u8 {
@@ -393,7 +393,7 @@ pub fn set_capability_offsets(
     // capability with the lowest offset.
     Ok(shared_with_offsets
         .first()
-        .ok_or_else(|| P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))?
+        .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))?
         .clone())
 }
 
