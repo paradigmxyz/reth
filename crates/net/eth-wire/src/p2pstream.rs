@@ -72,7 +72,10 @@ where
 {
     /// Consumes the `UnauthedP2PStream` and returns a `P2PStream` after the `Hello` handshake is
     /// completed.
-    pub async fn handshake(mut self, hello: HelloMessage) -> Result<P2PStream<S>, P2PStreamError> {
+    pub async fn handshake(
+        mut self,
+        hello: HelloMessage,
+    ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
 
         // send our hello message with the Sink
@@ -124,11 +127,12 @@ where
         }
 
         // determine shared capabilities (currently returns only one capability)
-        let capability = set_capability_offsets(hello.capabilities, their_hello.capabilities)?;
+        let capability =
+            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone())?;
 
         let stream = P2PStream::new(self.inner, capability);
 
-        Ok(stream)
+        Ok((stream, their_hello))
     }
 }
 
@@ -736,7 +740,7 @@ mod tests {
             };
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
-            let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
+            let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
 
             // ensure that the two share a single capability, eth67
             assert_eq!(
@@ -762,7 +766,7 @@ mod tests {
         };
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
-        let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
+        let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
 
         // ensure that the two share a single capability, eth67
         assert_eq!(

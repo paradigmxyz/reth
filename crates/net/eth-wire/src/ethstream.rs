@@ -348,7 +348,7 @@ mod tests {
             };
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
-            let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
+            let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
             let mut eth_stream = EthStream::new(p2p_stream);
             eth_stream.handshake(status_copy, fork_filter_clone).await.unwrap();
 
@@ -377,7 +377,7 @@ mod tests {
         };
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
-        let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
+        let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
         let mut client_stream = EthStream::new(p2p_stream);
         client_stream.handshake(status, fork_filter).await.unwrap();
 
