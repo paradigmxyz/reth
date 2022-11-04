@@ -3242,6 +3242,7 @@ dependencies = [
 name = "reth-network"
 version = "0.1.0"
 dependencies = [
+ "aquamarine",
  "async-trait",
  "bytes",
  "either",

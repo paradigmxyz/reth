@@ -2,10 +2,11 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::{Capabilities, CapabilityMessage},
     session::{SessionEvent, SessionId, SessionManager},
-    state::NetworkState,
+    state::{NetworkState, StateAction},
     NodeId,
 };
 use futures::Stream;
+use reth_ecies::ECIESError;
 use reth_interfaces::provider::BlockProvider;
 use std::{
     io,
@@ -19,6 +20,10 @@ use tracing::warn;
 /// Contains the connectivity related state of the network.
 ///
 /// A swarm emits [`SwarmEvent`]s when polled.
+///
+/// The manages the [`ConnectionListener`] and delegates new incoming connections to the
+/// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
+/// [`NetworkState`] and also delegated to the [`NetworkState`].
 #[must_use = "Swarm does nothing unless polled"]
 pub struct Swarm<C> {
     /// Listens for new incoming connections.
@@ -59,22 +64,28 @@ where
         match event {
             SessionEvent::SessionAuthenticated { node_id, remote_addr, capabilities, messages } => {
                 self.state.on_session_authenticated(node_id, capabilities, messages);
-                return Some(SwarmEvent::SessionEstablished { node_id, remote_addr })
+                Some(SwarmEvent::SessionEstablished { node_id, remote_addr })
             }
             SessionEvent::ValidMessage { node_id, message } => {
-                return Some(SwarmEvent::CapabilityMessage { node_id, message })
+                Some(SwarmEvent::CapabilityMessage { node_id, message })
             }
             SessionEvent::InvalidMessage { node_id, capabilities, message } => {
-                return Some(SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message })
+                Some(SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message })
             }
-            SessionEvent::DisconnectedPending { .. } => {}
+            SessionEvent::IncomingPendingSessionClosed { remote_addr, error } => {
+                Some(SwarmEvent::IncomingPendingSessionClosed { remote_addr, error })
+            }
+            SessionEvent::OutgoingPendingSessionClosed { remote_addr, node_id, error } => {
+                Some(SwarmEvent::OutgoingPendingSessionClosed { remote_addr, node_id, error })
+            }
             SessionEvent::Disconnected { node_id, remote_addr } => {
                 self.state.on_session_closed(node_id);
-                return Some(SwarmEvent::SessionClosed { node_id, remote_addr })
+                Some(SwarmEvent::SessionClosed { node_id, remote_addr })
+            }
+            SessionEvent::OutgoingConnectionError { remote_addr, node_id, error } => {
+                Some(SwarmEvent::OutgoingConnectionError { node_id, remote_addr, error })
             }
         }
-
-        None
     }
 
     /// Callback for events produced by [`ConnectionListener`].
@@ -99,6 +110,19 @@ where
         }
         None
     }
+
+    /// Hook for actions pulled from the state
+    fn on_state_action(&mut self, event: StateAction) -> Option<SwarmEvent> {
+        match event {
+            StateAction::Connect { remote_addr, node_id } => {
+                self.sessions.dial_outbound(remote_addr, node_id);
+            }
+            StateAction::Disconnect { node_id } => {
+                self.sessions.disconnect(node_id);
+            }
+        }
+        None
+    }
 }
 
 impl<C> Stream for Swarm<C>
@@ -117,6 +141,12 @@ where
         let this = self.get_mut();
 
         loop {
+            while let Poll::Ready(action) = this.state.poll(cx) {
+                if let Some(event) = this.on_state_action(action) {
+                    return Poll::Ready(Some(event))
+                }
+            }
+
             // poll all sessions
             match this.sessions.poll(cx) {
                 Poll::Pending => {}
@@ -191,5 +221,22 @@ pub enum SwarmEvent {
     SessionClosed {
         node_id: NodeId,
         remote_addr: SocketAddr,
+    },
+    /// Closed an incoming pending session during authentication.
+    IncomingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        error: Option<ECIESError>,
+    },
+    /// Closed an outgoing pending session during authentication.
+    OutgoingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        node_id: NodeId,
+        error: Option<ECIESError>,
+    },
+    /// Failed to establish a tcp stream to the given address/node
+    OutgoingConnectionError {
+        remote_addr: SocketAddr,
+        node_id: NodeId,
+        error: io::Error,
     },
 }

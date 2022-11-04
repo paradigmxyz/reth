@@ -9,7 +9,7 @@ use crate::{
     NodeId,
 };
 use futures::FutureExt;
-use reth_eth_wire::{BlockHeaders, GetBlockHeaders};
+
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{H256, U256};
 use std::{
@@ -22,9 +22,16 @@ use std::{
 use tokio::sync::oneshot;
 use tracing::trace;
 
-/// Maintains the state of all peers in the network.
+/// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
-/// This determines how to interact with peers.
+/// This includes:
+///   - [`Discovery`]: manages the discovery protocol, essentially a stream of discovery updates
+///   - [`PeersManager`]: keeps track of connected peers and issues new outgoing connections
+///     depending on the configured capacity.
+///   - [`StateFetcher`]: streams download request (received from outside via channel) which are
+///     then send to the session of the peer.
+///
+/// This type is also responsible for responding for received request.
 pub struct NetworkState<C> {
     /// All connected peers and their state.
     connected_peers: HashMap<NodeId, ConnectedPeer>,
@@ -33,7 +40,7 @@ pub struct NetworkState<C> {
     /// Tracks the state of connected peers
     peers_state: HashMap<NodeId, PeerSessionState>,
     /// Buffered messages until polled.
-    queued_messages: VecDeque<StateMessage>,
+    queued_messages: VecDeque<StateAction>,
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Network discovery.
@@ -63,7 +70,7 @@ where
     }
 
     /// Event hook for an authenticated session for the peer.
-    pub fn on_session_authenticated(
+    pub(crate) fn on_session_authenticated(
         &mut self,
         _node_id: NodeId,
         _capabilities: Arc<Capabilities>,
@@ -97,11 +104,11 @@ where
         match action {
             PeerAction::Connect { node_id, remote_addr } => {
                 self.peers_state.insert(node_id, PeerSessionState::Connecting);
-                self.queued_messages.push_back(StateMessage::Connect { node_id, remote_addr });
+                self.queued_messages.push_back(StateAction::Connect { node_id, remote_addr });
             }
             PeerAction::Disconnect { node_id } => {
                 self.peers_state.remove(&node_id);
-                self.queued_messages.push_back(StateMessage::Disconnect { node_id });
+                self.queued_messages.push_back(StateAction::Disconnect { node_id });
             }
         }
     }
@@ -113,7 +120,7 @@ where
     fn on_response(&mut self, _node: NodeId, _resp: CapabilityResponse) {}
 
     /// Advances the state
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateMessage> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction> {
         loop {
             // drain buffered messages
             if let Some(message) = self.queued_messages.pop_front() {
@@ -202,18 +209,9 @@ pub enum PeerSessionState {
 }
 
 /// Message variants triggered by the [`State`]
-pub enum StateMessage {
+pub enum StateAction {
     /// Create a new connection to the given node.
-    Connect { node_id: NodeId, remote_addr: SocketAddr },
+    Connect { remote_addr: SocketAddr, node_id: NodeId },
     /// Disconnect an existing connection
     Disconnect { node_id: NodeId },
-    /// Request Block headers from the peer.
-    ///
-    /// The response should be sent through the channel.
-    GetBlockHeaders {
-        peer: NodeId,
-        request: GetBlockHeaders,
-        /// TODO the `CapabilityMessage` should be an enum with possible variants
-        response: oneshot::Sender<BlockHeaders>,
-    },
 }

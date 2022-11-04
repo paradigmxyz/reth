@@ -27,6 +27,7 @@ tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-threa
 tokio-stream = "0.1"
 
 # misc
+aquamarine = "0.1" # docs
 tracing = "0.1"
 fnv = "1.0"
 thiserror = "1.0"

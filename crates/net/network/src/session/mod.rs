@@ -7,9 +7,9 @@ use crate::{
     NodeId,
 };
 use fnv::FnvHashMap;
-use futures::{future::Either, FutureExt, StreamExt};
+use futures::{future::Either, io, FutureExt, StreamExt};
 pub use handle::PeerMessageSender;
-use reth_ecies::stream::ECIESStream;
+use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::UnauthedEthStream;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -157,6 +157,16 @@ impl SessionManager {
         self.pending_sessions.insert(session_id, handle);
     }
 
+    /// Initiates a shutdown of the channel.
+    ///
+    /// This will trigger the disconnect on the session task to gracefully terminate. The result
+    /// will be picked up by the receiver.
+    pub(crate) fn disconnect(&self, node: NodeId) {
+        if let Some(session) = self.active_sessions.get(&node) {
+            session.disconnect();
+        }
+    }
+
     /// This polls all the session handles and returns [`SessionEvent`].
     ///
     /// Active sessions are prioritized.
@@ -225,7 +235,7 @@ impl SessionManager {
                     //     messages: ()
                     // })
                 }
-                PendingSessionEvent::Disconnected { remote_addr, session_id } => {
+                PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
                     trace!(
                         ?session_id,
                         ?remote_addr,
@@ -233,18 +243,41 @@ impl SessionManager {
                         "disconnected pending session"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
-                    return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
+                    return match direction {
+                        Direction::Incoming => {
+                            Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                                remote_addr,
+                                error,
+                            })
+                        }
+                        Direction::Outgoing(node_id) => {
+                            Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
+                                remote_addr,
+                                node_id,
+                                error,
+                            })
+                        }
+                    }
                 }
-                PendingSessionEvent::ConnectionRefused { remote_addr, session_id, error } => {
+                PendingSessionEvent::OutgoingConnectionError {
+                    remote_addr,
+                    session_id,
+                    node_id,
+                    error,
+                } => {
                     trace!(
                         ?error,
                         ?session_id,
                         ?remote_addr,
+                        ?node_id,
                         target = "net::session",
                         "connection refused"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
-                    return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
+                    return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                        remote_addr,
+                        error: None,
+                    })
                 }
                 PendingSessionEvent::EciesAuthError { remote_addr, session_id, error } => {
                     let _ = self.pending_sessions.remove(&session_id);
@@ -256,7 +289,10 @@ impl SessionManager {
                         "ecies auth failed"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
-                    return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
+                    return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                        remote_addr,
+                        error: None,
+                    })
                 }
             }
         }
@@ -325,8 +361,16 @@ pub(crate) enum SessionEvent {
         /// Message received from the peer.
         message: CapabilityMessage,
     },
-    /// Disconnected during pending state.
-    DisconnectedPending { remote_addr: SocketAddr },
+    /// Closed an incoming pending session during authentication.
+    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<ECIESError> },
+    /// Closed an outgoing pending session during authentication.
+    OutgoingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        node_id: NodeId,
+        error: Option<ECIESError>,
+    },
+    /// Failed to establish a tcp stream
+    OutgoingConnectionError { remote_addr: SocketAddr, node_id: NodeId, error: io::Error },
     /// Active session was disconnected.
     Disconnected { node_id: NodeId, remote_addr: SocketAddr },
 }
@@ -374,7 +418,12 @@ async fn start_pending_outbound_session(
         Ok(stream) => stream,
         Err(error) => {
             let _ = events
-                .send(PendingSessionEvent::ConnectionRefused { remote_addr, session_id, error })
+                .send(PendingSessionEvent::OutgoingConnectionError {
+                    remote_addr,
+                    session_id,
+                    node_id: remote_node_id,
+                    error,
+                })
                 .await;
             return
         }
@@ -392,8 +441,11 @@ async fn start_pending_outbound_session(
 }
 
 /// The direction of the connection.
-enum Direction {
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum Direction {
+    /// Incoming connection.
     Incoming,
+    /// Outgoing connection to a specific node.
     Outgoing(NodeId),
 }
 
@@ -438,8 +490,14 @@ async fn authenticate(
 
     match futures::future::select(disconnect_rx, auth).await {
         Either::Left((_, _)) => {
-            let _ =
-                events.send(PendingSessionEvent::Disconnected { remote_addr, session_id }).await;
+            let _ = events
+                .send(PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: None,
+                })
+                .await;
         }
         Either::Right((res, _)) => {
             let _ = events.send(res).await;

@@ -48,6 +48,25 @@ use tracing::{error, trace};
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
+///
+/// The [`NetworkManager`] is the container type for all parts involved with advancing the network.
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ```mermaid
+///  graph TB
+///    handle(NetworkHandle)
+///    events(NetworkEvents)
+///    subgraph NetworkManager
+///      direction LR
+///      subgraph Swarm
+///          direction TB
+///          B1[(Peer Sessions)]
+///          B2[(Connection Lister)]
+///          B3[(State)]
+///      end
+///    end
+///   handle <--> |request/response channel| NetworkManager
+///   NetworkManager --> |Network events| events
+/// ```
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
@@ -146,12 +165,56 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
+        // TODO: disconnect?
     }
 
     /// Handles a received [`CapabilityMessage`] from the peer.
-    fn on_capability_message(&mut self, _node_id: NodeId, _msg: CapabilityMessage) {
-        // TODO needs capability+state depended decoding and handling of the message.
-        // if this is a request
+    fn on_capability_message(&mut self, _node_id: NodeId, msg: CapabilityMessage) {
+        match msg {
+            CapabilityMessage::Eth(eth) => {
+                match eth {
+                    EthMessage::Status(_) => {}
+                    EthMessage::NewBlockHashes(_) => {
+                        // update peer's state, to track what blocks this peer has seen
+                    }
+                    EthMessage::NewBlock(_) => {
+                        // emit new block and track that the peer knows this block
+                    }
+                    EthMessage::Transactions(_) => {
+                        // need to emit this as event/send to tx handler
+                    }
+                    EthMessage::NewPooledTransactionHashes(_) => {
+                        // need to emit this as event/send to tx handler
+                    }
+
+                    // TODO: should remove the response types here, as they are handled separately
+                    EthMessage::GetBlockHeaders(_) => {}
+                    EthMessage::BlockHeaders(_) => {}
+                    EthMessage::GetBlockBodies(_) => {}
+                    EthMessage::BlockBodies(_) => {}
+                    EthMessage::GetPooledTransactions(_) => {}
+                    EthMessage::PooledTransactions(_) => {}
+                    EthMessage::GetNodeData(_) => {}
+                    EthMessage::NodeData(_) => {}
+                    EthMessage::GetReceipts(_) => {}
+                    EthMessage::Receipts(_) => {}
+                }
+            }
+            CapabilityMessage::Other(_) => {
+                // other subprotocols
+            }
+        }
+    }
+
+    /// Handler for received messages from a handle
+    fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
+        match msg {
+            NetworkHandleMessage::EventListener(tx) => {
+                self.event_listeners.listeners.push(tx);
+            }
+            NetworkHandleMessage::NewestBlock(_, _) => {}
+            _ => {}
+        }
     }
 }
 
@@ -166,8 +229,7 @@ where
 
         // process incoming messages from a handle
         loop {
-            let _msg = match this.from_handle_rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(msg)) => msg,
+            match this.from_handle_rx.poll_next_unpin(cx) {
                 Poll::Pending => break,
                 Poll::Ready(None) => {
                     // This is only possible if the channel was deliberately closed since we always
@@ -175,10 +237,8 @@ where
                     error!("network message channel closed.");
                     return Poll::Ready(())
                 }
+                Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
-            {
-                {}
-            }
         }
 
         // advance the swarm
@@ -223,6 +283,9 @@ where
                         "Session disconnected"
                     );
                 }
+                SwarmEvent::IncomingPendingSessionClosed { .. } => {}
+                SwarmEvent::OutgoingPendingSessionClosed { .. } => {}
+                SwarmEvent::OutgoingConnectionError { .. } => {}
             }
         }
 

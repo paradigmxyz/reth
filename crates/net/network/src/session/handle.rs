@@ -1,9 +1,10 @@
 //! Session handles
 use crate::{
     message::{Capabilities, CapabilityMessage},
-    session::SessionId,
+    session::{Direction, SessionId},
     NodeId,
 };
+use reth_ecies::ECIESError;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{mpsc, oneshot};
 
@@ -12,7 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 ///
 /// This session needs to wait until it is authenticated.
 #[derive(Debug)]
-pub struct PendingSessionHandle {
+pub(crate) struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
     pub(crate) disconnect_tx: oneshot::Sender<()>,
 }
@@ -22,7 +23,7 @@ pub struct PendingSessionHandle {
 /// Within an active session that supports the `Ethereum Wire Protocol `, three high-level tasks can
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
-pub struct ActiveSessionHandle {
+pub(crate) struct ActiveSessionHandle {
     /// The assigned id for this session
     pub(crate) session_id: SessionId,
     /// The identifier of the remote peer
@@ -35,23 +36,43 @@ pub struct ActiveSessionHandle {
     pub(crate) commands: mpsc::Sender<SessionCommand>,
 }
 
+// === impl ActiveSessionHandle ===
+
+impl ActiveSessionHandle {
+    /// Sends a disconnect command to the session.
+    pub(crate) fn disconnect(&self) {
+        // Note: we clone the sender which ensures the channel has capacity to send the message
+        let _ = self.commands.clone().try_send(SessionCommand::Disconnect);
+    }
+}
+
 /// Events a pending session can produce.
 ///
 /// This represents the state changes a session can undergo until it is ready to send capability messages <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md>.
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub enum PendingSessionEvent {
+pub(crate) enum PendingSessionEvent {
     /// Initial handshake step was successful <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#initial-handshake>
     SuccessfulHandshake { remote_addr: SocketAddr, session_id: SessionId },
     /// Represents a successful `Hello` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Hello { session_id: SessionId, node_id: NodeId, capabilities: Arc<Capabilities>, stream: () },
     /// Handshake unsuccessful, session was disconnected.
-    Disconnected { remote_addr: SocketAddr, session_id: SessionId },
+    Disconnected {
+        remote_addr: SocketAddr,
+        session_id: SessionId,
+        direction: Direction,
+        error: Option<ECIESError>,
+    },
     /// Thrown when unable to establish a [`TcpStream`].
-    ConnectionRefused { remote_addr: SocketAddr, session_id: SessionId, error: io::Error },
+    OutgoingConnectionError {
+        remote_addr: SocketAddr,
+        session_id: SessionId,
+        node_id: NodeId,
+        error: io::Error,
+    },
     /// Thrown when authentication via Ecies failed.
-    EciesAuthError { remote_addr: SocketAddr, session_id: SessionId, error: reth_ecies::ECIESError },
+    EciesAuthError { remote_addr: SocketAddr, session_id: SessionId, error: ECIESError },
 }
 
 /// Commands that can be sent to the spawned session.
@@ -65,7 +86,7 @@ pub(crate) enum SessionCommand {
 /// Message variants an active session can produce and send back to the
 /// [`SessionManager`](crate::session::SessionManager)
 #[derive(Debug)]
-pub enum ActiveSessionMessage {
+pub(crate) enum ActiveSessionMessage {
     /// Session disconnected.
     Closed { node_id: NodeId, remote_addr: SocketAddr },
     /// A session received a valid message via RLPx.
