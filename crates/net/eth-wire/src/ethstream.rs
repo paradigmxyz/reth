@@ -64,7 +64,7 @@ where
         let msg = self
             .next()
             .await
-            .ok_or_else(|| EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
+            .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
 
         // TODO: Add any missing checks
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
@@ -348,7 +348,7 @@ mod tests {
             };
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
-            let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
+            let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
             let mut eth_stream = EthStream::new(p2p_stream);
             eth_stream.handshake(status_copy, fork_filter_clone).await.unwrap();
 
@@ -377,7 +377,7 @@ mod tests {
         };
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
-        let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
+        let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
         let mut client_stream = EthStream::new(p2p_stream);
         client_stream.handshake(status, fork_filter).await.unwrap();
 
