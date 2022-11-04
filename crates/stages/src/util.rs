@@ -68,7 +68,21 @@ pub(crate) mod unwind {
     };
     use reth_primitives::BlockNumber;
 
+    /// Unwind table by block number key
+    #[inline]
+    pub(crate) fn unwind_table_by_num<DB, T>(
+        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        block: BlockNumber,
+    ) -> Result<(), Error>
+    where
+        DB: Database,
+        T: Table<Key = BlockNumber>,
+    {
+        unwind_table::<DB, T, _>(tx, block, |key| key)
+    }
+
     /// Unwind table by composite block number hash key
+    #[inline]
     pub(crate) fn unwind_table_by_num_hash<DB, T>(
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         block: BlockNumber,
