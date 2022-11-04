@@ -60,7 +60,7 @@ pub struct UnauthedP2PStream<S> {
 }
 
 impl<S> UnauthedP2PStream<S> {
-    /// Create a new `UnauthedP2PStream` from a `Stream` of bytes.
+    /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
@@ -635,7 +635,7 @@ impl Display for DisconnectReason {
             DisconnectReason::SubprotocolSpecific => "Some other reason specific to a subprotocol",
         };
 
-        write!(f, "{}", message)
+        write!(f, "{message}")
     }
 }
 
