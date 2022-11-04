@@ -101,8 +101,6 @@ impl HeadersClient for TestHeadersClient {
     async fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
 
     async fn send_header_request(&self, id: u64, request: HeadersRequest) -> HashSet<H512> {
-        println!("SENDING REQUEST >>> {id}");
-
         self.req_tx.send((id, request)).await.expect("failed to send request");
         HashSet::default()
     }
