@@ -16,6 +16,83 @@ use tokio_stream::Stream;
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
 const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
+/// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
+/// `Status` handshake is completed.
+#[pin_project]
+pub struct UnauthedEthStream<S> {
+    #[pin]
+    inner: S,
+}
+
+impl<S> UnauthedEthStream<S> {
+    /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
+    pub fn new(inner: S) -> Self {
+        Self { inner }
+    }
+}
+
+impl<S, E> UnauthedEthStream<S>
+where
+    S: Stream<Item = Result<bytes::BytesMut, E>> + Sink<bytes::Bytes, Error = E> + Unpin,
+    EthStreamError: From<E>,
+{
+    /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
+    /// handshake is completed successfully. This also returns the `Status` message sent by the
+    /// remote peer.
+    pub async fn handshake(
+        self,
+        status: Status,
+        fork_filter: ForkFilter,
+    ) -> Result<(EthStream<S>, Status), EthStreamError> {
+        // construct the stream here so we can use the `Stream` and `Sink` impls for convenient
+        // encoding / decoding
+        let mut stream = EthStream { inner: self.inner, authed: true };
+
+        tracing::trace!("sending eth status ...");
+        stream.send(EthMessage::Status(status)).await?;
+
+        tracing::trace!("waiting for eth status from peer ...");
+        let msg = stream
+            .next()
+            .await
+            .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
+
+        // TODO: Add any missing checks
+        // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
+        match msg {
+            EthMessage::Status(resp) => {
+                if status.genesis != resp.genesis {
+                    return Err(HandshakeError::MismatchedGenesis {
+                        expected: status.genesis,
+                        got: resp.genesis,
+                    }
+                    .into())
+                }
+
+                if status.version != resp.version {
+                    return Err(HandshakeError::MismatchedProtocolVersion {
+                        expected: status.version,
+                        got: resp.version,
+                    }
+                    .into())
+                }
+
+                if status.chain != resp.chain {
+                    return Err(HandshakeError::MismatchedChain {
+                        expected: status.chain,
+                        got: resp.chain,
+                    }
+                    .into())
+                }
+
+                fork_filter.validate(resp.forkid).map_err(HandshakeError::InvalidFork)?;
+                Ok((stream, resp))
+            }
+            _ => Err(EthStreamError::HandshakeError(HandshakeError::NonStatusMessageInHandshake)),
+        }
+    }
+}
+
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
@@ -189,6 +266,8 @@ mod tests {
     use ethers_core::types::Chain;
     use reth_primitives::{H256, U256};
 
+    use super::UnauthedEthStream;
+
     #[tokio::test]
     async fn can_handshake() {
         let genesis = H256::random();
@@ -213,14 +292,17 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
-            let _ = EthStream::connect(stream, status_clone, fork_filter_clone).await.unwrap();
+            let _ = UnauthedEthStream::new(stream)
+                .handshake(status_clone, fork_filter_clone)
+                .await
+                .unwrap();
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = crate::PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let _ = EthStream::connect(sink, status, fork_filter).await.unwrap();
+        let _ = UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
 
         // wait for it to finish
         handle.await.unwrap();
@@ -349,8 +431,10 @@ mod tests {
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
             let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
-            let mut eth_stream = EthStream::new(p2p_stream);
-            eth_stream.handshake(status_copy, fork_filter_clone).await.unwrap();
+            let (mut eth_stream, _) = UnauthedEthStream::new(p2p_stream)
+                .handshake(status_copy, fork_filter_clone)
+                .await
+                .unwrap();
 
             // use the stream to get the next message
             let message = eth_stream.next().await.unwrap().unwrap();
@@ -378,8 +462,8 @@ mod tests {
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
         let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
-        let mut client_stream = EthStream::new(p2p_stream);
-        client_stream.handshake(status, fork_filter).await.unwrap();
+        let (mut client_stream, _) =
+            UnauthedEthStream::new(p2p_stream).handshake(status, fork_filter).await.unwrap();
 
         client_stream.send(test_msg).await.unwrap();
 
