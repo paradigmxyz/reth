@@ -40,26 +40,37 @@ where
     /// handshake is completed successfully. This also returns the `Status` message sent by the
     /// remote peer.
     pub async fn handshake(
-        self,
+        mut self,
         status: Status,
         fork_filter: ForkFilter,
     ) -> Result<(EthStream<S>, Status), EthStreamError> {
-        // construct the stream here so we can use the `Stream` and `Sink` impls for convenient
-        // encoding / decoding
-        let mut stream = EthStream { inner: self.inner };
 
         tracing::trace!("sending eth status ...");
-        stream.send(EthMessage::Status(status)).await?;
+
+        // we need to encode and decode here on our own because we don't have an `EthStream` yet
+        let mut our_status_bytes = BytesMut::new();
+        ProtocolMessage::from(EthMessage::Status(status)).encode(&mut our_status_bytes);
+        let our_status_bytes = our_status_bytes.freeze();
+        self.inner.send(our_status_bytes).await?;
 
         tracing::trace!("waiting for eth status from peer ...");
-        let msg = stream
+        let their_msg = self.inner
             .next()
             .await
             .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
 
+        if their_msg.len() > MAX_MESSAGE_SIZE {
+            return Err(EthStreamError::MessageTooBig(their_msg.len()))
+        }
+
+        let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
+            Ok(m) => m,
+            Err(err) => return Err(err.into()),
+        };
+
         // TODO: Add any missing checks
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
-        match msg {
+        match msg.message {
             EthMessage::Status(resp) => {
                 if status.genesis != resp.genesis {
                     return Err(HandshakeError::MismatchedGenesis {
@@ -86,6 +97,11 @@ where
                 }
 
                 fork_filter.validate(resp.forkid).map_err(HandshakeError::InvalidFork)?;
+
+                // now we can create the `EthStream` because the peer has successfully completed
+                // the handshake
+                let stream = EthStream::new(self.inner);
+
                 Ok((stream, resp))
             }
             _ => Err(EthStreamError::HandshakeError(HandshakeError::NonStatusMessageInHandshake)),
@@ -221,17 +237,24 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
-            let _ = UnauthedEthStream::new(stream)
+            let (_, their_status) = UnauthedEthStream::new(stream)
                 .handshake(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
+
+            // just make sure it equals our status (our status is a clone of their status)
+            assert_eq!(their_status, status_clone);
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = crate::PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let _ = UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
+        let (_, their_status) =
+            UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
+
+        // their status is a clone of our status, these should be equal
+        assert_eq!(their_status, status);
 
         // wait for it to finish
         handle.await.unwrap();
