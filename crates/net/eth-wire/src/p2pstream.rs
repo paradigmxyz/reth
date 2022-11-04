@@ -687,23 +687,26 @@ impl Encodable for DisconnectReason {
 
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let first = *buf.first().expect("disconnect reason should have at least 1 byte");
-        buf.advance(1);
+        if buf.len() < 3 {
+            return Err(DecodeError::Custom("disconnect reason should have 3 bytes"))
+        }
+
+        let first = buf[0];
         if first != 0x01 {
             return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
         }
 
-        let second = *buf.first().expect("disconnect reason should have at least 2 bytes");
-        buf.advance(1);
+        let second = buf[1];
         if second != 0x00 {
             // TODO: make sure this error message is correct
             return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
         }
 
-        let reason = *buf.first().expect("disconnect reason should have 3 bytes");
-        buf.advance(1);
-        DisconnectReason::try_from(reason)
-            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))
+        let reason = buf[2];
+        let reason = DisconnectReason::try_from(reason)
+            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))?;
+        buf.advance(3);
+        Ok(reason)
     }
 }
 
@@ -950,6 +953,11 @@ mod tests {
 
             assert_eq!(disconnect, disconnect_decoded);
         }
+    }
+
+    #[test]
+    fn test_reason_too_short() {
+        assert!(DisconnectReason::decode(&mut &[0u8][..]).is_err())
     }
 
     #[test]
