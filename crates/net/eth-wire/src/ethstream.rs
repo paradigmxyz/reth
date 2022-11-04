@@ -46,7 +46,7 @@ where
     ) -> Result<(EthStream<S>, Status), EthStreamError> {
         // construct the stream here so we can use the `Stream` and `Sink` impls for convenient
         // encoding / decoding
-        let mut stream = EthStream { inner: self.inner, authed: true };
+        let mut stream = EthStream { inner: self.inner };
 
         tracing::trace!("sending eth status ...");
         stream.send(EthMessage::Status(status)).await?;
@@ -99,84 +99,13 @@ where
 pub struct EthStream<S> {
     #[pin]
     inner: S,
-    /// Whether the `Status` handshake has been completed
-    authed: bool,
 }
 
 impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
     pub fn new(inner: S) -> Self {
-        Self { inner, authed: false }
-    }
-}
-
-impl<S, E> EthStream<S>
-where
-    S: Stream<Item = Result<bytes::BytesMut, E>> + Sink<bytes::Bytes, Error = E> + Unpin,
-    EthStreamError: From<E>,
-{
-    /// Given an instantiated transport layer, it proceeds to return an [`EthStream`]
-    /// after performing a [`Status`] message handshake as specified in
-    pub async fn connect(
-        inner: S,
-        status: Status,
-        fork_filter: ForkFilter,
-    ) -> Result<Self, EthStreamError> {
-        let mut this = Self::new(inner);
-        this.handshake(status, fork_filter).await?;
-        Ok(this)
-    }
-
-    /// Performs a handshake with the connected peer over the transport stream.
-    pub async fn handshake(
-        &mut self,
-        status: Status,
-        fork_filter: ForkFilter,
-    ) -> Result<(), EthStreamError> {
-        tracing::trace!("sending eth status ...");
-        self.send(EthMessage::Status(status)).await?;
-
-        tracing::trace!("waiting for eth status from peer ...");
-        let msg = self
-            .next()
-            .await
-            .ok_or_else(|| EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
-
-        // TODO: Add any missing checks
-        // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
-        match msg {
-            EthMessage::Status(resp) => {
-                self.authed = true;
-
-                if status.genesis != resp.genesis {
-                    return Err(HandshakeError::MismatchedGenesis {
-                        expected: status.genesis,
-                        got: resp.genesis,
-                    }
-                    .into())
-                }
-
-                if status.version != resp.version {
-                    return Err(HandshakeError::MismatchedProtocolVersion {
-                        expected: status.version,
-                        got: resp.version,
-                    }
-                    .into())
-                }
-
-                if status.chain != resp.chain {
-                    return Err(HandshakeError::MismatchedChain {
-                        expected: status.chain,
-                        got: resp.chain,
-                    }
-                    .into())
-                }
-
-                Ok(fork_filter.validate(resp.forkid).map_err(HandshakeError::InvalidFork)?)
-            }
-            _ => Err(EthStreamError::HandshakeError(HandshakeError::NonStatusMessageInHandshake)),
-        }
+        Self { inner }
     }
 }
 
@@ -205,7 +134,7 @@ where
             Err(err) => return Poll::Ready(Some(Err(err.into()))),
         };
 
-        if *this.authed && matches!(msg.message, EthMessage::Status(_)) {
+        if matches!(msg.message, EthMessage::Status(_)) {
             return Poll::Ready(Some(Err(EthStreamError::HandshakeError(
                 HandshakeError::StatusNotInHandshake,
             ))))
@@ -227,7 +156,7 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
-        if self.authed && matches!(item, EthMessage::Status(_)) {
+        if matches!(item, EthMessage::Status(_)) {
             return Err(EthStreamError::HandshakeError(HandshakeError::StatusNotInHandshake))
         }
 
