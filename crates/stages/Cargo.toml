@@ -27,3 +27,4 @@ tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tokio-stream = "0.1.10"
 tempfile = "3.3.0"
 assert_matches = "1.5.0"
+rand = "0.8.5"

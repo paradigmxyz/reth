@@ -32,6 +32,16 @@ impl BlockNumHash {
     pub fn take(self) -> (BlockNumber, BlockHash) {
         (self.0 .0, self.0 .1)
     }
+
+    /// Return the block number
+    pub fn number(&self) -> BlockNumber {
+        self.0 .0
+    }
+
+    /// Return the block hash
+    pub fn hash(&self) -> BlockHash {
+        self.0 .1
+    }
 }
 
 impl From<(u64, H256)> for BlockNumHash {

@@ -3344,6 +3344,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "metrics",
+ "rand 0.8.5",
  "reth-db",
  "reth-headers-downloaders",
  "reth-interfaces",
