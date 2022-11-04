@@ -29,6 +29,11 @@ impl<S> UnauthedEthStream<S> {
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
+
+    /// Consumes the type and returns the wrapped stream
+    pub fn into_inner(self) -> S {
+        self.inner
+    }
 }
 
 impl<S, E> UnauthedEthStream<S>

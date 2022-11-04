@@ -24,7 +24,6 @@ mod manager;
 mod message;
 mod network;
 mod peers;
-mod request;
 mod session;
 mod state;
 mod swarm;

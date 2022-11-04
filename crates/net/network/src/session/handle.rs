@@ -4,9 +4,12 @@ use crate::{
     session::{Direction, SessionId},
     NodeId,
 };
-use reth_ecies::ECIESError;
+use reth_ecies::{stream::ECIESStream, ECIESError};
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, oneshot},
+};
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
 /// message which exchanges the `capabilities` of the peer.
@@ -56,7 +59,12 @@ pub(crate) enum PendingSessionEvent {
     /// Initial handshake step was successful <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#initial-handshake>
     SuccessfulHandshake { remote_addr: SocketAddr, session_id: SessionId },
     /// Represents a successful `Hello` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
-    Hello { session_id: SessionId, node_id: NodeId, capabilities: Arc<Capabilities>, stream: () },
+    Hello {
+        session_id: SessionId,
+        node_id: NodeId,
+        capabilities: Arc<Capabilities>,
+        stream: ECIESStream<TcpStream>,
+    },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
         remote_addr: SocketAddr,
