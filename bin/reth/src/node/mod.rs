@@ -25,14 +25,14 @@ impl Command {
         let expanded_db_path = Path::new(&path);
         std::fs::create_dir_all(&expanded_db_path)?;
         let db = Arc::new(reth_db::kv::Env::<reth_db::mdbx::WriteMap>::open(
-            &expanded_db_path,
+            expanded_db_path,
             reth_db::kv::EnvKind::RW,
         )?);
         info!("DB opened");
 
-        let _p2p = ();
-        let _consensus = ();
-        let _rpc = ();
+        // let _p2p = ();
+        // let _consensus = ();
+        // let _rpc = ();
 
         let mut pipeline = reth_stages::Pipeline::new();
 

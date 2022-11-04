@@ -626,11 +626,7 @@ mod tests {
             pipeline.run(db.clone()).await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline
-                .set_channel(tx)
-                .unwind(&db, 1, None)
-                .await
-                .expect("Could not unwind pipeline");
+            pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order

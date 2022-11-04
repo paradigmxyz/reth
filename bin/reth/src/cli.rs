@@ -3,13 +3,18 @@
 use clap::{ArgAction, Parser, Subcommand};
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::{node, test_eth_chain,util::reth_tracing::{self, TracingMode}};
+use crate::{
+    node, test_eth_chain,
+    util::reth_tracing::{self, TracingMode},
+};
 
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
-    reth_tracing::build_subscriber(TracingMode::All).init();
+    let tracing = if opt.silent { TracingMode::Silent } else { TracingMode::All };
+
+    reth_tracing::build_subscriber(tracing).init();
 
     match opt.command {
         Commands::Node(command) => command.execute().await,

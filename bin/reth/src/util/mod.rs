@@ -12,7 +12,6 @@ pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<Pat
         .collect::<Vec<PathBuf>>()
 }
 
-
 /// Tracing utility
 pub mod reth_tracing {
     use tracing::Subscriber;
@@ -22,12 +21,15 @@ pub mod reth_tracing {
     pub enum TracingMode {
         /// Enable all info traces.
         All,
+        /// Disable tracing
+        Silent,
     }
 
     impl TracingMode {
         fn into_env_filter(self) -> EnvFilter {
             match self {
                 Self::All => EnvFilter::new("reth=info"),
+                Self::Silent => EnvFilter::new(""),
             }
         }
     }
