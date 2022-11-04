@@ -44,7 +44,6 @@ where
         status: Status,
         fork_filter: ForkFilter,
     ) -> Result<(EthStream<S>, Status), EthStreamError> {
-
         tracing::trace!("sending eth status ...");
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
@@ -54,7 +53,8 @@ where
         self.inner.send(our_status_bytes).await?;
 
         tracing::trace!("waiting for eth status from peer ...");
-        let their_msg = self.inner
+        let their_msg = self
+            .inner
             .next()
             .await
             .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
