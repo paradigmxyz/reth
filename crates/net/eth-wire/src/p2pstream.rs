@@ -956,6 +956,11 @@ mod tests {
     }
 
     #[test]
+    fn test_reason_too_short() {
+        assert!(DisconnectReason::decode(&mut &[0u8][..]).is_err())
+    }
+
+    #[test]
     fn disconnect_encoding_length() {
         let all_reasons = vec![
             DisconnectReason::DisconnectRequested,
