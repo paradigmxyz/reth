@@ -51,8 +51,8 @@ const GRACE_PERIOD: Duration = Duration::from_secs(2);
 /// from a peer.
 const MAX_FAILED_PINGS: u8 = 3;
 
-/// An un-authenticated [`P2PStream`]. This is consumed and returns a [`P2PStream`] after the `Hello`
-/// handshake is completed.
+/// An un-authenticated [`P2PStream`]. This is consumed and returns a [`P2PStream`] after the
+/// `Hello` handshake is completed.
 #[pin_project]
 pub struct UnauthedP2PStream<S> {
     #[pin]
