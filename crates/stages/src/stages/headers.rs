@@ -55,12 +55,12 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         // TODO: handle input.max_block
         let last_hash =
             tx.get::<tables::CanonicalHeaders>(last_block_num)?.ok_or_else(|| -> StageError {
-                DatabaseIntegrityError::NoCannonicalHash { number: last_block_num }.into()
+                DatabaseIntegrityError::CannonicalHash { number: last_block_num }.into()
             })?;
         let last_header = tx
             .get::<tables::Headers>((last_block_num, last_hash).into())?
             .ok_or_else(|| -> StageError {
-                DatabaseIntegrityError::NoHeader { number: last_block_num, hash: last_hash }.into()
+                DatabaseIntegrityError::Header { number: last_block_num, hash: last_hash }.into()
             })?;
         let head = HeaderLocked::new(last_header, last_hash);
 
@@ -121,7 +121,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         height: BlockNumber,
     ) -> Result<(), StageError> {
         let hash = tx.get::<tables::CanonicalHeaders>(height)?.ok_or_else(|| -> StageError {
-            DatabaseIntegrityError::NoCannonicalHeader { number: height }.into()
+            DatabaseIntegrityError::CannonicalHeader { number: height }.into()
         })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
@@ -227,7 +227,7 @@ pub mod tests {
         let rx = execute_stage(db.inner(), input, H256::zero(), Ok(vec![]));
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::NoCannonicalHeader { .. }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CannonicalHeader { .. }))
         );
     }
 
