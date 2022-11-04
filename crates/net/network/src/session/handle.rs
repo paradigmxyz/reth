@@ -4,7 +4,7 @@ use crate::{
     session::SessionId,
     NodeId,
 };
-use std::{net::SocketAddr, sync::Arc, time::Instant};
+use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{mpsc, oneshot};
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
@@ -48,6 +48,10 @@ pub enum PendingSessionEvent {
     Hello { session_id: SessionId, node_id: NodeId, capabilities: Arc<Capabilities>, stream: () },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected { remote_addr: SocketAddr, session_id: SessionId },
+    /// Thrown when unable to establish a [`TcpStream`].
+    ConnectionRefused { remote_addr: SocketAddr, session_id: SessionId, error: io::Error },
+    /// Thrown when authentication via Ecies failed.
+    EciesAuthError { remote_addr: SocketAddr, session_id: SessionId, error: reth_ecies::ECIESError },
 }
 
 /// Commands that can be sent to the spawned session.

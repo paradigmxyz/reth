@@ -1,5 +1,7 @@
 use crate::{peers::PeersConfig, session::SessionsConfig};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_eth_wire::forkid::ForkId;
+use reth_primitives::Chain;
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -22,6 +24,11 @@ pub struct NetworkConfig<C> {
     pub peers_config: PeersConfig,
     /// How to configure the [`SessionManager`]
     pub sessions_config: SessionsConfig,
+    /// A fork identifier as defined by EIP-2124.
+    /// Serves as the chain compatibility identifier.
+    pub fork_id: Option<ForkId>,
+    /// The id of the network
+    pub chain: Chain,
 }
 
 // === impl NetworkConfig ===
@@ -66,6 +73,10 @@ pub struct NetworkConfigBuilder<C> {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
+
+    fork_id: Option<ForkId>,
+
+    chain: Chain,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -81,6 +92,8 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
+            fork_id: None,
+            chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
         }
     }
 
@@ -94,6 +107,8 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr,
             peers_config,
             sessions_config,
+            fork_id,
+            chain,
         } = self;
         NetworkConfig {
             client,
@@ -107,6 +122,8 @@ impl<C> NetworkConfigBuilder<C> {
             }),
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
+            fork_id,
+            chain,
         }
     }
 }

@@ -3244,11 +3244,13 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "either",
  "fnv",
  "futures",
  "parking_lot 0.12.1",
  "pin-project",
  "reth-discv4",
+ "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",

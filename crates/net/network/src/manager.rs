@@ -90,6 +90,7 @@ where
             listener_addr,
             peers_config,
             sessions_config,
+            ..
         } = config;
 
         let peers_manger = PeersManager::new(peers_config);

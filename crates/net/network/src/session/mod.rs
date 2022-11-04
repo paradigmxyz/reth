@@ -7,9 +7,11 @@ use crate::{
     NodeId,
 };
 use fnv::FnvHashMap;
-use futures::StreamExt;
+use futures::{future::Either, FutureExt, StreamExt};
 pub use handle::PeerMessageSender;
-use secp256k1::SecretKey;
+use reth_ecies::stream::ECIESStream;
+use reth_eth_wire::UnauthedEthStream;
+use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashMap,
     future::Future,
@@ -23,7 +25,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::trace;
+use tracing::{instrument, trace, warn};
 
 mod handle;
 
@@ -38,6 +40,8 @@ pub(crate) struct SessionManager {
     next_id: usize,
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
+    /// The node id of node
+    node_id: NodeId,
     /// Size of the command buffer per session.
     session_command_buffer: usize,
     /// All spawned session tasks.
@@ -65,8 +69,6 @@ pub(crate) struct SessionManager {
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
-    // TODO(mattsse): since new blocks need to be relayed to all nodes, this could either happen
-    // through a separate `tokio::sync::broadcast::Sender` or part of the mpsc channels
 }
 
 // === impl SessionManager ===
@@ -77,9 +79,13 @@ impl SessionManager {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
 
+        let pk = secret_key.public_key(SECP256K1);
+        let node_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+
         Self {
             next_id: 0,
             secret_key,
+            node_id,
             session_command_buffer: config.session_command_buffer,
             spawned_tasks: Default::default(),
             pending_sessions: Default::default(),
@@ -115,16 +121,17 @@ impl SessionManager {
         stream: TcpStream,
         remote_addr: SocketAddr,
     ) -> Result<SessionId, ExceedsSessionLimit> {
-        // TODO check limits
+        // TODO(mattsse): enforce limits
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         self.spawn(start_pending_incoming_session(
+            disconnect_rx,
             session_id,
             stream,
-            disconnect_rx,
             pending_events,
             remote_addr,
+            self.secret_key,
         ));
 
         let handle = PendingSessionHandle { disconnect_tx };
@@ -133,16 +140,17 @@ impl SessionManager {
     }
 
     /// Starts a new pending session from the local node to the given remote node.
-    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, node_id: NodeId) {
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_node_id: NodeId) {
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         self.spawn(start_pending_outbound_session(
-            session_id,
             disconnect_rx,
             pending_events,
+            session_id,
             remote_addr,
-            node_id,
+            remote_node_id,
+            self.secret_key,
         ));
 
         let handle = PendingSessionHandle { disconnect_tx };
@@ -227,6 +235,29 @@ impl SessionManager {
                     let _ = self.pending_sessions.remove(&session_id);
                     return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
                 }
+                PendingSessionEvent::ConnectionRefused { remote_addr, session_id, error } => {
+                    trace!(
+                        ?error,
+                        ?session_id,
+                        ?remote_addr,
+                        target = "net::session",
+                        "connection refused"
+                    );
+                    let _ = self.pending_sessions.remove(&session_id);
+                    return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
+                }
+                PendingSessionEvent::EciesAuthError { remote_addr, session_id, error } => {
+                    let _ = self.pending_sessions.remove(&session_id);
+                    warn!(
+                        ?error,
+                        ?session_id,
+                        ?remote_addr,
+                        target = "net::session",
+                        "ecies auth failed"
+                    );
+                    let _ = self.pending_sessions.remove(&session_id);
+                    return Poll::Ready(SessionEvent::DisconnectedPending { remote_addr })
+                }
             }
         }
 
@@ -307,24 +338,123 @@ pub(crate) enum SessionEvent {
 pub struct ExceedsSessionLimit(usize);
 
 /// Starts the authentication process for a connection initiated by a remote peer.
+///
+/// This will wait for the _incoming_ handshake request and answer it.
 async fn start_pending_incoming_session(
-    _session_id: SessionId,
-    _stream: TcpStream,
-    _disconnect_rx: oneshot::Receiver<()>,
-    _events: mpsc::Sender<PendingSessionEvent>,
-    _remote_addr: SocketAddr,
+    disconnect_rx: oneshot::Receiver<()>,
+    session_id: SessionId,
+    stream: TcpStream,
+    events: mpsc::Sender<PendingSessionEvent>,
+    remote_addr: SocketAddr,
+    secret_key: SecretKey,
 ) {
-    // Authenticates the stream, sends `PendingSessionEvent` updates back, sends Disconnect if
-    // disconnect trigger was fired.
-    todo!()
+    authenticate(
+        disconnect_rx,
+        events,
+        stream,
+        session_id,
+        remote_addr,
+        secret_key,
+        Direction::Incoming,
+    )
+    .await
 }
 
 /// Starts the authentication process for a connection initiated by a remote peer.
+#[instrument(skip_all, fields(%remote_addr, node_id), target = "net")]
 async fn start_pending_outbound_session(
-    _session_id: SessionId,
-    _disconnect_rx: oneshot::Receiver<()>,
-    _events: mpsc::Sender<PendingSessionEvent>,
-    _remote_addr: SocketAddr,
-    _node_id: NodeId,
+    disconnect_rx: oneshot::Receiver<()>,
+    events: mpsc::Sender<PendingSessionEvent>,
+    session_id: SessionId,
+    remote_addr: SocketAddr,
+    remote_node_id: NodeId,
+    secret_key: SecretKey,
 ) {
+    let stream = match TcpStream::connect(remote_addr).await {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = events
+                .send(PendingSessionEvent::ConnectionRefused { remote_addr, session_id, error })
+                .await;
+            return
+        }
+    };
+    authenticate(
+        disconnect_rx,
+        events,
+        stream,
+        session_id,
+        remote_addr,
+        secret_key,
+        Direction::Outgoing(remote_node_id),
+    )
+    .await
+}
+
+/// The direction of the connection.
+enum Direction {
+    Incoming,
+    Outgoing(NodeId),
+}
+
+async fn authenticate(
+    disconnect_rx: oneshot::Receiver<()>,
+    events: mpsc::Sender<PendingSessionEvent>,
+    stream: TcpStream,
+    session_id: SessionId,
+    remote_addr: SocketAddr,
+    secret_key: SecretKey,
+    direction: Direction,
+) {
+    let stream = match direction {
+        Direction::Incoming => match ECIESStream::incoming(stream, secret_key).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                let _ = events
+                    .send(PendingSessionEvent::EciesAuthError { remote_addr, session_id, error })
+                    .await;
+                return
+            }
+        },
+        Direction::Outgoing(remote_node_id) => {
+            match ECIESStream::connect(stream, secret_key, remote_node_id).await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    let _ = events
+                        .send(PendingSessionEvent::EciesAuthError {
+                            remote_addr,
+                            session_id,
+                            error,
+                        })
+                        .await;
+                    return
+                }
+            }
+        }
+    };
+
+    let unauthed = UnauthedEthStream::new(stream);
+    let auth = authenticate_stream(unauthed, session_id, remote_addr, direction).boxed();
+
+    match futures::future::select(disconnect_rx, auth).await {
+        Either::Left((_, _)) => {
+            let _ =
+                events.send(PendingSessionEvent::Disconnected { remote_addr, session_id }).await;
+        }
+        Either::Right((res, _)) => {
+            let _ = events.send(res).await;
+        }
+    }
+}
+
+/// Authenticate the stream via handshake
+///
+/// On Success return the authenticated stream as [`PendingSessionEvent`]
+async fn authenticate_stream(
+    _stream: UnauthedEthStream<ECIESStream<TcpStream>>,
+    _session_id: SessionId,
+    _remote_addr: SocketAddr,
+    _direction: Direction,
+) -> PendingSessionEvent {
+    todo!()
 }

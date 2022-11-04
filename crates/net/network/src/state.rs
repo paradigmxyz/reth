@@ -3,7 +3,7 @@
 use crate::{
     discovery::{Discovery, DiscoveryEvent},
     fetch::StateFetcher,
-    message::{Capabilities, CapabilityMessage, CapabilityResponse, RequestResult},
+    message::{Capabilities, CapabilityResponse},
     peers::{PeerAction, PeersManager},
     session::PeerMessageSender,
     NodeId,
@@ -19,7 +19,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tokio::sync::{oneshot, oneshot::error::RecvError};
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Maintains the state of all peers in the network.
@@ -65,9 +65,9 @@ where
     /// Event hook for an authenticated session for the peer.
     pub fn on_session_authenticated(
         &mut self,
-        node_id: NodeId,
-        capabilities: Arc<Capabilities>,
-        messages: PeerMessageSender,
+        _node_id: NodeId,
+        _capabilities: Arc<Capabilities>,
+        _messages: PeerMessageSender,
     ) {
         // TODO notify fetecher as well
     }
@@ -107,10 +107,10 @@ where
     }
 
     /// Disconnect the session
-    fn disconnect_session(&mut self, node: NodeId) {}
+    fn disconnect_session(&mut self, _node: NodeId) {}
 
     /// Invoked when received a response from a connected peer.
-    fn on_response(&mut self, node: NodeId, resp: CapabilityResponse) {}
+    fn on_response(&mut self, _node: NodeId, _resp: CapabilityResponse) {}
 
     /// Advances the state
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateMessage> {

@@ -15,6 +15,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-discv4 = { path = "../discv4" }
 reth-eth-wire = { path = "../eth-wire" }
+reth-ecies = { path = "../ecies" }
 reth-rlp = { path = "../../common/rlp", features = ["smol_str"] }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
 reth-transaction-pool = { path = "../../transaction-pool" }
@@ -33,6 +34,7 @@ parking_lot = "0.12"
 async-trait = "0.1"
 bytes = "1.2"
 smol_str = { version = "0.1", default-features = false }
+either = "1.8"
 
 secp256k1 = { version = "0.24", features = [
     "global-context",
