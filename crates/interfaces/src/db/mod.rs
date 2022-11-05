@@ -8,10 +8,9 @@ pub mod tables;
 
 use std::marker::PhantomData;
 
+pub use container::DBContainer;
 pub use error::Error;
 pub use table::*;
-
-pub use container::DBContainer;
 
 // Sealed trait helper to prevent misuse of the API.
 mod sealed {

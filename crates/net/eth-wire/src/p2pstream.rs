@@ -1,4 +1,9 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
+use crate::{
+    capability::SharedCapability,
+    error::{P2PHandshakeError, P2PStreamError},
+    pinger::{Pinger, PingerEvent},
+};
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{ready, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -13,12 +18,6 @@ use std::{
     time::Duration,
 };
 use tokio_stream::Stream;
-
-use crate::{
-    capability::SharedCapability,
-    error::{P2PHandshakeError, P2PStreamError},
-    pinger::{IntervalTimeoutPinger, PingerEvent},
-};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -47,12 +46,8 @@ const PING_INTERVAL: Duration = Duration::from_secs(60);
 /// [`P2PMessage::Disconnect`] message.
 const GRACE_PERIOD: Duration = Duration::from_secs(2);
 
-/// [`MAX_FAILED_PINGS`] determines the maximum number of failed ping attempts before disconnecting
-/// from a peer.
-const MAX_FAILED_PINGS: u8 = 3;
-
-/// An un-authenticated `P2PStream`. This is consumed and returns a [`P2PStream`] after the `Hello`
-/// handshake is completed.
+/// An un-authenticated [`P2PStream`]. This is consumed and returns a [`P2PStream`] after the
+/// `Hello` handshake is completed.
 #[pin_project]
 pub struct UnauthedP2PStream<S> {
     #[pin]
@@ -60,7 +55,7 @@ pub struct UnauthedP2PStream<S> {
 }
 
 impl<S> UnauthedP2PStream<S> {
-    /// Create a new `UnauthedP2PStream` from a `Stream` of bytes.
+    /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
@@ -71,8 +66,11 @@ where
     S: Stream<Item = Result<BytesMut, io::Error>> + Sink<Bytes, Error = io::Error> + Unpin,
 {
     /// Consumes the `UnauthedP2PStream` and returns a `P2PStream` after the `Hello` handshake is
-    /// completed.
-    pub async fn handshake(mut self, hello: HelloMessage) -> Result<P2PStream<S>, P2PStreamError> {
+    /// completed successfully. This also returns the `Hello` message sent by the remote peer.
+    pub async fn handshake(
+        mut self,
+        hello: HelloMessage,
+    ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
         tracing::trace!("sending p2p hello ...");
 
         // send our hello message with the Sink
@@ -97,7 +95,7 @@ where
         }
 
         // get the message id
-        let id = *hello_bytes.first().ok_or_else(|| P2PStreamError::EmptyProtocolMessage)?;
+        let id = *hello_bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
 
         // the first message sent MUST be the hello message
         if id != P2PMessageID::Hello as u8 {
@@ -124,11 +122,12 @@ where
         }
 
         // determine shared capabilities (currently returns only one capability)
-        let capability = set_capability_offsets(hello.capabilities, their_hello.capabilities)?;
+        let capability =
+            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone())?;
 
         let stream = P2PStream::new(self.inner, capability);
 
-        Ok(stream)
+        Ok((stream, their_hello))
     }
 }
 
@@ -146,21 +145,22 @@ pub struct P2PStream<S> {
     decoder: snap::raw::Decoder,
 
     /// The state machine used for keeping track of the peer's ping status.
-    pinger: IntervalTimeoutPinger,
+    pinger: Pinger,
 
     /// The supported capability for this stream.
     shared_capability: SharedCapability,
 }
 
 impl<S> P2PStream<S> {
-    /// Create a new unauthed [`P2PStream`] from the provided stream. You will need to manually
-    /// handshake with a peer.
+    /// Create a new [`P2PStream`] from the provided stream.
+    /// New [`P2PStream`]s are assumed to have completed the `p2p` handshake successfully and are
+    /// ready to send and receive subprotocol messages.
     pub fn new(inner: S, capability: SharedCapability) -> Self {
         Self {
             inner,
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
-            pinger: IntervalTimeoutPinger::new(MAX_FAILED_PINGS, PING_INTERVAL, PING_TIMEOUT),
+            pinger: Pinger::new(PING_INTERVAL, PING_TIMEOUT),
             shared_capability: capability,
         }
     }
@@ -178,9 +178,9 @@ where
         let mut this = self.project();
 
         // poll the pinger to determine if we should send a ping
-        let pinger_res = ready!(Pin::new(&mut this.pinger).poll_next(cx));
-        match pinger_res {
-            Some(Ok(PingerEvent::Ping)) => {
+        match this.pinger.poll_ping(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Ok(PingerEvent::Ping)) => {
                 // encode the ping message
                 let mut ping_bytes = BytesMut::new();
                 P2PMessage::Ping.encode(&mut ping_bytes);
@@ -189,7 +189,6 @@ where
                 let send_res = Pin::new(&mut this.inner).send(ping_bytes.into()).poll_unpin(cx)?;
                 ready!(send_res)
             }
-            // either None (stream ended) or Some(PingEvent::Timeout) or Err(err)
             _ => {
                 // encode the disconnect message
                 let mut disconnect_bytes = BytesMut::new();
@@ -203,7 +202,7 @@ where
                 // since the ping stream has timed out, let's send a None
                 return Poll::Ready(None)
             }
-        };
+        }
 
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
         // return behind any pings we need to respond to
@@ -239,7 +238,7 @@ where
             } else if id == P2PMessageID::Pong as u8 {
                 // TODO: do we need to decode the pong?
                 // if we were waiting for a pong, this will reset the pinger state
-                this.pinger.pong_received()?
+                this.pinger.on_pong()?
             } else if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID {
                 // we have received an unknown reserved message
                 return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
@@ -388,7 +387,7 @@ pub fn set_capability_offsets(
     // capability with the lowest offset.
     Ok(shared_with_offsets
         .first()
-        .ok_or_else(|| P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))?
+        .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))?
         .clone())
 }
 
@@ -630,7 +629,7 @@ impl Display for DisconnectReason {
             DisconnectReason::SubprotocolSpecific => "Some other reason specific to a subprotocol",
         };
 
-        write!(f, "{}", message)
+        write!(f, "{message}")
     }
 }
 
@@ -682,23 +681,26 @@ impl Encodable for DisconnectReason {
 
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let first = *buf.first().expect("disconnect reason should have at least 1 byte");
-        buf.advance(1);
+        if buf.len() < 3 {
+            return Err(DecodeError::Custom("disconnect reason should have 3 bytes"))
+        }
+
+        let first = buf[0];
         if first != 0x01 {
             return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
         }
 
-        let second = *buf.first().expect("disconnect reason should have at least 2 bytes");
-        buf.advance(1);
+        let second = buf[1];
         if second != 0x00 {
             // TODO: make sure this error message is correct
             return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
         }
 
-        let reason = *buf.first().expect("disconnect reason should have 3 bytes");
-        buf.advance(1);
-        DisconnectReason::try_from(reason)
-            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))
+        let reason = buf[2];
+        let reason = DisconnectReason::try_from(reason)
+            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))?;
+        buf.advance(3);
+        Ok(reason)
     }
 }
 
@@ -736,7 +738,7 @@ mod tests {
             };
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
-            let p2p_stream = unauthed_stream.handshake(server_hello).await.unwrap();
+            let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
 
             // ensure that the two share a single capability, eth67
             assert_eq!(
@@ -762,7 +764,7 @@ mod tests {
         };
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
-        let p2p_stream = unauthed_stream.handshake(client_hello).await.unwrap();
+        let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
 
         // ensure that the two share a single capability, eth67
         assert_eq!(
@@ -945,6 +947,11 @@ mod tests {
 
             assert_eq!(disconnect, disconnect_decoded);
         }
+    }
+
+    #[test]
+    fn test_reason_too_short() {
+        assert!(DisconnectReason::decode(&mut &[0u8][..]).is_err())
     }
 
     #[test]

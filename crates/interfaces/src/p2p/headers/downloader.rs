@@ -53,6 +53,7 @@ impl DownloadError {
 
 /// The header downloading strategy
 #[async_trait]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait Downloader: Sync + Send {
     /// The Consensus used to verify block validity when
     /// downloading

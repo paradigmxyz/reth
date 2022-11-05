@@ -90,15 +90,7 @@ pub enum P2PHandshakeError {
 /// An error that can occur when interacting with a [`Pinger`].
 #[derive(Debug, thiserror::Error)]
 pub enum PingerError {
-    /// A ping was sent while the pinger was in the `TimedOut` state.
-    #[error("ping sent while timed out")]
-    PingWhileTimedOut,
-
-    /// A pong was received while the pinger was in the `Ready` state.
+    /// An unexpected pong was received while the pinger was in the `Ready` state.
     #[error("pong received while ready")]
-    PongWhileReady,
-
-    /// A pong was received while the pinger was in the `TimedOut` state.
-    #[error("pong received while timed out")]
-    PongWhileTimedOut,
+    UnexpectedPong,
 }
