@@ -148,3 +148,21 @@ impl Discv4ConfigBuilder {
         self.config.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_builder() {
+        let mut builder = Discv4Config::builder();
+        let _ = builder
+            .enable_lookup(true)
+            .enable_dht_random_walk(true)
+            .add_boot_nodes(HashSet::new())
+            .ban_duration(None)
+            .lookup_interval(Duration::from_secs(3))
+            .enable_lookup(true)
+            .build();
+    }
+}

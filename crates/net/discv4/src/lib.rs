@@ -1274,6 +1274,25 @@ mod tests {
     };
     use tracing_test::traced_test;
 
+    #[test]
+    fn test_local_rotator() {
+        let id = NodeId::random();
+        let mut rotator = LookupTargetRotator::local_only();
+        assert_eq!(rotator.next(&id), id);
+        assert_eq!(rotator.next(&id), id);
+    }
+
+    #[test]
+    fn test_rotator() {
+        let id = NodeId::random();
+        let mut rotator = LookupTargetRotator::default();
+        assert_eq!(rotator.next(&id), id);
+        assert_ne!(rotator.next(&id), id);
+        assert_ne!(rotator.next(&id), id);
+        assert_ne!(rotator.next(&id), id);
+        assert_eq!(rotator.next(&id), id);
+    }
+
     #[tokio::test]
     #[traced_test]
     async fn test_pending_ping() {
@@ -1314,5 +1333,18 @@ mod tests {
             }
             println!("total peers {}", table.len());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn test_service_commands() {
+        let config = Discv4Config::builder().build();
+        let (discv4, mut service) = create_discv4_with_config(config).await;
+
+        service.lookup_self();
+
+        let _handle = service.spawn();
+        discv4.send_lookup_self();
+        let _ = discv4.lookup_self().await;
     }
 }
