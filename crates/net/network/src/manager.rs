@@ -118,7 +118,7 @@ where
         let incoming = ConnectionListener::bind(listener_addr).await?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
-        let discovery = Discovery::new(discovery_addr, discovery_v4_config, secret_key).await?;
+        let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_node_id = discovery.local_id();
 

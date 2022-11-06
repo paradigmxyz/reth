@@ -41,8 +41,8 @@ impl Discovery {
     /// channel to receive all discovered nodes.
     pub async fn new(
         discovery_addr: SocketAddr,
-        dsicv4_config: Discv4Config,
         sk: SecretKey,
+        dsicv4_config: Discv4Config,
     ) -> Result<Self, NetworkError> {
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
         let (discv4, mut discv4_service) =
@@ -132,4 +132,21 @@ impl Discovery {
 pub enum DiscoveryEvent {
     /// A new node was discovered
     Discovered(NodeId, SocketAddr),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::thread_rng;
+    use secp256k1::SECP256K1;
+    use std::net::{Ipv4Addr, SocketAddrV4};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_discovery_setup() {
+        let mut rng = thread_rng();
+        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+        let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+        let _discovery =
+            Discovery::new(discovery_addr, secret_key, Default::default()).await.unwrap();
+    }
 }

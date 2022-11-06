@@ -42,3 +42,6 @@ secp256k1 = { version = "0.24", features = [
     "rand-std",
     "recovery",
 ] }
+
+[dev-dependencies]
+rand = "0.8"

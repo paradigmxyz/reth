@@ -3250,6 +3250,7 @@ dependencies = [
  "futures",
  "parking_lot 0.12.1",
  "pin-project",
+ "rand 0.8.5",
  "reth-discv4",
  "reth-ecies",
  "reth-eth-wire",

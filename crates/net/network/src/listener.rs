@@ -97,3 +97,32 @@ impl Stream for TcpListenerStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::pin_mut;
+    use std::net::{Ipv4Addr, SocketAddrV4};
+    use tokio::macros::support::poll_fn;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_incoming_listener() {
+        let listener =
+            ConnectionListener::bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
+                .await
+                .unwrap();
+        let local_addr = listener.local_address();
+
+        tokio::task::spawn(async move {
+            pin_mut!(listener);
+            match poll_fn(|cx| listener.as_mut().poll(cx)).await {
+                ListenerEvent::Incoming { .. } => {}
+                _ => {
+                    panic!("unexpected event")
+                }
+            }
+        });
+
+        let _ = TcpStream::connect(local_addr).await.unwrap();
+    }
+}
