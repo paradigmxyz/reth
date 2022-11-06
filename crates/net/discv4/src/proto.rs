@@ -2,13 +2,14 @@
 
 use crate::{error::DecodePacketError, node::NodeRecord, NodeId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use k256::{
+    ecdsa::{hazmat::SignPrimitive, RecoveryId, Signature, SigningKey, VerifyingKey},
+    sha2::Sha256,
+};
 use reth_primitives::{keccak256, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
-use secp256k1::{
-    ecdsa::{RecoverableSignature, RecoveryId},
-    SecretKey, SECP256K1,
-};
+use sha3::{Digest, Keccak256};
 use std::net::{IpAddr, Ipv6Addr};
 
 // Note: this is adapted from https://github.com/vorot93/discv4
@@ -63,14 +64,14 @@ impl Message {
     ///
     /// The datagram is `header || payload`
     /// where header is `hash || signature || packet-type`
-    pub fn encode(&self, secret_key: &SecretKey) -> (Bytes, H256) {
+    pub fn encode(&self, signing_key: &SigningKey) -> Result<(Bytes, H256), k256::ecdsa::Error> {
         // allocate max packet size
         let mut datagram = BytesMut::with_capacity(MAX_PACKET_SIZE);
 
         // since signature has fixed len, we can split and fill the datagram buffer at fixed
         // positions, this way we can encode the message directly in the datagram buffer
         let mut sig_bytes = datagram.split_off(H256::len_bytes());
-        let mut payload = sig_bytes.split_off(secp256k1::constants::COMPACT_SIGNATURE_SIZE + 1);
+        let mut payload = sig_bytes.split_off(64 + 1);
 
         match self {
             Message::Ping(message) => {
@@ -91,22 +92,21 @@ impl Message {
             }
         }
 
-        let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
-            &secp256k1::Message::from_slice(keccak256(&payload).as_ref())
-                .expect("is correct MESSAGE_SIZE; qed"),
-            secret_key,
-        );
+        let digest = Keccak256::digest(&payload);
+        let (signature, recid) =
+            signing_key.as_nonzero_scalar().try_sign_prehashed_rfc6979::<Sha256>(digest, b"")?;
 
-        let (rec, sig) = signature.serialize_compact();
-        sig_bytes.extend_from_slice(&sig);
-        sig_bytes.put_u8(rec.to_i32() as u8);
+        let recid = recid.ok_or_else(k256::ecdsa::Error::new)?;
+
+        sig_bytes.extend_from_slice(signature.to_bytes().as_slice());
+        sig_bytes.put_u8(recid.to_byte());
         sig_bytes.unsplit(payload);
 
         let hash = keccak256(&sig_bytes);
         datagram.extend_from_slice(hash.as_bytes());
 
         datagram.unsplit(sig_bytes);
-        (datagram.freeze(), hash)
+        Ok((datagram.freeze(), hash))
     }
 
     /// Decodes the [`Message`] from the given buffer.
@@ -128,15 +128,18 @@ impl Message {
             return Err(DecodePacketError::HashMismatch)
         }
 
-        let signature = &packet[32..96];
-        let recovery_id = RecoveryId::from_i32(packet[96] as i32)?;
-        let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
+        let signature = Signature::try_from(&packet[32..96]).unwrap();
+        let recid = packet[96];
+        let recid =
+            RecoveryId::try_from(recid).map_err(|_| DecodePacketError::InvalidRecoveryId(recid))?;
 
-        // recover the public key
-        let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_bytes())?;
-
-        let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
-        let node_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        // recover the node id
+        let recovered_key = VerifyingKey::recover_from_digest(
+            Keccak256::new_with_prefix(&packet[97..]),
+            &signature,
+            recid,
+        )?;
+        let node_id = NodeId::from_slice(&recovered_key.to_encoded_point(false).as_bytes()[1..]);
 
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
@@ -391,6 +394,7 @@ mod tests {
         SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
     use bytes::BytesMut;
+    use k256::ecdsa::VerifyingKey;
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]
@@ -453,8 +457,8 @@ mod tests {
     fn test_hash_mismatch() {
         let mut rng = thread_rng();
         let msg = rng_message(&mut rng);
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
-        let (buf, _) = msg.encode(&secret_key);
+        let signing_key = SigningKey::random(&mut rng);
+        let (buf, _) = msg.encode(&signing_key).unwrap();
         let mut buf = BytesMut::from(buf.as_ref());
         buf.put_u8(0);
         match Message::decode(buf.as_ref()).unwrap_err() {
@@ -475,10 +479,10 @@ mod tests {
                     .collect(),
                 expire: rng.gen(),
             });
-            let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+            let signing_key = SigningKey::random(&mut rng);
 
-            let (encoded, _) = msg.encode(&secret_key);
-            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {:?}", encoded.len(), msg);
+            let (encoded, _) = msg.encode(&signing_key).unwrap();
+            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
 
             let mut neighbours = Neighbours {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
@@ -488,8 +492,8 @@ mod tests {
             };
             neighbours.nodes.push(rng_ipv4_record(&mut rng));
             let msg = Message::Neighbours(neighbours);
-            let (encoded, _) = msg.encode(&secret_key);
-            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {:?}", encoded.len(), msg);
+            let (encoded, _) = msg.encode(&signing_key).unwrap();
+            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
         }
     }
 
@@ -498,10 +502,12 @@ mod tests {
         let mut rng = thread_rng();
         for _ in 0..100 {
             let msg = rng_message(&mut rng);
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-            let sender_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+            let signing_key = SigningKey::random(&mut rng);
+            let verifying_key = VerifyingKey::from(&signing_key);
+            let sender_id =
+                NodeId::from_slice(&verifying_key.to_encoded_point(false).as_bytes()[1..]);
 
-            let (buf, _) = msg.encode(&secret_key);
+            let (buf, _) = msg.encode(&signing_key).unwrap();
 
             let packet = Message::decode(buf.as_ref()).unwrap();
 

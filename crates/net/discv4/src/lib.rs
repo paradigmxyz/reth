@@ -30,8 +30,8 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
+use k256::ecdsa::SigningKey;
 use reth_primitives::{H256, H512};
-use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
@@ -122,10 +122,10 @@ impl Discv4 {
     pub async fn spawn(
         local_address: SocketAddr,
         local_enr: NodeRecord,
-        secret_key: SecretKey,
+        signing_key: SigningKey,
         config: Discv4Config,
     ) -> io::Result<Self> {
-        let (discv4, service) = Self::bind(local_address, local_enr, secret_key, config).await?;
+        let (discv4, service) = Self::bind(local_address, local_enr, signing_key, config).await?;
 
         let _ = service.spawn();
 
@@ -138,14 +138,15 @@ impl Discv4 {
     /// # use std::io;
     /// use std::net::SocketAddr;
     /// use std::str::FromStr;
+    /// use k256::ecdsa::{SigningKey, VerifyingKey};
     /// use rand::thread_rng;
-    /// use secp256k1::SECP256K1;
     /// use reth_discv4::{Discv4, Discv4Config, NodeId, NodeRecord};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
     ///  let mut rng = thread_rng();
-    ///  let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    ///  let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+    ///  let signing_key = SigningKey::random(&mut rng);
+    ///  let verifying_key = VerifyingKey::from(&signing_key);
+    ///  let id = NodeId::from_slice(&verifying_key.to_encoded_point(false).as_bytes()[1..]);
     ///
     ///  let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     ///  let local_enr = NodeRecord {
@@ -156,7 +157,7 @@ impl Discv4 {
     ///  };
     ///  let config = Discv4Config::default();
     ///
-    ///  let(discv4, mut service) = Discv4::bind(socket, local_enr, secret_key, config).await.unwrap();
+    ///  let(discv4, mut service) = Discv4::bind(socket, local_enr, signing_key, config).await.unwrap();
     ///
     ///   // get an update strea
     ///   let updates = service.update_stream();
@@ -172,7 +173,7 @@ impl Discv4 {
     pub async fn bind(
         local_address: SocketAddr,
         mut local_enr: NodeRecord,
-        secret_key: SecretKey,
+        signing_key: SigningKey,
         config: Discv4Config,
     ) -> io::Result<(Self, Discv4Service)> {
         let socket = UdpSocket::bind(local_address).await?;
@@ -183,7 +184,7 @@ impl Discv4 {
         // We don't expect many commands, so the buffer can be quite small here.
         let (to_service, rx) = mpsc::channel(5);
         let service =
-            Discv4Service::new(socket, local_addr, local_enr, secret_key, config, Some(rx));
+            Discv4Service::new(socket, local_addr, local_enr, signing_key, config, Some(rx));
         let discv4 = Discv4 { local_addr, to_service };
         Ok((discv4, service))
     }
@@ -240,7 +241,7 @@ pub struct Discv4Service {
     /// Local ENR of the server.
     local_enr: NodeRecord,
     /// The secret key used to sign payloads
-    secret_key: SecretKey,
+    signing_key: SigningKey,
     /// The UDP socket for sending and receiving messages.
     _socket: Arc<UdpSocket>,
     /// The spawned UDP tasks.
@@ -288,7 +289,7 @@ impl Discv4Service {
         socket: UdpSocket,
         local_address: SocketAddr,
         local_enr: NodeRecord,
-        secret_key: SecretKey,
+        signing_key: SigningKey,
         config: Discv4Config,
         commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     ) -> Self {
@@ -331,7 +332,7 @@ impl Discv4Service {
             local_enr,
             _socket: socket,
             kbuckets,
-            secret_key,
+            signing_key,
             _tasks: tasks,
             ingress: ingress_rx,
             egress: egress_tx,
@@ -540,7 +541,7 @@ impl Discv4Service {
 
     /// Encodes the packet, sends it and returns the hash.
     pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
-        let (payload, hash) = msg.encode(&self.secret_key);
+        let (payload, hash) = msg.encode(&self.signing_key).unwrap();
         trace!(r#type=?msg.msg_type(), ?to, ?hash, target = "net::disc", "sending packet");
         let _ = self.egress.try_send((payload, to));
         hash

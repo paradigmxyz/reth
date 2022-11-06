@@ -8,9 +8,9 @@ use crate::{
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
     IngressReceiver, NodeId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
+use k256::ecdsa::{SigningKey, VerifyingKey};
 use rand::{thread_rng, Rng, RngCore};
 use reth_primitives::H256;
-use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -33,7 +33,7 @@ use tracing::error;
 pub struct MockDiscovery {
     local_addr: SocketAddr,
     local_enr: NodeRecord,
-    secret_key: SecretKey,
+    signing_key: SigningKey,
     udp: Arc<UdpSocket>,
     _tasks: JoinSet<()>,
     /// Receiver for incoming messages
@@ -50,8 +50,9 @@ impl MockDiscovery {
     pub async fn new() -> io::Result<(Self, mpsc::Sender<MockCommand>)> {
         let mut rng = thread_rng();
         let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
-        let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-        let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let signing_key = SigningKey::random(&mut rng);
+        let verifying_key = VerifyingKey::from(&signing_key);
+        let id = NodeId::from_slice(&verifying_key.to_encoded_point(false).as_bytes()[1..]);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
         let local_enr = NodeRecord {
@@ -78,7 +79,7 @@ impl MockDiscovery {
             egress: egress_tx,
             local_addr,
             local_enr,
-            secret_key,
+            signing_key,
             udp: socket,
             pending_pongs: Default::default(),
             pending_neighbours: Default::default(),
@@ -114,7 +115,7 @@ impl MockDiscovery {
 
     /// Encodes the packet, sends it and returns the hash.
     fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
-        let (payload, hash) = msg.encode(&self.secret_key);
+        let (payload, hash) = msg.encode(&self.signing_key).unwrap();
         let _ = self.egress.try_send((payload, to));
         hash
     }
@@ -208,12 +209,13 @@ pub async fn create_discv4() -> (Discv4, Discv4Service) {
 pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4Service) {
     let mut rng = thread_rng();
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
-    let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+    let signing_key = SigningKey::random(&mut rng);
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let id = NodeId::from_slice(&verifying_key.to_encoded_point(false).as_bytes()[1..]);
     let external_addr = public_ip::addr().await.unwrap_or_else(|| socket.ip());
     let local_enr =
         NodeRecord { address: external_addr, tcp_port: socket.port(), udp_port: socket.port(), id };
-    Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
+    Discv4::bind(socket, local_enr, signing_key, config).await.unwrap()
 }
 
 pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {

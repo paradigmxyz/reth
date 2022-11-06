@@ -24,3 +24,6 @@ members = [
     "crates/libmdbx-rs/mdbx-sys"
 ]
 default-members = ["bin/reth"]
+
+[patch.crates-io]
+ecdsa = { git = "https://github.com/RustCrypto/signatures.git" }

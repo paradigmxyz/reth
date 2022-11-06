@@ -15,7 +15,9 @@ pub enum DecodePacketError {
     #[error("Message id {0} is not supported.")]
     UnknownMessage(u8),
     #[error("Failed to recover public key: {0:?}")]
-    Secp256k1(#[from] secp256k1::Error),
+    RecoveryError(#[from] k256::ecdsa::Error),
+    #[error("Recovery id {0} too large")]
+    InvalidRecoveryId(u8),
 }
 
 /// High level errors that can occur when interacting with the discovery service

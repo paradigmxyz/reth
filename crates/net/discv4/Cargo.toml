@@ -17,11 +17,8 @@ reth-rlp-derive = { path = "../../common/rlp-derive" }
 
 # ethereum
 discv5 = { git = "https://github.com/sigp/discv5" }
-secp256k1 = { version = "0.24", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+k256 = { git = "https://github.com/RustCrypto/elliptic-curves", default-features = false, features = ["ecdsa", "std"] }
+sha3 = { version = "0.10", default-features = false }
 
 # async/futures
 tokio = { version = "1", features = ["io-util", "net", "time"] }

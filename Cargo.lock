@@ -1010,8 +1010,19 @@ checksum = "413301934810f597c1d19ca71c8710e99a3f1ba28a0d2ebc01551a2daeea3c5c"
 dependencies = [
  "der",
  "elliptic-curve",
- "rfc6979",
- "signature",
+ "rfc6979 0.3.0",
+ "signature 1.6.4",
+]
+
+[[package]]
+name = "ecdsa"
+version = "0.15.0-pre"
+source = "git+https://github.com/RustCrypto/signatures.git#ea3e3f3bae3d6b2dac9e9e99466dd29b4b0ffe9b"
+dependencies = [
+ "der",
+ "elliptic-curve",
+ "rfc6979 0.3.1",
+ "signature 2.0.0-pre.2",
 ]
 
 [[package]]
@@ -1020,7 +1031,7 @@ version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9c280362032ea4203659fc489832d0204ef09f247a0506f170dafcac08c369"
 dependencies = [
- "signature",
+ "signature 1.6.4",
 ]
 
 [[package]]
@@ -1102,7 +1113,7 @@ dependencies = [
  "bytes",
  "ed25519-dalek",
  "hex",
- "k256",
+ "k256 0.11.6",
  "log",
  "rand 0.8.5",
  "rlp",
@@ -1120,7 +1131,7 @@ dependencies = [
  "bs58",
  "bytes",
  "hex",
- "k256",
+ "k256 0.11.6",
  "log",
  "rand 0.8.5",
  "rlp",
@@ -1216,7 +1227,7 @@ dependencies = [
  "ethabi",
  "generic-array",
  "hex",
- "k256",
+ "k256 0.11.6",
  "open-fastrlp",
  "rand 0.8.5",
  "rlp",
@@ -2098,10 +2109,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72c1e0b51e7ec0a97369623508396067a486bd0cbed95a2659a4b863d28cfc8b"
 dependencies = [
  "cfg-if",
- "ecdsa",
+ "ecdsa 0.14.8",
  "elliptic-curve",
  "sha2 0.10.6",
  "sha3",
+]
+
+[[package]]
+name = "k256"
+version = "0.12.0-pre"
+source = "git+https://github.com/RustCrypto/elliptic-curves#c87d391a107b5bc22f03acf0de4ded988797c4ec"
+dependencies = [
+ "cfg-if",
+ "ecdsa 0.15.0-pre",
+ "elliptic-curve",
+ "sha2 0.10.6",
 ]
 
 [[package]]
@@ -3080,12 +3102,13 @@ dependencies = [
  "discv5",
  "generic-array",
  "hex",
+ "k256 0.12.0-pre",
  "public-ip",
  "rand 0.8.5",
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
- "secp256k1",
+ "sha3",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3416,6 +3439,16 @@ name = "rfc6979"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88c86280f057430a52f4861551b092a01b419b8eacefc7c995eacb9dc132fe32"
+dependencies = [
+ "crypto-bigint",
+ "hmac",
+ "zeroize",
+]
+
+[[package]]
+name = "rfc6979"
+version = "0.3.1"
+source = "git+https://github.com/RustCrypto/signatures.git#ea3e3f3bae3d6b2dac9e9e99466dd29b4b0ffe9b"
 dependencies = [
  "crypto-bigint",
  "hmac",
@@ -3893,6 +3926,16 @@ name = "signature"
 version = "1.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c"
+dependencies = [
+ "digest 0.10.5",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "signature"
+version = "2.0.0-pre.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b7d7471fcfa786b75b657061bd5bf1d51179b3aac54db33bba7e44f5a4b5b75"
 dependencies = [
  "digest 0.10.5",
  "rand_core 0.6.4",
