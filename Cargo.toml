@@ -12,6 +12,7 @@ members = [
     "crates/net/ecies",
     "crates/net/eth-wire",
     "crates/net/discv4",
+    "crates/net/network",
     "crates/net/rpc",
     "crates/net/rpc-api",
     "crates/net/rpc-types",

@@ -1,0 +1,47 @@
+[package]
+name = "reth-network"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = """
+Ethereum network support
+"""
+
+[dependencies]
+# reth
+reth-interfaces = { path = "../../interfaces" }
+reth-primitives = { path = "../../primitives" }
+reth-discv4 = { path = "../discv4" }
+reth-eth-wire = { path = "../eth-wire" }
+reth-ecies = { path = "../ecies" }
+reth-rlp = { path = "../../common/rlp", features = ["smol_str"] }
+reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-transaction-pool = { path = "../../transaction-pool" }
+
+# async/futures
+futures = "0.3"
+pin-project = "1.0"
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
+tokio-stream = "0.1"
+
+# misc
+aquamarine = "0.1" # docs
+tracing = "0.1"
+fnv = "1.0"
+thiserror = "1.0"
+parking_lot = "0.12"
+async-trait = "0.1"
+bytes = "1.2"
+smol_str = { version = "0.1", default-features = false }
+either = "1.8"
+
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
+[dev-dependencies]
+rand = "0.8"

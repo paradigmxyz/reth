@@ -3239,6 +3239,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network"
+version = "0.1.0"
+dependencies = [
+ "aquamarine",
+ "async-trait",
+ "bytes",
+ "either",
+ "fnv",
+ "futures",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "rand 0.8.5",
+ "reth-discv4",
+ "reth-ecies",
+ "reth-eth-wire",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rlp",
+ "reth-rlp-derive",
+ "reth-transaction-pool",
+ "secp256k1",
+ "smol_str",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "reth-p2p"
 version = "0.1.0"
 dependencies = [
