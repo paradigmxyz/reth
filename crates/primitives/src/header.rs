@@ -250,7 +250,7 @@ mod tests {
     #[test]
     // Test vector from: https://github.com/ethereum/tests/blob/f47bbef4da376a49c8fc3166f09ab8a6d182f765/BlockchainTests/ValidBlocks/bcEIP1559/baseFee.json#L15-L36
     fn test_eip1559_block_header_hash() {
-        let _expected_hash =
+        let expected_hash =
             H256::from_str("6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f")
                 .unwrap();
         let header = Header {
@@ -271,15 +271,7 @@ mod tests {
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
         };
-
-        dbg!("###########");
-        dbg!(header.clone().to_compact().1.len());
-        let (len, h) = header.clone().to_compact();
-        let (h, _) = Header::from_compact(&h, dbg!(len));
-        let test = parity_scale_codec::Encode::encode(&header);
-        dbg!(len);
-        dbg!(test.len());
-        assert!(header == h);
+        assert_eq!(header.hash_slow(), expected_hash);
     }
 
     #[test]
