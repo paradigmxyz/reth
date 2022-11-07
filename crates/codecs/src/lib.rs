@@ -52,14 +52,12 @@ where
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let mut list = vec![];
-        let length = buf[0];
-
-        buf.advance(1);
+        let length = buf.get_u8();
 
         for _ in 0..length {
             #[allow(unused_assignments)]
             let mut element = T::default();
-            (element, buf) = T::from_compact(&buf[1..], buf.len());
+            (element, buf) = T::from_compact(buf, buf.len());
             list.push(element);
         }
 
@@ -162,7 +160,7 @@ impl Compact for Bloom {
         if len == 0 {
             return (Bloom::default(), buf)
         }
-        let result = Bloom::from_slice(&buf[0..len]);
+        let result = Bloom::from_slice(&buf[..len]);
         buf.advance(len);
         (result, buf)
     }

@@ -1,11 +1,16 @@
+//! Code generator for the [`Compact`] trait.
+
 use super::*;
 
+/// Generates the flag fieldset struct that is going to be used to store the length of fields and
+/// their potential presence.
 pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
     let mut field_flags = vec![];
     let mut total_bits = 0;
 
+    // Find out the adequate bit size for the length of each field, if applicable.
     for (name, ftype, is_compact) in fields {
         if *is_compact && !is_hash_type(ftype) {
             let name = format_ident!("{name}_len");
@@ -19,10 +24,11 @@ pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         }
     }
 
+    // Total number of bits should be divisible by 8, so we might need to pad the struct with a
+    // skipped field.
     let remaining = 8 - total_bits % 8;
     let total_bytes = if remaining != 8 {
         let bsize = format_ident!("B{remaining}");
-
         field_flags.push(quote! {
             #[skip]
             unused: #bsize ,
@@ -32,13 +38,15 @@ pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         total_bits / 8
     };
 
-    let bytes = vec![
+    // Provides the number of bytes used to represent the flag struct.
+    let readable_bytes = vec![
         quote! {
             buf.get_u8(),
         };
         total_bytes.into()
     ];
 
+    // Generate the flag struct.
     quote! {
         #[bitfield]
         #[derive(Clone, Copy, Debug, Default)]
@@ -49,13 +57,14 @@ pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         impl #flags {
             fn from(mut buf: &[u8]) -> (Self, &[u8]) {
                 (#flags::from_bytes([
-                    #(#bytes)*
+                    #(#readable_bytes)*
                 ]), buf)
             }
         }
     }
 }
 
+/// Generates code to implement the [`Compact`] trait for a data type.
 pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
@@ -83,6 +92,7 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     }
 }
 
+/// Generates code to implement the [`Compact`] trait method `to_compact`.
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
 
@@ -134,6 +144,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
     lines
 }
 
+/// Generates code to implement the [`Compact`] trait method `from_compact`.
 fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
     let mut lines = vec![];
     // Sets the TypeFlags with the buffer length
