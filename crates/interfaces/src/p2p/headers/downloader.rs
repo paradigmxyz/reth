@@ -4,7 +4,7 @@ use crate::consensus::Consensus;
 use async_trait::async_trait;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Header, HeaderLocked, H256,
+    Header, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{fmt::Debug, time::Duration};
@@ -74,9 +74,9 @@ pub trait Downloader: Sync + Send {
     /// Download the headers
     async fn download(
         &self,
-        head: &HeaderLocked,
+        head: &SealedHeader,
         forkchoice: &ForkchoiceState,
-    ) -> Result<Vec<HeaderLocked>, DownloadError>;
+    ) -> Result<Vec<SealedHeader>, DownloadError>;
 
     /// Perform a header request and returns the headers.
     // TODO: Isn't this effectively blocking per request per downloader?
@@ -108,7 +108,7 @@ pub trait Downloader: Sync + Send {
     /// Validate whether the header is valid in relation to it's parent
     ///
     /// Returns Ok(false) if the
-    fn validate(&self, header: &HeaderLocked, parent: &HeaderLocked) -> Result<(), DownloadError> {
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
         if !(parent.hash() == header.parent_hash && parent.number + 1 == header.number) {
             return Err(DownloadError::MismatchedHeaders {
                 header_number: header.number.into(),
