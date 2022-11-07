@@ -1,4 +1,4 @@
-use crate::{Address, H256, U256};
+use crate::{H256, U256};
 use bytes::Buf;
 use modular_bitfield::prelude::*;
 use reth_codecs::{main_codec, Compact};

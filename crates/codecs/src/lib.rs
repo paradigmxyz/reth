@@ -27,7 +27,7 @@ impl Compact for u64 {
 
             return (u64::from_be_bytes(arr), buf)
         }
-        return (0, buf)
+        (0, buf)
     }
 }
 
@@ -50,16 +50,17 @@ where
         (buf.len(), buf)
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let mut list = vec![];
-        let num = buf[0];
+        let length = buf[0];
 
         buf.advance(1);
 
-        for num in 0..num {
-            let mut ele = T::default();
-            (ele, buf) = T::from_compact(&buf[1..], buf.len());
-            list.push(ele);
+        for _ in 0..length {
+            #[allow(unused_assignments)]
+            let mut element = T::default();
+            (element, buf) = T::from_compact(&buf[1..], buf.len());
+            list.push(element);
         }
 
         (list, buf)
@@ -79,12 +80,11 @@ where
         (0, <T as Compact>::Encoded::default())
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
             return (None, buf)
         }
-        let mut element = T::default();
-        (element, buf) = T::from_compact(buf, len);
+        let (element, buf) = T::from_compact(buf, len);
         (Some(element), buf)
     }
 }
@@ -102,7 +102,7 @@ impl Compact for U256 {
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len > 0 {
             let mut arr = [0; 32];
-            arr[32 - len..].copy_from_slice(&buf[..3]);
+            arr[(32 - len)..].copy_from_slice(&buf[..3]);
             buf.advance(len);
             return (U256::from_big_endian(&arr), buf)
         }
@@ -135,7 +135,7 @@ macro_rules! impl_hash_compact {
                     let buf = bytes::Bytes::from_iter(buf);
                     (buf.len(), buf)
                 }
-                fn from_compact(mut buf: &[u8], len: usize) -> (Self,&[u8]) {
+                fn from_compact(mut buf: &[u8], _: usize) -> (Self,&[u8]) {
                     let v = $name::from_slice(
                         buf.get(..$size).expect("size not matching"),
                     );

@@ -222,7 +222,7 @@ mod tests {
     use super::{Decodable, Encodable, Header, H256};
     use crate::Address;
     use ethers_core::{
-        types::{Bloom, Bytes},
+        types::Bytes,
         utils::hex::{self, FromHex},
     };
     use reth_codecs::Compact;
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     // Test vector from: https://github.com/ethereum/tests/blob/f47bbef4da376a49c8fc3166f09ab8a6d182f765/BlockchainTests/ValidBlocks/bcEIP1559/baseFee.json#L15-L36
     fn test_eip1559_block_header_hash() {
-        let expected_hash =
+        let _expected_hash =
             H256::from_str("6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f")
                 .unwrap();
         let header = Header {

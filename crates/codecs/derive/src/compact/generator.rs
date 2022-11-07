@@ -1,62 +1,6 @@
-extern crate proc_macro2;
-use proc_macro::{self, TokenStream};
-use proc_macro2::{Ident, TokenStream as TokenStream2};
-use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput};
+use super::*;
 
-type IsCompact = bool;
-type FieldName = String;
-type FieldType = String;
-type FieldList = Vec<(FieldName, FieldType, IsCompact)>;
-
-pub fn get_fields(data: &Data) -> FieldList {
-    let mut named_fields = vec![];
-    if let syn::Data::Struct(data) = data {
-        if let syn::Fields::Named(ref fields) = data.fields {
-            for field in &fields.named {
-                if let syn::Type::Path(ref path) = field.ty {
-                    let segments = &path.path.segments;
-                    if !segments.is_empty() {
-                        // TODO: attribute that makes it raw if requested. Which means it wont be
-                        // part of the flags
-                        let mut ftype = String::new();
-                        for (index, s) in segments.iter().enumerate() {
-                            ftype.push_str(&s.ident.to_string());
-                            if index < segments.len() - 1 {
-                                ftype.push_str("::");
-                            }
-                        }
-
-                        named_fields.push((
-                            field.ident.as_ref().expect("qed").to_string(),
-                            ftype,
-                            true,
-                        ));
-                    }
-                }
-            }
-            assert_eq!(named_fields.len(), fields.named.len());
-        }
-    }
-    named_fields
-}
-
-pub fn get_bit_size(ftype: &str) -> u8 {
-    if ftype == "u64" {
-        return 4
-    }
-    if ftype == "U256" {
-        return 6
-    }
-    return 6
-}
-
-pub fn is_hash_type(ftype: &str) -> bool {
-    let known = ["H256", "H160", "Address"];
-    known.contains(&ftype)
-}
-
-pub fn build_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
+pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
     let mut field_flags = vec![];
@@ -95,7 +39,7 @@ pub fn build_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         total_bytes.into()
     ];
 
-    let out = quote! {
+    quote! {
         #[bitfield]
         #[derive(Clone, Copy, Debug, Default)]
         struct #flags {
@@ -109,26 +53,17 @@ pub fn build_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
                 ]), buf)
             }
         }
-    };
-    out.into()
+    }
 }
 
-pub fn get_field_idents(name: &str, ident: &Ident) -> (Ident, Ident, Ident, Ident) {
-    let name = format_ident!("{name}");
-    let set_len_method = format_ident!("set_{name}_len");
-    let slice = format_ident!("{name}_slice");
-    let len = format_ident!("{name}_len");
-    (name, set_len_method, slice, len)
-}
-
-pub fn build_encode(ident: &Ident, fields: &FieldList) -> TokenStream2 {
+pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
-    let to_compact = build_to_compact(fields, ident);
-    let from_compact = build_from_compact(fields, ident);
+    let to_compact = generate_to_compact(fields);
+    let from_compact = generate_from_compact(fields, ident);
 
     // Build function
-    let mut out = quote! {
+    quote! {
         impl Compact for #ident {
             type Encoded = Vec<u8>;
 
@@ -145,16 +80,15 @@ pub fn build_encode(ident: &Ident, fields: &FieldList) -> TokenStream2 {
                 (obj, buf)
             }
         }
-    };
-    out.into()
+    }
 }
 
-fn build_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
+fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
 
     // Sets the TypeFlags with the buffer length
     for (name, ftype, is_compact) in fields {
-        let (name, set_len_method, slice, len) = get_field_idents(name, ident);
+        let (name, _, _, len) = get_field_idents(name);
 
         if ftype == "bytes::Bytes" {
             lines.push(quote! {
@@ -200,11 +134,11 @@ fn build_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     lines
 }
 
-fn build_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
+fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
     let mut lines = vec![];
     // Sets the TypeFlags with the buffer length
     for (name, ftype, is_compact) in fields {
-        let (name, set_len_method, slice, len) = get_field_idents(name, ident);
+        let (name, set_len_method, slice, len) = get_field_idents(name);
 
         if *is_compact {
             lines.push(quote! {
@@ -225,8 +159,8 @@ fn build_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
         buffer.extend_from_slice(&flags.into_bytes());
     });
     // Extends buffer with the field encoded values
-    for (name, ftype, is_compact) in fields {
-        let (_, _, slice, len) = get_field_idents(name, ident);
+    for (name, _, is_compact) in fields {
+        let (_, _, slice, len) = get_field_idents(name);
 
         if *is_compact {
             lines.push(quote! {
@@ -239,15 +173,4 @@ fn build_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
         }
     }
     lines
-}
-
-pub fn derive(input: TokenStream) -> TokenStream {
-    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
-
-    let fields = get_fields(&data);
-
-    let mut output = quote! {};
-    output.extend(build_flag_struct(&ident, &fields));
-    output.extend(build_encode(&ident, &fields));
-    output.into()
 }
