@@ -145,7 +145,7 @@ pub(crate) mod test_utils {
     impl Default for StageTestDB {
         /// Create a new instance of [StageTestDB]
         fn default() -> Self {
-            Self { db: Arc::new(create_test_db::<WriteMap>(EnvKind::RW)) }
+            Self { db: create_test_db::<WriteMap>(EnvKind::RW) }
         }
     }
 
