@@ -12,15 +12,25 @@ pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 
     // Find out the adequate bit size for the length of each field, if applicable.
     for (name, ftype, is_compact) in fields {
-        if *is_compact && !is_hash_type(ftype) {
-            let name = format_ident!("{name}_len");
-            let bitsize = get_bit_size(ftype);
-            let bsize = format_ident!("B{bitsize}");
-            total_bits += bitsize;
+        if *is_compact {
+            if !is_hash_type(ftype) {
+                let name = format_ident!("{name}_len");
+                let bitsize = get_bit_size(ftype);
+                let bsize = format_ident!("B{bitsize}");
+                total_bits += bitsize;
 
-            field_flags.push(quote! {
-                #name: #bsize ,
-            });
+                field_flags.push(quote! {
+                    #name: #bsize ,
+                });
+            } else {
+                let name = format_ident!("{name}");
+
+                field_flags.push(quote! {
+                    #name: bool ,
+                });
+
+                total_bits += 1;
+            }
         }
     }
 
@@ -167,17 +177,27 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
     for (name, ftype, is_compact) in fields {
         let (name, set_len_method, slice, len) = get_field_idents(name);
 
-        if *is_compact {
+        if *is_compact && is_hash_type(ftype) {
+            let itype = format_ident!("{ftype}");
+            let set_bool_method = format_ident!("set_{name}");
+
+            lines.push(quote! {
+                let (#len, #slice) = if self.#name != #itype::zero() {
+                    flags.#set_bool_method(true);
+                    self.#name.to_compact()
+                } else {
+                    (0, bytes::Bytes::new())
+                };
+            });
+        } else {
             lines.push(quote! {
                 let (#len, #slice) = self.#name.to_compact();
             });
-        } else {
-            todo!()
         }
 
         if !is_hash_type(ftype) {
             lines.push(quote! {
-                flags.#set_len_method(dbg!(#len) as u8);
+                flags.#set_len_method(#len as u8);
             })
         }
     }
@@ -186,18 +206,12 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
         buffer.extend_from_slice(&flags.into_bytes());
     });
     // Extends buffer with the field encoded values
-    for (name, _, is_compact) in fields {
-        let (_, _, slice, len) = get_field_idents(name);
+    for (name, _, _) in fields {
+        let (_, _, slice, _) = get_field_idents(name);
 
-        if *is_compact {
-            lines.push(quote! {
-                if #len > 0 {
-                    buffer.extend_from_slice(#slice.as_ref())
-                }
-            })
-        } else {
-            todo!()
-        }
+        lines.push(quote! {
+            buffer.extend_from_slice(#slice.as_ref());
+        });
     }
     lines
 }

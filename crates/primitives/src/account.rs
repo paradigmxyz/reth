@@ -11,6 +11,28 @@ pub struct Account {
     pub nonce: u64,
     /// Account balance.
     pub balance: U256,
+    #[maybe_zero]
     /// Hash of the bytecode.
     pub bytecode_hash: H256,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Account;
+    use reth_codecs::Compact;
+
+    #[test]
+    fn test_account() {
+        let mut acc = Account::default();
+        let (len, _) = acc.to_compact();
+        assert_eq!(len, 2);
+
+        acc.balance = 2.into();
+        let (len, _) = acc.to_compact();
+        assert_eq!(len, 3);
+
+        acc.nonce = 2;
+        let (len, _) = acc.to_compact();
+        assert_eq!(len, 4);
+    }
 }

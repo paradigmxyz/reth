@@ -46,8 +46,11 @@ pub fn get_fields(data: &Data) -> FieldList {
                                 ftype.push_str("::");
                             }
                         }
+                        let should_compact = !is_hash_type(&ftype) ||
+                            field.attrs.iter().any(|attr| {
+                                attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
+                            });
 
-                        let should_compact = true;
                         named_fields.push((
                             field.ident.as_ref().expect("qed").to_string(),
                             ftype,
@@ -67,9 +70,6 @@ pub fn get_fields(data: &Data) -> FieldList {
 pub fn get_bit_size(ftype: &str) -> u8 {
     if ftype == "u64" {
         return 4
-    }
-    if ftype == "U256" {
-        return 6
     }
     6
 }

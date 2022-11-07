@@ -133,7 +133,12 @@ macro_rules! impl_hash_compact {
                     let buf = bytes::Bytes::from_iter(buf);
                     (buf.len(), buf)
                 }
-                fn from_compact(mut buf: &[u8], _: usize) -> (Self,&[u8]) {
+                fn from_compact(mut buf: &[u8], len: usize) -> (Self,&[u8]) {
+
+                    if len == 0 {
+                        return ($name::default(), buf)
+                    }
+
                     let v = $name::from_slice(
                         buf.get(..$size).expect("size not matching"),
                     );
