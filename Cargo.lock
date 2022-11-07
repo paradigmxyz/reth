@@ -3269,6 +3269,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sucds",
+ "test-fuzz",
  "thiserror",
  "tiny-keccak",
 ]

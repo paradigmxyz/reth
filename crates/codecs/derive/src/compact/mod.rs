@@ -76,7 +76,7 @@ pub fn get_bit_size(ftype: &str) -> u8 {
 
 /// Given the field type in a string format, checks if it's a fixed-hash type.
 pub fn is_hash_type(ftype: &str) -> bool {
-    let known = ["H256", "H160", "Address"];
+    let known = ["H256", "H160", "Address", "Bloom"];
     known.contains(&ftype)
 }
 

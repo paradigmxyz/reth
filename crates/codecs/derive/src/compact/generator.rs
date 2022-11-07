@@ -71,8 +71,26 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let to_compact = generate_to_compact(fields);
     let from_compact = generate_from_compact(fields, ident);
 
+    let fuzz = format_ident!("fuzz_test_{ident}");
+    let test = format_ident!("fuzz_{ident}");
+
     // Build function
     quote! {
+
+        #[cfg(test)]
+        #[allow(dead_code)]
+        #[test_fuzz::test_fuzz]
+        fn #fuzz(obj: #ident)  {
+            let (len, buf) = obj.clone().to_compact();
+            let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
+            assert_eq!(obj, same_obj);
+        }
+
+        #[test]
+        pub fn #test() {
+            #fuzz(#ident::default())
+        }
+
         impl Compact for #ident {
             type Encoded = Vec<u8>;
 
@@ -122,10 +140,8 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
                 todo!()
             }
         }
-        // lines.push(quote! {
-        //     dbg!(&#name);
-        // });
     }
+
     let fields = fields
         .iter()
         .map(|field| {

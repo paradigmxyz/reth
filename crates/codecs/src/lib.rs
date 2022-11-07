@@ -100,7 +100,7 @@ impl Compact for U256 {
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len > 0 {
             let mut arr = [0; 32];
-            arr[(32 - len)..].copy_from_slice(&buf[..3]);
+            arr[(32 - len)..].copy_from_slice(&buf[..len]);
             buf.advance(len);
             return (U256::from_big_endian(&arr), buf)
         }
@@ -151,17 +151,12 @@ impl Compact for Bloom {
     type Encoded = bytes::Bytes;
 
     fn to_compact(self) -> (usize, Self::Encoded) {
-        let buf = self.0.into_iter().skip_while(|&v| v == 0);
-        let buf = bytes::Bytes::from_iter(buf);
-        (buf.len(), buf)
+        (256, bytes::Bytes::from_iter(self.0.into_iter()))
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        if len == 0 {
-            return (Bloom::default(), buf)
-        }
-        let result = Bloom::from_slice(&buf[..len]);
-        buf.advance(len);
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let result = Bloom::from_slice(&buf[..256]);
+        buf.advance(256);
         (result, buf)
     }
 }

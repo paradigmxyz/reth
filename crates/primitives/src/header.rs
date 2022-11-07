@@ -277,6 +277,7 @@ mod tests {
         let (len, h) = header.clone().to_compact();
         let (h, _) = Header::from_compact(&h, dbg!(len));
         let test = parity_scale_codec::Encode::encode(&header);
+        dbg!(len);
         dbg!(test.len());
         assert!(header == h);
     }
