@@ -1,4 +1,107 @@
-use crate::{version::ParseVersionError, EthVersion};
+use crate::{version::ParseVersionError, EthMessage, EthVersion};
+use bytes::{BufMut, Bytes};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use smol_str::SmolStr;
+
+/// A Capability message consisting of the message-id and the payload
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RawCapabilityMessage {
+    /// Identifier of the message.
+    pub id: usize,
+    /// Actual payload
+    pub payload: Bytes,
+}
+
+/// Various protocol related event types bubbled up from a session that need to be handled by the
+/// network.
+#[derive(Debug)]
+pub enum CapabilityMessage {
+    /// Eth sub-protocol message.
+    Eth(EthMessage),
+    /// Any other capability message.
+    Other(RawCapabilityMessage),
+}
+
+/// A message indicating a supported capability and capability version.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+pub struct Capability {
+    /// The name of the subprotocol
+    pub name: SmolStr,
+    /// The version of the subprotocol
+    pub version: usize,
+}
+
+impl Capability {
+    /// Create a new `Capability` with the given name and version.
+    pub fn new(name: SmolStr, version: usize) -> Self {
+        Self { name, version }
+    }
+
+    /// Whether this is eth v66 protocol.
+    #[inline]
+    pub fn is_eth_v66(&self) -> bool {
+        self.name == "eth" && self.version == 66
+    }
+
+    /// Whether this is eth v67.
+    #[inline]
+    pub fn is_eth_v67(&self) -> bool {
+        self.name == "eth" && self.version == 67
+    }
+}
+
+/// Represents all capabilities of a node.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Capabilities {
+    /// All Capabilities and their versions
+    inner: Vec<Capability>,
+    eth_66: bool,
+    eth_67: bool,
+}
+
+impl Capabilities {
+    /// Returns all capabilities.
+    #[inline]
+    pub fn capabilities(&self) -> &[Capability] {
+        &self.inner
+    }
+
+    /// Consumes the type and returns the all capabilities.
+    #[inline]
+    pub fn into_inner(self) -> Vec<Capability> {
+        self.inner
+    }
+
+    /// Whether this peer supports eth v66 protocol.
+    #[inline]
+    pub fn supports_eth_v66(&self) -> bool {
+        self.eth_66
+    }
+
+    /// Whether this peer supports eth v67 protocol.
+    #[inline]
+    pub fn supports_eth_v67(&self) -> bool {
+        self.eth_67
+    }
+}
+
+impl Encodable for Capabilities {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.inner.encode(out)
+    }
+}
+
+impl Decodable for Capabilities {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let inner = Vec::<Capability>::decode(buf)?;
+
+        Ok(Self {
+            eth_66: inner.iter().any(Capability::is_eth_v66),
+            eth_67: inner.iter().any(Capability::is_eth_v67),
+            inner,
+        })
+    }
+}
 
 /// This represents a shared capability, its version, and its offset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -7,7 +110,7 @@ pub enum SharedCapability {
     Eth { version: EthVersion, offset: u8 },
 
     /// An unknown capability.
-    UnknownCapability { name: String, version: u8, offset: u8 },
+    UnknownCapability { name: SmolStr, version: u8, offset: u8 },
 }
 
 impl SharedCapability {
@@ -15,7 +118,7 @@ impl SharedCapability {
     pub(crate) fn new(name: &str, version: u8, offset: u8) -> Result<Self, SharedCapabilityError> {
         match name {
             "eth" => Ok(Self::Eth { version: EthVersion::try_from(version)?, offset }),
-            _ => Ok(Self::UnknownCapability { name: name.to_string(), version, offset }),
+            _ => Ok(Self::UnknownCapability { name: name.into(), version, offset }),
         }
     }
 

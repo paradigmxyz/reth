@@ -1,16 +1,19 @@
 //! Support for handling peer sessions.
 use crate::{
-    NodeId,
     session::handle::{
         ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     },
+    NodeId,
 };
 use fnv::FnvHashMap;
-use futures::{future::Either, FutureExt, io, StreamExt};
+use futures::{future::Either, io, FutureExt, StreamExt};
 pub use handle::PeerMessageSender;
-use reth_ecies::{ECIESError, stream::ECIESStream};
-use reth_eth_wire::UnauthedEthStream;
-use secp256k1::{SECP256K1, SecretKey};
+use reth_ecies::{stream::ECIESStream, ECIESError};
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    UnauthedEthStream,
+};
+use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashMap,
     future::Future,
@@ -25,7 +28,6 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{instrument, trace, warn};
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 
 mod handle;
 

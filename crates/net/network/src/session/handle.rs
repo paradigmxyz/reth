@@ -1,15 +1,15 @@
 //! Session handles
 use crate::{
-    NodeId,
     session::{Direction, SessionId},
+    NodeId,
 };
-use reth_ecies::{ECIESError, stream::ECIESStream};
+use reth_ecies::{stream::ECIESStream, ECIESError};
+use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
 };
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
 /// message which exchanges the `capabilities` of the peer.

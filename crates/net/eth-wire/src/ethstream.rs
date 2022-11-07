@@ -202,7 +202,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        p2pstream::{CapabilityMessage, HelloMessage, ProtocolVersion, UnauthedP2PStream},
+        p2pstream::{HelloMessage, ProtocolVersion, UnauthedP2PStream},
         types::{broadcast::BlockHashNumber, forkid::ForkFilter, EthMessage, Status},
         EthStream, PassthroughCodec,
     };
@@ -212,7 +212,7 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
-    use crate::types::EthVersion;
+    use crate::{capability::Capability, types::EthVersion};
     use ethers_core::types::Chain;
     use reth_primitives::{H256, U256};
 
@@ -378,10 +378,7 @@ mod tests {
             let server_hello = HelloMessage {
                 protocol_version: ProtocolVersion::V5,
                 client_version: "bitcoind/1.0.0".to_string(),
-                capabilities: vec![CapabilityMessage::new(
-                    "eth".to_string(),
-                    EthVersion::Eth67 as usize,
-                )],
+                capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
                 port: 30303,
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
@@ -409,10 +406,7 @@ mod tests {
         let client_hello = HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
-            capabilities: vec![CapabilityMessage::new(
-                "eth".to_string(),
-                EthVersion::Eth67 as usize,
-            )],
+            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
             port: 30303,
             id: pk2id(&client_key.public_key(SECP256K1)),
         };

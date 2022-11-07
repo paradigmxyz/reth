@@ -21,29 +21,31 @@ use crate::{
     error::NetworkError,
     listener::ConnectionListener,
     network::{NetworkHandle, NetworkHandleMessage},
-    NodeId,
     peers::PeersManager,
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
+    NodeId,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::EthMessage;
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    EthMessage,
+};
 use reth_interfaces::provider::BlockProvider;
 use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     },
     task::{Context, Poll},
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, trace};
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 
 /// Manages the _entire_ state of the network.
 ///

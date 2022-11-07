@@ -1,11 +1,12 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    NodeId,
     session::{SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
+    NodeId,
 };
 use futures::Stream;
 use reth_ecies::ECIESError;
+use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 use reth_interfaces::provider::BlockProvider;
 use std::{
     io,
@@ -15,7 +16,6 @@ use std::{
     task::{Context, Poll},
 };
 use tracing::warn;
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 
 /// Contains the connectivity related state of the network.
 ///
