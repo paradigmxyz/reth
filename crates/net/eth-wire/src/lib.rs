@@ -11,7 +11,7 @@
 pub use tokio_util::codec::{
     LengthDelimitedCodec as PassthroughCodec, LengthDelimitedCodecError as PassthroughCodecError,
 };
-mod capability;
+pub mod capability;
 pub mod error;
 mod ethstream;
 mod p2pstream;

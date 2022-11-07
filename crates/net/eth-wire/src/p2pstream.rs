@@ -1,6 +1,6 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use crate::{
-    capability::SharedCapability,
+    capability::{Capability, SharedCapability},
     error::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
 };
@@ -313,8 +313,8 @@ where
 ///
 /// Currently only `eth` versions 66 and 67 are supported.
 pub fn set_capability_offsets(
-    local_capabilities: Vec<CapabilityMessage>,
-    peer_capabilities: Vec<CapabilityMessage>,
+    local_capabilities: Vec<Capability>,
+    peer_capabilities: Vec<Capability>,
 ) -> Result<SharedCapability, P2PStreamError> {
     // find intersection of capabilities
     let our_capabilities_map =
@@ -513,22 +513,6 @@ impl TryFrom<u8> for P2PMessageID {
     }
 }
 
-/// A message indicating a supported capability and capability version.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-pub struct CapabilityMessage {
-    /// The name of the subprotocol
-    pub name: String,
-    /// The version of the subprotocol
-    pub version: usize,
-}
-
-impl CapabilityMessage {
-    /// Create a new `CapabilityMessage` with the given name and version.
-    pub fn new(name: String, version: usize) -> Self {
-        Self { name, version }
-    }
-}
-
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
@@ -540,7 +524,7 @@ pub struct HelloMessage {
     /// "Ethereum(++)/1.0.0").
     pub client_version: String,
     /// The list of supported capabilities and their versions.
-    pub capabilities: Vec<CapabilityMessage>,
+    pub capabilities: Vec<Capability>,
     /// The port that the client is listening on, zero indicates the client is not listening.
     pub port: u16,
     /// The secp256k1 public key corresponding to the node's private key.
@@ -860,10 +844,7 @@ mod tests {
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
-            capabilities: vec![CapabilityMessage::new(
-                "eth".to_string(),
-                EthVersion::Eth67 as usize,
-            )],
+            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
             port: 30303,
             id,
         });
@@ -883,10 +864,7 @@ mod tests {
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
-            capabilities: vec![CapabilityMessage::new(
-                "eth".to_string(),
-                EthVersion::Eth67 as usize,
-            )],
+            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
             port: 30303,
             id,
         });
@@ -905,10 +883,7 @@ mod tests {
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
-            capabilities: vec![CapabilityMessage::new(
-                "eth".to_string(),
-                EthVersion::Eth67 as usize,
-            )],
+            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
             port: 30303,
             id,
         });

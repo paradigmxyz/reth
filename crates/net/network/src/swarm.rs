@@ -1,12 +1,12 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    message::{Capabilities, CapabilityMessage},
     session::{SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
     NodeId,
 };
 use futures::Stream;
 use reth_ecies::ECIESError;
+use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 use reth_interfaces::provider::BlockProvider;
 use std::{
     io,
