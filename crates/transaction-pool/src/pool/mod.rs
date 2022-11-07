@@ -308,7 +308,7 @@ where
 
         match tx {
             AddedTransaction::Pending(tx) => {
-                let AddedPendingTransaction { transaction, promoted, discarded,.. } = tx;
+                let AddedPendingTransaction { transaction, promoted, discarded, .. } = tx;
 
                 listener.ready(transaction.hash(), None);
                 promoted.iter().for_each(|tx| listener.ready(tx, None));
