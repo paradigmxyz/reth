@@ -1,12 +1,12 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
 use reth_interfaces::{consensus::Error, provider::HeaderProvider, Result as RethResult};
-use reth_primitives::{BlockLocked, HeaderLocked, TransactionSigned};
+use reth_primitives::{BlockLocked, SealedHeader, TransactionSigned};
 use std::time::SystemTime;
 
 /// Validate header standalone
 pub fn validate_header_standalone(
-    header: &HeaderLocked,
+    header: &SealedHeader,
     config: &config::Config,
 ) -> Result<(), Error> {
     // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
@@ -106,8 +106,8 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
 
 /// Validate block in regards to parent
 pub fn validate_header_regarding_parent(
-    parent: &HeaderLocked,
-    child: &HeaderLocked,
+    parent: &SealedHeader,
+    child: &SealedHeader,
     config: &config::Config,
 ) -> Result<(), Error> {
     // Parent number is consistent.
@@ -186,7 +186,7 @@ pub fn validate_header_regarding_parent(
 pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
     block: &BlockLocked,
     provider: &PROV,
-) -> RethResult<HeaderLocked> {
+) -> RethResult<SealedHeader> {
     let hash = block.header.hash();
 
     // Check if block is known.
@@ -200,7 +200,7 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
         .ok_or(Error::ParentUnknown { hash: block.parent_hash })?;
 
     // Return parent header.
-    Ok(parent.lock())
+    Ok(parent.seal())
 }
 
 /// Full validation of block before execution.
@@ -310,7 +310,7 @@ mod tests {
         let receipts = Vec::new();
         let body = Vec::new();
 
-        (BlockLocked { header: header.lock(), body, receipts, ommers }, parent)
+        (BlockLocked { header: header.seal(), body, receipts, ommers }, parent)
     }
 
     #[test]

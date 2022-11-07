@@ -8,7 +8,7 @@ use reth_interfaces::{
         downloader::{DownloadError, Downloader},
     },
 };
-use reth_primitives::{rpc::BlockId, HeaderLocked};
+use reth_primitives::{rpc::BlockId, SealedHeader};
 use reth_rpc_types::engine::ForkchoiceState;
 
 /// Download headers in batches
@@ -49,9 +49,9 @@ impl<C: Consensus, H: HeadersClient> Downloader for LinearDownloader<C, H> {
     /// order from chain tip to local head
     async fn download(
         &self,
-        head: &HeaderLocked,
+        head: &SealedHeader,
         forkchoice: &ForkchoiceState,
-    ) -> Result<Vec<HeaderLocked>, DownloadError> {
+    ) -> Result<Vec<SealedHeader>, DownloadError> {
         let mut stream = self.client().stream_headers().await;
         let mut retries = self.request_retries;
 
@@ -83,9 +83,9 @@ impl<C: Consensus, H: HeadersClient> Downloader for LinearDownloader<C, H> {
 #[derive(Debug)]
 pub enum LinearDownloadResult {
     /// Downloaded last batch up to tip
-    Finished(Vec<HeaderLocked>),
+    Finished(Vec<SealedHeader>),
     /// Downloaded batch
-    Batch(Vec<HeaderLocked>),
+    Batch(Vec<SealedHeader>),
     /// Ignore this batch
     Ignore,
 }
@@ -95,8 +95,8 @@ impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
         &self,
         stream: &mut HeadersStream,
         forkchoice: &ForkchoiceState,
-        head: &HeaderLocked,
-        earliest: Option<&HeaderLocked>,
+        head: &SealedHeader,
+        earliest: Option<&SealedHeader>,
     ) -> Result<LinearDownloadResult, DownloadError> {
         // Request headers starting from tip or earliest cached
         let start = earliest.map_or(forkchoice.head_block_hash, |h| h.parent_hash);
@@ -107,7 +107,7 @@ impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
         let mut out = Vec::with_capacity(headers.len());
         // Iterate headers in reverse
         for parent in headers.into_iter().rev() {
-            let parent = parent.lock();
+            let parent = parent.seal();
 
             if head.hash() == parent.hash() {
                 // We've reached the target
@@ -210,7 +210,7 @@ mod tests {
             gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
         },
     };
-    use reth_primitives::{rpc::BlockId, HeaderLocked};
+    use reth_primitives::{rpc::BlockId, SealedHeader};
 
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
@@ -237,7 +237,7 @@ mod tests {
                 .retries(retries)
                 .build(CONSENSUS.clone(), CLIENT.clone());
             let result =
-                downloader.download(&HeaderLocked::default(), &ForkchoiceState::default()).await;
+                downloader.download(&SealedHeader::default(), &ForkchoiceState::default()).await;
             tx.send(result).expect("failed to forward download response");
         });
 
@@ -261,7 +261,7 @@ mod tests {
                 .retries(retries)
                 .build(CONSENSUS.clone(), CLIENT.clone());
             let result =
-                downloader.download(&HeaderLocked::default(), &ForkchoiceState::default()).await;
+                downloader.download(&SealedHeader::default(), &ForkchoiceState::default()).await;
             tx.send(result).expect("failed to forward download response");
         });
 
@@ -295,7 +295,7 @@ mod tests {
             let downloader =
                 LinearDownloadBuilder::new().build(CONSENSUS_FAIL.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
-            let result = downloader.download(&HeaderLocked::default(), &forkchoice).await;
+            let result = downloader.download(&SealedHeader::default(), &forkchoice).await;
             tx.send(result).expect("failed to forward download response");
         });
 
@@ -310,7 +310,7 @@ mod tests {
         let request = request.unwrap();
         CLIENT.send_header_response(
             request.0,
-            vec![tip_parent.clone().unlock(), tip.clone().unlock()],
+            vec![tip_parent.clone().unseal(), tip.clone().unseal()],
         );
 
         assert_matches!(
@@ -337,16 +337,16 @@ mod tests {
 
         CLIENT
             .on_header_request(1, |id, _req| {
-                let mut corrupted_tip = tip.clone().unlock();
+                let mut corrupted_tip = tip.clone().unseal();
                 corrupted_tip.nonce = rand::random();
-                CLIENT.send_header_response(id, vec![corrupted_tip, head.clone().unlock()])
+                CLIENT.send_header_response(id, vec![corrupted_tip, head.clone().unseal()])
             })
             .await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         CLIENT
             .on_header_request(1, |id, _req| {
-                CLIENT.send_header_response(id, vec![tip.clone().unlock(), head.clone().unlock()])
+                CLIENT.send_header_response(id, vec![tip.clone().unseal(), head.clone().unseal()])
             })
             .await;
 
@@ -383,10 +383,10 @@ mod tests {
                     headers.iter().skip(chunk_size * idx).take(chunk_size).cloned().peekable();
                 idx += 1;
                 if chunk.peek().is_some() {
-                    let headers: Vec<_> = chunk.map(|h| h.unlock()).collect();
+                    let headers: Vec<_> = chunk.map(|h| h.unseal()).collect();
                     CLIENT.send_header_response(id, headers);
                 } else {
-                    CLIENT.send_header_response(id, vec![head.clone().unlock()])
+                    CLIENT.send_header_response(id, vec![head.clone().unseal()])
                 }
             })
             .await;

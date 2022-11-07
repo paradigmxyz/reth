@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use reth_primitives::{BlockHash, BlockNumber, HeaderLocked, H256};
+use reth_primitives::{BlockHash, BlockNumber, SealedHeader, H256};
 use tokio::sync::watch::Receiver;
 
 /// Re-export forkchoice state
@@ -14,7 +14,7 @@ pub trait Consensus: Send + Sync {
     fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
 
     /// Validate if header is correct and follows consensus specification
-    fn validate_header(&self, header: &HeaderLocked, parent: &HeaderLocked) -> Result<(), Error>;
+    fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error>;
 }
 
 /// Consensus Errors

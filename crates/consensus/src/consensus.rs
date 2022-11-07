@@ -2,7 +2,7 @@
 
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{HeaderLocked, H256};
+use reth_primitives::{SealedHeader, H256};
 use tokio::sync::watch;
 
 /// Ethereum consensus
@@ -32,7 +32,7 @@ impl Consensus for EthConsensus {
         self.channel.1.clone()
     }
 
-    fn validate_header(&self, header: &HeaderLocked, parent: &HeaderLocked) -> Result<(), Error> {
+    fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
         verification::validate_header_standalone(header, &self.config)?;
         verification::validate_header_regarding_parent(parent, header, &self.config)
 
