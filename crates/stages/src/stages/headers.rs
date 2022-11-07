@@ -105,7 +105,8 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         // TODO: handle bad block
         let tx = db.get_mut();
         unwind_table_by_num::<DB, tables::CanonicalHeaders>(tx, input.unwind_to)?;
-        unwind_table_by_num_hash::<DB, tables::HeaderNumbers>(tx, input.unwind_to)?;
+        // TODO HeaderNumber was NumHash but it is changed to just BlockHash
+        //unwind_table_by_num_hash::<DB, tables::HeaderNumbers>(tx, input.unwind_to)?;
         unwind_table_by_num_hash::<DB, tables::Headers>(tx, input.unwind_to)?;
         unwind_table_by_num_hash::<DB, tables::HeaderTD>(tx, input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -157,14 +158,15 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
                 continue
             }
 
-            let key: BlockNumHash = (header.number, header.hash()).into();
+            let block_hash = header.hash();
+            let key: BlockNumHash = (header.number, block_hash).into();
             let header = header.unlock();
             latest = Some(header.number);
 
             td += header.difficulty;
 
             // TODO: investigate default write flags
-            cursor_header_number.append(key, header.number)?;
+            cursor_header_number.append(block_hash, header.number)?;
             cursor_header.append(key, header)?;
             cursor_canonical.append(key.number(), key.hash())?;
             cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
@@ -352,7 +354,7 @@ mod tests {
             .expect("failed to check cannonical headers");
         runner
             .db()
-            .check_no_entry_above::<tables::HeaderNumbers, _>(unwind_to, |key| key.number())
+            .check_no_entry_above::<tables::HeaderNumbers, _>(unwind_to, |key| key)
             .expect("failed to check header numbers");
         runner
             .db()
@@ -445,9 +447,8 @@ mod tests {
                 I: Iterator<Item = &'a HeaderLocked>,
             {
                 let headers = headers.collect::<Vec<_>>();
-                self.db.map_put::<tables::HeaderNumbers, _, _>(&headers, |h| {
-                    (BlockNumHash((h.number, h.hash())), h.number)
-                })?;
+                self.db
+                    .map_put::<tables::HeaderNumbers, _, _>(&headers, |h| (h.hash(), h.number))?;
                 self.db.map_put::<tables::Headers, _, _>(&headers, |h| {
                     (BlockNumHash((h.number, h.hash())), h.deref().clone().unlock())
                 })?;
@@ -475,7 +476,7 @@ mod tests {
                 let tx = db.get();
                 let key: BlockNumHash = (header.number, header.hash()).into();
 
-                let db_number = tx.get::<tables::HeaderNumbers>(key)?;
+                let db_number = tx.get::<tables::HeaderNumbers>(header.hash())?;
                 assert_eq!(db_number, Some(header.number));
 
                 let db_header = tx.get::<tables::Headers>(key)?;

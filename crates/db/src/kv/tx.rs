@@ -55,12 +55,12 @@ impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E>
 
 impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
     // Iterate over read only values in database.
-    fn cursor<T: Table>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::Cursor<T>, Error> {
+    fn cursor<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup<T: DupSort>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::DupCursor<T>, Error> {
+    fn cursor_dup<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error> {
         self.new_cursor()
     }
 

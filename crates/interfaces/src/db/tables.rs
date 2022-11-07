@@ -9,7 +9,8 @@ use crate::db::{
     DupSort,
 };
 use reth_primitives::{
-    Account, Address, BlockNumber, Header, IntegerList, Receipt, StorageEntry, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry, TxNumber,
+    H256,
 };
 
 /// Enum for the type of table present in libmdbx.
@@ -22,7 +23,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 19] = [
+pub const TABLES: [(TableType, &str); 20] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -35,6 +36,7 @@ pub const TABLES: [(TableType, &str); 19] = [
     (TableType::Table, Logs::const_name()),
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
+    (TableType::Table, Bytecodes::const_name()),
     (TableType::Table, AccountHistory::const_name()),
     (TableType::Table, StorageHistory::const_name()),
     (TableType::DupSort, AccountChangeSet::const_name()),
@@ -59,7 +61,6 @@ macro_rules! table {
             const NAME: &'static str = $name::const_name();
             type Key = $key;
             type Value = $value;
-            type SeekKey = $seek;
         }
 
         impl $name {
@@ -89,7 +90,7 @@ macro_rules! dupsort {
             $(#[$docs])+
             ///
             #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
-            $name => $key => $value
+            $name => $key => $value => $subkey
         );
         impl DupSort for $name {
             type SubKey = $subkey;
@@ -111,7 +112,7 @@ table!(
 
 table!(
     /// Stores the block number corresponding to an header.
-    HeaderNumbers => BlockNumHash => BlockNumber);
+    HeaderNumbers => BlockHash => BlockNumber);
 
 table!(
     /// Stores header bodies.
@@ -144,6 +145,10 @@ table!(
 table!(
     /// Stores the current state of an Account.
     PlainAccountState => Address => Account);
+
+table!(
+    /// Stores all smart contract bytecodes.
+    Bytecodes => H256 => Bytecode);
 
 dupsort!(
     /// Stores the current value of a storage key.
@@ -242,3 +247,5 @@ pub type RlpTotalDifficulty = Vec<u8>;
 pub type RlpTxBody = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type AddressStorageKey = Vec<u8>;
+/// Temporary placeholder type for DB.
+pub type Bytecode = Vec<u8>;

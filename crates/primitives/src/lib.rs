@@ -51,7 +51,7 @@ pub type TxNumber = u64;
 pub type StorageKey = H256;
 
 /// Storage value
-pub type StorageValue = H256;
+pub type StorageValue = U256;
 
 pub use ethers_core::{
     types as rpc,
