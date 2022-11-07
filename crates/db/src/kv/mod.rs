@@ -110,6 +110,7 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::{Env, EnvKind, EnvironmentKind, Path};
+    use std::sync::Arc;
 
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
@@ -119,8 +120,11 @@ pub mod test_utils {
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
     /// Create database for testing
-    pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Env<E> {
-        create_test_db_with_path(kind, &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path())
+    pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
+        Arc::new(create_test_db_with_path(
+            kind,
+            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+        ))
     }
 
     /// Create database for testing with specified path
@@ -141,7 +145,7 @@ mod tests {
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
-    use std::str::FromStr;
+    use std::{str::FromStr, sync::Arc};
     use tempfile::TempDir;
 
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
@@ -282,7 +286,7 @@ mod tests {
 
     #[test]
     fn db_sharded_key() {
-        let db: Env<WriteMap> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
         let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
 
         for i in 1..5 {
