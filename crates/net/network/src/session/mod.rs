@@ -1,6 +1,5 @@
 //! Support for handling peer sessions.
 use crate::{
-    message::{Capabilities, CapabilityMessage},
     session::handle::{
         ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     },
@@ -10,7 +9,10 @@ use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
 pub use handle::PeerMessageSender;
 use reth_ecies::{stream::ECIESStream, ECIESError};
-use reth_eth_wire::UnauthedEthStream;
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    UnauthedEthStream,
+};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashMap,

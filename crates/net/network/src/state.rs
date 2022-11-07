@@ -3,13 +3,14 @@
 use crate::{
     discovery::{Discovery, DiscoveryEvent},
     fetch::StateFetcher,
-    message::{Capabilities, CapabilityResponse},
+    message::CapabilityResponse,
     peers::{PeerAction, PeersManager},
     session::PeerMessageSender,
     NodeId,
 };
 use futures::FutureExt;
 
+use reth_eth_wire::capability::Capabilities;
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{H256, U256};
 use std::{

@@ -20,7 +20,6 @@ use crate::{
     discovery::Discovery,
     error::NetworkError,
     listener::ConnectionListener,
-    message::{Capabilities, CapabilityMessage},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     session::SessionManager,
@@ -30,7 +29,10 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::EthMessage;
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    EthMessage,
+};
 use reth_interfaces::provider::BlockProvider;
 use std::{
     net::SocketAddr,
@@ -122,7 +124,6 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_node_id = discovery.local_id();
 
-        // TODO this should also need sk for encrypted sessions
         let sessions = SessionManager::new(secret_key, sessions_config);
         let state = NetworkState::new(client, discovery, peers_manger);
 
@@ -161,10 +162,11 @@ where
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &self,
-        _node_id: NodeId,
+        node_id: NodeId,
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
+        trace!(?node_id, target = "net", "received unexpected message");
         // TODO: disconnect?
     }
 

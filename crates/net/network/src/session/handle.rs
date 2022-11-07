@@ -1,10 +1,10 @@
 //! Session handles
 use crate::{
-    message::{Capabilities, CapabilityMessage},
     session::{Direction, SessionId},
     NodeId,
 };
 use reth_ecies::{stream::ECIESStream, ECIESError};
+use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
     net::TcpStream,
