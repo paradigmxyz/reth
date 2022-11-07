@@ -5,12 +5,12 @@ use crate::{
     fetch::StateFetcher,
     message::CapabilityResponse,
     peers::{PeerAction, PeersManager},
-    session::PeerMessageSender,
     NodeId,
 };
 use futures::FutureExt;
 
-use reth_eth_wire::capability::Capabilities;
+use crate::message::PeerMessageSender;
+use reth_eth_wire::{capability::Capabilities, Status};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{H256, U256};
 use std::{
@@ -75,6 +75,7 @@ where
         &mut self,
         _node_id: NodeId,
         _capabilities: Arc<Capabilities>,
+        _status: Status,
         _messages: PeerMessageSender,
     ) {
         // TODO notify fetecher as well

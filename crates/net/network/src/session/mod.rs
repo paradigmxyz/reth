@@ -1,17 +1,20 @@
 //! Support for handling peer sessions.
+pub use crate::message::PeerMessageSender;
 use crate::{
-    session::handle::{
-        ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+    session::{
+        active::ActiveSession,
+        handle::{
+            ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+        },
     },
     NodeId,
 };
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
-pub use handle::PeerMessageSender;
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    UnauthedEthStream,
+    Status, UnauthedEthStream,
 };
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -20,6 +23,7 @@ use std::{
     net::SocketAddr,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::{
     net::TcpStream,
@@ -29,6 +33,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{instrument, trace, warn};
 
+mod active;
 mod handle;
 
 /// Internal identifier for active sessions.
@@ -213,29 +218,55 @@ impl SessionManager {
                         "successful handshake"
                     );
                 }
-                PendingSessionEvent::Hello {
+                PendingSessionEvent::Established {
                     session_id,
-                    node_id: _,
-                    capabilities: _,
-                    stream: _,
+                    remote_addr,
+                    node_id,
+                    capabilities,
+                    conn,
+                    status,
                 } => {
                     // move from pending to established.
                     let _ = self.pending_sessions.remove(&session_id);
 
-                    // TODO spawn the authenticated session
-                    // let session = ActiveSessionHandle {
-                    //     session_id,
-                    //     remote_id: node_id,
-                    //     established: Instant::now(),
-                    //     capabilities,
-                    //     commands
-                    // };
-                    // self.active_sessions.insert(node_id, session);
-                    // return Poll::Ready(SessionEvent::SessionAuthenticated {
-                    //     node_id,
-                    //     capabilities,
-                    //     messages: ()
-                    // })
+                    let (commands_to_session, commands_rx) =
+                        mpsc::channel(self.session_command_buffer);
+
+                    let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
+
+                    let messages = PeerMessageSender { peer: node_id, to_session_tx };
+
+                    let session = ActiveSession {
+                        remote_node_id: node_id,
+                        remote_capabilities: Arc::clone(&capabilities),
+                        session_id,
+                        commands_rx: ReceiverStream::new(commands_rx),
+                        to_session: self.active_session_tx.clone(),
+                        messages_rx: ReceiverStream::new(messages_rx).fuse(),
+                        inflight_requests: Default::default(),
+                        conn,
+                        buffered_outgoing: Default::default(),
+                    };
+
+                    self.spawn(session);
+
+                    let handle = ActiveSessionHandle {
+                        session_id,
+                        remote_id: node_id,
+                        established: Instant::now(),
+                        capabilities: Arc::clone(&capabilities),
+                        commands_to_session,
+                    };
+
+                    self.active_sessions.insert(node_id, handle);
+
+                    return Poll::Ready(SessionEvent::SessionEstablished {
+                        node_id,
+                        remote_addr,
+                        capabilities,
+                        status,
+                        messages,
+                    })
                 }
                 PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
                     trace!(
@@ -343,10 +374,11 @@ pub(crate) enum SessionEvent {
     /// A new session was successfully authenticated.
     ///
     /// This session is now able to exchange data.
-    SessionAuthenticated {
+    SessionEstablished {
         node_id: NodeId,
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
+        status: Status,
         messages: PeerMessageSender,
     },
     /// A session received a valid message via RLPx.

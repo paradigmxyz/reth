@@ -5,6 +5,8 @@
 
 use reth_eth_wire::{BlockHeaders, GetBlockHeaders};
 
+use crate::NodeId;
+use reth_eth_wire::capability::CapabilityMessage;
 use tokio::sync::{mpsc, oneshot};
 
 /// Result alias for result of a request.
@@ -52,4 +54,13 @@ pub enum CapabilityRequest {
 #[derive(Debug)]
 pub enum CapabilityResponse {
     GetBlockHeaders(RequestResult<BlockHeaders>),
+}
+
+/// A Cloneable connection for sending messages directly to the session of a peer.
+#[derive(Debug, Clone)]
+pub struct PeerMessageSender {
+    /// id of the remote node.
+    pub(crate) peer: NodeId,
+    /// The Sender half connected to a session.
+    pub(crate) to_session_tx: mpsc::Sender<CapabilityMessage>,
 }
