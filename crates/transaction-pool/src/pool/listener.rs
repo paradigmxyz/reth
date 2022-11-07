@@ -2,6 +2,7 @@
 
 use crate::pool::events::TransactionEvent;
 use futures::channel::mpsc::UnboundedSender;
+use reth_primitives::H256;
 use std::{collections::HashMap, hash};
 
 type EventSink<Hash> = UnboundedSender<TransactionEvent<Hash>>;
@@ -44,6 +45,16 @@ impl<Hash: hash::Hash + Eq + Clone> PoolEventListener<Hash> {
     pub(crate) fn queued(&mut self, tx: &Hash) {
         self.notify_with(tx, |notifier| notifier.queued());
     }
+
+    /// Notify listeners about a transaction that was discarded.
+    pub(crate) fn discarded(&mut self, tx: &Hash) {
+        self.notify_with(tx, |notifier| notifier.discarded());
+    }
+
+    /// Notify listeners that the transaction was mined
+    pub(crate) fn mined(&mut self, tx: &Hash, block_hash: H256) {
+        self.notify_with(tx, |notifier| notifier.mined(block_hash));
+    }
 }
 
 impl<Hash: hash::Hash + Eq> Default for PoolEventListener<Hash> {
@@ -84,6 +95,18 @@ impl<Hash: Clone> PoolEventNotifier<Hash> {
     /// Transaction was replaced with the given transaction
     fn replaced(&mut self, hash: Hash) {
         self.notify(TransactionEvent::Replaced(hash));
+        self.is_done = true;
+    }
+
+    /// Transaction was mined.
+    fn mined(&mut self, block_hash: H256) {
+        self.notify(TransactionEvent::Mined(block_hash));
+        self.is_done = true;
+    }
+
+    /// Transaction was replaced with the given transaction
+    fn discarded(&mut self) {
+        self.notify(TransactionEvent::Discarded);
         self.is_done = true;
     }
 }

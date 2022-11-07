@@ -57,7 +57,7 @@ pub mod error;
 mod proto;
 
 mod config;
-pub use config::Discv4Config;
+pub use config::{Discv4Config, Discv4ConfigBuilder};
 mod node;
 pub use node::NodeRecord;
 
@@ -218,9 +218,15 @@ impl Discv4 {
 
     async fn lookup_node(&self, node_id: Option<NodeId>) -> Result<Vec<NodeRecord>, Discv4Error> {
         let (tx, rx) = oneshot::channel();
-        let cmd = Discv4Command::Lookup { node_id, tx };
+        let cmd = Discv4Command::Lookup { node_id, tx: Some(tx) };
         self.to_service.send(cmd).await?;
         Ok(rx.await?)
+    }
+
+    /// Triggers a new self lookup without expecting a response
+    pub fn send_lookup_self(&self) {
+        let cmd = Discv4Command::Lookup { node_id: None, tx: None };
+        let _ = self.to_service.try_send(cmd);
     }
 
     /// Returns the receiver half of new listener channel that streams [`TableUpdate`]s.
@@ -326,6 +332,12 @@ impl Discv4Service {
 
         let evict_expired_requests_interval = tokio::time::interval(config.find_node_timeout);
 
+        let lookup_rotator = if config.enable_dht_random_walk {
+            LookupTargetRotator::default()
+        } else {
+            LookupTargetRotator::local_only()
+        };
+
         Discv4Service {
             local_address,
             local_enr,
@@ -345,7 +357,7 @@ impl Discv4Service {
             ping_interval,
             evict_expired_requests_interval,
             config,
-            lookup_rotator: Default::default(),
+            lookup_rotator,
         }
     }
 
@@ -846,7 +858,7 @@ impl Discv4Service {
     /// if it has sent a valid Pong response with matching ping hash within the last 12 hours.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
         // trigger self lookup
-        if self.lookup_interval.poll_tick(cx).is_ready() {
+        if self.config.enable_lookup && self.lookup_interval.poll_tick(cx).is_ready() {
             let target = self.lookup_rotator.next(&self.local_enr.id);
             self.lookup_with(target, None);
         }
@@ -856,7 +868,7 @@ impl Discv4Service {
             self.evict_expired_requests(Instant::now())
         }
 
-        // reping some peers
+        // re-ping some peers
         if self.ping_interval.poll_tick(cx).is_ready() {
             self.reping_oldest();
         }
@@ -869,7 +881,7 @@ impl Discv4Service {
                     match cmd {
                         Discv4Command::Lookup { node_id, tx } => {
                             let node_id = node_id.unwrap_or(self.local_enr.id);
-                            self.lookup_with(node_id, Some(tx));
+                            self.lookup_with(node_id, tx);
                         }
                         Discv4Command::Updates(tx) => {
                             let rx = self.update_stream();
@@ -998,7 +1010,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 
 /// The commands sent from the frontend to the service
 enum Discv4Command {
-    Lookup { node_id: Option<NodeId>, tx: NodeRecordSender },
+    Lookup { node_id: Option<NodeId>, tx: Option<NodeRecordSender> },
     Updates(OneshotSender<ReceiverStream<TableUpdate>>),
 }
 
@@ -1031,6 +1043,15 @@ struct PingRequest {
 struct LookupTargetRotator {
     interval: usize,
     counter: usize,
+}
+
+// === impl LookupTargetRotator ===
+
+impl LookupTargetRotator {
+    /// Returns a rotator that always returns the local target.
+    fn local_only() -> Self {
+        Self { interval: 1, counter: 0 }
+    }
 }
 
 impl Default for LookupTargetRotator {
@@ -1253,6 +1274,25 @@ mod tests {
     };
     use tracing_test::traced_test;
 
+    #[test]
+    fn test_local_rotator() {
+        let id = NodeId::random();
+        let mut rotator = LookupTargetRotator::local_only();
+        assert_eq!(rotator.next(&id), id);
+        assert_eq!(rotator.next(&id), id);
+    }
+
+    #[test]
+    fn test_rotator() {
+        let id = NodeId::random();
+        let mut rotator = LookupTargetRotator::default();
+        assert_eq!(rotator.next(&id), id);
+        assert_ne!(rotator.next(&id), id);
+        assert_ne!(rotator.next(&id), id);
+        assert_ne!(rotator.next(&id), id);
+        assert_eq!(rotator.next(&id), id);
+    }
+
     #[tokio::test]
     #[traced_test]
     async fn test_pending_ping() {
@@ -1293,5 +1333,18 @@ mod tests {
             }
             println!("total peers {}", table.len());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn test_service_commands() {
+        let config = Discv4Config::builder().build();
+        let (discv4, mut service) = create_discv4_with_config(config).await;
+
+        service.lookup_self();
+
+        let _handle = service.spawn();
+        discv4.send_lookup_self();
+        let _ = discv4.lookup_self().await;
     }
 }
