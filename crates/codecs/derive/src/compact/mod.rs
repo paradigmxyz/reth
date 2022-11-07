@@ -37,8 +37,6 @@ pub fn get_fields(data: &Data) -> FieldList {
                 if let syn::Type::Path(ref path) = field.ty {
                     let segments = &path.path.segments;
                     if !segments.is_empty() {
-                        // TODO: attribute that makes it raw if requested. Which means it wont be
-                        // part of the flags
                         let mut ftype = String::new();
                         for (index, segment) in segments.iter().enumerate() {
                             ftype.push_str(&segment.ident.to_string());
