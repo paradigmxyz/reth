@@ -4,6 +4,7 @@ use generic_array::GenericArray;
 use reth_primitives::keccak256;
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use reth_rlp_derive::RlpEncodable;
+use secp256k1::{SecretKey, SECP256K1};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
@@ -48,6 +49,13 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
+    /// Derive the [`NodeRecord`] from the secret key and addr
+    pub fn from_secret_key(addr: SocketAddr, sk: &SecretKey) -> Self {
+        let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
+        let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        Self::new(addr, id)
+    }
+
     /// Creates a new record
     #[allow(unused)]
     pub(crate) fn new(addr: SocketAddr, id: NodeId) -> Self {

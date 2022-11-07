@@ -33,6 +33,12 @@ pub struct Discv4Config {
     pub ban_duration: Option<Duration>,
     /// Nodes to boot from.
     pub bootstrap_nodes: HashSet<NodeRecord>,
+    /// Whether to randomly discover new peers.
+    ///
+    /// If true, the node will automatically randomly walk the DHT in order to find new peers.
+    pub enable_dht_random_walk: bool,
+    /// Whether to automatically lookup peers.
+    pub enable_lookup: bool,
 }
 
 impl Discv4Config {
@@ -55,10 +61,13 @@ impl Default for Discv4Config {
             permit_ban_list: PermitBanList::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
+            enable_dht_random_walk: true,
+            enable_lookup: true,
         }
     }
 }
 
+/// Builder type for [`Discv4Config`]
 #[derive(Debug, Default)]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
@@ -86,6 +95,18 @@ impl Discv4ConfigBuilder {
     /// Sets the timeout for pings
     pub fn ping_timeout(&mut self, duration: Duration) -> &mut Self {
         self.config.ping_timeout = duration;
+        self
+    }
+
+    /// Whether to discover random nodes in the DHT.
+    pub fn enable_dht_random_walk(&mut self, enable_dht_random_walk: bool) -> &mut Self {
+        self.config.enable_dht_random_walk = enable_dht_random_walk;
+        self
+    }
+
+    /// Whether to automatically lookup
+    pub fn enable_lookup(&mut self, enable_lookup: bool) -> &mut Self {
+        self.config.enable_lookup = enable_lookup;
         self
     }
 
@@ -122,7 +143,26 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    pub fn build(&mut self) -> Discv4Config {
+    /// Returns the configured [`Discv4Config`]
+    pub fn build(&self) -> Discv4Config {
         self.config.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_builder() {
+        let mut builder = Discv4Config::builder();
+        let _ = builder
+            .enable_lookup(true)
+            .enable_dht_random_walk(true)
+            .add_boot_nodes(HashSet::new())
+            .ban_duration(None)
+            .lookup_interval(Duration::from_secs(3))
+            .enable_lookup(true)
+            .build();
     }
 }

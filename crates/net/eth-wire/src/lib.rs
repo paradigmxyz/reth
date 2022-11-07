@@ -19,4 +19,4 @@ mod pinger;
 pub mod types;
 pub use types::*;
 
-pub use ethstream::EthStream;
+pub use ethstream::{EthStream, UnauthedEthStream};
