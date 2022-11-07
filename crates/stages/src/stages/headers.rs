@@ -14,7 +14,7 @@ use reth_interfaces::{
         downloader::{DownloadError, Downloader},
     },
 };
-use reth_primitives::{rpc::BigEndianHash, BlockNumber, HeaderLocked, H256, U256};
+use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -60,7 +60,7 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
             tx.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or({
                 DatabaseIntegrityError::Header { number: last_block_num, hash: last_hash }
             })?;
-        let head = HeaderLocked::new(last_header, last_hash);
+        let head = SealedHeader::new(last_header, last_hash);
 
         let forkchoice = self.next_fork_choice_state(&head.hash()).await;
         // The stage relies on the downloader to return the headers
@@ -141,7 +141,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     async fn write_headers<DB: Database>(
         &self,
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
-        headers: Vec<HeaderLocked>,
+        headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
         let mut cursor_header_number = tx.cursor_mut::<tables::HeaderNumbers>()?;
         let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
@@ -158,7 +158,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             }
 
             let key: BlockNumHash = (header.number, header.hash()).into();
-            let header = header.unlock();
+            let header = header.unseal();
             latest = Some(header.number);
 
             td += header.difficulty;
@@ -300,7 +300,7 @@ mod tests {
             .on_header_request(1, |id, _| {
                 runner.client.send_header_response(
                     id,
-                    download_result.clone().into_iter().map(|h| h.unlock()).collect(),
+                    download_result.clone().into_iter().map(|h| h.unseal()).collect(),
                 )
             })
             .await;
@@ -377,7 +377,7 @@ mod tests {
             p2p::headers::downloader::{DownloadError, Downloader},
             test_utils::{TestConsensus, TestHeadersClient},
         };
-        use reth_primitives::{rpc::BigEndianHash, HeaderLocked, H256, U256};
+        use reth_primitives::{rpc::BigEndianHash, SealedHeader, H256, U256};
         use std::{ops::Deref, sync::Arc, time::Duration};
 
         pub(crate) struct HeadersTestRunner<D: Downloader> {
@@ -435,21 +435,21 @@ mod tests {
             }
 
             /// Insert header into tables
-            pub(crate) fn insert_header(&self, header: &HeaderLocked) -> Result<(), db::Error> {
+            pub(crate) fn insert_header(&self, header: &SealedHeader) -> Result<(), db::Error> {
                 self.insert_headers(std::iter::once(header))
             }
 
             /// Insert headers into tables
             pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
             where
-                I: Iterator<Item = &'a HeaderLocked>,
+                I: Iterator<Item = &'a SealedHeader>,
             {
                 let headers = headers.collect::<Vec<_>>();
                 self.db.map_put::<tables::HeaderNumbers, _, _>(&headers, |h| {
                     (BlockNumHash((h.number, h.hash())), h.number)
                 })?;
                 self.db.map_put::<tables::Headers, _, _>(&headers, |h| {
-                    (BlockNumHash((h.number, h.hash())), h.deref().clone().unlock())
+                    (BlockNumHash((h.number, h.hash())), h.deref().clone().unseal())
                 })?;
                 self.db.map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| {
                     (h.number, h.hash())
@@ -469,7 +469,7 @@ mod tests {
             /// Validate stored header against provided
             pub(crate) fn validate_db_header(
                 &self,
-                header: &HeaderLocked,
+                header: &SealedHeader,
             ) -> Result<(), db::Error> {
                 let db = self.db.container();
                 let tx = db.get();
@@ -479,7 +479,7 @@ mod tests {
                 assert_eq!(db_number, Some(header.number));
 
                 let db_header = tx.get::<tables::Headers>(key)?;
-                assert_eq!(db_header, Some(header.clone().unlock()));
+                assert_eq!(db_header, Some(header.clone().unseal()));
 
                 let db_canonical_header = tx.get::<tables::CanonicalHeaders>(header.number)?;
                 assert_eq!(db_canonical_header, Some(header.hash()));
@@ -500,11 +500,11 @@ mod tests {
 
         #[derive(Debug)]
         pub(crate) struct TestDownloader {
-            result: Result<Vec<HeaderLocked>, DownloadError>,
+            result: Result<Vec<SealedHeader>, DownloadError>,
         }
 
         impl TestDownloader {
-            pub(crate) fn new(result: Result<Vec<HeaderLocked>, DownloadError>) -> Self {
+            pub(crate) fn new(result: Result<Vec<SealedHeader>, DownloadError>) -> Self {
                 Self { result }
             }
         }
@@ -528,9 +528,9 @@ mod tests {
 
             async fn download(
                 &self,
-                _: &HeaderLocked,
+                _: &SealedHeader,
                 _: &ForkchoiceState,
-            ) -> Result<Vec<HeaderLocked>, DownloadError> {
+            ) -> Result<Vec<SealedHeader>, DownloadError> {
                 self.result.clone()
             }
         }

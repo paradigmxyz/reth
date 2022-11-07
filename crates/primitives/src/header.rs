@@ -66,17 +66,17 @@ pub struct Header {
 
 impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
-    /// Use lock, HeaderLocked and unlock if you need hash to be persistent.
+    /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> H256 {
         let mut out = BytesMut::new();
         self.encode(&mut out);
         H256::from_slice(keccak256(&out).as_slice())
     }
 
-    /// Calculate hash and lock the Header so that it can't be changed.
-    pub fn lock(self) -> HeaderLocked {
+    /// Calculate hash and seal the Header so that it can't be changed.
+    pub fn seal(self) -> SealedHeader {
         let hash = self.hash_slow();
-        HeaderLocked { header: self, hash }
+        SealedHeader { header: self, hash }
     }
 
     fn header_payload_length(&self) -> usize {
@@ -174,22 +174,23 @@ impl Decodable for Header {
     }
 }
 
+/// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
+/// to modify header.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
-/// HeaderLocked that has precalculated hash, use unlock if you want to modify header.
-pub struct HeaderLocked {
+pub struct SealedHeader {
     /// Locked Header fields.
     header: Header,
     /// Locked Header hash.
     hash: BlockHash,
 }
 
-impl AsRef<Header> for HeaderLocked {
+impl AsRef<Header> for SealedHeader {
     fn as_ref(&self) -> &Header {
         &self.header
     }
 }
 
-impl Deref for HeaderLocked {
+impl Deref for SealedHeader {
     type Target = Header;
 
     fn deref(&self) -> &Self::Target {
@@ -197,16 +198,16 @@ impl Deref for HeaderLocked {
     }
 }
 
-impl HeaderLocked {
-    /// Construct a new locked header.
-    /// Applicable when hash is known from
-    /// the database provided it's not corrupted.
+impl SealedHeader {
+    /// Construct a new sealed header.
+    ///
+    /// Applicable when hash is known from the database provided it's not corrupted.
     pub fn new(header: Header, hash: H256) -> Self {
         Self { header, hash }
     }
 
     /// Extract raw header that can be modified.
-    pub fn unlock(self) -> Header {
+    pub fn unseal(self) -> Header {
         self.header
     }
 
