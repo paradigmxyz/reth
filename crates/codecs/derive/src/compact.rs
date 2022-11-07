@@ -57,16 +57,16 @@ pub fn is_hash_type(ftype: &str) -> bool {
 }
 
 pub fn build_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
-    let flags = syn::Ident::new(&format!("{}Flags", ident), ident.span());
+    let flags = format_ident!("{ident}Flags");
 
     let mut field_flags = vec![];
     let mut total_bits = 0;
 
     for (name, ftype, is_compact) in fields {
         if *is_compact && !is_hash_type(ftype) {
-            let name = syn::Ident::new(&format!("{name}_len"), ident.span());
+            let name = format_ident!("{name}_len");
             let bitsize = get_bit_size(ftype);
-            let bsize = syn::Ident::new(&format!("B{bitsize}"), ident.span());
+            let bsize = format_ident!("B{bitsize}");
             total_bits += bitsize;
 
             field_flags.push(quote! {
@@ -77,7 +77,7 @@ pub fn build_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 
     let remaining = 8 - total_bits % 8;
     let total_bytes = if remaining != 8 {
-        let bsize = syn::Ident::new(&format!("B{remaining}"), ident.span());
+        let bsize = format_ident!("B{remaining}");
 
         field_flags.push(quote! {
             #[skip]
@@ -114,15 +114,15 @@ pub fn build_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 }
 
 pub fn get_field_idents(name: &str, ident: &Ident) -> (Ident, Ident, Ident, Ident) {
-    let name = syn::Ident::new(&{ name }, ident.span());
-    let set_len_method = syn::Ident::new(&format!("set_{name}_len"), ident.span());
-    let slice = syn::Ident::new(&format!("{name}_slice"), ident.span());
-    let len = syn::Ident::new(&format!("{name}_len"), ident.span());
+    let name = format_ident!("{name}");
+    let set_len_method = format_ident!("set_{name}_len");
+    let slice = format_ident!("{name}_slice");
+    let len = format_ident!("{name}_len");
     (name, set_len_method, slice, len)
 }
 
 pub fn build_encode(ident: &Ident, fields: &FieldList) -> TokenStream2 {
-    let flags = syn::Ident::new(&format!("{}Flags", ident), ident.span());
+    let flags = format_ident!("{ident}Flags");
 
     let to_compact = build_to_compact(fields, ident);
     let from_compact = build_from_compact(fields, ident);
@@ -185,7 +185,7 @@ fn build_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let fields = fields
         .iter()
         .map(|field| {
-            let ident = syn::Ident::new(&format!("{}", field.0), ident.span());
+            let ident = format_ident!("{}", field.0);
             quote! {
                 #ident: #ident,
             }
