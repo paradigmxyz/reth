@@ -78,12 +78,12 @@
 pub use crate::{
     config::PoolConfig,
     ordering::TransactionOrdering,
-    traits::{BestTransactions, NewBlockEvent, PoolTransaction, TransactionPool},
+    traits::{BestTransactions, OnNewBlockEvent, PoolTransaction, TransactionPool},
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{
     error::PoolResult,
-    pool::PoolInner,
+    pool::{OnNewBlockOutcome, PoolInner},
     traits::{NewTransactionEvent, PoolStatus, TransactionOrigin},
     validate::ValidPoolTransaction,
 };
@@ -178,9 +178,8 @@ where
         self.pool.status()
     }
 
-    fn on_new_block(&self, _event: NewBlockEvent<Self::Transaction>) {
-        // TODO perform maintenance: update pool accordingly
-        todo!()
+    fn on_new_block(&self, event: OnNewBlockEvent) {
+        self.pool.on_new_block(event);
     }
 
     async fn add_transaction(

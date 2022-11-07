@@ -11,14 +11,13 @@ pub enum TransactionEvent<Hash> {
     /// Transaction has been added to the queued pool.
     Queued,
     /// Transaction has been included in the block belonging to this hash.
-    Included(H256),
+    Mined(H256),
     /// Transaction has been replaced by the transaction belonging to the hash.
     ///
     /// E.g. same (sender + nonce) pair
     Replaced(Hash),
     /// Transaction was dropped due to configured limits.
-    Dropped,
+    Discarded,
     /// Transaction became invalid indefinitely.
     Invalid,
-    // TODO Timedout?, broadcasted(peers)
 }
