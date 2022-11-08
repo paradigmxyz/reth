@@ -116,6 +116,24 @@ pub(crate) mod unwind {
         }
         Ok(())
     }
+
+    /// Unwind a table forward by a [Walker] on another table
+    pub(crate) fn unwind_table_by_walker<DB, T1, T2>(
+        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        start_at: T1::Key,
+    ) -> Result<(), Error>
+    where
+        DB: Database,
+        T1: Table,
+        T2: Table<Key = T1::Value>,
+    {
+        let mut cursor = tx.cursor_mut::<T1>()?;
+        let mut walker = cursor.walk(start_at)?;
+        while let Some((_, value)) = walker.next().transpose()? {
+            tx.delete::<T2>(value, None)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -216,8 +234,9 @@ pub(crate) mod test_utils {
             Ok(())
         }
 
-        /// Check there there is no table entry above a given block
-        pub(crate) fn check_no_entry_above<T: Table, F>(
+        /// Check that there is no table entry above a given
+        /// block by [Table::Key]
+        pub(crate) fn check_no_entry_above<T, F>(
             &self,
             block: BlockNumber,
             mut selector: F,
@@ -232,6 +251,28 @@ pub(crate) mod test_utils {
             let mut cursor = tx.cursor::<T>()?;
             if let Some((key, _)) = cursor.last()? {
                 assert!(selector(key) <= block);
+            }
+
+            Ok(())
+        }
+
+        /// Check that there is no table entry above a given
+        /// block by [Table::Value]
+        pub(crate) fn check_no_entry_above_by_value<T, F>(
+            &self,
+            block: BlockNumber,
+            mut selector: F,
+        ) -> Result<(), Error>
+        where
+            T: Table,
+            F: FnMut(T::Value) -> BlockNumber,
+        {
+            let db = self.container();
+            let tx = db.get();
+
+            let mut cursor = tx.cursor::<T>()?;
+            if let Some((_, value)) = cursor.last()? {
+                assert!(selector(value) <= block);
             }
 
             Ok(())

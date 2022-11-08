@@ -1,5 +1,5 @@
 use crate::{
-    util::unwind::{unwind_table_by_num, unwind_table_by_num_hash},
+    util::unwind::{unwind_table_by_num, unwind_table_by_num_hash, unwind_table_by_walker},
     DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
     UnwindOutput,
 };
@@ -104,9 +104,13 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: handle bad block
         let tx = db.get_mut();
+
+        unwind_table_by_walker::<DB, tables::CanonicalHeaders, tables::HeaderNumbers>(
+            tx,
+            input.unwind_to + 1,
+        )?;
+
         unwind_table_by_num::<DB, tables::CanonicalHeaders>(tx, input.unwind_to)?;
-        // TODO HeaderNumber was NumHash but it is changed to just BlockHash
-        //unwind_table_by_num_hash::<DB, tables::HeaderNumbers>(tx, input.unwind_to)?;
         unwind_table_by_num_hash::<DB, tables::Headers>(tx, input.unwind_to)?;
         unwind_table_by_num_hash::<DB, tables::HeaderTD>(tx, input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -354,7 +358,7 @@ mod tests {
             .expect("failed to check cannonical headers");
         runner
             .db()
-            .check_no_entry_above::<tables::HeaderNumbers, _>(unwind_to, |key| key)
+            .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(unwind_to, |val| val)
             .expect("failed to check header numbers");
         runner
             .db()
