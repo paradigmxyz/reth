@@ -1,18 +1,17 @@
-use reth_interfaces::executor::ExecutorDb;
+use reth_interfaces::{provider::StateProvider, Error};
 use reth_primitives::{BlockLocked, Transaction, TransactionKind, H160, H256, U256};
 use revm::{
     db::{CacheDB, DatabaseRef},
     BlockEnv, TransactTo, TxEnv,
 };
-use std::convert::Infallible;
 
 /// SubState of database. Uses revm internal cache with binding to reth DbExecutor trait.
 pub type SubState<DB> = CacheDB<State<DB>>;
 
 /// Wrapper around ExeuctorDb that implements revm database trait
-pub struct State<DB: ExecutorDb>(DB);
+pub struct State<DB: StateProvider>(DB);
 
-impl<DB: ExecutorDb> State<DB> {
+impl<DB: StateProvider> State<DB> {
     /// Create new State with generic ExecutorDb.
     pub fn new(db: DB) -> Self {
         Self(db)
@@ -34,11 +33,11 @@ impl<DB: ExecutorDb> State<DB> {
     }
 }
 
-impl<DB: ExecutorDb> DatabaseRef for State<DB> {
-    type Error = Infallible;
+impl<DB: StateProvider> DatabaseRef for State<DB> {
+    type Error = Error;
 
     fn basic(&self, address: H160) -> Result<Option<revm::AccountInfo>, Self::Error> {
-        Ok(self.0.basic_account(address).map(|account| revm::AccountInfo {
+        Ok(self.0.basic_account(address)?.map(|account| revm::AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash,
@@ -47,19 +46,19 @@ impl<DB: ExecutorDb> DatabaseRef for State<DB> {
     }
 
     fn code_by_hash(&self, code_hash: H256) -> Result<revm::Bytecode, Self::Error> {
-        let (bytecode, size) = self.0.bytecode_by_hash(code_hash).unwrap_or_default();
-        Ok(unsafe { revm::Bytecode::new_checked(bytecode.0, size, Some(code_hash)) })
+        let bytecode = self.0.bytecode_by_hash(code_hash)?.unwrap_or_default();
+        Ok(revm::Bytecode::new_raw(bytecode.0))
     }
 
     fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
         let mut h_index = H256::zero();
         index.to_big_endian(h_index.as_bytes_mut());
 
-        Ok(U256::from_big_endian(self.0.storage(address, h_index).unwrap_or_default().as_ref()))
+        Ok(self.0.storage(address, h_index)?.unwrap_or_default())
     }
 
     fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
-        Ok(self.0.block_hash(number).unwrap_or_default())
+        Ok(self.0.block_hash(number)?.unwrap_or_default())
     }
 }
 

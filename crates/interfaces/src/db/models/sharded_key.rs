@@ -12,7 +12,7 @@ use reth_primitives::TxNumber;
 /// `Address | 200` -> data is from transaction 0 to 200.
 ///
 /// `Address | 300` -> data is from transaction 201 to 300.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct ShardedKey<T> {
     /// The key for this type.
     pub key: T,

@@ -138,10 +138,13 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::{test_utils, Env, EnvKind};
-    use reth_interfaces::db::{
-        models::ShardedKey,
-        tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
-        Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
+    use reth_interfaces::{
+        db::{
+            models::ShardedKey,
+            tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
+            Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
+        },
+        provider::{ProviderImpl, StateProviderFactory},
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
@@ -314,6 +317,13 @@ mod tests {
             let list200: IntegerList = vec![200u64].into();
             assert_eq!(list200, list);
         }
+    }
+
+    #[test]
+    fn common_history_provider() {
+        let db = test_utils::create_test_db::<WriteMap>(EnvKind::RW);
+        let provider = ProviderImpl::new(db);
+        let _ = provider.latest();
     }
 }
 
