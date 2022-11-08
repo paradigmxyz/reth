@@ -117,9 +117,9 @@ impl From<EthMessage> for ProtocolMessage {
 ///  correlate request-response message pairs. This allows for request multiplexing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EthMessage {
-    // Status is required for the protocol handshake
+    /// Status is required for the protocol handshake
     Status(Status),
-    // The following messages are broadcast to the network
+    /// The following messages are broadcast to the network
     NewBlockHashes(NewBlockHashes),
     NewBlock(Box<NewBlock>),
     Transactions(Transactions),
