@@ -1,5 +1,6 @@
+use reth_codecs::main_codec;
 use reth_rlp::{Decodable, DecodeError, Encodable};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serializer};
 use std::{
     borrow::Borrow,
     clone::Clone,
@@ -10,7 +11,8 @@ use std::{
 use thiserror::Error;
 
 /// Wrapper type around Bytes to deserialize/serialize "0x" prefixed ethereum hex strings
-#[derive(Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
+#[main_codec]
+#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct Bytes(
     #[serde(serialize_with = "serialize_bytes", deserialize_with = "deserialize_bytes")]
     pub  bytes::Bytes,

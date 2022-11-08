@@ -1,3 +1,4 @@
+use reth_codecs::main_codec;
 use reth_rlp::{Decodable, DecodeError, Encodable};
 
 use crate::U256;
@@ -5,6 +6,7 @@ use crate::U256;
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
