@@ -6,6 +6,7 @@ use crate::{Address, Bytes, TxHash, U256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::Buf;
 use ethers_core::utils::keccak256;
+use reth_codecs::main_codec;
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 use std::ops::Deref;
@@ -13,6 +14,7 @@ pub use tx_type::TxType;
 
 /// Raw Transaction.
 /// Transaction type is introduced in EIP-2718: https://eips.ethereum.org/EIPS/eip-2718
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Transaction {
     /// Legacy transaciton.
@@ -388,6 +390,7 @@ impl Encodable for Transaction {
 }
 
 /// Whether or not the transaction is a contract creation.
+#[main_codec]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransactionKind {
     /// A transaction that creates a contract.
@@ -428,11 +431,15 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TransactionSigned {
-    transaction: Transaction,
-    hash: TxHash,
-    signature: Signature,
+    /// Raw transaction info
+    pub transaction: Transaction,
+    /// Transaction hash
+    pub hash: TxHash,
+    /// The transaction signature values
+    pub signature: Signature,
 }
 
 impl AsRef<Transaction> for TransactionSigned {
@@ -456,6 +463,7 @@ impl Encodable for TransactionSigned {
         // add the length of the RLP header
         len + length_of_length(len)
     }
+
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         if let Transaction::Legacy { chain_id, .. } = self.transaction {
             let header = Header { list: true, payload_length: self.payload_len() };
