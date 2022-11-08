@@ -39,4 +39,40 @@ impl StatusBuilder {
             forkid: self.forkid.unwrap_or_else(|| Hardfork::Homestead.fork_id()),
         }
     }
+
+    /// Sets the protocol version.
+    pub fn version(mut self, version: u8) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Sets the chain id.
+    pub fn chain(mut self, chain: Chain) -> Self {
+        self.chain = Some(chain);
+        self
+    }
+
+    /// Sets the total difficulty.
+    pub fn total_difficulty(mut self, total_difficulty: U256) -> Self {
+        self.total_difficulty = Some(total_difficulty);
+        self
+    }
+
+    /// Sets the block hash.
+    pub fn blockhash(mut self, blockhash: H256) -> Self {
+        self.blockhash = Some(blockhash);
+        self
+    }
+
+    /// Sets the genesis hash.
+    pub fn genesis(mut self, genesis: H256) -> Self {
+        self.genesis = Some(genesis);
+        self
+    }
+
+    /// Sets the fork id.
+    pub fn forkid(mut self, forkid: ForkId) -> Self {
+        self.forkid = Some(forkid);
+        self
+    }
 }
