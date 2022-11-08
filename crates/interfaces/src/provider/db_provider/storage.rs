@@ -136,12 +136,11 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplLatest<'a, TX> {
             if entry.key == storage_key {
                 return Ok(Some(entry.value))
             }
-        } else {
-            return Ok(None)
-        }
-        if let Some((_, entry)) = cursor.seek(storage_key)? {
-            if entry.key == storage_key {
-                return Ok(Some(entry.value))
+
+            if let Some((_, entry)) = cursor.seek(storage_key)? {
+                if entry.key == storage_key {
+                    return Ok(Some(entry.value))
+                }
             }
         }
         Ok(None)
