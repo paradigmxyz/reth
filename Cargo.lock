@@ -3330,6 +3330,7 @@ dependencies = [
  "ethers-core",
  "hex",
  "hex-literal",
+ "k256",
  "maplit",
  "parity-scale-codec",
  "reth-codecs",

@@ -1,7 +1,7 @@
 use reth_codecs::main_codec;
 use reth_rlp::{Decodable, DecodeError, Encodable};
 
-use crate::U256;
+use crate::{transaction::util::secp256k1, Address, H256, U256};
 
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
@@ -67,5 +67,15 @@ impl Signature {
             let odd_y_parity = (v - 27) != 0;
             Ok((Signature { r, s, odd_y_parity }, None))
         }
+    }
+
+    pub(crate) fn recover_signer(&self, hash: H256) -> Address {
+        let mut compact_sig: [u8; 65] = [0; 65];
+
+        self.r.to_big_endian(&mut compact_sig);
+        self.s.to_big_endian(&mut compact_sig[32..]);
+        compact_sig[64] = if self.odd_y_parity == true { 1 } else { 0 };
+
+        secp256k1::ecrecover(&compact_sig, hash.as_fixed_bytes()).unwrap()
     }
 }

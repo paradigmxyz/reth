@@ -1,6 +1,7 @@
 mod access_list;
 mod signature;
 mod tx_type;
+mod util;
 
 use crate::{Address, Bytes, TxHash, U256};
 pub use access_list::{AccessList, AccessListItem};
@@ -171,6 +172,16 @@ impl Transaction {
             Transaction::Legacy { nonce, .. } => *nonce,
             Transaction::Eip2930 { nonce, .. } => *nonce,
             Transaction::Eip1559 { nonce, .. } => *nonce,
+        }
+    }
+
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_limit
+    pub fn max_fee_per_gas(&self) -> u64 {
+        match self {
+            Transaction::Legacy { gas_limit, .. } | Transaction::Eip2930 { gas_limit, .. } => {
+                *gas_limit
+            }
+            Transaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
     }
 
@@ -631,6 +642,44 @@ impl TransactionSigned {
             // add type byte
             len + 1
         }
+    }
+
+    pub fn into_ecrecovered(&self) -> Result<TransactionSignedEcRecovered, ()> {
+        let signer = self.signature.recover_signer(self.hash);
+        Ok(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
+    }
+}
+
+pub struct TransactionSignedEcRecovered {
+    /// Signed transaction
+    signed_transaction: TransactionSigned,
+    /// Signer of the transaction
+    signer: Address,
+}
+
+impl AsRef<TransactionSigned> for TransactionSignedEcRecovered {
+    fn as_ref(&self) -> &TransactionSigned {
+        &self.signed_transaction
+    }
+}
+
+impl Deref for TransactionSignedEcRecovered {
+    type Target = TransactionSigned;
+
+    fn deref(&self) -> &Self::Target {
+        &self.signed_transaction
+    }
+}
+
+impl TransactionSignedEcRecovered {
+    /// Signer of transaction recovered from signature
+    pub fn signer(&self) -> Address {
+        self.signer
+    }
+
+    /// Transform back to [`TransactionSigned`]
+    pub fn into_signed(self) -> TransactionSigned {
+        self.signed_transaction
     }
 }
 

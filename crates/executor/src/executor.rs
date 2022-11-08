@@ -49,6 +49,8 @@ impl Executor {
             // create receipt
             // bloom filter from logs
 
+            // Sum of the transaction’s gas limit and the gas utilized in this block prior
+
             // Receipt outcome EIP-658: Embedding transaction status code in receipts
             // EIP-658 supperseeded EIP-98 in Byzantium fork
         }
