@@ -144,7 +144,7 @@ mod tests {
             tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
             Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
         },
-        provider::{StateProviderFactory, ProviderImpl},
+        provider::{ProviderImpl, StateProviderFactory},
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};

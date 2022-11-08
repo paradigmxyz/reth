@@ -6,4 +6,4 @@ mod storage;
 pub use block::{BlockProvider, HeaderProvider};
 pub use db_provider::{self as db, ProviderImpl};
 pub use error::Error;
-pub use storage::{StateProviderFactory, StateProvider, StorageProvider};
+pub use storage::{StateProvider, StateProviderFactory, StorageProvider};

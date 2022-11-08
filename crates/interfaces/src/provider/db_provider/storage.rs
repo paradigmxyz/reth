@@ -1,7 +1,7 @@
 use super::ProviderImpl;
 use crate::{
     db::{tables, Database, DatabaseGAT, DbCursorRO, DbDupCursorRO, DbTx},
-    provider::{Error, StateProviderFactory, StateProvider},
+    provider::{Error, StateProvider, StateProviderFactory},
     Result,
 };
 use reth_primitives::{
