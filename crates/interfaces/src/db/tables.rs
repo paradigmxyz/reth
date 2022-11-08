@@ -9,7 +9,8 @@ use crate::db::{
     DupSort,
 };
 use reth_primitives::{
-    Account, Address, BlockNumber, Header, IntegerList, Receipt, StorageEntry, TxNumber, H256,
+    Account, Address, BlockNumber, Header, IntegerList, Receipt, StorageEntry, TransactionSigned,
+    TxNumber, H256,
 };
 
 /// Enum for the type of table present in libmdbx.
@@ -127,11 +128,11 @@ table!(
 
 table!(
     /// Stores the transaction body from non canonical transactions.
-    NonCanonicalTransactions => BlockNumHashTxNumber => RlpTxBody);
+    NonCanonicalTransactions => BlockNumHashTxNumber => TransactionSigned);
 
 table!(
     /// Stores the transaction body from canonical transactions. Canonical only
-    Transactions => TxNumber => RlpTxBody);
+    Transactions => TxNumber => TransactionSigned);
 
 table!(
     /// Stores transaction receipts. Canonical only
@@ -238,7 +239,5 @@ pub type ConfigValue = Vec<u8>;
 pub type BlockNumHashTxNumber = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type RlpTotalDifficulty = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type RlpTxBody = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type AddressStorageKey = Vec<u8>;
