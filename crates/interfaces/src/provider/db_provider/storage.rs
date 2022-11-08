@@ -1,7 +1,7 @@
 use super::ProviderImpl;
 use crate::{
     db::{tables, Database, DatabaseGAT, DbCursorRO, DbDupCursorRO, DbTx},
-    provider::{Error, HistoryStateProvider, StateProvider},
+    provider::{Error, StateProviderFactory, StateProvider},
     Result,
 };
 use reth_primitives::{
@@ -9,7 +9,7 @@ use reth_primitives::{
 };
 use std::marker::PhantomData;
 
-impl<DB: Database> HistoryStateProvider for ProviderImpl<DB> {
+impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
     type HistorySP<'a> = StateProviderImplHistory<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     type LatestSP<'a> = StateProviderImplLatest<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     /// Storage provider for latest block

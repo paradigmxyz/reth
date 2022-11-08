@@ -25,12 +25,8 @@ pub trait StateProvider: Send + Sync {
     fn block_hash(&self, number: U256) -> Result<Option<H256>>;
 }
 
-/// Light wrapper around StateProvider.
-///
-/// TODO decision for later, do we check if block exist or not, or does number is sane or not,
-/// or should this be just a thin wrapper to create StateProvider structure.
-/// Check later but for now it is thin wrapper.
-pub trait HistoryStateProvider: Send + Sync {
+/// Light wrapper that creates StateProvider.
+pub trait StateProviderFactory: Send + Sync {
     /// History State provider.
     type HistorySP<'a>: StateProvider
     where

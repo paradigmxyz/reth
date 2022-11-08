@@ -62,8 +62,14 @@ where
     /// Handles a polled [`SessionEvent`]
     fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
         match event {
-            SessionEvent::SessionAuthenticated { node_id, remote_addr, capabilities, messages } => {
-                self.state.on_session_authenticated(node_id, capabilities, messages);
+            SessionEvent::SessionEstablished {
+                node_id,
+                remote_addr,
+                capabilities,
+                status,
+                messages,
+            } => {
+                self.state.on_session_authenticated(node_id, capabilities, status, messages);
                 Some(SwarmEvent::SessionEstablished { node_id, remote_addr })
             }
             SessionEvent::ValidMessage { node_id, message } => {

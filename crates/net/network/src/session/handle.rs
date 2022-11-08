@@ -4,7 +4,10 @@ use crate::{
     NodeId,
 };
 use reth_ecies::{stream::ECIESStream, ECIESError};
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    Status,
+};
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
     net::TcpStream,
@@ -36,7 +39,7 @@ pub(crate) struct ActiveSessionHandle {
     /// Announced capabilities of the peer.
     pub(crate) capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
-    pub(crate) commands: mpsc::Sender<SessionCommand>,
+    pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
 }
 
 // === impl ActiveSessionHandle ===
@@ -45,7 +48,7 @@ impl ActiveSessionHandle {
     /// Sends a disconnect command to the session.
     pub(crate) fn disconnect(&self) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
-        let _ = self.commands.clone().try_send(SessionCommand::Disconnect);
+        let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect);
     }
 }
 
@@ -58,12 +61,14 @@ impl ActiveSessionHandle {
 pub(crate) enum PendingSessionEvent {
     /// Initial handshake step was successful <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#initial-handshake>
     SuccessfulHandshake { remote_addr: SocketAddr, session_id: SessionId },
-    /// Represents a successful `Hello` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
-    Hello {
+    /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
+    Established {
         session_id: SessionId,
+        remote_addr: SocketAddr,
         node_id: NodeId,
         capabilities: Arc<Capabilities>,
-        stream: ECIESStream<TcpStream>,
+        status: Status,
+        conn: ECIESStream<TcpStream>,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
@@ -113,13 +118,4 @@ pub(crate) enum ActiveSessionMessage {
         /// Message received from the peer.
         message: CapabilityMessage,
     },
-}
-
-/// A Cloneable connection for sending messages directly to the session of a peer.
-#[derive(Debug, Clone)]
-pub struct PeerMessageSender {
-    /// id of the remote node.
-    pub(crate) peer: NodeId,
-    /// The Sender half connected to a session.
-    pub(crate) to_session_tx: mpsc::Sender<CapabilityMessage>,
 }

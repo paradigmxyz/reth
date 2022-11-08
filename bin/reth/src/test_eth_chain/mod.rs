@@ -1,3 +1,5 @@
+//! Command for running Ethereum chain tests.
+
 use crate::util;
 use clap::Parser;
 use std::path::PathBuf;
@@ -21,7 +23,7 @@ impl Command {
             .path
             .iter()
             .map(|item| {
-                util::find_all_json_tests(item).into_iter().map(|file| {
+                util::find_all_files_with_postfix(item, ".json").into_iter().map(|file| {
                     let tfile = file.clone();
                     let join = tokio::spawn(async move { runner::run_test(tfile.as_path()).await });
                     (join, file)
