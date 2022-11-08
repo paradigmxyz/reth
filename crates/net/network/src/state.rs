@@ -3,13 +3,11 @@
 use crate::{
     discovery::{Discovery, DiscoveryEvent},
     fetch::StateFetcher,
-    message::CapabilityResponse,
+    message::{EthResponse, PeerRequestSender, PeerResponse},
     peers::{PeerAction, PeersManager},
     NodeId,
 };
-use futures::FutureExt;
 
-use crate::message::PeerMessageSender;
 use reth_eth_wire::{capability::Capabilities, Status};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{H256, U256};
@@ -20,7 +18,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tokio::sync::oneshot;
+
 use tracing::trace;
 
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
@@ -76,7 +74,7 @@ where
         _node_id: NodeId,
         _capabilities: Arc<Capabilities>,
         _status: Status,
-        _messages: PeerMessageSender,
+        _messages: PeerRequestSender,
     ) {
         // TODO notify fetecher as well
     }
@@ -119,7 +117,7 @@ where
     fn disconnect_session(&mut self, _node: NodeId) {}
 
     /// Invoked when received a response from a connected peer.
-    fn on_response(&mut self, _node: NodeId, _resp: CapabilityResponse) {}
+    fn on_eth_response(&mut self, _node: NodeId, _resp: EthResponse) {}
 
     /// Advances the state
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction> {
@@ -138,7 +136,7 @@ where
             // poll all connected peers for responses
             for (id, peer) in self.connected_peers.iter_mut() {
                 if let Some(response) = peer.pending_response.as_mut() {
-                    match response.poll_unpin(cx) {
+                    match response.poll(cx) {
                         Poll::Ready(Ok(resp)) => received_responses.push((*id, resp)),
                         Poll::Ready(Err(_)) => {
                             trace!(
@@ -161,7 +159,7 @@ where
             }
 
             for (id, resp) in received_responses {
-                self.on_response(id, resp);
+                self.on_eth_response(id, resp);
             }
 
             // poll peer manager
@@ -185,9 +183,9 @@ pub struct ConnectedPeer {
     /// Best block number of the peer.
     pub(crate) best_number: U256,
     /// A communication channel directly to the session service.
-    pub(crate) message_tx: PeerMessageSender,
+    pub(crate) message_tx: PeerRequestSender,
     /// The response receiver for a currently active request to that peer.
-    pub(crate) pending_response: Option<oneshot::Receiver<CapabilityResponse>>,
+    pub(crate) pending_response: Option<PeerResponse>,
 }
 
 /// Tracks the current state of the peer session
@@ -201,12 +199,12 @@ pub enum PeerSessionState {
     Incoming {
         /// How long to keep this open.
         until: Instant,
-        sender: PeerMessageSender,
+        sender: PeerRequestSender,
     },
     /// Node is connected to the peer and is ready to
     Ready {
         /// Communication channel directly to the session task
-        sender: PeerMessageSender,
+        sender: PeerRequestSender,
     },
 }
 
