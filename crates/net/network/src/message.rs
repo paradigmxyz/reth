@@ -6,8 +6,7 @@
 use futures::FutureExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions,
-    GetReceipts, NewBlock, NewBlockHashes, NodeData, PooledTransactions, Receipts,
-    Transactions,
+    GetReceipts, NewBlock, NewBlockHashes, NodeData, PooledTransactions, Receipts, Transactions,
 };
 use std::task::{ready, Context, Poll};
 
