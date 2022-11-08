@@ -186,7 +186,7 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
                     flags.#set_bool_method(true);
                     self.#name.to_compact()
                 } else {
-                    (0, bytes::Bytes::new())
+                    (0, #itype::default().0)
                 };
             });
         } else {
