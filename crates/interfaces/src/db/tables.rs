@@ -161,10 +161,10 @@ table!(
     /// use reth_primitives::{Address, IntegerList};
     /// use reth_interfaces::db::{DbTx, DbTxMut, DbCursorRO, Database, models::ShardedKey, tables::AccountHistory};
     /// use reth_db::{kv::{EnvKind, Env, test_utils}, mdbx::WriteMap};
-    /// use std::str::FromStr;
+    /// use std::{str::FromStr,sync::Arc};
     /// 
     /// fn main() {
-    ///     let db: Env<WriteMap> = test_utils::create_test_db(EnvKind::RW);
+    ///     let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
     ///     let account = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
     /// 
     ///     // Setup if each shard can only take 1 transaction.

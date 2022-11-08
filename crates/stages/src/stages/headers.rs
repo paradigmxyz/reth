@@ -91,7 +91,6 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
                 }
             },
         };
-
         let stage_progress = self.write_headers::<DB>(tx, headers).await?.unwrap_or(last_block_num);
         Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
     }
@@ -148,7 +147,6 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header_number = tx.cursor_mut::<tables::HeaderNumbers>()?;
         let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
         let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
         let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
@@ -170,7 +168,8 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             td += header.difficulty;
 
             // TODO: investigate default write flags
-            cursor_header_number.append(block_hash, header.number)?;
+            // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
+            tx.put::<tables::HeaderNumbers>(block_hash, header.number)?;
             cursor_header.append(key, header)?;
             cursor_canonical.append(key.number(), key.hash())?;
             cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
