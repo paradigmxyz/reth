@@ -62,8 +62,6 @@ pub trait Table: Send + Sync + Debug + 'static {
     type Key: Key;
     /// Value element of `Table`.
     type Value: Value;
-    /// Seek Key element of `Table`.
-    type SeekKey: Key;
 }
 
 /// DupSort allows for keys not to be repeated in the database,

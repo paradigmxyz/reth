@@ -101,9 +101,9 @@ pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
     /// freeing of memory pages
     fn commit(self) -> Result<bool, Error>;
     /// Iterate over read only values in table.
-    fn cursor<T: Table>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::Cursor<T>, Error>;
+    fn cursor<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error>;
     /// Iterate over read only values in dup sorted table.
-    fn cursor_dup<T: DupSort>(&'tx self) -> Result<<Self as DbTxGAT<'tx>>::DupCursor<T>, Error>;
+    fn cursor_dup<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error>;
 }
 
 /// Read write transaction that allows writing to database
@@ -115,11 +115,11 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), Error>;
     /// Cursor mut
-    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'tx>>::CursorMut<T>, Error>;
+    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
     /// DupCursor mut.
     fn cursor_dup_mut<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'tx>>::DupCursorMut<T>, Error>;
+    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error>;
 }
 
 /// Alias type for a `(key, value)` result coming from a cursor.
@@ -133,9 +133,6 @@ pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, Error>;
 pub trait DbCursorRO<'tx, T: Table> {
     /// First item in table
     fn first(&mut self) -> PairResult<T>;
-
-    /// Seeks for a `(key, value)` pair greater or equal than `key`.
-    fn seek(&mut self, key: T::SeekKey) -> PairResult<T>;
 
     /// Seeks for the exact `(key, value)` pair with `key`.
     fn seek_exact(&mut self, key: T::Key) -> PairResult<T>;
@@ -164,6 +161,9 @@ pub trait DbCursorRO<'tx, T: Table> {
 
 /// Read only curor over DupSort table.
 pub trait DbDupCursorRO<'tx, T: DupSort> {
+    /// Seeks for a `(key, value)` pair greater or equal than `key`.
+    fn seek(&mut self, key: T::SubKey) -> PairResult<T>;
+
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T>;
 
