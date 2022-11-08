@@ -1,5 +1,5 @@
 //! Support for handling peer sessions.
-pub use crate::message::PeerMessageSender;
+pub use crate::message::PeerRequestSender;
 use crate::{
     session::{
         active::ActiveSession,
@@ -234,15 +234,16 @@ impl SessionManager {
 
                     let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
 
-                    let messages = PeerMessageSender { peer: node_id, to_session_tx };
+                    let messages = PeerRequestSender { peer: node_id, to_session_tx };
 
                     let session = ActiveSession {
+                        next_id: 0,
                         remote_node_id: node_id,
                         remote_capabilities: Arc::clone(&capabilities),
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
                         to_session: self.active_session_tx.clone(),
-                        messages_rx: ReceiverStream::new(messages_rx).fuse(),
+                        request_tx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
                         buffered_outgoing: Default::default(),
@@ -379,7 +380,7 @@ pub(crate) enum SessionEvent {
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         status: Status,
-        messages: PeerMessageSender,
+        messages: PeerRequestSender,
     },
     /// A session received a valid message via RLPx.
     ValidMessage {

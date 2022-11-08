@@ -1,13 +1,13 @@
 //! Represents an established session.
 
 use crate::{
+    message::PeerRequest,
     session::{
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
     },
     NodeId,
 };
-
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, Sink, Stream};
 use pin_project::pin_project;
@@ -27,6 +27,8 @@ use tokio_stream::wrappers::ReceiverStream;
 /// node or read from connection) and emitting events back to the [`SessionHandler`].
 #[pin_project]
 pub(crate) struct ActiveSession {
+    /// Keeps track of request ids.
+    pub(crate) next_id: usize,
     /// The underlying connection.
     #[pin]
     pub(crate) conn: ECIESStream<TcpStream>,
@@ -43,9 +45,9 @@ pub(crate) struct ActiveSession {
     pub(crate) to_session: mpsc::Sender<ActiveSessionMessage>,
     /// Incoming request to send to delegate to the remote peer.
     #[pin]
-    pub(crate) messages_rx: Fuse<ReceiverStream<CapabilityMessage>>,
+    pub(crate) request_tx: Fuse<ReceiverStream<PeerRequest>>,
     /// All requests currently in progress.
-    pub(crate) inflight_requests: FnvHashMap<u64, ()>,
+    pub(crate) inflight_requests: FnvHashMap<usize, ()>,
     /// Buffered messages that should be sent to the remote peer.
     pub(crate) buffered_outgoing: VecDeque<CapabilityMessage>,
 }
@@ -76,7 +78,7 @@ impl Future for ActiveSession {
                 }
             }
 
-            while let Poll::Ready(Some(_msg)) = this.messages_rx.as_mut().poll_next(cx) {
+            while let Poll::Ready(Some(_req)) = this.request_tx.as_mut().poll_next(cx) {
                 progress = true;
                 // TODO handle request
             }
