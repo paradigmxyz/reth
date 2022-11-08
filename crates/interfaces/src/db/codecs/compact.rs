@@ -10,8 +10,9 @@ macro_rules! impl_compact {
                 type Encoded = Vec<u8>;
 
                 fn encode(self) -> Self::Encoded {
-                    let (_, obj) = Compact::to_compact(self);
-                    obj
+                    let mut buf = vec![];
+                    let _  = Compact::to_compact(self, &mut buf);
+                    buf
                 }
             }
 

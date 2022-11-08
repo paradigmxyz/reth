@@ -91,7 +91,8 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         #[allow(dead_code)]
         #[test_fuzz::test_fuzz]
         fn #fuzz(obj: #ident)  {
-            let (len, buf) = obj.clone().to_compact();
+            let mut buf = vec![];
+            let len = obj.clone().to_compact(&mut buf);
             let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
             assert_eq!(obj, same_obj);
         }
@@ -104,11 +105,11 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         impl Compact for #ident {
             type Encoded = Vec<u8>;
 
-            fn to_compact(self) -> (usize, Self::Encoded) {
-                let mut buffer = vec![];
+            fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
                 let mut flags = #flags::default();
+                let mut total_len = 0;
                 #(#to_compact)*
-                (buffer.len(), buffer)
+                total_len
             }
 
             fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -173,45 +174,45 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
 /// Generates code to implement the [`Compact`] trait method `from_compact`.
 fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
     let mut lines = vec![];
+
+    lines.push(quote! {
+        let mut buffer = bytes::BytesMut::new();
+    });
+
     // Sets the TypeFlags with the buffer length
     for (name, ftype, is_compact) in fields {
-        let (name, set_len_method, slice, len) = get_field_idents(name);
-
+        let (name, set_len_method, _, len) = get_field_idents(name);
         if *is_compact && is_hash_type(ftype) {
             let itype = format_ident!("{ftype}");
             let set_bool_method = format_ident!("set_{name}");
 
             lines.push(quote! {
-                let (#len, #slice) = if self.#name != #itype::zero() {
+                if self.#name != #itype::zero() {
                     flags.#set_bool_method(true);
-                    self.#name.to_compact()
-                } else {
-                    (0, #itype::default().0)
+                    total_len += self.#name.to_compact(&mut buffer);
                 };
             });
         } else {
             lines.push(quote! {
-                let (#len, #slice) = self.#name.to_compact();
+                let #len = self.#name.to_compact(&mut buffer);
             });
         }
 
         if !is_hash_type(ftype) {
             lines.push(quote! {
                 flags.#set_len_method(#len as u8);
+                total_len += #len;
             })
         }
     }
-    // Initializes buffer with the flag bits
-    lines.push(quote! {
-        buffer.extend_from_slice(&flags.into_bytes());
-    });
-    // Extends buffer with the field encoded values
-    for (name, _, _) in fields {
-        let (_, _, slice, _) = get_field_idents(name);
 
-        lines.push(quote! {
-            buffer.extend_from_slice(#slice.as_ref());
-        });
-    }
+    // Replaces flag bits with the real ones.
+    lines.push(quote! {
+        let flags = flags.into_bytes();
+        total_len += flags.len();
+        buf.put_slice(&flags);
+        buf.put(buffer);
+    });
+
     lines
 }

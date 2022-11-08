@@ -23,16 +23,17 @@ mod tests {
 
     #[test]
     fn test_account() {
+        let mut buf = vec![];
         let mut acc = Account::default();
-        let (len, _) = acc.to_compact();
+        let len = acc.to_compact(&mut buf);
         assert_eq!(len, 2);
 
         acc.balance = 2.into();
-        let (len, _) = acc.to_compact();
+        let len = acc.to_compact(&mut buf);
         assert_eq!(len, 3);
 
         acc.nonce = 2;
-        let (len, _) = acc.to_compact();
+        let len = acc.to_compact(&mut buf);
         assert_eq!(len, 4);
     }
 }

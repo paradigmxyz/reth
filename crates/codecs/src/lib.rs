@@ -3,7 +3,7 @@ pub use codecs_derive::*;
 pub trait Compact {
     type Encoded: AsRef<[u8]> + Default;
 
-    fn to_compact(self) -> (usize, Self::Encoded);
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized;
@@ -12,10 +12,10 @@ pub trait Compact {
 impl Compact for u64 {
     type Encoded = bytes::Bytes;
 
-    fn to_compact(self) -> (usize, Self::Encoded) {
-        let buf = self.to_be_bytes().into_iter().skip(self.leading_zeros() as usize / 8);
-        let buf = bytes::Bytes::from_iter(buf);
-        (buf.len(), buf)
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        let leading = self.leading_zeros() as usize / 8;
+        buf.put_slice(&self.to_be_bytes()[leading..]);
+        8 - leading
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -39,15 +39,12 @@ where
 {
     type Encoded = Vec<u8>;
 
-    fn to_compact(self) -> (usize, Self::Encoded) {
-        let mut buf = vec![self.len() as u8];
-
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        let mut total_len = 0;
         for element in self {
-            let (len, obj) = element.to_compact();
-            buf.extend_from_slice(&obj.as_ref()[0..len]);
+            total_len += element.to_compact(buf);
         }
-
-        (buf.len(), buf)
+        total_len
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
@@ -71,11 +68,11 @@ where
 {
     type Encoded = <T as Compact>::Encoded;
 
-    fn to_compact(self) -> (usize, Self::Encoded) {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         if let Some(element) = self {
-            return element.to_compact()
+            return element.to_compact(buf)
         }
-        (0, <T as Compact>::Encoded::default())
+        0
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -90,11 +87,12 @@ where
 impl Compact for U256 {
     type Encoded = Vec<u8>;
 
-    fn to_compact(self) -> (usize, Self::Encoded) {
-        let mut buf = vec![0; 32];
-        self.to_big_endian(&mut buf);
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        let mut inner = vec![0; 32];
+        self.to_big_endian(&mut inner);
         let size = 32 - (self.leading_zeros() / 8) as usize;
-        (size, buf.split_off(32 - size))
+        buf.put_slice(&inner[32 - size..]);
+        size
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -112,8 +110,10 @@ impl Compact for U256 {
 impl Compact for Bytes {
     type Encoded = bytes::Bytes;
 
-    fn to_compact(self) -> (usize, Self::Encoded) {
-        (self.len(), self)
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        let len = self.len();
+        buf.put(self);
+        len
     }
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         (buf.copy_to_bytes(len), buf)
@@ -126,8 +126,9 @@ macro_rules! impl_hash_compact {
             impl Compact for $name {
                 type Encoded = [u8; $size];
 
-                fn to_compact(self) -> (usize, Self::Encoded) {
-                    ($size, self.0)
+                fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                    buf.put_slice(&self.0);
+                    $size
                 }
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self,&[u8]) {
 
@@ -151,8 +152,9 @@ impl_hash_compact!((H256, 32), (H160, 20));
 impl Compact for Bloom {
     type Encoded = bytes::Bytes;
 
-    fn to_compact(self) -> (usize, Self::Encoded) {
-        (256, bytes::Bytes::from_iter(self.0.into_iter()))
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        buf.put_slice(&self.0);
+        256
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
