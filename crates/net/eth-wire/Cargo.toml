@@ -17,6 +17,9 @@ reth-ecies = { path = "../ecies" }
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp", features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
 
+# used for Chain and builders
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+
 #used for forkid
 crc = "1"
 maplit = "1"

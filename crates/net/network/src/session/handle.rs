@@ -6,7 +6,7 @@ use crate::{
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    Status,
+    Status, P2PStream, EthStream, error::EthStreamError,
 };
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
@@ -68,14 +68,14 @@ pub(crate) enum PendingSessionEvent {
         node_id: NodeId,
         capabilities: Arc<Capabilities>,
         status: Status,
-        conn: ECIESStream<TcpStream>,
+        conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
         remote_addr: SocketAddr,
         session_id: SessionId,
         direction: Direction,
-        error: Option<ECIESError>,
+        error: Option<EthStreamError>,
     },
     /// Thrown when unable to establish a [`TcpStream`].
     OutgoingConnectionError {

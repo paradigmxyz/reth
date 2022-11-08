@@ -8,6 +8,8 @@ pub use version::EthVersion;
 
 pub mod forkid;
 
+pub mod hardfork;
+
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
 

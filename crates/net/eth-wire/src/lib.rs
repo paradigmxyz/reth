@@ -16,7 +16,9 @@ pub mod error;
 mod ethstream;
 mod p2pstream;
 mod pinger;
+pub mod builder;
+pub use builder::*;
 pub mod types;
 pub use types::*;
 
-pub use ethstream::{EthStream, UnauthedEthStream};
+pub use crate::{p2pstream::{P2PStream, UnauthedP2PStream}, ethstream::{EthStream, UnauthedEthStream}};

@@ -61,6 +61,10 @@ pub use ethers_core::{
     types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
+/// The Ethereum mainnet genesis hash.
+pub const MAINNET_GENESIS: H256 =
+    H256(hex_literal::hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
+
 #[doc(hidden)]
 mod __reexport {
     pub use hex;

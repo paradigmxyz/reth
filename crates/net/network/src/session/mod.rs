@@ -14,7 +14,7 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    Status, UnauthedEthStream,
+    Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -520,7 +520,7 @@ async fn authenticate(
         }
     };
 
-    let unauthed = UnauthedEthStream::new(stream);
+    let unauthed = UnauthedP2PStream::new(stream);
     let auth = authenticate_stream(unauthed, session_id, remote_addr, direction).boxed();
 
     match futures::future::select(disconnect_rx, auth).await {
@@ -544,10 +544,21 @@ async fn authenticate(
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`]
 async fn authenticate_stream(
-    _stream: UnauthedEthStream<ECIESStream<TcpStream>>,
+    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
     _session_id: SessionId,
     _remote_addr: SocketAddr,
     _direction: Direction,
 ) -> PendingSessionEvent {
-    todo!()
+    // conduct the p2p handshake and return the authenticated stream
+    let (p2p_stream, hello) = match stream.handshake().await {
+        Ok(stream_res) => stream_res,
+        Err(err) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr: _remote_addr,
+                session_id: _session_id,
+                direction: _direction,
+                error: Some(err.into()),
+            }
+        }
+    };
 }

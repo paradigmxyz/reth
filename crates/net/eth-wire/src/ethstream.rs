@@ -117,6 +117,7 @@ where
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
+#[derive(Debug)]
 pub struct EthStream<S> {
     #[pin]
     inner: S,
