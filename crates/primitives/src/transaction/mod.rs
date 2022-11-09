@@ -6,13 +6,13 @@ mod util;
 use crate::{Address, Bytes, ChainId, TxHash, H256, U256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BufMut, BytesMut};
+use derive_more::{AsRef, Deref};
 use ethers_core::utils::keccak256;
 use reth_codecs::main_codec;
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, RlpEncodable, EMPTY_STRING_CODE,
 };
 pub use signature::Signature;
-use std::ops::Deref;
 pub use tx_type::TxType;
 
 /// Raw Transaction.
@@ -571,28 +571,16 @@ impl Decodable for TransactionKind {
 
 /// Signed transaction.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref)]
 pub struct TransactionSigned {
     /// Raw transaction info
+    #[deref]
+    #[as_ref]
     pub transaction: Transaction,
     /// Transaction hash
     pub hash: TxHash,
     /// The transaction signature values
     pub signature: Signature,
-}
-
-impl AsRef<Transaction> for TransactionSigned {
-    fn as_ref(&self) -> &Transaction {
-        &self.transaction
-    }
-}
-
-impl Deref for TransactionSigned {
-    type Target = Transaction;
-
-    fn deref(&self) -> &Self::Target {
-        &self.transaction
-    }
 }
 
 impl Encodable for TransactionSigned {
@@ -793,26 +781,14 @@ impl TransactionSigned {
 
 /// Signed transaction with recovered signer.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref)]
 pub struct TransactionSignedEcRecovered {
     /// Signed transaction
+    #[deref]
+    #[as_ref]
     signed_transaction: TransactionSigned,
     /// Signer of the transaction
     signer: Address,
-}
-
-impl AsRef<TransactionSigned> for TransactionSignedEcRecovered {
-    fn as_ref(&self) -> &TransactionSigned {
-        &self.signed_transaction
-    }
-}
-
-impl Deref for TransactionSignedEcRecovered {
-    type Target = TransactionSigned;
-
-    fn deref(&self) -> &Self::Target {
-        &self.signed_transaction
-    }
 }
 
 impl TransactionSignedEcRecovered {
