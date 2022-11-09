@@ -5,8 +5,10 @@ use crate::{
     NodeId,
 };
 use futures::Stream;
-use reth_ecies::ECIESError;
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    error::EthStreamError,
+};
 use reth_interfaces::provider::BlockProvider;
 use std::{
     io,
@@ -236,13 +238,13 @@ pub enum SwarmEvent {
     /// Closed an incoming pending session during authentication.
     IncomingPendingSessionClosed {
         remote_addr: SocketAddr,
-        error: Option<ECIESError>,
+        error: Option<EthStreamError>,
     },
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
         node_id: NodeId,
-        error: Option<ECIESError>,
+        error: Option<EthStreamError>,
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError {

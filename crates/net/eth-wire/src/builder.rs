@@ -1,78 +1,141 @@
 //! Builder structs for [`Status`](crate::types::Status) and [`Hello`](crate::types::Hello) messages.
 
-use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS};
-use crate::{Status, forkid::ForkId, EthVersion, hardfork::Hardfork};
+use reth_primitives::{Chain, U256, H256, PeerId};
+use crate::{Status, forkid::ForkId, EthVersion, p2pstream::{HelloMessage, ProtocolVersion}, capability::Capability};
 
 /// Builder for [`Status`](crate::types::Status) messages.
+///
+/// # Example
+/// ```
+/// use reth_eth_wire::{EthVersion, hardfork::Hardfork};
+/// use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS};
+/// use reth_eth_wire::types::Status;
+///
+/// // this is just an example status message!
+/// let status = Status::builder()
+///     .version(EthVersion::Eth66.into())
+///     .chain(Chain::Named(ethers_core::types::Chain::Mainnet))
+///     .total_difficulty(U256::from(100))
+///     .blockhash(H256::from(MAINNET_GENESIS))
+///     .genesis(H256::from(MAINNET_GENESIS))
+///     .forkid(Hardfork::Latest.fork_id())
+///     .build();
+///
+/// assert_eq!(
+///     status,
+///     Status {
+///         version: EthVersion::Eth66.into(),
+///         chain: Chain::Named(ethers_core::types::Chain::Mainnet),
+///         total_difficulty: U256::from(100),
+///         blockhash: H256::from(MAINNET_GENESIS),
+///         genesis: H256::from(MAINNET_GENESIS),
+///         forkid: Hardfork::Latest.fork_id(),
+///     }
+/// );
+///
+/// ```
+#[derive(Debug, Default)]
 pub struct StatusBuilder {
-    /// The current protocol version. For example, peers running `eth/66` would have a version of
-    /// 66.
-    pub version: Option<u8>,
-
-    /// The chain id, as introduced in
-    /// [EIP155](https://eips.ethereum.org/EIPS/eip-155#list-of-chain-ids).
-    pub chain: Option<Chain>,
-
-    /// Total difficulty of the best chain.
-    pub total_difficulty: Option<U256>,
-
-    /// The highest difficulty block hash the peer has seen
-    pub blockhash: Option<H256>,
-
-    /// The genesis hash of the peer's chain.
-    pub genesis: Option<H256>,
-
-    /// The fork identifier as defined by
-    /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
-    pub forkid: Option<ForkId>,
+    status: Status,
 }
 
 impl StatusBuilder {
     /// Consumes the type and creates the actual [`Status`](crate::types::Status) message.
     pub fn build(self) -> Status {
-        Status {
-            version: self.version.unwrap_or(EthVersion::Eth67 as u8),
-            chain: self.chain.unwrap_or(Chain::Named(ethers_core::types::Chain::Mainnet)),
-            total_difficulty: self.total_difficulty.unwrap_or(U256::zero()),
-            blockhash: self.blockhash.unwrap_or(MAINNET_GENESIS),
-            genesis: self.genesis.unwrap_or(MAINNET_GENESIS),
-            forkid: self.forkid.unwrap_or_else(|| Hardfork::Homestead.fork_id()),
-        }
+        self.status
     }
 
     /// Sets the protocol version.
     pub fn version(mut self, version: u8) -> Self {
-        self.version = Some(version);
+        self.status.version = version;
         self
     }
 
     /// Sets the chain id.
     pub fn chain(mut self, chain: Chain) -> Self {
-        self.chain = Some(chain);
+        self.status.chain = chain;
         self
     }
 
     /// Sets the total difficulty.
     pub fn total_difficulty(mut self, total_difficulty: U256) -> Self {
-        self.total_difficulty = Some(total_difficulty);
+        self.status.total_difficulty = total_difficulty;
         self
     }
 
     /// Sets the block hash.
     pub fn blockhash(mut self, blockhash: H256) -> Self {
-        self.blockhash = Some(blockhash);
+        self.status.blockhash = blockhash;
         self
     }
 
     /// Sets the genesis hash.
     pub fn genesis(mut self, genesis: H256) -> Self {
-        self.genesis = Some(genesis);
+        self.status.genesis = genesis;
         self
     }
 
     /// Sets the fork id.
     pub fn forkid(mut self, forkid: ForkId) -> Self {
-        self.forkid = Some(forkid);
+        self.status.forkid = forkid;
+        self
+    }
+}
+
+/// Builder for [`Hello`](crate::types::Hello) messages.
+pub struct HelloBuilder {
+    hello: HelloMessage,
+}
+
+impl HelloBuilder {
+    /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`Hello`] values,
+    /// and a `NodeId` corresponding to the given pubkey.
+    pub fn new(pubkey: PeerId) -> Self {
+        Self {
+            hello: HelloMessage {
+                protocol_version: ProtocolVersion::V5,
+                // TODO: proper client versioning
+                client_version: "Ethereum/1.0.0".to_string(),
+                capabilities: vec![EthVersion::Eth67.into()],
+                // TODO: default port config
+                port: 30303,
+                id: pubkey,
+            },
+        }
+    }
+
+    /// Consumes the type and creates the actual [`Hello`](crate::types::Hello) message.
+    pub fn build(self) -> HelloMessage {
+        self.hello
+    }
+
+    /// Sets the protocol version.
+    pub fn protocol_version(mut self, protocol_version: ProtocolVersion) -> Self {
+        self.hello.protocol_version = protocol_version;
+        self
+    }
+
+    /// Sets the client version.
+    pub fn client_version(mut self, client_version: String) -> Self {
+        self.hello.client_version = client_version;
+        self
+    }
+
+    /// Sets the capabilities.
+    pub fn capabilities(mut self, capabilities: Vec<Capability>) -> Self {
+        self.hello.capabilities = capabilities;
+        self
+    }
+
+    /// Sets the port.
+    pub fn port(mut self, port: u16) -> Self {
+        self.hello.port = port;
+        self
+    }
+
+    /// Sets the node id.
+    pub fn id(mut self, id: PeerId) -> Self {
+        self.hello.id = id;
         self
     }
 }

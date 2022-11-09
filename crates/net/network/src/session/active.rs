@@ -12,7 +12,10 @@ use fnv::FnvHashMap;
 use futures::{stream::Fuse, Sink, Stream};
 use pin_project::pin_project;
 use reth_ecies::stream::ECIESStream;
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    EthStream, P2PStream,
+};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -31,7 +34,7 @@ pub(crate) struct ActiveSession {
     pub(crate) next_id: usize,
     /// The underlying connection.
     #[pin]
-    pub(crate) conn: ECIESStream<TcpStream>,
+    pub(crate) conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     /// Identifier of the node we're connected to.
     pub(crate) remote_node_id: NodeId,
     /// All capabilities the peer announced

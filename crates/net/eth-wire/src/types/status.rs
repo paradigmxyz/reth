@@ -1,5 +1,7 @@
+use crate::{EthVersion, hardfork::Hardfork, StatusBuilder};
+
 use super::forkid::ForkId;
-use reth_primitives::{Chain, H256, U256};
+use reth_primitives::{Chain, H256, U256, MAINNET_GENESIS};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
@@ -35,6 +37,13 @@ pub struct Status {
     /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
     /// This was added in [`eth/64`](https://eips.ethereum.org/EIPS/eip-2364)
     pub forkid: ForkId,
+}
+
+impl Status {
+    /// Helper for returning a builder for the status message.
+    pub fn builder() -> StatusBuilder {
+        Default::default()
+    }
 }
 
 impl Display for Status {
@@ -80,6 +89,19 @@ impl Debug for Status {
                 hexed_genesis,
                 self.forkid
             )
+        }
+    }
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Status {
+            version: EthVersion::Eth67 as u8,
+            chain: Chain::Named(ethers_core::types::Chain::Mainnet),
+            total_difficulty: U256::zero(),
+            blockhash: MAINNET_GENESIS,
+            genesis: MAINNET_GENESIS,
+            forkid: Hardfork::Homestead.fork_id(),
         }
     }
 }

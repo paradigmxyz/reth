@@ -6,7 +6,8 @@ use crate::{
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    Status, P2PStream, EthStream, error::EthStreamError,
+    error::EthStreamError,
+    EthStream, P2PStream, Status,
 };
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
@@ -65,6 +66,7 @@ pub(crate) enum PendingSessionEvent {
     Established {
         session_id: SessionId,
         remote_addr: SocketAddr,
+        /// The remote node's public key
         node_id: NodeId,
         capabilities: Arc<Capabilities>,
         status: Status,

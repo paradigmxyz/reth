@@ -56,6 +56,9 @@ pub type StorageKey = H256;
 /// Storage value
 pub type StorageValue = U256;
 
+// TODO: document that this is as pubkey type
+pub type PeerId = H512;
+
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},

@@ -91,6 +91,25 @@ impl Capabilities {
     }
 }
 
+impl From<Vec<Capability>> for Capabilities {
+    fn from(value: Vec<Capability>) -> Self {
+        let mut eth_66 = false;
+        let mut eth_67 = false;
+        for capability in &value {
+            if capability.is_eth_v66() {
+                eth_66 = true;
+            } else if capability.is_eth_v67() {
+                eth_67 = true;
+            }
+        }
+        Self {
+            inner: value,
+            eth_66,
+            eth_67,
+        }
+    }
+}
+
 impl Encodable for Capabilities {
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.encode(out)

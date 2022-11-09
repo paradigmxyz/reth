@@ -21,4 +21,4 @@ pub use builder::*;
 pub mod types;
 pub use types::*;
 
-pub use crate::{p2pstream::{P2PStream, UnauthedP2PStream}, ethstream::{EthStream, UnauthedEthStream}};
+pub use crate::{p2pstream::{P2PStream, UnauthedP2PStream, HelloMessage}, ethstream::{EthStream, UnauthedEthStream}};

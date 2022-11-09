@@ -1,5 +1,5 @@
-use crate::forkid::{ForkHash, ForkId};
-use reth_primitives::BlockNumber;
+use crate::forkid::{ForkHash, ForkId, ForkFilter};
+use reth_primitives::{BlockNumber, MAINNET_GENESIS};
 use std::str::FromStr;
 
 /// Ethereum mainnet hardforks
@@ -84,6 +84,45 @@ impl Hardfork {
                 ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 0 }
             }
         }
+    }
+
+    /// This returns all known hardforks in order.
+    pub fn all_forks() -> Vec<Self> {
+        vec![
+            Hardfork::Homestead,
+            Hardfork::Dao,
+            Hardfork::Tangerine,
+            Hardfork::SpuriousDragon,
+            Hardfork::Byzantium,
+            Hardfork::Constantinople, // petersburg is skipped because it's the same block num as constantinople
+            Hardfork::Istanbul,
+            Hardfork::Muirglacier,
+            Hardfork::Berlin,
+            Hardfork::London,
+            Hardfork::ArrowGlacier,
+            Hardfork::GrayGlacier,
+        ]
+    }
+
+    /// This returns all known hardfork block numbers as a vector.
+    pub fn all_fork_blocks() -> Vec<BlockNumber> {
+        Hardfork::all_forks().iter().map(|f| f.fork_block()).collect()
+    }
+
+    /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
+    /// This assumes the current hardfork's block number is the current head and uses all known
+    /// future hardforks to initialize the filter.
+    pub fn fork_filter(&self) -> ForkFilter {
+        let all_forks = Hardfork::all_forks();
+        let future_forks: Vec<BlockNumber> = all_forks
+            .iter()
+            .filter(|f| f.fork_block() > self.fork_block())
+            .map(|f| f.fork_block())
+            .collect();
+
+        // this data structure is not chain-agnostic, so we can pass in the constant mainnet
+        // genesis
+        ForkFilter::new(self.fork_block(), MAINNET_GENESIS, future_forks)
     }
 }
 
@@ -176,20 +215,7 @@ mod tests {
         assert_eq!(curr_forkhash, frontier_forkid.hash);
 
         // list of the above hardforks
-        let hardforks = vec![
-            Hardfork::Homestead,
-            Hardfork::Dao,
-            Hardfork::Tangerine,
-            Hardfork::SpuriousDragon,
-            Hardfork::Byzantium,
-            Hardfork::Constantinople,
-            Hardfork::Istanbul,
-            Hardfork::Muirglacier,
-            Hardfork::Berlin,
-            Hardfork::London,
-            Hardfork::ArrowGlacier,
-            Hardfork::GrayGlacier,
-        ];
+        let hardforks = Hardfork::all_forks();
 
         // check that the curr_forkhash we compute matches the output of each fork_id returned
         for hardfork in hardforks {
