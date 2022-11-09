@@ -31,7 +31,8 @@ pub use log::Log;
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
-    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
+    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned,
+    TransactionSignedEcRecovered, TxType,
 };
 
 /// Block hash.
@@ -46,6 +47,8 @@ pub type BlockID = H256;
 pub type TxHash = H256;
 /// TxNumber is sequence number of all existing transactions
 pub type TxNumber = u64;
+/// Chain identifier type, introduced in EIP-155
+pub type ChainId = u64;
 
 /// Storage Key
 pub type StorageKey = H256;

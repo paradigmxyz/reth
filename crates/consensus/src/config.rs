@@ -15,10 +15,12 @@ pub struct Config {
     pub london_hard_fork_block: BlockNumber,
     /// The Merge/Paris hard fork block number
     pub paris_hard_fork_block: BlockNumber,
+    /// Blockchain identifier introduced in EIP-155: Simple replay attack protection
+    pub chain_id: u64,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { london_hard_fork_block: 12965000, paris_hard_fork_block: 15537394 }
+        Self { london_hard_fork_block: 12965000, paris_hard_fork_block: 15537394, chain_id: 1 }
     }
 }

@@ -1,7 +1,6 @@
+use crate::{transaction::util::secp256k1, Address, H256, U256};
 use reth_codecs::main_codec;
 use reth_rlp::{Decodable, DecodeError, Encodable};
-
-use crate::U256;
 
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
@@ -67,5 +66,18 @@ impl Signature {
             let odd_y_parity = (v - 27) != 0;
             Ok((Signature { r, s, odd_y_parity }, None))
         }
+    }
+
+    /// Recover signature from hash.
+    pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
+        let mut sig: [u8; 65] = [0; 65];
+
+        self.r.to_big_endian(&mut sig[0..32]);
+        self.s.to_big_endian(&mut sig[32..64]);
+        sig[64] = self.odd_y_parity as u8;
+
+        // NOTE: we are removing error from underlying crypto library as it will restrain primitive
+        // errors and we care only if recovery is passing or not.
+        secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
     }
 }
