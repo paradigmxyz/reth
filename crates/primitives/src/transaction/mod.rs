@@ -5,7 +5,7 @@ mod util;
 
 use crate::{Address, Bytes, ChainId, TxHash, H256, U256};
 pub use access_list::{AccessList, AccessListItem};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use ethers_core::utils::keccak256;
 use reth_codecs::main_codec;
@@ -477,6 +477,10 @@ impl Decodable for TransactionSigned {
         let first_header = Header::decode(buf)?;
         // if the transaction is encoded as a string then it is a typed transaction
         if !first_header.list {
+            // Bytes that are going to be used to create a hash of transaction.
+            // For eip2728 types transaction header is not used inside hash
+            let original_encoding = *buf;
+
             let tx_type = *buf
                 .first()
                 .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
@@ -484,7 +488,7 @@ impl Decodable for TransactionSigned {
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
             if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"));
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
             }
 
             // decode common fields
@@ -520,8 +524,7 @@ impl Decodable for TransactionSigned {
             };
 
             let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
-            let tx_length = first_header.payload_length + first_header.length();
-            signed.hash = keccak256(&original_encoding[..tx_length]).into();
+            signed.hash = keccak256(&original_encoding[..first_header.payload_length]).into();
             Ok(signed)
         } else {
             let mut transaction = Transaction::Legacy {
@@ -617,7 +620,8 @@ impl TransactionSigned {
         }
     }
 
-    /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with tx type.
+    /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
+    /// tx type.
     pub fn recalculate_hash(&self) -> H256 {
         let mut buf = Vec::new();
         self.encode_inner(&mut buf, false);
