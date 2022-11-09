@@ -41,7 +41,6 @@ pub enum Error {
     TimestampIsInPast { parent_timestamp: u64, timestamp: u64 },
     #[error("Block timestamp {timestamp:?} is in future in comparison of our clock time {present_timestamp:?}")]
     TimestampIsInFuture { timestamp: u64, present_timestamp: u64 },
-    // TODO make better error msg :)
     #[error("Child gas_limit {child_gas_limit:?} max increase is {parent_gas_limit}/1024")]
     GasLimitInvalidIncrease { parent_gas_limit: u64, child_gas_limit: u64 },
     #[error("Child gas_limit {child_gas_limit:?} max decrease is {parent_gas_limit}/1024")]
@@ -50,4 +49,10 @@ pub enum Error {
     BaseFeeMissing,
     #[error("Block base fee ({got:?}) is different then expected: ({expected:?})")]
     BaseFeeDiff { expected: u64, got: u64 },
+    #[error("Transaction eip1559 priority fee is more then max fee")]
+    TransactionPriorityFeeMoreThenMaxFee,
+    #[error("Transaction chain_id does not match")]
+    TransactionChainId,
+    #[error("Transation max fee is less them block base fee")]
+    TransactionMaxFeeLessThenBaseFee,
 }

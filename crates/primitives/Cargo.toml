@@ -17,6 +17,9 @@ ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features =
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 
+# crypto
+secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery"] }
+
 #used for forkid
 crc = "1"
 maplit = "1"
@@ -29,6 +32,9 @@ sucds = "0.5.0"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true}
 hex = "0.4"
 hex-literal = "0.3"
+derive_more = "0.99"
+
+
 
 [dev-dependencies]
 arbitrary = { version = "1.1.7", features = ["derive"]}
