@@ -9,9 +9,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use derive_more::{AsRef, Deref};
 use ethers_core::utils::keccak256;
 use reth_codecs::main_codec;
-use reth_rlp::{
-    length_of_length, Decodable, DecodeError, Encodable, Header, RlpEncodable, EMPTY_STRING_CODE,
-};
+use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 pub use tx_type::TxType;
 
@@ -136,133 +134,7 @@ impl Transaction {
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> H256 {
         let mut buf = BytesMut::new();
-        match self {
-            Transaction::Legacy { chain_id, nonce, gas_price, gas_limit, to, value, input } => {
-                if let Some(chain_id) = chain_id {
-                    #[derive(RlpEncodable)]
-                    struct S<'a> {
-                        nonce: u64,
-                        gas_price: u64,
-                        gas_limit: u64,
-                        to: &'a TransactionKind,
-                        value: &'a U256,
-                        input: &'a Bytes,
-                        chain_id: ChainId,
-                        _a: u8,
-                        _b: u8,
-                    }
-
-                    S {
-                        nonce: *nonce,
-                        gas_price: *gas_price,
-                        gas_limit: *gas_limit,
-                        to,
-                        value,
-                        input,
-                        chain_id: *chain_id,
-                        _a: 0,
-                        _b: 0,
-                    }
-                    .encode(&mut buf);
-                } else {
-                    #[derive(RlpEncodable)]
-                    struct S<'a> {
-                        nonce: u64,
-                        gas_price: u64,
-                        gas_limit: u64,
-                        to: &'a TransactionKind,
-                        value: &'a U256,
-                        input: &'a Bytes,
-                    }
-
-                    S {
-                        nonce: *nonce,
-                        gas_price: *gas_price,
-                        gas_limit: *gas_limit,
-                        to,
-                        value,
-                        input,
-                    }
-                    .encode(&mut buf);
-                }
-            }
-            Transaction::Eip2930 {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            } => {
-                buf.put_u8(1);
-
-                #[derive(RlpEncodable)]
-                struct S<'a> {
-                    chain_id: ChainId,
-                    nonce: u64,
-                    gas_price: u64,
-                    gas_limit: u64,
-                    to: &'a TransactionKind,
-                    value: &'a U256,
-                    input: &'a Bytes,
-                    access_list: &'a AccessList,
-                }
-
-                S {
-                    chain_id: *chain_id,
-                    nonce: *nonce,
-                    gas_price: *gas_price,
-                    gas_limit: *gas_limit,
-                    to,
-                    value,
-                    input,
-                    access_list,
-                }
-                .encode(&mut buf);
-            }
-            Transaction::Eip1559 {
-                chain_id,
-                nonce,
-                max_priority_fee_per_gas,
-                max_fee_per_gas,
-                gas_limit,
-                to,
-                value,
-                input,
-                access_list,
-            } => {
-                buf.put_u8(2);
-
-                #[derive(RlpEncodable)]
-                struct S<'a> {
-                    chain_id: ChainId,
-                    nonce: u64,
-                    max_priority_fee_per_gas: u64,
-                    max_fee_per_gas: u64,
-                    gas_limit: u64,
-                    to: &'a TransactionKind,
-                    value: &'a U256,
-                    input: &'a Bytes,
-                    access_list: &'a AccessList,
-                }
-
-                S {
-                    chain_id: *chain_id,
-                    nonce: *nonce,
-                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
-                    max_fee_per_gas: *max_fee_per_gas,
-                    gas_limit: *gas_limit,
-                    to,
-                    value,
-                    input,
-                    access_list,
-                }
-                .encode(&mut buf);
-            }
-        };
-
+        self.encode(&mut buf);
         keccak256(&buf).into()
     }
 
@@ -592,41 +464,7 @@ impl Encodable for TransactionSigned {
     }
 
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        if let Transaction::Legacy { chain_id, .. } = self.transaction {
-            let header = Header { list: true, payload_length: self.payload_len() };
-            header.encode(out);
-            self.transaction.encode_fields(out);
-
-            if let Some(id) = chain_id {
-                self.signature.encode_eip155_inner(out, id);
-            } else {
-                // if the transaction has no chain id then it is a pre-EIP-155 transaction
-                self.signature.encode_inner_legacy(out);
-            }
-        } else {
-            let header = Header { list: false, payload_length: self.payload_len() };
-            header.encode(out);
-            match self.transaction {
-                Transaction::Eip2930 { .. } => {
-                    out.put_u8(1);
-                    let list_header = Header { list: true, payload_length: self.inner_tx_len() };
-                    list_header.encode(out);
-                }
-                Transaction::Eip1559 { .. } => {
-                    out.put_u8(2);
-                    let list_header = Header { list: true, payload_length: self.inner_tx_len() };
-                    list_header.encode(out);
-                }
-                Transaction::Legacy { .. } => {
-                    unreachable!("Legacy transaction should be handled above")
-                }
-            }
-
-            self.transaction.encode_fields(out);
-            self.signature.odd_y_parity.encode(out);
-            self.signature.r.encode(out);
-            self.signature.s.encode(out);
-        }
+        self.encode_inner(out, true);
     }
 }
 
@@ -646,7 +484,7 @@ impl Decodable for TransactionSigned {
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
             if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"));
             }
 
             // decode common fields
@@ -737,13 +575,60 @@ impl TransactionSigned {
         Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
     }
 
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2728 does not require rlp header
+    fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
+        if let Transaction::Legacy { chain_id, .. } = self.transaction {
+            let header = Header { list: true, payload_length: self.payload_len() };
+            header.encode(out);
+            self.transaction.encode_fields(out);
+
+            if let Some(id) = chain_id {
+                self.signature.encode_eip155_inner(out, id);
+            } else {
+                // if the transaction has no chain id then it is a pre-EIP-155 transaction
+                self.signature.encode_inner_legacy(out);
+            }
+        } else {
+            if with_header {
+                let header = Header { list: false, payload_length: self.payload_len() };
+                header.encode(out);
+            }
+            match self.transaction {
+                Transaction::Eip2930 { .. } => {
+                    out.put_u8(1);
+                    let list_header = Header { list: true, payload_length: self.inner_tx_len() };
+                    list_header.encode(out);
+                }
+                Transaction::Eip1559 { .. } => {
+                    out.put_u8(2);
+                    let list_header = Header { list: true, payload_length: self.inner_tx_len() };
+                    list_header.encode(out);
+                }
+                Transaction::Legacy { .. } => {
+                    unreachable!("Legacy transaction should be handled above")
+                }
+            }
+
+            self.transaction.encode_fields(out);
+            self.signature.odd_y_parity.encode(out);
+            self.signature.r.encode(out);
+            self.signature.s.encode(out);
+        }
+    }
+
+    /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with tx type.
+    pub fn recalculate_hash(&self) -> H256 {
+        let mut buf = Vec::new();
+        self.encode_inner(&mut buf, false);
+        keccak256(&buf).into()
+    }
+
     /// Create a new signed transaction from a transaction and its signature.
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        let mut buf = Vec::new();
-        initial_tx.encode(&mut buf);
-        initial_tx.hash = keccak256(&buf).into();
+        initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
     }
 
@@ -814,7 +699,7 @@ mod tests {
 
     use crate::{
         transaction::{signature::Signature, TransactionKind},
-        Address, Bytes, Transaction, TransactionSigned, H256, U256,
+        AccessList, Address, Bytes, Transaction, TransactionSigned, H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
@@ -1035,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_signer() {
+    fn recover_signer_legacy() {
         use crate::hex_literal::hex;
 
         let signer: Address = hex!("398137383b3d25c92898c656696e41950e47316b").into();
@@ -1055,6 +940,37 @@ mod tests {
         let sig = Signature {
             r: hex!("2a378831cf81d99a3f06a18ae1b6ca366817ab4d88a70053c41d7a8f0368e031").into(),
             s: hex!("450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5").into(),
+            odd_y_parity: false,
+        };
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
+        assert_eq!(signed_tx.hash(), hash, "Expected same hash");
+        assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
+    }
+
+    #[test]
+    fn recover_signer_eip1559() {
+        use crate::hex_literal::hex;
+
+        let signer: Address = hex!("dd6b8b3dc6b7ad97db52f08a275ff4483e024cea").into();
+        let hash: H256 =
+            hex!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").into();
+
+        let tx = Transaction::Eip1559 {
+            chain_id: 1,
+            nonce: 0x42,
+            gas_limit: 44386,
+            to: TransactionKind::Call( hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
+            value: 0.into(),
+            input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
+            max_fee_per_gas: 0x4a817c800,
+            max_priority_fee_per_gas: 0x3b9aca00,
+            access_list: AccessList::default(),
+        };
+
+        let sig = Signature {
+            r: hex!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565").into(),
+            s: hex!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1").into(),
             odd_y_parity: false,
         };
 
