@@ -66,7 +66,6 @@ pub fn validate_transactions_standalone(
 /// Only parametar from header that effects transaction is base_fee
 pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
-    config: &Config,
     base_fee: Option<u64>,
 ) -> Result<(), Error> {
     // check basefee and few checks that are related to that.
@@ -88,9 +87,9 @@ pub trait AccountProvider {
 
 /// Validate transaction in regards of State
 pub fn validate_transaction_regarding_state<AP: AccountProvider>(
-    transaction: &TransactionSigned,
-    config: &Config,
-    account_provider: &AP,
+    _transaction: &TransactionSigned,
+    _config: &Config,
+    _account_provider: &AP,
 ) -> Result<(), Error> {
     // sanity check: if account has a bytecode. This is not allowed.s
     // check nonce

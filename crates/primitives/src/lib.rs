@@ -47,6 +47,8 @@ pub type BlockID = H256;
 pub type TxHash = H256;
 /// TxNumber is sequence number of all existing transactions
 pub type TxNumber = u64;
+/// Chain identifier type, introduced in EIP-155
+pub type ChainId = u64;
 
 /// Storage Key
 pub type StorageKey = H256;

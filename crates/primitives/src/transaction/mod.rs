@@ -3,12 +3,14 @@ mod signature;
 mod tx_type;
 mod util;
 
-use crate::{Address, Bytes, TxHash, U256};
+use crate::{Address, Bytes, ChainId, TxHash, H256, U256};
 pub use access_list::{AccessList, AccessListItem};
-use bytes::Buf;
+use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::utils::keccak256;
 use reth_codecs::main_codec;
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
+use reth_rlp::{
+    length_of_length, Decodable, DecodeError, Encodable, Header, RlpEncodable, EMPTY_STRING_CODE,
+};
 pub use signature::Signature;
 use std::ops::Deref;
 pub use tx_type::TxType;
@@ -21,7 +23,7 @@ pub enum Transaction {
     /// Legacy transaciton.
     Legacy {
         /// Added as EIP-155: Simple replay attack protection
-        chain_id: Option<u64>,
+        chain_id: Option<ChainId>,
         /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
         nonce: u64,
         /// A scalar value equal to the number of
@@ -52,7 +54,7 @@ pub enum Transaction {
     /// Transaction with AccessList. https://eips.ethereum.org/EIPS/eip-2930
     Eip2930 {
         /// Added as EIP-155: Simple replay attack protection
-        chain_id: u64,
+        chain_id: ChainId,
         /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
         nonce: u64,
         /// A scalar value equal to the number of
@@ -130,12 +132,138 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    /// Heavy operation that return hash over rlp encoded transaction.
-    /// It is only used for signature signing.
-    pub fn signature_hash(&self) -> TxHash {
-        let mut encoded = Vec::with_capacity(self.length());
-        self.encode(&mut encoded);
-        keccak256(encoded).into()
+    /// Heavy operation that return signature hash over rlp encoded transaction.
+    /// It is only for signature signing or signer recovery.
+    pub fn signature_hash(&self) -> H256 {
+        let mut buf = BytesMut::new();
+        match self {
+            Transaction::Legacy { chain_id, nonce, gas_price, gas_limit, to, value, input } => {
+                if let Some(chain_id) = chain_id {
+                    #[derive(RlpEncodable)]
+                    struct S<'a> {
+                        nonce: u64,
+                        gas_price: u64,
+                        gas_limit: u64,
+                        to: &'a TransactionKind,
+                        value: &'a U256,
+                        input: &'a Bytes,
+                        chain_id: ChainId,
+                        _a: u8,
+                        _b: u8,
+                    }
+
+                    S {
+                        nonce: *nonce,
+                        gas_price: *gas_price,
+                        gas_limit: *gas_limit,
+                        to,
+                        value,
+                        input,
+                        chain_id: *chain_id,
+                        _a: 0,
+                        _b: 0,
+                    }
+                    .encode(&mut buf);
+                } else {
+                    #[derive(RlpEncodable)]
+                    struct S<'a> {
+                        nonce: u64,
+                        gas_price: u64,
+                        gas_limit: u64,
+                        to: &'a TransactionKind,
+                        value: &'a U256,
+                        input: &'a Bytes,
+                    }
+
+                    S {
+                        nonce: *nonce,
+                        gas_price: *gas_price,
+                        gas_limit: *gas_limit,
+                        to,
+                        value,
+                        input,
+                    }
+                    .encode(&mut buf);
+                }
+            }
+            Transaction::Eip2930 {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+            } => {
+                buf.put_u8(1);
+
+                #[derive(RlpEncodable)]
+                struct S<'a> {
+                    chain_id: ChainId,
+                    nonce: u64,
+                    gas_price: u64,
+                    gas_limit: u64,
+                    to: &'a TransactionKind,
+                    value: &'a U256,
+                    input: &'a Bytes,
+                    access_list: &'a AccessList,
+                }
+
+                S {
+                    chain_id: *chain_id,
+                    nonce: *nonce,
+                    gas_price: *gas_price,
+                    gas_limit: *gas_limit,
+                    to,
+                    value,
+                    input,
+                    access_list,
+                }
+                .encode(&mut buf);
+            }
+            Transaction::Eip1559 {
+                chain_id,
+                nonce,
+                max_priority_fee_per_gas,
+                max_fee_per_gas,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+            } => {
+                buf.put_u8(2);
+
+                #[derive(RlpEncodable)]
+                struct S<'a> {
+                    chain_id: ChainId,
+                    nonce: u64,
+                    max_priority_fee_per_gas: u64,
+                    max_fee_per_gas: u64,
+                    gas_limit: u64,
+                    to: &'a TransactionKind,
+                    value: &'a U256,
+                    input: &'a Bytes,
+                    access_list: &'a AccessList,
+                }
+
+                S {
+                    chain_id: *chain_id,
+                    nonce: *nonce,
+                    max_priority_fee_per_gas: *max_priority_fee_per_gas,
+                    max_fee_per_gas: *max_fee_per_gas,
+                    gas_limit: *gas_limit,
+                    to,
+                    value,
+                    input,
+                    access_list,
+                }
+                .encode(&mut buf);
+            }
+        };
+
+        keccak256(&buf).into()
     }
 
     /// Sets the transaction's chain id to the provided value.
@@ -603,6 +731,24 @@ impl TransactionSigned {
         self.hash
     }
 
+    /// Recover signer from signature and hash.
+    pub fn recover_signer(&self) -> Option<Address> {
+        let signature_hash = self.signature_hash();
+        self.signature.recover_signer(signature_hash)
+    }
+
+    /// Devour Self, recover signer and return [`TransactionSignedEcRecovered`]
+    pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
+        let signer = self.recover_signer()?;
+        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+    }
+
+    /// try to recover signer and return [`TransactionSignedEcRecovered`]
+    pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
+        let signer = self.recover_signer()?;
+        Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
+    }
+
     /// Create a new signed transaction from a transaction and its signature.
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
@@ -643,13 +789,11 @@ impl TransactionSigned {
             len + 1
         }
     }
-
-    pub fn into_ecrecovered(&self) -> Result<TransactionSignedEcRecovered, ()> {
-        let signer = self.signature.recover_signer(self.hash);
-        Ok(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
-    }
 }
 
+/// Signed transaction with recovered signer.
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TransactionSignedEcRecovered {
     /// Signed transaction
     signed_transaction: TransactionSigned,
@@ -681,6 +825,11 @@ impl TransactionSignedEcRecovered {
     pub fn into_signed(self) -> TransactionSigned {
         self.signed_transaction
     }
+
+    /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`].
+    pub fn from_signed_transaction(signed_transaction: TransactionSigned, signer: Address) -> Self {
+        Self { signed_transaction, signer }
+    }
 }
 
 #[cfg(test)]
@@ -697,7 +846,6 @@ mod tests {
 
     #[test]
     fn test_decode_create() {
-        // panic!("not implemented");
         // tests that a contract creation tx encodes and decodes properly
         let request = Transaction::Eip2930 {
             chain_id: 1u64,
@@ -892,5 +1040,50 @@ mod tests {
 
         let expected = TransactionSigned::from_transaction_and_signature(expected, signature);
         assert_eq!(expected, TransactionSigned::decode(bytes_fifth).unwrap());
+    }
+
+    #[test]
+    fn decode_raw_tx_and_recover_signer() {
+        use crate::hex_literal::hex;
+        // transaction is from ropsten
+
+        let hash: H256 =
+            hex!("559fb34c4a7f115db26cbf8505389475caaab3df45f5c7a0faa4abfa3835306c").into();
+        let signer: Address = hex!("641c5d790f862a58ec7abcfd644c0442e9c201b3").into();
+        let raw =hex!("f88b8212b085028fa6ae00830f424094aad593da0c8116ef7d2d594dd6a63241bccfc26c80a48318b64b000000000000000000000000641c5d790f862a58ec7abcfd644c0442e9c201b32aa0a6ef9e170bca5ffb7ac05433b13b7043de667fbb0b4a5e45d3b54fb2d6efcc63a0037ec2c05c3d60c5f5f78244ce0a3859e3a18a36c61efb061b383507d3ce19d2");
+
+        let mut pointer = raw.as_ref();
+        let tx = TransactionSigned::decode(&mut pointer).unwrap();
+        assert_eq!(tx.hash(), hash, "Expected same hash");
+        assert_eq!(tx.recover_signer(), Some(signer), "Recovering signer should pass.");
+    }
+
+    #[test]
+    fn recover_signer() {
+        use crate::hex_literal::hex;
+
+        let signer: Address = hex!("398137383b3d25c92898c656696e41950e47316b").into();
+        let hash: H256 =
+            hex!("bb3a336e3f823ec18197f1e13ee875700f08f03e2cab75f0d0b118dabb44cba0").into();
+
+        let tx = Transaction::Legacy {
+            chain_id: Some(1),
+            nonce: 0x18,
+            gas_price: 0xfa56ea00,
+            gas_limit: 119902,
+            to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
+            value: 0x1c6bf526340000u64.into(),
+            input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
+        };
+
+        let sig = Signature {
+            r: hex!("2a378831cf81d99a3f06a18ae1b6ca366817ab4d88a70053c41d7a8f0368e031").into(),
+            s: hex!("450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5").into(),
+            odd_y_parity: false,
+        };
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
+        assert_eq!(signed_tx.hash(), hash, "Expected same hash");
+        assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
     }
 }

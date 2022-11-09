@@ -18,7 +18,7 @@ parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 
 # crypto
-k256 = { version = "0.11", default-features = false, features = ["ecdsa", "keccak256"] }
+secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery"] }
 
 #used for forkid
 crc = "1"
