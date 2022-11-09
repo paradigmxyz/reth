@@ -215,6 +215,11 @@ where
                     // send the ping message
                     Pin::new(&mut this.inner).start_send(ping_bytes.into())?
                 } else {
+                    // check if the buffer is full
+                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
+                    }
+
                     // if the sink is not ready, buffer the message
                     this.outgoing_messages.push_back(ping_bytes.into());
                 }
@@ -228,6 +233,11 @@ where
                     // send the disconnect message
                     Pin::new(&mut this.inner).start_send(disconnect_bytes.into())?
                 } else {
+                    // check if the buffer is full
+                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
+                    }
+
                     // if the sink is not ready, buffer the message
                     this.outgoing_messages.push_back(disconnect_bytes.into());
                 }
@@ -257,6 +267,11 @@ where
                     // send the pong message
                     Pin::new(&mut this.inner).start_send(pong_bytes.into())?
                 } else {
+                    // check if the buffer is full
+                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
+                    }
+
                     // if the sink is not ready, buffer the message
                     this.outgoing_messages.push_back(pong_bytes.into());
                 }
