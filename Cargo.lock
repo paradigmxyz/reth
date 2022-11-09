@@ -3411,6 +3411,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
+ "itertools 0.10.5",
  "metrics",
  "rand 0.8.5",
  "reth-db",
