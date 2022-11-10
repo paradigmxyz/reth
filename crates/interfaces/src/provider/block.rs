@@ -17,7 +17,7 @@ pub trait HeaderProvider: Send + Sync {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>>;
 }
 
-/// Client trait for fetching `Block` related data.
+/// Api trait for fetching `Block` related data.
 pub trait BlockProvider: Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
