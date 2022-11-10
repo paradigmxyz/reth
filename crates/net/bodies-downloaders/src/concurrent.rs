@@ -1,6 +1,6 @@
 use futures_util::{stream, StreamExt, TryFutureExt};
 use reth_interfaces::p2p::bodies::{
-    client::BodiesClient,
+    client::{BodiesClient, BodiesClientError},
     downloader::{BodiesStream, DownloadError, Downloader},
 };
 use reth_primitives::H256;
@@ -40,15 +40,19 @@ impl<C: BodiesClient> Downloader for ConcurrentDownloader<C> {
         <I as IntoIterator>::IntoIter: Send + 'b,
         'b: 'a,
     {
-        // TODO: Timeout
+        // TODO: Retry
         Box::pin(
             stream::iter(headers.into_iter().map(|header_hash| {
                 {
                     self.client
                         .get_block_body(header_hash)
                         .map_ok(move |body| (header_hash, body))
-                        // TODO: Real error
-                        .map_err(move |_| DownloadError::Timeout { header_hash })
+                        .map_err(|err| match err {
+                            BodiesClientError::Timeout { header_hash } => {
+                                DownloadError::Timeout { header_hash }
+                            }
+                            err => DownloadError::Client { source: err },
+                        })
                 }
             }))
             .buffered(self.batch_size),
