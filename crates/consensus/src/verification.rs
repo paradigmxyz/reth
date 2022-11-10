@@ -117,10 +117,10 @@ pub fn validate_transaction_regarding_state<AP: AccountProvider>(
 /// Validate block standalone
 pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     // check omners hash
-    let omners_hash = crate::proofs::calculate_omners_root(block.ommers.iter().map(|h| h.as_ref()));
-    if block.header.ommers_hash != omners_hash {
-        return Err(Error::BodyOmmnersHashDiff {
-            got: omners_hash,
+    let ommers_hash = crate::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+    if block.header.ommers_hash != ommers_hash {
+        return Err(Error::BodyOmmersHashDiff {
+            got: ommers_hash,
             expected: block.header.ommers_hash,
         })
     }

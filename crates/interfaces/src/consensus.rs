@@ -23,8 +23,8 @@ pub trait Consensus: Send + Sync {
 pub enum Error {
     #[error("Block used gas ({gas_used:?}) is greater then gas limit ({gas_limit:?})")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
-    #[error("Block ommner hash ({got:?}) is different then expected: ({expected:?})")]
-    BodyOmmnersHashDiff { got: H256, expected: H256 },
+    #[error("Block ommer hash ({got:?}) is different then expected: ({expected:?})")]
+    BodyOmmersHashDiff { got: H256, expected: H256 },
     #[error("Block transaction root ({got:?}) is different then expected: ({expected:?})")]
     BodyTransactionRootDiff { got: H256, expected: H256 },
     #[error("Block receipts root ({got:?}) is different then expected: ({expected:?})")]
