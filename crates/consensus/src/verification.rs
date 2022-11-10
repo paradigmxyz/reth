@@ -1,9 +1,7 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
 use reth_interfaces::{consensus::Error, provider::HeaderProvider, Result as RethResult};
-use reth_primitives::{
-    Account, Address, BlockLocked, SealedHeader, Transaction, TransactionSigned,
-};
+use reth_primitives::{Account, Address, BlockLocked, BlockNumber, SealedHeader, Transaction};
 use std::time::SystemTime;
 
 /// Validate header standalone
@@ -34,20 +32,33 @@ pub fn validate_header_standalone(
     Ok(())
 }
 
-/// Validate transactions standlone
-pub fn validate_transactions_standalone(
+/// Validate transaction in regards to header
+/// Only parametar from header that effects transaction is base_fee
+pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
     config: &Config,
+    at_block_number: BlockNumber,
+    base_fee: Option<u64>,
 ) -> Result<(), Error> {
     let chain_id = match transaction {
         Transaction::Legacy { chain_id, .. } => *chain_id,
-        Transaction::Eip2930 { chain_id, .. } => Some(*chain_id),
+        Transaction::Eip2930 { chain_id, .. } => {
+            if config.berlin_hard_fork_block > at_block_number {
+                return Err(Error::TransactionEip2930Disabled)
+            }
+            Some(*chain_id)
+        }
         Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+            if config.berlin_hard_fork_block > at_block_number {
+                return Err(Error::TransactionEip1559Disabled)
+            }
+
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {
                 return Err(Error::TransactionPriorityFeeMoreThenMaxFee)
             }
+
             Some(*chain_id)
         }
     };
@@ -56,22 +67,10 @@ pub fn validate_transactions_standalone(
             return Err(Error::TransactionChainId)
         }
     }
-
-    // signature validation?
-
-    Ok(())
-}
-
-/// Validate transaction in regards to header
-/// Only parametar from header that effects transaction is base_fee
-pub fn validate_transaction_regarding_header(
-    transaction: &Transaction,
-    base_fee: Option<u64>,
-) -> Result<(), Error> {
     // check basefee and few checks that are related to that.
     // https://github.com/ethereum/EIPs/pull/3594
     if let Some(base_fee_per_gas) = base_fee {
-        if transaction.max_fee_per_gas() < base_fee_per_gas {
+        if transaction.max_fee_per_gas() < base_fee_per_gas as u128 {
             return Err(Error::TransactionMaxFeeLessThenBaseFee)
         }
     }
@@ -79,38 +78,43 @@ pub fn validate_transaction_regarding_header(
     Ok(())
 }
 
-/// Account provider
-pub trait AccountProvider {
-    /// Get basic account information.
-    fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>>;
-}
-
 /// Validate transaction in regards of State
-pub fn validate_transaction_regarding_state<AP: AccountProvider>(
-    _transaction: &TransactionSigned,
-    _config: &Config,
-    _account_provider: &AP,
-) -> Result<(), Error> {
-    // sanity check: if account has a bytecode. This is not allowed.s
-    // check nonce
-    // gas_price*gas_limit+value < account.balance
+pub fn validate_transaction_regarding_account(
+    transaction: &Transaction,
+    account: &Account,
+) -> reth_interfaces::Result<()> {
+    // Signer account shoudn't have bytecode. Presence of bytecode means this is a smartcontract.
+    if account.has_bytecode() {
+        return Err(Error::SignerAccountHasBytecode.into())
+    }
 
-    // let max_gas_cost = U512::from(message.gas_limit())
-    //     * U512::from(ethereum_types::U256::from(message.max_fee_per_gas().to_be_bytes()));
-    // // See YP, Eq (57) in Section 6.2 "Execution"
-    // let v0 = max_gas_cost +
-    // U512::from(ethereum_types::U256::from(message.value().to_be_bytes()));
-    // let available_balance =
-    //     ethereum_types::U256::from(self.state.get_balance(sender)?.to_be_bytes()).into();
-    // if available_balance < v0 {
-    //     return Err(TransactionValidationError::Validation(
-    //         BadTransactionError::InsufficientFunds {
-    //             account: sender,
-    //             available: available_balance,
-    //             required: v0,
-    //         },
-    //     ));
-    // }
+    let (nonce, gas_price, gas_limit, value) = match transaction {
+        Transaction::Legacy { nonce, gas_price, gas_limit, value, .. } => {
+            (nonce, gas_price, gas_limit, value)
+        }
+        Transaction::Eip2930 { nonce, gas_price, gas_limit, value, .. } => {
+            (nonce, gas_price, gas_limit, value)
+        }
+        Transaction::Eip1559 { nonce, gas_limit, max_fee_per_gas, value, .. } => {
+            (nonce, max_fee_per_gas, gas_limit, value)
+        }
+    };
+
+    // check nonce
+    if account.nonce + 1 != *nonce {
+        return Err(Error::TransactionNonceNotConsistent.into())
+    }
+
+    // max fee that transaction can potentially spend
+    let max_fee = (*gas_limit as u128).saturating_mul(*gas_price).saturating_add(*value);
+
+    // check if account balance has enought to cover worst case
+    if max_fee > account.balance.as_u128() {
+        return Err(
+            Error::InsufficientFunds { max_fee, available_funds: account.balance.as_u128() }.into()
+        )
+    }
+
     Ok(())
 }
 
@@ -133,11 +137,6 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
             expected: block.header.transactions_root,
         })
     }
-
-    // TODO transaction verification, Maybe make it configurable as in check only
-    // signatures/limits/types
-
-    // check if all transactions limit does not goes over block limit
 
     // check receipts root
     let receipts_root = crate::proofs::calculate_receipt_root(block.receipts.iter());
@@ -277,18 +276,41 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
 }
 
 /// Full validation of block before execution.
-pub fn full_validation<PROV: HeaderProvider>(
+pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     block: &BlockLocked,
-    provider: PROV,
+    provider: Provider,
     config: &Config,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, config)?;
     validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
+
+    for transaction in block.body.iter() {
+        validate_transaction_regarding_header(
+            transaction,
+            config,
+            block.header.number,
+            block.header.base_fee_per_gas,
+        )?;
+
+        // NOTE: depending on the need of the stages, recovery could be done in different place.
+        let recovered =
+            transaction.try_ecrecovered().ok_or(Error::TransactionSignerRecoveryError)?;
+
+        let account =
+            provider.basic_account(recovered.signer())?.ok_or(Error::SignerAccountNotExisting)?;
+
+        validate_transaction_regarding_account(transaction, &account)?;
+    }
     Ok(())
 }
 
+/// Account provider
+pub trait AccountProvider {
+    /// Get basic account information.
+    fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>>;
+}
 #[cfg(test)]
 mod tests {
     use reth_interfaces::Result;
@@ -326,16 +348,23 @@ mod tests {
     struct Provider {
         is_known: bool,
         parent: Option<Header>,
+        account: Option<Account>,
     }
 
     impl Provider {
         /// New provider with parent
         fn new(parent: Option<Header>) -> Self {
-            Self { is_known: false, parent }
+            Self { is_known: false, parent, account: None }
         }
         /// New provider where is_known is always true
         fn new_known() -> Self {
-            Self { is_known: true, parent: None }
+            Self { is_known: true, parent: None, account: None }
+        }
+    }
+
+    impl AccountProvider for Provider {
+        fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
+            Ok(self.account)
         }
     }
 

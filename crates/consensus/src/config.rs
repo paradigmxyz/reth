@@ -11,6 +11,8 @@ pub const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
 /// Configuration for consensus
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// EIP-2728 hard fork number
+    pub berlin_hard_fork_block: BlockNumber,
     /// EIP-1559 hard fork number
     pub london_hard_fork_block: BlockNumber,
     /// The Merge/Paris hard fork block number
@@ -21,6 +23,11 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { london_hard_fork_block: 12965000, paris_hard_fork_block: 15537394, chain_id: 1 }
+        Self {
+            berlin_hard_fork_block: 12244000,
+            london_hard_fork_block: 12965000,
+            paris_hard_fork_block: 15537394,
+            chain_id: 1,
+        }
     }
 }

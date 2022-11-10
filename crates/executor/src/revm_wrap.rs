@@ -1,5 +1,5 @@
 use reth_interfaces::{provider::StateProvider, Error};
-use reth_primitives::{BlockLocked, Transaction, TransactionKind, H160, H256, U256};
+use reth_primitives::{BlockLocked, Transaction, TransactionKind, H160, H256, KECCAK_EMPTY, U256};
 use revm::{
     db::{CacheDB, DatabaseRef},
     BlockEnv, TransactTo, TxEnv,
@@ -40,7 +40,7 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
         Ok(self.0.basic_account(address)?.map(|account| revm::AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
-            code_hash: account.bytecode_hash,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
             code: None,
         }))
     }
@@ -83,7 +83,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = *value;
+            tx_env.value = (*value).into();
             tx_env.data = input.0.clone();
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
@@ -105,7 +105,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = *value;
+            tx_env.value = (*value).into();
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -138,7 +138,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = *value;
+            tx_env.value = (*value).into();
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);

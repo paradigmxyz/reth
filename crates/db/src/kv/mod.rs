@@ -214,7 +214,7 @@ mod tests {
 
         let value = Account {
             nonce: 18446744073709551615,
-            bytecode_hash: H256::random(),
+            bytecode_hash: Some(H256::random()),
             balance: U256::max_value(),
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
