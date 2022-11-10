@@ -34,6 +34,24 @@ pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         }
     }
 
+    if total_bits == 0 {
+        // Placeholder struct for when there are no bitfields to be added.
+        return quote! {
+            #[derive(Debug, Default)]
+            struct #flags {
+            }
+
+            impl #flags {
+                fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+                    (#flags::default(), buf)
+                }
+                fn into_bytes(self) -> [u8; 0] {
+                    []
+                }
+            }
+        }
+    }
+
     // Total number of bits should be divisible by 8, so we might need to pad the struct with a
     // skipped field.
     let remaining = 8 - total_bits % 8;
