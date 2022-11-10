@@ -34,7 +34,7 @@ pub enum EgressECIESValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Raw ingress values for an ECIES protocol
 pub enum IngressECIESValue {
-    /// Receiving a message from a [`peerId`]
+    /// Receiving a message from a [`PeerId`]
     AuthReceive(PeerId),
     /// Receiving an ACK message
     Ack,

@@ -20,7 +20,17 @@ use tracing::*;
 
 const HEADERS: StageId = StageId("Headers");
 
-/// The headers stage implementation for staged sync
+/// The headers stage.
+///
+/// The headers stage downloads all block headers from the highest block in the local database to
+/// the perceived highest block on the network.
+///
+/// The headers are processed and data is inserted into these tables:
+///
+/// - [`HeaderNumbers`][reth_interfaces::db::tables::HeaderNumbers]
+/// - [`Headers`][reth_interfaces::db::tables::Headers]
+/// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
+/// - [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
 #[derive(Debug)]
 pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers

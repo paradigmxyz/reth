@@ -67,8 +67,8 @@
 //! The final `TransactionPool` is made up of two layers:
 //!
 //! The lowest layer is the actual pool implementations that manages (validated) transactions:
-//! [`TxPool`](crate::pool::TxPool). This is contained in a higher level pool type that guards the
-//! low level pool and handles additional listeners or metrics:
+//! [`TxPool`](crate::pool::txpool::TxPool). This is contained in a higher level pool type that
+//! guards the low level pool and handles additional listeners or metrics:
 //! [`PoolInner`](crate::pool::PoolInner)
 //!
 //! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
