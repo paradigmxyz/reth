@@ -18,7 +18,6 @@ use tracing::warn;
 const BODIES: StageId = StageId("BODIES");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
-// TODO(onbjerg): More docs
 /// The body stage downloads block bodies.
 /// The body downloader stage.
 ///
@@ -210,4 +209,6 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn unwind_missing_tx() {}
+
+    mod test_utils {}
 }
