@@ -4,14 +4,9 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-
 //! Rust Ethereum (reth) binary executable.
 
-/// CLI definition and entrypoint
 pub mod cli;
-
-/// Utility functions.
-pub mod util;
-
-/// Command for executing Ethereum blockchain tests
+pub mod node;
 pub mod test_eth_chain;
+pub mod util;

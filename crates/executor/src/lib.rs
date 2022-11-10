@@ -7,10 +7,9 @@
 
 //! Reth executor executes transaction in block of data.
 
-mod cfg;
+pub mod config;
 /// Executor
 pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
-
-pub use cfg::Config;
+pub use config::Config;

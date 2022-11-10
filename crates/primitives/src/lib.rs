@@ -12,6 +12,7 @@ mod block;
 mod chain;
 mod error;
 mod header;
+mod hex_bytes;
 mod integer_list;
 mod jsonu256;
 mod log;
@@ -22,14 +23,16 @@ mod transaction;
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
-pub use header::{Header, HeaderLocked};
+pub use header::{Header, SealedHeader};
+pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
-    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned, TxType,
+    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned,
+    TransactionSignedEcRecovered, TxType,
 };
 
 /// Block hash.
@@ -44,22 +47,24 @@ pub type BlockID = H256;
 pub type TxHash = H256;
 /// TxNumber is sequence number of all existing transactions
 pub type TxNumber = u64;
+/// Chain identifier type, introduced in EIP-155
+pub type ChainId = u64;
 
 /// Storage Key
 pub type StorageKey = H256;
 
 /// Storage value
-pub type StorageValue = H256;
+pub type StorageValue = U256;
 
-// NOTE: There is a benefit of using wrapped Bytes as it gives us serde and debug
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, Bloom, Bytes, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 #[doc(hidden)]
 mod __reexport {
     pub use hex;
+    pub use hex_literal;
     pub use tiny_keccak;
 }
 

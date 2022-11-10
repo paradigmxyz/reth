@@ -8,7 +8,7 @@
 
 ## Build
 
-To build this project we are currently using Rust nightly for GAT support, that is planed to release in rust 1.65 (4th Nov 2022). GAT's are used for the `Database` trait in `reth-interface`. 
+Rust minimum required version to build this project is 1.65.0 published 02.11.2022
 
 ## Docs
 

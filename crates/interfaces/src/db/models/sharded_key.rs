@@ -4,7 +4,6 @@ use crate::db::{
     table::{Decode, Encode},
     Error,
 };
-use eyre::eyre;
 use reth_primitives::TxNumber;
 
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
@@ -13,7 +12,7 @@ use reth_primitives::TxNumber;
 /// `Address | 200` -> data is from transaction 0 to 200.
 ///
 /// `Address | 300` -> data is from transaction 201 to 300.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct ShardedKey<T> {
     /// The key for this type.
     pub key: T,
@@ -51,9 +50,7 @@ where
         let tx_num_index = value.len() - 8;
 
         let highest_tx_number = u64::from_be_bytes(
-            value.as_ref()[tx_num_index..]
-                .try_into()
-                .map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
+            value.as_ref()[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?,
         );
         let key = T::decode(value.slice(..tx_num_index))?;
 

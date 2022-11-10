@@ -12,7 +12,6 @@ reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
-eyre = "0.6.8"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
 bytes = "1.2"

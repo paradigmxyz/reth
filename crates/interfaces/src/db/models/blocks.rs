@@ -8,7 +8,6 @@ use crate::{
     impl_fixed_arbitrary,
 };
 use bytes::Bytes;
-use eyre::eyre;
 use reth_primitives::{BlockHash, BlockNumber, H256};
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +31,16 @@ impl BlockNumHash {
     /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]
     pub fn take(self) -> (BlockNumber, BlockHash) {
         (self.0 .0, self.0 .1)
+    }
+
+    /// Return the block number
+    pub fn number(&self) -> BlockNumber {
+        self.0 .0
+    }
+
+    /// Return the block hash
+    pub fn hash(&self) -> BlockHash {
+        self.0 .1
     }
 }
 
@@ -60,12 +69,9 @@ impl Decode for BlockNumHash {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         let value: bytes::Bytes = value.into();
 
-        let num = u64::from_be_bytes(
-            value.as_ref()[..8]
-                .try_into()
-                .map_err(|_| Error::Decode(eyre!("Into bytes error.")))?,
-        );
-        let hash = H256::decode(value.slice(8..))?;
+        let num =
+            u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
+        let hash = H256::from_slice(&value.slice(8..));
 
         Ok(BlockNumHash((num, hash)))
     }
@@ -88,7 +94,7 @@ mod test {
         bytes[..8].copy_from_slice(&num.to_be_bytes());
         bytes[8..].copy_from_slice(&hash.0);
 
-        let encoded = Encode::encode(key.clone());
+        let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
         let decoded: BlockNumHash = Decode::decode(encoded.to_vec()).unwrap();

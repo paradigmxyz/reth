@@ -32,19 +32,27 @@ pub enum StageError {
 pub enum DatabaseIntegrityError {
     /// Cannonical hash is missing from db
     #[error("no cannonical hash for block #{number}")]
-    NoCannonicalHash {
+    CannonicalHash {
         /// The block number key
         number: BlockNumber,
     },
     /// Cannonical header is missing from db
     #[error("no cannonical hash for block #{number}")]
-    NoCannonicalHeader {
+    CannonicalHeader {
         /// The block number key
         number: BlockNumber,
     },
     /// Header is missing from db
     #[error("no header for block #{number} ({hash})")]
-    NoHeader {
+    Header {
+        /// The block number key
+        number: BlockNumber,
+        /// The block hash key
+        hash: H256,
+    },
+    /// Cumulative transaction count is missing from db
+    #[error("no cumulative tx count for ${number} ({hash})")]
+    CumulativeTxCount {
         /// The block number key
         number: BlockNumber,
         /// The block hash key

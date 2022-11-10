@@ -17,7 +17,7 @@ reth-rpc-types = { path = "../rpc-types" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 # rpc
-jsonrpsee = { version = "0.15" }
+jsonrpsee = { version = "0.16" }
 
 # misc
 async-trait = "0.1"

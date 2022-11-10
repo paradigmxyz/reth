@@ -1,3 +1,4 @@
+//! Testing support for headers related interfaces.
 use crate::{
     consensus::{self, Consensus},
     p2p::headers::{
@@ -5,23 +6,21 @@ use crate::{
         downloader::{DownloadError, Downloader},
     },
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
-
-use reth_primitives::{Header, HeaderLocked, H256, H512, U256};
+use reth_primitives::{Header, SealedHeader, H256, H512, U256};
 use reth_rpc_types::engine::ForkchoiceState;
-
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 #[derive(Debug)]
 /// A test downloader which just returns the values that have been pushed to it.
 pub struct TestDownloader {
-    result: Result<Vec<HeaderLocked>, DownloadError>,
+    result: Result<Vec<SealedHeader>, DownloadError>,
 }
 
 impl TestDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(result: Result<Vec<HeaderLocked>, DownloadError>) -> Self {
+    pub fn new(result: Result<Vec<SealedHeader>, DownloadError>) -> Self {
         Self { result }
     }
 }
@@ -45,9 +44,9 @@ impl Downloader for TestDownloader {
 
     async fn download(
         &self,
-        _: &HeaderLocked,
+        _: &SealedHeader,
         _: &ForkchoiceState,
-    ) -> Result<Vec<HeaderLocked>, DownloadError> {
+    ) -> Result<Vec<SealedHeader>, DownloadError> {
         self.result.clone()
     }
 }
@@ -155,9 +154,13 @@ impl Consensus for TestConsensus {
         self.channel.1.clone()
     }
 
-    fn validate_header(&self, _header: &Header, _parent: &Header) -> Result<(), consensus::Error> {
+    fn validate_header(
+        &self,
+        _header: &SealedHeader,
+        _parent: &SealedHeader,
+    ) -> Result<(), consensus::Error> {
         if self.fail_validation {
-            Err(consensus::Error::ConsensusError)
+            Err(consensus::Error::BaseFeeMissing)
         } else {
             Ok(())
         }
@@ -166,19 +169,19 @@ impl Consensus for TestConsensus {
 
 /// Generate a range of random header. The parent hash of the first header
 /// in the result will be equal to head
-pub fn gen_random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<HeaderLocked> {
+pub fn gen_random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<SealedHeader> {
     let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
     for idx in rng {
         headers.push(gen_random_header(
             idx,
-            Some(headers.last().map(|h: &HeaderLocked| h.hash()).unwrap_or(head)),
+            Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
         ));
     }
     headers
 }
 
 /// Generate a random header
-pub fn gen_random_header(number: u64, parent: Option<H256>) -> HeaderLocked {
+pub fn gen_random_header(number: u64, parent: Option<H256>) -> SealedHeader {
     let header = reth_primitives::Header {
         number,
         nonce: rand::random(),
@@ -186,5 +189,5 @@ pub fn gen_random_header(number: u64, parent: Option<H256>) -> HeaderLocked {
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    header.lock()
+    header.seal()
 }

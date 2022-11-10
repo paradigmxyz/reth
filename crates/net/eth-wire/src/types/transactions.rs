@@ -395,10 +395,10 @@ mod test {
         };
 
         // checking tx by tx for easier debugging if there are any regressions
-        for (expected, decoded) in
+        for (decoded, expected) in
             decoded_transactions.message.0.iter().zip(expected_transactions.message.0.iter())
         {
-            assert_eq!(expected, decoded);
+            assert_eq!(decoded, expected);
         }
 
         assert_eq!(decoded_transactions, expected_transactions);

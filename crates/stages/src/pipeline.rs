@@ -4,7 +4,10 @@ use crate::{
 };
 use reth_interfaces::db::{DBContainer, Database, DbTx};
 use reth_primitives::BlockNumber;
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    sync::Arc,
+};
 use tokio::sync::mpsc::Sender;
 use tracing::*;
 
@@ -139,7 +142,7 @@ impl<DB: Database> Pipeline<DB> {
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self, db: &DB) -> Result<(), PipelineError> {
+    pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
         loop {
             let mut state = PipelineState {
                 events_sender: self.events_sender.clone(),
@@ -148,7 +151,7 @@ impl<DB: Database> Pipeline<DB> {
                 minimum_progress: None,
                 reached_tip: true,
             };
-            let next_action = self.run_loop(&mut state, db).await?;
+            let next_action = self.run_loop(&mut state, db.as_ref()).await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -396,7 +399,7 @@ mod tests {
                     false,
                 )
                 .set_max_block(Some(10))
-                .run(&db)
+                .run(db)
                 .await
         });
 
@@ -450,7 +453,7 @@ mod tests {
                 .set_max_block(Some(10));
 
             // Sync first
-            pipeline.run(&db).await.expect("Could not run pipeline");
+            pipeline.run(db.clone()).await.expect("Could not run pipeline");
 
             // Unwind
             pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
@@ -528,7 +531,7 @@ mod tests {
                 )
                 .set_max_block(Some(10))
                 .set_channel(tx)
-                .run(&db)
+                .run(db)
                 .await
                 .expect("Could not run pipeline");
         });
@@ -620,7 +623,7 @@ mod tests {
                 .set_max_block(Some(10));
 
             // Sync first
-            pipeline.run(&db).await.expect("Could not run pipeline");
+            pipeline.run(db.clone()).await.expect("Could not run pipeline");
 
             // Unwind
             pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
@@ -690,7 +693,7 @@ mod tests {
                     true,
                 )
                 .set_max_block(Some(10))
-                .run(&db)
+                .run(db)
                 .await
         });
 

@@ -9,14 +9,14 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate},
-        AddedPendingTransaction, AddedTransaction,
+        AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
     },
     traits::{PoolStatus, StateDiff},
-    NewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
+    OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::TxHash;
+use reth_primitives::{TxHash, H256};
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
@@ -152,19 +152,25 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
     /// sender allowance.
-    pub(crate) fn on_new_block(&mut self, block: NewBlockEvent<T::Transaction>) {
+    pub(crate) fn on_new_block(&mut self, event: OnNewBlockEvent) -> OnNewBlockOutcome {
         // Remove all transaction that were included in the block
-        for mined in &block.mined_transactions {
-            self.all_transactions.remove_transaction(mined.id());
-            self.pending_pool.remove_transaction(mined.id());
+        for tx_hash in &event.mined_transactions {
+            self.remove_transaction_by_hash(tx_hash);
         }
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let updates =
-            self.all_transactions.update(block.pending_block_base_fee, &block.state_changes);
+            self.all_transactions.update(event.pending_block_base_fee, &event.state_changes);
 
         // Process the sub-pool updates
-        self.process_updates(updates);
+        let UpdateOutcome { promoted, discarded, .. } = self.process_updates(updates);
+
+        OnNewBlockOutcome {
+            block_hash: event.hash,
+            mined: event.mined_transactions,
+            promoted,
+            discarded,
+        }
     }
 
     /// Adds the transaction into the pool.
@@ -270,6 +276,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let (tx, pool) = self.all_transactions.remove_transaction(id)?;
+        self.remove_from_subpool(pool, tx.id())
+    }
+
+    /// Remove the transaction from the entire pool via its hash.
+    ///
+    /// This includes the total set of transaction and the subpool it currently resides in.
+    fn remove_transaction_by_hash(
+        &mut self,
+        tx_hash: &H256,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
         self.remove_from_subpool(pool, tx.id())
     }
 
@@ -673,6 +690,18 @@ impl<T: PoolTransaction> AllTransactions<T> {
         id: &'b TransactionId,
     ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
+    }
+
+    /// Removes a transaction from the set using its hash.
+    pub(crate) fn remove_transaction_by_hash(
+        &mut self,
+        tx_hash: &H256,
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
+        let tx = self.by_hash.remove(tx_hash)?;
+        let internal = self.txs.remove(&tx.transaction_id)?;
+        // decrement the counter for the sender.
+        self.tx_decr(tx.sender_id());
+        Some((tx, internal.subpool))
     }
 
     /// Removes a transaction from the set.
