@@ -1,6 +1,7 @@
 use super::client::{HeadersClient, HeadersRequest, HeadersStream};
 use crate::consensus::Consensus;
 
+use crate::consensus;
 use async_trait::async_trait;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
@@ -15,12 +16,13 @@ use tokio_stream::StreamExt;
 #[derive(Error, Debug, Clone)]
 pub enum DownloadError {
     /// Header validation failed
-    #[error("Failed to validate header {hash}. Details: {details}.")]
+    #[error("Failed to validate header {hash}. Details: {error}.")]
     HeaderValidation {
         /// Hash of header failing validation
         hash: H256,
         /// The details of validation failure
-        details: String,
+        #[source]
+        error: consensus::Error,
     },
     /// Timed out while waiting for request id response.
     #[error("Timed out while getting headers for request {request_id}.")]
@@ -118,9 +120,9 @@ pub trait Downloader: Sync + Send {
             })
         }
 
-        self.consensus().validate_header(header, parent).map_err(|e| {
-            DownloadError::HeaderValidation { hash: parent.hash(), details: e.to_string() }
-        })?;
+        self.consensus()
+            .validate_header(header, parent)
+            .map_err(|error| DownloadError::HeaderValidation { hash: parent.hash(), error })?;
         Ok(())
     }
 }

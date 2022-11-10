@@ -192,7 +192,9 @@ pub trait DbCursorRW<'tx, T: Table> {
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 
-    /// Append value to next cursor item
+    /// Append value to next cursor item.
+    ///
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 
     /// Delete current value that cursor points to
@@ -203,7 +205,10 @@ pub trait DbCursorRW<'tx, T: Table> {
 pub trait DbDupCursorRW<'tx, T: DupSort> {
     /// Append value to next cursor item
     fn delete_current_duplicates(&mut self) -> Result<(), Error>;
-    /// Append duplicate value
+
+    /// Append duplicate value.
+    ///
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 }
 

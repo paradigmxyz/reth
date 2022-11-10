@@ -1,12 +1,12 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, Consensus},
+    consensus::{self, Consensus, Error},
     p2p::headers::{
         client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
         downloader::{DownloadError, Downloader},
     },
 };
-use reth_primitives::{Header, SealedHeader, H256, H512, U256};
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -159,6 +159,14 @@ impl Consensus for TestConsensus {
         _header: &SealedHeader,
         _parent: &SealedHeader,
     ) -> Result<(), consensus::Error> {
+        if self.fail_validation {
+            Err(consensus::Error::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), Error> {
         if self.fail_validation {
             Err(consensus::Error::BaseFeeMissing)
         } else {

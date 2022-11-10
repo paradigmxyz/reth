@@ -65,8 +65,8 @@ impl<DB: Database> Stage<DB> for TxIndex {
 
         // Aggregate and insert cumulative transaction count for each block number
         for entry in entries {
-            let (key, tx_count) = entry?;
-            count += tx_count as u64;
+            let (key, body) = entry?;
+            count += body.tx_amount;
             cursor.append(key, count)?;
         }
 

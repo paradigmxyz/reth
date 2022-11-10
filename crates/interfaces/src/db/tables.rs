@@ -3,7 +3,7 @@
 use crate::db::{
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
-        blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+        blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockBody},
         ShardedKey,
     },
     DupSort,
@@ -119,8 +119,10 @@ table!(
     Headers => BlockNumHash => Header);
 
 table!(
-    /// Stores the number of transactions of a block.
-    BlockBodies => BlockNumHash => NumTxesInBlock);
+    /// Stores a pointer to the first transaction in the block, the number of transactions in the block, and the uncles/ommers of the block.
+    /// 
+    /// The transaction IDs point to the [`Transactions`] table.
+    BlockBodies => BlockNumHash => StoredBlockBody);
 
 table!(
     /// Stores the maximum [`TxNumber`] from which this particular block starts.

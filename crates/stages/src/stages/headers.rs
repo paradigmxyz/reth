@@ -81,14 +81,15 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
                         done: false,
                     })
                 }
-                DownloadError::HeaderValidation { hash, details } => {
-                    warn!("validation error for header {hash}: {details}");
-                    return Err(StageError::Validation { block: last_block_num })
+                DownloadError::HeaderValidation { hash, error } => {
+                    warn!("Validation error for header {hash}: {error}");
+                    return Err(StageError::Validation { block: last_block_num, error })
                 }
                 // TODO: this error is never propagated, clean up
-                DownloadError::MismatchedHeaders { .. } => {
-                    return Err(StageError::Validation { block: last_block_num })
-                }
+                // DownloadError::MismatchedHeaders { .. } => {
+                //     return Err(StageError::Validation { block: last_block_num })
+                // }
+                _ => unreachable!(),
             },
         };
         let stage_progress = self.write_headers::<DB>(tx, headers).await?.unwrap_or(last_block_num);
@@ -184,7 +185,10 @@ mod tests {
     use super::*;
     use crate::util::test_utils::StageTestRunner;
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{gen_random_header, gen_random_header_range};
+    use reth_interfaces::{
+        consensus,
+        test_utils::{gen_random_header, gen_random_header_range},
+    };
     use test_utils::{HeadersTestRunner, TestDownloader};
 
     const TEST_STAGE: StageId = StageId("Headers");
@@ -221,13 +225,16 @@ mod tests {
     async fn execute_validation_error() {
         let head = gen_random_header(0, None);
         let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Err(
-            DownloadError::HeaderValidation { hash: H256::zero(), details: "".to_owned() },
+            DownloadError::HeaderValidation {
+                hash: H256::zero(),
+                error: consensus::Error::BaseFeeMissing,
+            },
         )));
         runner.insert_header(&head).expect("failed to insert header");
 
         let rx = runner.execute(ExecInput::default());
         runner.consensus.update_tip(H256::from_low_u64_be(1));
-        assert_matches!(rx.await.unwrap(), Err(StageError::Validation { block }) if block == 0);
+        assert_matches!(rx.await.unwrap(), Err(StageError::Validation { block, error: consensus::Error::BaseFeeMissing, }) if block == 0);
     }
 
     #[tokio::test]

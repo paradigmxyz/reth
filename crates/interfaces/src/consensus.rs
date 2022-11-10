@@ -1,20 +1,30 @@
 use async_trait::async_trait;
-use reth_primitives::{BlockHash, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockHash, BlockLocked, BlockNumber, SealedHeader, H256};
 use tokio::sync::watch::Receiver;
 
 /// Re-export forkchoice state
 pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
-/// We are checking validity of block header here.
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Send + Sync {
     /// Get a receiver for the fork choice state
     fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
 
-    /// Validate if header is correct and follows consensus specification
+    /// Validate if header is correct and follows consensus specification.
+    ///
+    /// **This should not be called for the genesis block**.
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error>;
+
+    /// Validate a block disregarding world state, i.e. things that can be checked before sender
+    /// recovery and execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
+    /// 11.1 "Ommer Validation".
+    ///
+    /// **This should not be called for the genesis block**.
+    fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error>;
 }
 
 /// Consensus Errors
