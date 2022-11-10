@@ -74,9 +74,9 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
-    type Cursor<T: Table>: DbCursorRO<'a, T>;
+    type Cursor<T: Table>: DbCursorRO<'a, T> + Send + Sync;
     /// DupCursor GAT
-    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T>;
+    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T> + Send + Sync;
 }
 
 /// Implements the GAT method from:
@@ -85,12 +85,14 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DbTxMutGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
-    type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T>;
+    type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T> + Send + Sync;
     /// DupCursor GAT
     type DupCursorMut<T: DupSort>: DbDupCursorRW<'a, T>
         + DbCursorRW<'a, T>
         + DbDupCursorRO<'a, T>
-        + DbCursorRO<'a, T>;
+        + DbCursorRO<'a, T>
+        + Send
+        + Sync;
 }
 
 /// Read only transaction
