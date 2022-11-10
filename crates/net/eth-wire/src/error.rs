@@ -67,6 +67,8 @@ pub enum P2PStreamError {
     MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("started ping task before the handshake completed")]
     PingBeforeHandshake,
+    #[error("too many messages buffered before sending")]
+    SendBufferFull,
     // TODO: remove / reconsider
     #[error("disconnected")]
     Disconnected,
