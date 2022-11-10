@@ -11,7 +11,7 @@ use reth_interfaces::{
     },
     p2p::bodies::downloader::Downloader,
 };
-use reth_primitives::{BlockLocked, Header, SealedHeader};
+use reth_primitives::{BlockLocked, SealedHeader};
 use std::fmt::Debug;
 use tracing::warn;
 
@@ -124,14 +124,7 @@ impl<DB: Database, D: Downloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
                 StoredBlockBody {
                     base_tx_id,
                     tx_amount: block.body.len() as u64,
-                    // TODO: This should be a Vec with max 2 elements
-                    ommers: block
-                        .ommers
-                        .into_iter()
-                        .map(|header| header.unseal())
-                        .collect::<Vec<Header>>()
-                        .try_into()
-                        .expect("The block should only have at most 2 uncles"),
+                    ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
                 },
             )?;
 

@@ -30,7 +30,7 @@ pub struct StoredBlockBody {
     /// The number of transactions in the block.
     pub tx_amount: u64,
     /// The block headers of this block's uncles.
-    pub ommers: [Header; 2],
+    pub ommers: Vec<Header>,
 }
 
 /// Hash of the block header. Value for [`CanonicalHeaders`]
