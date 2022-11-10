@@ -87,12 +87,10 @@ impl<DB: Database> Stage<DB> for TxIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::{StageTestDB, StageTestRunner};
+    use crate::util::test_utils::{StageTestDB, StageTestRunner, PREV_STAGE_ID};
     use assert_matches::assert_matches;
     use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
     use reth_primitives::H256;
-
-    const TEST_STAGE: StageId = StageId("PrevStage");
 
     #[tokio::test]
     async fn execute_empty_db() {
@@ -115,7 +113,7 @@ mod tests {
 
         let (head, tail) = (headers.first().unwrap(), headers.last().unwrap());
         let input = ExecInput {
-            previous_stage: Some((TEST_STAGE, tail.number)),
+            previous_stage: Some((PREV_STAGE_ID, tail.number)),
             stage_progress: Some(head.number),
         };
         let rx = runner.execute(input);
@@ -146,7 +144,7 @@ mod tests {
 
         let (pivot, tail) = (headers.get(pivot).unwrap(), headers.last().unwrap());
         let input = ExecInput {
-            previous_stage: Some((TEST_STAGE, tail.number)),
+            previous_stage: Some((PREV_STAGE_ID, tail.number)),
             stage_progress: Some(pivot.number),
         };
         let rx = runner.execute(input);

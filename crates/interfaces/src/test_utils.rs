@@ -7,9 +7,14 @@ use crate::{
 };
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use reth_primitives::{Header, SealedHeader, H256, H512, U256};
+use reth_primitives::{
+    AccessList, Bytes, Header, SealedHeader, Signature, Transaction, TransactionSigned, H256, H512,
+    U256,
+};
 use reth_rpc_types::engine::ForkchoiceState;
 
+use rand::Rng;
+use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
@@ -183,12 +188,94 @@ pub fn gen_random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<Sea
 
 /// Generate a random header
 pub fn gen_random_header(number: u64, parent: Option<H256>) -> SealedHeader {
+    let mut rng = rand::thread_rng();
     let header = reth_primitives::Header {
         number,
-        nonce: rand::random(),
-        difficulty: U256::from(rand::random::<u32>()),
+        nonce: rng.gen(),
+        difficulty: U256::from(rng.gen::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
     header.seal()
+}
+
+/// Generate a random transaction
+pub fn gen_random_tx() -> TransactionSigned {
+    let mut rng = rand::thread_rng();
+
+    let secp = Secp256k1::new();
+    let key_pair = KeyPair::new(&secp, &mut rng);
+
+    let tx = Transaction::Eip1559 {
+        chain_id: 1,
+        nonce: rng.gen(),
+        gas_limit: rng.gen(),
+        max_fee_per_gas: rng.gen(),
+        max_priority_fee_per_gas: rng.gen(),
+        to: reth_primitives::TransactionKind::Call(rng.gen()),
+        value: U256::from(rng.gen::<u64>()),
+        input: Bytes::default(),
+        access_list: AccessList::default(),
+    };
+
+    let signature =
+        sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+    TransactionSigned::from_transaction_and_signature(tx, signature)
+}
+
+/// Signs message with the given secret key.
+/// Returns the corresponding signature.
+pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1::Error> {
+    let secp = Secp256k1::new();
+    let sec = SecretKey::from_slice(secret.as_ref())?;
+    let s = secp.sign_ecdsa_recoverable(&SecpMessage::from_slice(&message[..])?, &sec);
+    let (rec_id, data) = s.serialize_compact();
+
+    Ok(Signature {
+        r: U256::from_big_endian(&data[..32]),
+        s: U256::from_big_endian(&data[32..64]),
+        odd_y_parity: rec_id.to_i32() != 0,
+    })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use hex_literal::hex;
+    use reth_primitives::{keccak256, Address, TransactionKind};
+    use secp256k1::KeyPair;
+
+    #[test]
+    fn test_sign_message() {
+        let secp = Secp256k1::new();
+
+        let tx = Transaction::Eip1559 {
+            chain_id: 1,
+            nonce: 0x42,
+            gas_limit: 44386,
+            to: TransactionKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
+            value: 0.into(),
+            input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
+            max_fee_per_gas: 0x4a817c800,
+            max_priority_fee_per_gas: 0x3b9aca00,
+            access_list: AccessList::default(),
+        };
+        let signature_hash = tx.signature_hash();
+
+        for _ in 0..100 {
+            let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
+
+            let signature =
+                sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
+                    .unwrap();
+
+            let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
+            let recovered = signed.recover_signer().unwrap();
+
+            let public_key_hash = keccak256(&key_pair.public_key().serialize_uncompressed()[1..]);
+            let expected = Address::from_slice(&public_key_hash[12..]);
+
+            assert_eq!(recovered, expected);
+        }
+    }
 }

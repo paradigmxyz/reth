@@ -147,7 +147,10 @@ pub(crate) mod test_utils {
     use std::{borrow::Borrow, sync::Arc};
     use tokio::sync::oneshot;
 
-    use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+    use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+
+    /// The previous test stage id mock used for testing
+    pub(crate) const PREV_STAGE_ID: StageId = StageId("PrevStage");
 
     /// The [StageTestDB] is used as an internal
     /// database for testing stage implementation.
@@ -176,6 +179,15 @@ pub(crate) mod test_utils {
         /// Return a database wrapped in [DBContainer].
         pub(crate) fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
             DBContainer::new(self.db.borrow()).expect("failed to create db container")
+        }
+
+        /// Put a single value into the database
+        pub(crate) fn put<T: Table>(&self, k: T::Key, v: T::Value) -> Result<(), Error> {
+            let mut db = self.container();
+            let tx = db.get_mut();
+            tx.put::<T>(k, v)?;
+            db.commit()?;
+            Ok(())
         }
 
         /// Map a collection of values and store them in the database.

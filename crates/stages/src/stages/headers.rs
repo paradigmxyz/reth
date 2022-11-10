@@ -182,12 +182,10 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::StageTestRunner;
+    use crate::util::test_utils::{StageTestRunner, PREV_STAGE_ID};
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{gen_random_header, gen_random_header_range};
     use test_utils::{HeadersTestRunner, TestDownloader};
-
-    const TEST_STAGE: StageId = StageId("Headers");
 
     #[tokio::test]
     // Check that the execution errors on empty database or
@@ -267,7 +265,7 @@ mod tests {
         runner.insert_header(&head).expect("failed to insert header");
 
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((TEST_STAGE, head.number)),
+            previous_stage: Some((PREV_STAGE_ID, head.number)),
             stage_progress: Some(head.number),
         });
         let tip = headers.last().unwrap();
@@ -291,7 +289,7 @@ mod tests {
         let runner = HeadersTestRunner::with_linear_downloader();
         runner.insert_header(&head).expect("failed to insert header");
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((TEST_STAGE, head.number)),
+            previous_stage: Some((PREV_STAGE_ID, head.number)),
             stage_progress: Some(head.number),
         });
 
