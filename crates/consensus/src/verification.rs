@@ -185,7 +185,7 @@ pub fn validate_header_regarding_parent(
 ) -> Result<(), Error> {
     // Parent number is consistent.
     if parent.number + 1 != child.number {
-        return Err(Error::ParentBlockNumberMissmatch {
+        return Err(Error::ParentBlockNumberMismatch {
             parent_block_number: parent.number,
             block_number: child.number,
         })

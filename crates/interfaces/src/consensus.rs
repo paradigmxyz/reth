@@ -33,8 +33,8 @@ pub enum Error {
     BlockKnown { hash: BlockHash, number: BlockNumber },
     #[error("Block parent [hash:{hash:?}] is not known")]
     ParentUnknown { hash: BlockHash },
-    #[error("Block number {block_number:?} is missmatch with parent block number {parent_block_number:?}")]
-    ParentBlockNumberMissmatch { parent_block_number: BlockNumber, block_number: BlockNumber },
+    #[error("Block number {block_number:?} is mismatch with parent block number {parent_block_number:?}")]
+    ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
     #[error(
         "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}"
     )]
