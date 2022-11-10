@@ -72,6 +72,12 @@ impl Capabilities {
         self.inner
     }
 
+    /// Whether the peer supports `eth` sub-protocol.
+    #[inline]
+    pub fn supports_eth(&self) -> bool {
+        self.eth_67 || self.eth_66
+    }
+
     /// Whether this peer supports eth v66 protocol.
     #[inline]
     pub fn supports_eth_v66(&self) -> bool {
