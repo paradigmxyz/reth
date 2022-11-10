@@ -107,3 +107,26 @@ impl ConcurrentDownloaderBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    #[ignore]
+    async fn emits_bodies_in_order() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn header_iter_failure() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn client_failure() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn retries_requests() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn timeout() {}
+}

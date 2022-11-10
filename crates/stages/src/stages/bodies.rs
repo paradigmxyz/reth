@@ -13,6 +13,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{BlockLocked, Header, SealedHeader};
 use std::fmt::Debug;
+use tracing::warn;
 
 const BODIES: StageId = StageId("BODIES");
 
@@ -56,11 +57,12 @@ impl<DB: Database, D: Downloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
     ) -> Result<ExecOutput, StageError> {
         let tx = db.get_mut();
         let starting_block = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input
-            .previous_stage
-            .as_ref()
-            .map(|(_, block)| *block)
-            .expect("The bodies stage cannot be the first stage.");
+        let previous_stage_progress =
+            input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
+        if previous_stage_progress == 0 {
+            warn!("The body stage seems to be running first, no work can be completed.");
+        }
+
         let target = previous_stage_progress.min(previous_stage_progress + self.batch_size);
 
         // Short circuit in case we already reached the target block
@@ -180,4 +182,39 @@ impl<DB: Database, D: Downloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    #[ignore]
+    async fn empty_db() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn already_reached_target() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn partial_body_download() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn full_body_download() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn pre_validation_failure() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn block_tx_pointer_validity() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn unwind() {}
+
+    #[tokio::test]
+    #[ignore]
+    async fn unwind_missing_tx() {}
 }
