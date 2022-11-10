@@ -1,7 +1,11 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
-use reth_interfaces::{consensus::Error, provider::HeaderProvider, Result as RethResult};
-use reth_primitives::{Account, Address, BlockLocked, BlockNumber, SealedHeader, Transaction};
+use reth_interfaces::{
+    consensus::Error,
+    provider::{AccountProvider, HeaderProvider},
+    Result as RethResult,
+};
+use reth_primitives::{Account, BlockLocked, BlockNumber, SealedHeader, Transaction};
 use std::time::SystemTime;
 
 /// Validate header standalone
@@ -306,15 +310,10 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     Ok(())
 }
 
-/// Account provider
-pub trait AccountProvider {
-    /// Get basic account information.
-    fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>>;
-}
 #[cfg(test)]
 mod tests {
     use reth_interfaces::Result;
-    use reth_primitives::{hex_literal::hex, BlockHash, Header};
+    use reth_primitives::{hex_literal::hex, Address, BlockHash, Header};
 
     use super::*;
 
