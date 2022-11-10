@@ -3195,6 +3195,7 @@ dependencies = [
  "eyre",
  "futures",
  "heapless",
+ "modular-bitfield",
  "parity-scale-codec",
  "postcard",
  "rand 0.8.5",

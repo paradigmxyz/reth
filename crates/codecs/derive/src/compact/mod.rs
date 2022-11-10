@@ -44,7 +44,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                                 ftype.push_str("::");
                             }
                         }
-                        let should_compact = !is_hash_type(&ftype) ||
+                        let should_compact = !not_flag_type(&ftype) ||
                             field.attrs.iter().any(|attr| {
                                 attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
                             });
@@ -68,14 +68,17 @@ pub fn get_fields(data: &Data) -> FieldList {
 pub fn get_bit_size(ftype: &str) -> u8 {
     if ftype == "u64" {
         return 4
+    } else if ftype == "bool" || ftype == "Option" {
+        return 1
     }
     6
 }
 
-/// Given the field type in a string format, checks if it's a fixed-hash type.
-pub fn is_hash_type(ftype: &str) -> bool {
+/// Given the field type in a string format, checks if it's type that shouldn't be added to the
+/// StructFlags.
+pub fn not_flag_type(ftype: &str) -> bool {
     let known = ["H256", "H160", "Address", "Bloom"];
-    known.contains(&ftype)
+    known.contains(&ftype) || ftype.starts_with("Vec")
 }
 
 /// Given the field name in a string format, returns various [`Ident`] necessary to generate code

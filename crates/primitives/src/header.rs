@@ -8,7 +8,7 @@ use std::ops::Deref;
 
 /// Block header
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, Compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.
@@ -225,7 +225,7 @@ mod tests {
         types::Bytes,
         utils::hex::{self, FromHex},
     };
-    use reth_codecs::Compact;
+
     use std::str::FromStr;
 
     #[test]

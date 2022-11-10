@@ -29,3 +29,5 @@ macro_rules! impl_compact {
 }
 
 impl_compact!(Header, Account);
+impl_compact!(Log, Receipt, TxType, StorageEntry);
+impl_compact!(AccountBeforeTx);

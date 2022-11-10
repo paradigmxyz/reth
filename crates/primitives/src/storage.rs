@@ -1,5 +1,7 @@
 use super::{H256, U256};
-use reth_codecs::main_codec;
+use bytes::Buf;
+use modular_bitfield::prelude::*;
+use reth_codecs::{main_codec, Compact};
 
 /// Account storage entry.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

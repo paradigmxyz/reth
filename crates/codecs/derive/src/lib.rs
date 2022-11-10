@@ -13,6 +13,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
 #[rustfmt::skip]
 #[allow(unreachable_code)]
 pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
+    #[cfg(feature = "compact")]
+    return use_compact(args, input);
+
     #[cfg(feature = "scale")]
     return use_scale(args, input);
 
@@ -61,6 +64,17 @@ pub fn use_postcard(_args: TokenStream, input: TokenStream) -> TokenStream {
 
     quote! {
         #[derive(serde::Serialize, serde::Deserialize)]
+        #ast
+    }
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    quote! {
+        #[derive(Compact, serde::Serialize, serde::Deserialize)]
         #ast
     }
     .into()

@@ -1,4 +1,4 @@
-use crate::db::{models::accounts::AccountBeforeTx, Decode, Encode, Error};
+use crate::db::{Decode, Encode, Error};
 use parity_scale_codec::decode_from_bytes;
 use reth_primitives::*;
 
@@ -42,6 +42,6 @@ impl sealed::Sealed for Vec<u8> {}
 
 impl_scale!(u8, u32, u16, u64, U256, H256, H160);
 
-impl_scale!(Log, Receipt, TxType, StorageEntry);
+// impl_scale!(Log, Receipt, TxType, StorageEntry);
 
-impl_scale!(AccountBeforeTx);
+// impl_scale!(AccountBeforeTx);

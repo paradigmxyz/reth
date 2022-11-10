@@ -5,7 +5,7 @@ use reth_codecs::{main_codec, Compact};
 
 /// Account saved in database
 #[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Compact)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Account {
     /// Nonce.
     pub nonce: u64,
