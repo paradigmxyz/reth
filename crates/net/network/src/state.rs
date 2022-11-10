@@ -87,7 +87,8 @@ where
         capabilities: Arc<Capabilities>,
         status: Status,
         request_tx: PeerRequestSender,
-    ) -> Result<(), Box<AddSessionError>> {
+    ) -> Result<(), AddSessionError> {
+        // TODO add capacity check
         debug_assert!(self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
         self.state_fetcher.new_connected_peer(peer, status.blockhash);

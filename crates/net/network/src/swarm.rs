@@ -71,7 +71,7 @@ where
             } => match self.state.on_session_activated(node_id, capabilities, status, messages) {
                 Ok(_) => Some(SwarmEvent::SessionEstablished { node_id, remote_addr }),
                 Err(err) => {
-                    match *err {
+                    match err {
                         AddSessionError::AtCapacity { peer } => self.sessions.disconnect(peer),
                     };
                     None
