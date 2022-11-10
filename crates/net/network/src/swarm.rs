@@ -68,21 +68,15 @@ where
                 capabilities,
                 status,
                 messages,
-            } => {
-                match self.state.on_session_activated(node_id, capabilities, status, messages) {
-                    Ok(_) => Some(SwarmEvent::SessionEstablished { node_id, remote_addr }),
-                    Err(err) => {
-                        match *err {
-                            AddSessionError::GenesisHashMismatch { peer, .. } => {
-                                // TODO can ban peer
-                                self.sessions.disconnect(peer)
-                            }
-                            AddSessionError::AtCapacity { peer } => self.sessions.disconnect(peer),
-                        };
-                        None
-                    }
+            } => match self.state.on_session_activated(node_id, capabilities, status, messages) {
+                Ok(_) => Some(SwarmEvent::SessionEstablished { node_id, remote_addr }),
+                Err(err) => {
+                    match *err {
+                        AddSessionError::AtCapacity { peer } => self.sessions.disconnect(peer),
+                    };
+                    None
                 }
-            }
+            },
             SessionEvent::ValidMessage { node_id, message } => {
                 Some(SwarmEvent::CapabilityMessage { node_id, message })
             }

@@ -90,17 +90,7 @@ where
     ) -> Result<(), Box<AddSessionError>> {
         debug_assert!(self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
-        if status.genesis != self.genesis_hash {
-            return Err(Box::new(AddSessionError::GenesisHashMismatch {
-                peer,
-                ours: self.genesis_hash,
-                status,
-            }))
-        }
-
-        if capabilities.supports_eth() {
-            self.state_fetcher.new_connected_peer(peer, status.blockhash);
-        }
+        self.state_fetcher.new_connected_peer(peer, status.blockhash);
 
         self.connected_peers.insert(
             peer,
@@ -293,15 +283,6 @@ pub enum StateAction {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AddSessionError {
-    #[error("Peer is on different chain")]
-    GenesisHashMismatch {
-        /// The peer of the session
-        peer: NodeId,
-        /// Genesis hash of our network
-        ours: H256,
-        /// The received status
-        status: Status,
-    },
     #[error("No capacity for new sessions")]
     AtCapacity {
         /// The peer of the session
