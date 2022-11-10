@@ -1,7 +1,9 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
 use reth_interfaces::{consensus::Error, provider::HeaderProvider, Result as RethResult};
-use reth_primitives::{BlockLocked, SealedHeader, TransactionSigned};
+use reth_primitives::{
+    Account, Address, BlockLocked, SealedHeader, Transaction, TransactionSigned,
+};
 use std::time::SystemTime;
 
 /// Validate header standalone
@@ -34,10 +36,81 @@ pub fn validate_header_standalone(
 
 /// Validate transactions standlone
 pub fn validate_transactions_standalone(
-    _transactions: &[TransactionSigned],
-    _config: &Config,
+    transaction: &Transaction,
+    config: &Config,
 ) -> Result<(), Error> {
-    // TODO
+    let chain_id = match transaction {
+        Transaction::Legacy { chain_id, .. } => *chain_id,
+        Transaction::Eip2930 { chain_id, .. } => Some(*chain_id),
+        Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+            // EIP-1559: add more constraints to the tx validation
+            // https://github.com/ethereum/EIPs/pull/3594
+            if max_priority_fee_per_gas > max_fee_per_gas {
+                return Err(Error::TransactionPriorityFeeMoreThenMaxFee)
+            }
+            Some(*chain_id)
+        }
+    };
+    if let Some(chain_id) = chain_id {
+        if chain_id != config.chain_id {
+            return Err(Error::TransactionChainId)
+        }
+    }
+
+    // signature validation?
+
+    Ok(())
+}
+
+/// Validate transaction in regards to header
+/// Only parametar from header that effects transaction is base_fee
+pub fn validate_transaction_regarding_header(
+    transaction: &Transaction,
+    base_fee: Option<u64>,
+) -> Result<(), Error> {
+    // check basefee and few checks that are related to that.
+    // https://github.com/ethereum/EIPs/pull/3594
+    if let Some(base_fee_per_gas) = base_fee {
+        if transaction.max_fee_per_gas() < base_fee_per_gas {
+            return Err(Error::TransactionMaxFeeLessThenBaseFee)
+        }
+    }
+
+    Ok(())
+}
+
+/// Account provider
+pub trait AccountProvider {
+    /// Get basic account information.
+    fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>>;
+}
+
+/// Validate transaction in regards of State
+pub fn validate_transaction_regarding_state<AP: AccountProvider>(
+    _transaction: &TransactionSigned,
+    _config: &Config,
+    _account_provider: &AP,
+) -> Result<(), Error> {
+    // sanity check: if account has a bytecode. This is not allowed.s
+    // check nonce
+    // gas_price*gas_limit+value < account.balance
+
+    // let max_gas_cost = U512::from(message.gas_limit())
+    //     * U512::from(ethereum_types::U256::from(message.max_fee_per_gas().to_be_bytes()));
+    // // See YP, Eq (57) in Section 6.2 "Execution"
+    // let v0 = max_gas_cost +
+    // U512::from(ethereum_types::U256::from(message.value().to_be_bytes()));
+    // let available_balance =
+    //     ethereum_types::U256::from(self.state.get_balance(sender)?.to_be_bytes()).into();
+    // if available_balance < v0 {
+    //     return Err(TransactionValidationError::Validation(
+    //         BadTransactionError::InsufficientFunds {
+    //             account: sender,
+    //             available: available_balance,
+    //             required: v0,
+    //         },
+    //     ));
+    // }
     Ok(())
 }
 
