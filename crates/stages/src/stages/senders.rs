@@ -6,12 +6,26 @@ use itertools::Itertools;
 use reth_interfaces::db::{
     self, tables, DBContainer, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut,
 };
+use reth_primitives::TxNumber;
 use std::fmt::Debug;
+use thiserror::Error;
 
 const SENDERS: StageId = StageId("Senders");
 
 #[derive(Debug)]
 struct SendersStage {}
+
+#[derive(Error, Debug)]
+enum SendersStageError {
+    #[error("Sender recovery failed for transaction {tx}.")]
+    SenderRecovery { tx: TxNumber },
+}
+
+impl Into<StageError> for SendersStageError {
+    fn into(self) -> StageError {
+        StageError::Internal(Box::new(self))
+    }
+}
 
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for SendersStage {
@@ -61,7 +75,9 @@ impl<DB: Database> Stage<DB> for SendersStage {
                 .collect::<Result<Vec<_>, db::Error>>()?;
 
             for (id, transaction) in transactions.iter() {
-                let signer = transaction.recover_signer().unwrap(/* TODO: */);
+                let signer = transaction
+                    .recover_signer()
+                    .ok_or::<StageError>(SendersStageError::SenderRecovery { tx: *id }.into())?;
                 senders_cursor.append(*id, signer)?;
             }
         }
@@ -194,6 +210,58 @@ mod tests {
             Ok(ExecOutput { stage_progress, done, reached_tip })
                 if done && reached_tip && stage_progress == expected_progress
         )
+    }
+
+    #[tokio::test]
+    async fn unwind_empty_db() {
+        let runner = SendersTestRunner::default();
+        let rx = runner.unwind(UnwindInput::default());
+        let result = rx.await.unwrap();
+        assert!(result.is_err());
+        let result = result.unwrap_err();
+        assert_matches!(
+            result.downcast_ref::<DatabaseIntegrityError>(),
+            Some(DatabaseIntegrityError::CannonicalHeader { number })
+                if *number == 0
+        );
+    }
+
+    #[tokio::test]
+    async fn unwind() {
+        let runner = SendersTestRunner::default();
+
+        let unwind_block = 100;
+        // one transaction per block
+        let transactions = (0..1000)
+            .map(|idx| (idx, gen_random_tx().recover_signer().unwrap()))
+            .collect::<Vec<_>>();
+
+        runner
+            .db()
+            .map_put::<tables::TxSenders, _, _>(&transactions, |(k, v)| (*k, *v))
+            .expect("failed to insert");
+
+        // put one transaction at unwind block
+        let unwind_tx_index = unwind_block + 1;
+        runner
+            .db()
+            .put::<tables::CumulativeTxCount>((unwind_block, H256::zero()).into(), unwind_tx_index)
+            .expect("failed to insert");
+        runner
+            .db()
+            .put::<tables::CanonicalHeaders>(unwind_block, H256::zero())
+            .expect("failed to insert");
+
+        let input = UnwindInput { bad_block: None, stage_progress: 0, unwind_to: unwind_block };
+        let rx = runner.unwind(input);
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_block
+        );
+        runner
+            .db()
+            .check_no_entry_above::<tables::TxSenders, _>(unwind_tx_index - 1, |key| key)
+            .expect("failed to check");
     }
 
     #[derive(Default)]

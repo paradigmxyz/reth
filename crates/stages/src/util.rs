@@ -247,44 +247,44 @@ pub(crate) mod test_utils {
         }
 
         /// Check that there is no table entry above a given
-        /// block by [Table::Key]
+        /// number by [Table::Key]
         pub(crate) fn check_no_entry_above<T, F>(
             &self,
-            block: BlockNumber,
+            num: u64,
             mut selector: F,
         ) -> Result<(), Error>
         where
             T: Table,
-            F: FnMut(T::Key) -> BlockNumber,
+            F: FnMut(T::Key) -> u64,
         {
             let db = self.container();
             let tx = db.get();
 
             let mut cursor = tx.cursor::<T>()?;
             if let Some((key, _)) = cursor.last()? {
-                assert!(selector(key) <= block);
+                assert!(selector(key) <= num);
             }
 
             Ok(())
         }
 
         /// Check that there is no table entry above a given
-        /// block by [Table::Value]
+        /// number by [Table::Value]
         pub(crate) fn check_no_entry_above_by_value<T, F>(
             &self,
-            block: BlockNumber,
+            num: u64,
             mut selector: F,
         ) -> Result<(), Error>
         where
             T: Table,
-            F: FnMut(T::Value) -> BlockNumber,
+            F: FnMut(T::Value) -> u64,
         {
             let db = self.container();
             let tx = db.get();
 
             let mut cursor = tx.cursor::<T>()?;
             if let Some((_, value)) = cursor.last()? {
-                assert!(selector(value) <= block);
+                assert!(selector(value) <= num);
             }
 
             Ok(())
