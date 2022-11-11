@@ -27,7 +27,7 @@ pub use block::{Block, BlockLocked};
 pub use chain::Chain;
 pub use hardfork::Hardfork;
 pub use header::{Header, SealedHeader};
-pub use forkid::{ForkId, ForkFilter, ForkHash};
+pub use forkid::{ForkId, ForkFilter, ForkHash, ValidationError};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
