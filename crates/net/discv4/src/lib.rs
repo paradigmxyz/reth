@@ -30,7 +30,7 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
-use reth_primitives::{H256, H512};
+use reth_primitives::{H256, H512, PeerId};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -66,9 +66,6 @@ pub mod mock;
 
 /// reexport to get public ip.
 pub use public_ip;
-
-/// Identifier for nodes.
-pub type NodeId = H512;
 
 /// The default port for discv4 via UDP
 ///
@@ -212,11 +209,11 @@ impl Discv4 {
     }
 
     /// Looks up the given node id
-    pub async fn lookup(&self, node_id: NodeId) -> Result<Vec<NodeRecord>, Discv4Error> {
+    pub async fn lookup(&self, node_id: PeerId) -> Result<Vec<NodeRecord>, Discv4Error> {
         self.lookup_node(Some(node_id)).await
     }
 
-    async fn lookup_node(&self, node_id: Option<NodeId>) -> Result<Vec<NodeRecord>, Discv4Error> {
+    async fn lookup_node(&self, node_id: Option<PeerId>) -> Result<Vec<NodeRecord>, Discv4Error> {
         let (tx, rx) = oneshot::channel();
         let cmd = Discv4Command::Lookup { node_id, tx: Some(tx) };
         self.to_service.send(cmd).await?;
@@ -269,9 +266,9 @@ pub struct Discv4Service {
     /// followup `FindNode` requests.... Buffering them effectively prevents high `Ping` peaks.
     queued_pings: VecDeque<(NodeRecord, PingReason)>,
     /// Currently active pings to specific nodes.
-    pending_pings: HashMap<NodeId, PingRequest>,
+    pending_pings: HashMap<PeerId, PingRequest>,
     /// Currently active FindNode requests
-    pending_find_nodes: HashMap<NodeId, FindNodeRequest>,
+    pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Commands listener
     commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     /// All subscribers for table updates
@@ -378,7 +375,7 @@ impl Discv4Service {
     }
 
     /// Returns true if the given NodeId is currently in the bucket
-    pub fn contains_node(&self, id: NodeId) -> bool {
+    pub fn contains_node(&self, id: PeerId) -> bool {
         let key = kad_key(id);
         self.kbuckets.get_index(&key).is_some()
     }
@@ -431,7 +428,7 @@ impl Discv4Service {
     //
     // To guard against traffic amplification attacks, Neighbors replies should only be sent if the
     // sender of FindNode has been verified by the endpoint proof procedure.
-    pub fn lookup(&mut self, target: NodeId) {
+    pub fn lookup(&mut self, target: PeerId) {
         self.lookup_with(target, None)
     }
 
@@ -445,7 +442,7 @@ impl Discv4Service {
     /// This takes an optional Sender through which all successfully discovered nodes are sent once
     /// the request has finished.
     #[instrument(skip_all, fields(?target), target = "net::discv4")]
-    fn lookup_with(&mut self, target: NodeId, tx: Option<NodeRecordSender>) {
+    fn lookup_with(&mut self, target: PeerId, tx: Option<NodeRecordSender>) {
         trace!("Starting lookup");
         let key = kad_key(target);
 
@@ -499,7 +496,7 @@ impl Discv4Service {
     ///
     /// This allows applications, for whatever reason, to remove nodes from the local routing
     /// table. Returns `true` if the node was in the table and `false` otherwise.
-    pub fn remove_node(&mut self, node_id: NodeId) -> bool {
+    pub fn remove_node(&mut self, node_id: PeerId) -> bool {
         let key = kad_key(node_id);
         let removed = self.kbuckets.remove(&key);
         if removed {
@@ -559,7 +556,7 @@ impl Discv4Service {
     }
 
     /// Message handler for an incoming `Ping`
-    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: NodeId, hash: H256) {
+    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
         // update the record
         let record = NodeRecord {
             address: ping.from.address,
@@ -611,7 +608,7 @@ impl Discv4Service {
     }
 
     /// Message handler for an incoming `Pong`.
-    fn on_pong(&mut self, pong: Pong, remote_addr: SocketAddr, remote_id: NodeId) {
+    fn on_pong(&mut self, pong: Pong, remote_addr: SocketAddr, remote_id: PeerId) {
         if self.is_expired(pong.expire) {
             return
         }
@@ -654,7 +651,7 @@ impl Discv4Service {
     }
 
     /// Handler for incoming `FindNode` message
-    fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: NodeId) {
+    fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
         match self.node_status(node_id, remote_addr) {
             NodeEntryStatus::IsLocal => {
                 // received address from self
@@ -675,7 +672,7 @@ impl Discv4Service {
 
     /// Handler for incoming `Neighbours` messages that are handled if they're responses to
     /// `FindNode` requests
-    fn on_neighbours(&mut self, msg: Neighbours, remote_addr: SocketAddr, node_id: NodeId) {
+    fn on_neighbours(&mut self, msg: Neighbours, remote_addr: SocketAddr, node_id: PeerId) {
         // check if this request was expected
         let ctx = match self.pending_find_nodes.entry(node_id) {
             Entry::Occupied(mut entry) => {
@@ -732,7 +729,7 @@ impl Discv4Service {
     }
 
     /// Sends a Neighbours packet for `target` to the given addr
-    fn respond_closest(&mut self, target: NodeId, to: SocketAddr) {
+    fn respond_closest(&mut self, target: PeerId, to: SocketAddr) {
         let key = kad_key(target);
         let expire = self.send_neighbours_timeout();
         let all_nodes = self.kbuckets.closest_values(&key).collect::<Vec<_>>();
@@ -746,7 +743,7 @@ impl Discv4Service {
     }
 
     /// Returns the current status of the node
-    fn node_status(&mut self, node: NodeId, addr: SocketAddr) -> NodeEntryStatus {
+    fn node_status(&mut self, node: PeerId, addr: SocketAddr) -> NodeEntryStatus {
         if node == self.local_enr.id {
             debug!(?node, target = "net::disc", "Got an incoming discovery request from self");
             return NodeEntryStatus::IsLocal
@@ -807,7 +804,7 @@ impl Discv4Service {
     }
 
     /// Removes the node from the table
-    fn expire_node_request(&mut self, node_id: NodeId) {
+    fn expire_node_request(&mut self, node_id: PeerId) {
         let key = kad_key(node_id);
         self.kbuckets.remove(&key);
     }
@@ -976,7 +973,7 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
 }
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
-pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: NodeId) {
+pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     loop {
         let mut buf = [0; MAX_PACKET_SIZE];
         let res = udp.recv_from(&mut buf).await;
@@ -1010,7 +1007,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 
 /// The commands sent from the frontend to the service
 enum Discv4Command {
-    Lookup { node_id: Option<NodeId>, tx: Option<NodeRecordSender> },
+    Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
     Updates(OneshotSender<ReceiverStream<TableUpdate>>),
 }
 
@@ -1066,13 +1063,13 @@ impl Default for LookupTargetRotator {
 
 impl LookupTargetRotator {
     /// this will return the next node id to lookup
-    fn next(&mut self, local: &NodeId) -> NodeId {
+    fn next(&mut self, local: &PeerId) -> PeerId {
         self.counter += 1;
         self.counter %= self.interval;
         if self.counter == 0 {
             return *local
         }
-        NodeId::random()
+        PeerId::random()
     }
 }
 
@@ -1087,7 +1084,7 @@ struct LookupContext {
 impl LookupContext {
     /// Create new context for a recursive lookup
     fn new(
-        target: NodeId,
+        target: PeerId,
         nearest_nodes: impl IntoIterator<Item = (Distance, NodeRecord)>,
         listener: Option<NodeRecordSender>,
     ) -> Self {
@@ -1107,7 +1104,7 @@ impl LookupContext {
     }
 
     /// Returns the target of this lookup
-    fn target(&self) -> NodeId {
+    fn target(&self) -> PeerId {
         self.inner.target
     }
 
@@ -1132,7 +1129,7 @@ impl LookupContext {
     }
 
     /// Marks the node as queried
-    fn mark_queried(&self, id: NodeId) {
+    fn mark_queried(&self, id: PeerId) {
         if let Some((_, node)) =
             self.inner.closest_nodes.borrow_mut().iter_mut().find(|(_, node)| node.record.id == id)
         {
@@ -1141,7 +1138,7 @@ impl LookupContext {
     }
 
     /// Marks the node as responded
-    fn mark_responded(&self, id: NodeId) {
+    fn mark_responded(&self, id: PeerId) {
         if let Some((_, node)) =
             self.inner.closest_nodes.borrow_mut().iter_mut().find(|(_, node)| node.record.id == id)
         {
@@ -1159,7 +1156,7 @@ impl LookupContext {
 unsafe impl Send for LookupContext {}
 
 struct LookupContextInner {
-    target: NodeId,
+    target: PeerId,
     /// The closest nodes
     closest_nodes: RefCell<BTreeMap<Distance, QueryNode>>,
     /// A listener for all the nodes retrieved in this lookup
@@ -1249,7 +1246,7 @@ enum PingReason {
     ///
     /// Once the expected PONG is received, the endpoint proof is complete and the find node can be
     /// answered.
-    FindNode(NodeId, NodeEntryStatus),
+    FindNode(PeerId, NodeEntryStatus),
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),
 }
@@ -1260,7 +1257,7 @@ pub enum TableUpdate {
     /// A new node was inserted to the table.
     Added(NodeRecord),
     /// Node that was removed from the table
-    Removed(NodeId),
+    Removed(PeerId),
     /// A series of updates
     Batch(Vec<TableUpdate>),
 }
@@ -1276,7 +1273,7 @@ mod tests {
 
     #[test]
     fn test_local_rotator() {
-        let id = NodeId::random();
+        let id = PeerId::random();
         let mut rotator = LookupTargetRotator::local_only();
         assert_eq!(rotator.next(&id), id);
         assert_eq!(rotator.next(&id), id);
@@ -1284,7 +1281,7 @@ mod tests {
 
     #[test]
     fn test_rotator() {
-        let id = NodeId::random();
+        let id = PeerId::random();
         let mut rotator = LookupTargetRotator::default();
         assert_eq!(rotator.next(&id), id);
         assert_ne!(rotator.next(&id), id);
@@ -1301,7 +1298,7 @@ mod tests {
         let local_addr = service.local_addr();
 
         for idx in 0..MAX_NODES_PING {
-            let node = NodeRecord::new(local_addr, NodeId::random());
+            let node = NodeRecord::new(local_addr, PeerId::random());
             service.add_node(node);
             assert!(service.pending_pings.contains_key(&node.id));
             assert_eq!(service.pending_pings.len(), idx + 1);

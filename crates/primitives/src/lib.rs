@@ -10,6 +10,7 @@
 mod account;
 mod block;
 mod chain;
+mod constants;
 mod error;
 mod forkid;
 mod hardfork;
@@ -25,6 +26,7 @@ mod transaction;
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
+pub use constants::MAINNET_GENESIS;
 pub use hardfork::Hardfork;
 pub use header::{Header, SealedHeader};
 pub use forkid::{ForkId, ForkFilter, ForkHash, ValidationError};
@@ -67,10 +69,6 @@ pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},
 };
-
-/// The Ethereum mainnet genesis hash.
-pub const MAINNET_GENESIS: H256 =
-    H256(hex_literal::hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
 
 #[doc(hidden)]
 mod __reexport {

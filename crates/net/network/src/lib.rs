@@ -30,7 +30,7 @@ mod swarm;
 mod transactions;
 
 /// Identifier for a unique node
-pub type NodeId = reth_discv4::NodeId;
+pub type NodeId = reth_discv4::PeerId;
 
 pub use config::NetworkConfig;
 pub use manager::NetworkManager;
