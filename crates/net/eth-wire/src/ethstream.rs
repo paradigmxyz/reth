@@ -1,10 +1,11 @@
 use crate::{
     error::{EthStreamError, HandshakeError},
-    types::{forkid::ForkFilter, EthMessage, ProtocolMessage, Status},
+    types::{EthMessage, ProtocolMessage, Status},
 };
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
+use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
 use std::{
     pin::Pin,
@@ -204,7 +205,7 @@ where
 mod tests {
     use crate::{
         p2pstream::{HelloMessage, ProtocolVersion, UnauthedP2PStream},
-        types::{broadcast::BlockHashNumber, forkid::ForkFilter, EthMessage, Status},
+        types::{broadcast::BlockHashNumber, EthMessage, Status},
         EthStream, PassthroughCodec,
     };
     use futures::{SinkExt, StreamExt};
@@ -215,7 +216,7 @@ mod tests {
 
     use crate::{capability::Capability, types::EthVersion};
     use ethers_core::types::Chain;
-    use reth_primitives::{H256, U256};
+    use reth_primitives::{ForkFilter, H256, U256};
 
     use super::UnauthedEthStream;
 

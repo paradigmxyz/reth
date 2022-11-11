@@ -1,5 +1,4 @@
-use crate::forkid::{ForkHash, ForkId, ForkFilter};
-use reth_primitives::{BlockNumber, MAINNET_GENESIS};
+use reth_primitives::{BlockNumber, MAINNET_GENESIS, ForkHash, ForkId, ForkFilter};
 use std::str::FromStr;
 
 /// Ethereum mainnet hardforks

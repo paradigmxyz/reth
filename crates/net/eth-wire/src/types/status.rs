@@ -1,7 +1,6 @@
 use crate::{EthVersion, hardfork::Hardfork, StatusBuilder};
 
-use super::forkid::ForkId;
-use reth_primitives::{Chain, H256, U256, MAINNET_GENESIS};
+use reth_primitives::{ForkId, Chain, H256, U256, MAINNET_GENESIS};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
@@ -110,12 +109,11 @@ impl Default for Status {
 mod tests {
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
-    use reth_primitives::{Chain, H256, U256};
+    use reth_primitives::{Chain, H256, U256, ForkHash, ForkId};
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     use crate::types::{
-        forkid::{ForkHash, ForkId},
         EthVersion, Status,
     };
 
