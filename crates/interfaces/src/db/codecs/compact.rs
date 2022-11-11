@@ -1,24 +1,24 @@
-use crate::db::{models::accounts::AccountBeforeTx, Decode, Encode, Error};
+use crate::db::{models::accounts::AccountBeforeTx, Compress, Decompress, Error};
 use reth_codecs::Compact;
 use reth_primitives::*;
 
 macro_rules! impl_compact {
     ($($name:tt),+) => {
         $(
-            impl Encode for $name
+            impl Compress for $name
             {
-                type Encoded = Vec<u8>;
+                type Compressed = Vec<u8>;
 
-                fn encode(self) -> Self::Encoded {
+                fn compress(self) -> Self::Compressed {
                     let mut buf = vec![];
                     let _  = Compact::to_compact(self, &mut buf);
                     buf
                 }
             }
 
-            impl Decode for $name
+            impl Decompress for $name
             {
-                fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<$name, Error> {
+                fn decompress<B: Into<bytes::Bytes>>(value: B) -> Result<$name, Error> {
                     let value = value.into();
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
@@ -28,6 +28,5 @@ macro_rules! impl_compact {
     };
 }
 
-impl_compact!(Header, Account);
-impl_compact!(Log, Receipt, TxType, StorageEntry);
+impl_compact!(Header, Account, Log, Receipt, TxType, StorageEntry);
 impl_compact!(AccountBeforeTx);

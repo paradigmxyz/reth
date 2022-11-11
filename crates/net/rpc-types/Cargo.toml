@@ -11,9 +11,7 @@ Reth RPC types
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-
-# eth
-fastrlp = { version = "0.1" }
+reth-rlp = {path = "../../common/rlp"}
 
 # misc
 serde = { version = "1.0", features = ["derive"] }

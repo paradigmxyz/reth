@@ -2,7 +2,10 @@ use crate::{
     revm_wrap::{self, State, SubState},
     Config,
 };
-use reth_interfaces::executor::{BlockExecutor, Error, ExecutorDb};
+use reth_interfaces::{
+    executor::{BlockExecutor, Error},
+    provider::StateProvider,
+};
 use reth_primitives::BlockLocked;
 use revm::{AnalysisKind, SpecId, EVM};
 
@@ -19,7 +22,7 @@ impl Executor {
     }
 
     /// Verify block. Execute all transaction and compare results.
-    pub fn verify<DB: ExecutorDb>(&self, block: &BlockLocked, db: DB) -> Result<(), Error> {
+    pub fn verify<DB: StateProvider>(&self, block: &BlockLocked, db: DB) -> Result<(), Error> {
         let db = SubState::new(State::new(db));
         let mut evm = EVM::new();
         evm.database(db);
@@ -45,6 +48,8 @@ impl Executor {
 
             // create receipt
             // bloom filter from logs
+
+            // Sum of the transaction’s gas limit and the gas utilized in this block prior
 
             // Receipt outcome EIP-658: Embedding transaction status code in receipts
             // EIP-658 supperseeded EIP-98 in Byzantium fork

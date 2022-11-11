@@ -63,7 +63,7 @@ impl Decodable for BlockHashOrNumber {
 /// traversing towards the latest block.
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
-/// in the the direction specified by [`reverse`](#structfield.reverse).
+/// in the direction specified by [`reverse`](#structfield.reverse).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.

@@ -1,11 +1,11 @@
 use crate::{Address, H256};
 use bytes::Buf;
 use modular_bitfield::prelude::*;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{use_compact, Compact};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// Ethereum Log
-#[main_codec]
+#[use_compact]
 #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
 pub struct Log {
     /// Contract that emitted this log.

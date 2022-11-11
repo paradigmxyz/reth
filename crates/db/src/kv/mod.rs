@@ -39,11 +39,11 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 
 impl<E: EnvironmentKind> Database for Env<E> {
     fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::Internal(e.into()))?))
+        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::InitTransaction(e.into()))?))
     }
 
     fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::Internal(e.into()))?))
+        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?))
     }
 }
 
@@ -73,7 +73,7 @@ impl<E: EnvironmentKind> Env<E> {
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(|e| Error::Internal(e.into()))?,
+                .map_err(|e| Error::DatabaseLocation(e.into()))?,
         };
 
         Ok(env)
@@ -81,7 +81,7 @@ impl<E: EnvironmentKind> Env<E> {
 
     /// Creates all the defined tables, if necessary.
     pub fn create_tables(&self) -> Result<(), Error> {
-        let tx = self.inner.begin_rw_txn().map_err(|e| Error::Initialization(e.into()))?;
+        let tx = self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -89,10 +89,10 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(|e| Error::Initialization(e.into()))?;
+            tx.create_db(Some(table), flags).map_err(|e| Error::TableCreation(e.into()))?;
         }
 
-        tx.commit().map_err(|e| Error::Initialization(e.into()))?;
+        tx.commit().map_err(|e| Error::Commit(e.into()))?;
 
         Ok(())
     }
@@ -110,6 +110,7 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::{Env, EnvKind, EnvironmentKind, Path};
+    use std::sync::Arc;
 
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
@@ -119,8 +120,11 @@ pub mod test_utils {
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
     /// Create database for testing
-    pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Env<E> {
-        create_test_db_with_path(kind, &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path())
+    pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
+        Arc::new(create_test_db_with_path(
+            kind,
+            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+        ))
     }
 
     /// Create database for testing with specified path
@@ -134,14 +138,17 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::{test_utils, Env, EnvKind};
-    use reth_interfaces::db::{
-        models::ShardedKey,
-        tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
-        Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
+    use reth_interfaces::{
+        db::{
+            models::ShardedKey,
+            tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
+            Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
+        },
+        provider::{ProviderImpl, StateProviderFactory},
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
-    use std::str::FromStr;
+    use std::{str::FromStr, sync::Arc};
     use tempfile::TempDir;
 
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
@@ -282,7 +289,7 @@ mod tests {
 
     #[test]
     fn db_sharded_key() {
-        let db: Env<WriteMap> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
         let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
 
         for i in 1..5 {
@@ -310,6 +317,13 @@ mod tests {
             let list200: IntegerList = vec![200u64].into();
             assert_eq!(list200, list);
         }
+    }
+
+    #[test]
+    fn common_history_provider() {
+        let db = test_utils::create_test_db::<WriteMap>(EnvKind::RW);
+        let provider = ProviderImpl::new(db);
+        let _ = provider.latest();
     }
 }
 

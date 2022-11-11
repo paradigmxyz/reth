@@ -7,7 +7,7 @@ use reth_primitives::{
 
 /// Client trait for fetching `Header` related data.
 #[auto_impl(&)]
-pub trait HeaderProvider: Send + Sync + 'static {
+pub trait HeaderProvider: Send + Sync {
     /// Check if block is known
     fn is_known(&self, block_hash: &BlockHash) -> Result<bool> {
         self.header(block_hash).map(|header| header.is_some())
@@ -18,7 +18,7 @@ pub trait HeaderProvider: Send + Sync + 'static {
 }
 
 /// Client trait for fetching `Block` related data.
-pub trait BlockProvider: Send + Sync + 'static {
+pub trait BlockProvider: Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 

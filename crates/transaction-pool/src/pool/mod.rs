@@ -69,13 +69,13 @@ use crate::{
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
     traits::{NewTransactionEvent, PoolStatus, PoolTransaction, TransactionOrigin},
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    PoolConfig, TransactionOrdering, TransactionValidator, U256,
+    OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{Address, TxHash};
+use reth_primitives::{Address, TxHash, H256};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -162,6 +162,12 @@ where
         let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
         self.transaction_listener.lock().push(tx);
         rx
+    }
+
+    /// Updates the entire pool after a new block was mined.
+    pub(crate) fn on_new_block(&self, block: OnNewBlockEvent) {
+        let outcome = self.pool.write().on_new_block(block);
+        self.notify_on_new_block(outcome);
     }
 
     /// Resubmits transactions back into the pool.
@@ -285,14 +291,28 @@ where
         });
     }
 
+    /// Notifies transaction listeners about changes after a block was processed.
+    fn notify_on_new_block(&self, outcome: OnNewBlockOutcome) {
+        let OnNewBlockOutcome { mined, promoted, discarded, block_hash } = outcome;
+
+        let mut listener = self.event_listener.write();
+
+        mined.iter().for_each(|tx| listener.mined(tx, block_hash));
+        promoted.iter().for_each(|tx| listener.ready(tx, None));
+        discarded.iter().for_each(|tx| listener.discarded(tx));
+    }
+
     /// Fire events for the newly added transaction.
     fn notify_event_listeners(&self, tx: &AddedTransaction<T::Transaction>) {
         let mut listener = self.event_listener.write();
 
         match tx {
             AddedTransaction::Pending(tx) => {
-                listener.ready(tx.transaction.hash(), None);
-                // TODO  more listeners for discarded, removed etc...
+                let AddedPendingTransaction { transaction, promoted, discarded, .. } = tx;
+
+                listener.ready(transaction.hash(), None);
+                promoted.iter().for_each(|tx| listener.ready(tx, None));
+                discarded.iter().for_each(|tx| listener.discarded(tx));
             }
             AddedTransaction::Parked { transaction, .. } => {
                 listener.queued(transaction.hash());
@@ -408,4 +428,17 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             }
         }
     }
+}
+
+/// Contains all state changes after a [`NewBlockEvent`] was processed
+#[derive(Debug)]
+pub(crate) struct OnNewBlockOutcome {
+    /// Hash of the block.
+    pub(crate) block_hash: H256,
+    /// All mined transactions.
+    pub(crate) mined: Vec<TxHash>,
+    /// Transactions promoted to the ready queue.
+    pub(crate) promoted: Vec<TxHash>,
+    /// transaction that were discarded during the update
+    pub(crate) discarded: Vec<TxHash>,
 }

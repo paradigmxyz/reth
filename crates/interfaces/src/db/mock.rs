@@ -107,10 +107,6 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn seek(&mut self, _key: T::SeekKey) -> super::PairResult<T> {
-        todo!()
-    }
-
     fn seek_exact(&mut self, _key: T::Key) -> super::PairResult<T> {
         todo!()
     }
@@ -144,6 +140,10 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
 
 impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
     fn next_dup(&mut self) -> super::PairResult<T> {
+        todo!()
+    }
+
+    fn seek(&mut self, _key: T::SubKey) -> super::PairResult<T> {
         todo!()
     }
 

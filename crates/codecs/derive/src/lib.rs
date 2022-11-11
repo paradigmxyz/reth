@@ -13,9 +13,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
 #[rustfmt::skip]
 #[allow(unreachable_code)]
 pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
-    #[cfg(feature = "compact")]
-    return use_compact(args, input);
-
     #[cfg(feature = "scale")]
     return use_scale(args, input);
 
@@ -24,6 +21,9 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
 
     #[cfg(feature = "no_codec")]
     return no_codec(args, input);
+    
+    #[cfg(feature = "compact")]
+    return use_compact(args, input);
 
     // no features
     no_codec(args, input)

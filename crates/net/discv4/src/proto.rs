@@ -478,7 +478,7 @@ mod tests {
             let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
             let (encoded, _) = msg.encode(&secret_key);
-            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {:?}", encoded.len(), msg);
+            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
 
             let mut neighbours = Neighbours {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
@@ -489,7 +489,7 @@ mod tests {
             neighbours.nodes.push(rng_ipv4_record(&mut rng));
             let msg = Message::Neighbours(neighbours);
             let (encoded, _) = msg.encode(&secret_key);
-            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {:?}", encoded.len(), msg);
+            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
         }
     }
 

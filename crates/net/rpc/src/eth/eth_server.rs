@@ -19,8 +19,8 @@ use serde_json::Value;
 #[async_trait::async_trait]
 impl<Pool, Client> EthApiServer for EthApi<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = Transaction> + Clone,
-    Client: BlockProvider + StorageProvider,
+    Pool: TransactionPool<Transaction = Transaction> + Clone + 'static,
+    Client: BlockProvider + StorageProvider + 'static,
 {
     fn protocol_version(&self) -> Result<U64> {
         Ok(self.protocol_version())
