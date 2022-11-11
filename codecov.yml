@@ -2,4 +2,9 @@ coverage:
   status:
     project:
       default:
+        threshold: null
         informational: true
+github_checks:
+  annotations: false
+comment:
+  require_changes: true
