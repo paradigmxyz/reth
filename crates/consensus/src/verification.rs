@@ -34,7 +34,7 @@ pub fn validate_header_standalone(
     Ok(())
 }
 
-/// Validate transactions standlone
+/// Validate transactions standalone
 pub fn validate_transactions_standalone(
     transaction: &Transaction,
     config: &Config,
@@ -62,13 +62,14 @@ pub fn validate_transactions_standalone(
     Ok(())
 }
 
-/// Validate transaction in regards to header
-/// Only parametar from header that effects transaction is base_fee
+/// Validate a transaction in regards to a block header.
+///
+/// The only parameter from the header that affects the transaction is `base_fee`.
 pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
     base_fee: Option<u64>,
 ) -> Result<(), Error> {
-    // check basefee and few checks that are related to that.
+    // check base fee and few checks that are related to that.
     // https://github.com/ethereum/EIPs/pull/3594
     if let Some(base_fee_per_gas) = base_fee {
         if transaction.max_fee_per_gas() < base_fee_per_gas {
@@ -116,11 +117,11 @@ pub fn validate_transaction_regarding_state<AP: AccountProvider>(
 
 /// Validate block standalone
 pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
-    // check omners hash
-    let omners_hash = crate::proofs::calculate_omners_root(block.ommers.iter().map(|h| h.as_ref()));
-    if block.header.ommers_hash != omners_hash {
-        return Err(Error::BodyOmmnersHashDiff {
-            got: omners_hash,
+    // check ommers hash
+    let ommers_hash = crate::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+    if block.header.ommers_hash != ommers_hash {
+        return Err(Error::BodyOmmersHashDiff {
+            got: ommers_hash,
             expected: block.header.ommers_hash,
         })
     }
@@ -185,7 +186,7 @@ pub fn validate_header_regarding_parent(
 ) -> Result<(), Error> {
     // Parent number is consistent.
     if parent.number + 1 != child.number {
-        return Err(Error::ParentBlockNumberMissmatch {
+        return Err(Error::ParentBlockNumberMismatch {
             parent_block_number: parent.number,
             block_number: child.number,
         })
@@ -361,7 +362,7 @@ mod tests {
             transactions_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
             receipts_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
             logs_bloom: hex!("002400000000004000220000800002000000000000000000000000000000100000000000000000100000000000000021020000000800000006000000002100040000000c0004000000000008000008200000000000000000000000008000000001040000020000020000002000000800000002000020000000022010000000000000010002001000000000020200000000000001000200880000004000000900020000000000020000000040000000000000000000000000000080000000000001000002000000000000012000200020000000000000001000000000000020000010321400000000100000000000000000000000000000400000000000000000").into(),
-            difficulty: 0x00.into(), // total diffuculty: 0xc70d815d562d3cfa955).into(),
+            difficulty: 0x00.into(), // total difficulty: 0xc70d815d562d3cfa955).into(),
             number: 0xf21d20,
             gas_limit: 0x1c9c380,
             gas_used: 0x6e813,

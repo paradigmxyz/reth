@@ -30,7 +30,7 @@ pub struct BlockLocked {
     pub body: Vec<TransactionSigned>,
     /// Block receipts.
     pub receipts: Vec<Receipt>,
-    /// Omners/uncles header
+    /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
 }
 
