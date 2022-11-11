@@ -1,6 +1,6 @@
-use crate::{EthVersion, hardfork::Hardfork, StatusBuilder};
+use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{ForkId, Chain, H256, U256, MAINNET_GENESIS};
+use reth_primitives::{Hardfork, ForkId, Chain, H256, U256, MAINNET_GENESIS};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 

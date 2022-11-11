@@ -1,14 +1,14 @@
 //! Builder structs for [`Status`](crate::types::Status) and [`Hello`](crate::types::Hello) messages.
 
-use reth_primitives::{Chain, U256, H256, PeerId};
-use crate::{Status, forkid::ForkId, EthVersion, p2pstream::{HelloMessage, ProtocolVersion}, capability::Capability};
+use reth_primitives::{Chain, U256, H256, PeerId, ForkId};
+use crate::{Status, EthVersion, p2pstream::{HelloMessage, ProtocolVersion}, capability::Capability};
 
 /// Builder for [`Status`](crate::types::Status) messages.
 ///
 /// # Example
 /// ```
-/// use reth_eth_wire::{EthVersion, hardfork::Hardfork};
-/// use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS};
+/// use reth_eth_wire::EthVersion;
+/// use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS, Hardfork};
 /// use reth_eth_wire::types::Status;
 ///
 /// // this is just an example status message!

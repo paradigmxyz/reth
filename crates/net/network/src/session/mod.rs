@@ -15,10 +15,9 @@ use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    forkid::ForkFilter,
-    hardfork::Hardfork,
     HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_primitives::{Hardfork, ForkFilter};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashMap,
