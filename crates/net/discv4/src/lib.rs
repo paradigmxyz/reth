@@ -30,7 +30,7 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
-use reth_primitives::{H256, H512, PeerId};
+use reth_primitives::{PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -137,12 +137,12 @@ impl Discv4 {
     /// use std::str::FromStr;
     /// use rand::thread_rng;
     /// use secp256k1::SECP256K1;
-    /// use reth_discv4::{Discv4, Discv4Config, NodeId, NodeRecord};
+    /// use reth_discv4::{Discv4, Discv4Config, PeerId, NodeRecord};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
     ///  let mut rng = thread_rng();
     ///  let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    ///  let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+    ///  let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
     ///
     ///  let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     ///  let local_enr = NodeRecord {
@@ -374,7 +374,7 @@ impl Discv4Service {
         &mut self.local_enr
     }
 
-    /// Returns true if the given NodeId is currently in the bucket
+    /// Returns true if the given PeerId is currently in the bucket
     pub fn contains_node(&self, id: PeerId) -> bool {
         let key = kad_key(id);
         self.kbuckets.get_index(&key).is_some()
@@ -1033,7 +1033,7 @@ struct PingRequest {
     reason: PingReason,
 }
 
-/// Rotates the NodeId that is periodically looked up.
+/// Rotates the PeerId that is periodically looked up.
 ///
 /// By selecting different targets, the lookups will be seeded with different ALPHA seed nodes.
 #[derive(Debug)]

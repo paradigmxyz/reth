@@ -102,11 +102,7 @@ impl From<Vec<Capability>> for Capabilities {
                 eth_67 = true;
             }
         }
-        Self {
-            inner: value,
-            eth_66,
-            eth_67,
-        }
+        Self { inner: value, eth_66, eth_67 }
     }
 }
 

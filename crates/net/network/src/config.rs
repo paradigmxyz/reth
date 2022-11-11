@@ -1,6 +1,6 @@
 use crate::{peers::PeersConfig, session::SessionsConfig};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, H256, ForkId};
+use reth_primitives::{Chain, ForkId, H256};
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},

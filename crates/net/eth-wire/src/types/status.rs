@@ -1,6 +1,6 @@
 use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{Hardfork, ForkId, Chain, H256, U256, MAINNET_GENESIS};
+use reth_primitives::{Chain, ForkId, Hardfork, H256, MAINNET_GENESIS, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
@@ -109,13 +109,11 @@ impl Default for Status {
 mod tests {
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
-    use reth_primitives::{Chain, H256, U256, ForkHash, ForkId};
+    use reth_primitives::{Chain, ForkHash, ForkId, H256, U256};
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
-    use crate::types::{
-        EthVersion, Status,
-    };
+    use crate::types::{EthVersion, Status};
 
     #[test]
     fn encode_eth_status_message() {

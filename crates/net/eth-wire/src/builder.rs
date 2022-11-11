@@ -1,7 +1,12 @@
-//! Builder structs for [`Status`](crate::types::Status) and [`Hello`](crate::types::Hello) messages.
+//! Builder structs for [`Status`](crate::types::Status) and [`Hello`](crate::types::Hello)
+//! messages.
 
-use reth_primitives::{Chain, U256, H256, PeerId, ForkId};
-use crate::{Status, EthVersion, p2pstream::{HelloMessage, ProtocolVersion}, capability::Capability};
+use crate::{
+    capability::Capability,
+    p2pstream::{HelloMessage, ProtocolVersion},
+    EthVersion, Status,
+};
+use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 
 /// Builder for [`Status`](crate::types::Status) messages.
 ///
@@ -32,7 +37,6 @@ use crate::{Status, EthVersion, p2pstream::{HelloMessage, ProtocolVersion}, capa
 ///         forkid: Hardfork::Latest.fork_id(),
 ///     }
 /// );
-///
 /// ```
 #[derive(Debug, Default)]
 pub struct StatusBuilder {
@@ -89,7 +93,7 @@ pub struct HelloBuilder {
 
 impl HelloBuilder {
     /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`Hello`] values,
-    /// and a `NodeId` corresponding to the given pubkey.
+    /// and a `PeerId` corresponding to the given pubkey.
     pub fn new(pubkey: PeerId) -> Self {
         Self {
             hello: HelloMessage {

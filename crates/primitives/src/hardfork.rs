@@ -1,4 +1,4 @@
-use crate::{BlockNumber, MAINNET_GENESIS, ForkHash, ForkId, ForkFilter};
+use crate::{BlockNumber, ForkFilter, ForkHash, ForkId, MAINNET_GENESIS};
 use std::str::FromStr;
 
 /// Ethereum mainnet hardforks
@@ -93,7 +93,8 @@ impl Hardfork {
             Hardfork::Tangerine,
             Hardfork::SpuriousDragon,
             Hardfork::Byzantium,
-            Hardfork::Constantinople, // petersburg is skipped because it's the same block num as constantinople
+            Hardfork::Constantinople, /* petersburg is skipped because it's the same block num
+                                       * as constantinople */
             Hardfork::Istanbul,
             Hardfork::Muirglacier,
             Hardfork::Berlin,
@@ -160,7 +161,6 @@ impl Default for Hardfork {
 
 impl From<BlockNumber> for Hardfork {
     fn from(num: BlockNumber) -> Hardfork {
-
         match num {
             _i if num < 1_150_000 => Hardfork::Frontier,
             _i if num < 1_920_000 => Hardfork::Dao,
@@ -182,7 +182,7 @@ impl From<BlockNumber> for Hardfork {
 
 #[cfg(test)]
 mod tests {
-    use crate::{hardfork::Hardfork, forkid::ForkHash};
+    use crate::{forkid::ForkHash, hardfork::Hardfork};
     use crc::crc32;
 
     #[test]

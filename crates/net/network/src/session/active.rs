@@ -6,7 +6,6 @@ use crate::{
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
     },
-    NodeId,
 };
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, Sink, Stream};
@@ -16,6 +15,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     EthStream, P2PStream,
 };
+use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -36,7 +36,7 @@ pub(crate) struct ActiveSession {
     #[pin]
     pub(crate) conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     /// Identifier of the node we're connected to.
-    pub(crate) remote_node_id: NodeId,
+    pub(crate) remote_node_id: PeerId,
     /// All capabilities the peer announced
     pub(crate) remote_capabilities: Arc<Capabilities>,
     /// Internal identifier of this session

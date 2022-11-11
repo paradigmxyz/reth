@@ -29,7 +29,7 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
     }
 }
 
-/// Converts a `NodeId` into the required `Key` type for the table
+/// Converts a `PeerId` into the required `Key` type for the table
 #[inline]
 pub(crate) fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
     discv5::kbucket::Key::from(NodeKey::from(node))

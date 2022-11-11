@@ -1,13 +1,10 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
-use crate::{
-    session::{
-        active::ActiveSession,
-        handle::{
-            ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
-        },
+use crate::session::{
+    active::ActiveSession,
+    handle::{
+        ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     },
-    NodeId,
 };
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
@@ -17,7 +14,7 @@ use reth_eth_wire::{
     error::EthStreamError,
     HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{Hardfork, ForkFilter};
+use reth_primitives::{ForkFilter, Hardfork, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashMap,
@@ -50,7 +47,7 @@ pub(crate) struct SessionManager {
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The node id of node
-    node_id: NodeId,
+    node_id: PeerId,
     /// The `Status` message to send to peers.
     status: Status,
     /// THe `Hello` message to send to peers.
@@ -69,7 +66,7 @@ pub(crate) struct SessionManager {
     /// session is authenticated, it can be moved to the `active_session` set.
     pending_sessions: FnvHashMap<SessionId, PendingSessionHandle>,
     /// All active sessions that are ready to exchange messages.
-    active_sessions: HashMap<NodeId, ActiveSessionHandle>,
+    active_sessions: HashMap<PeerId, ActiveSessionHandle>,
     /// The original Sender half of the [`PendingSessionEvent`] channel.
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
@@ -95,7 +92,7 @@ impl SessionManager {
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
 
         let pk = secret_key.public_key(SECP256K1);
-        let node_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let node_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
 
         // TODO: make sure this is the right place to put these builders - maybe per-Network rather
         // than per-Session?
@@ -167,7 +164,7 @@ impl SessionManager {
     }
 
     /// Starts a new pending session from the local node to the given remote node.
-    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_node_id: NodeId) {
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_node_id: PeerId) {
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
@@ -191,7 +188,7 @@ impl SessionManager {
     ///
     /// This will trigger the disconnect on the session task to gracefully terminate. The result
     /// will be picked up by the receiver.
-    pub(crate) fn disconnect(&self, node: NodeId) {
+    pub(crate) fn disconnect(&self, node: PeerId) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect();
         }
@@ -399,7 +396,7 @@ pub(crate) enum SessionEvent {
     ///
     /// This session is now able to exchange data.
     SessionEstablished {
-        node_id: NodeId,
+        node_id: PeerId,
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         status: Status,
@@ -407,13 +404,13 @@ pub(crate) enum SessionEvent {
     },
     /// A session received a valid message via RLPx.
     ValidMessage {
-        node_id: NodeId,
+        node_id: PeerId,
         /// Message received from the peer.
         message: CapabilityMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
-        node_id: NodeId,
+        node_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
@@ -424,13 +421,13 @@ pub(crate) enum SessionEvent {
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
-        node_id: NodeId,
+        node_id: PeerId,
         error: Option<EthStreamError>,
     },
     /// Failed to establish a tcp stream
-    OutgoingConnectionError { remote_addr: SocketAddr, node_id: NodeId, error: io::Error },
+    OutgoingConnectionError { remote_addr: SocketAddr, node_id: PeerId, error: io::Error },
     /// Active session was disconnected.
-    Disconnected { node_id: NodeId, remote_addr: SocketAddr },
+    Disconnected { node_id: PeerId, remote_addr: SocketAddr },
 }
 
 /// The error thrown when the max configured limit has been reached and no more connections are
@@ -475,7 +472,7 @@ async fn start_pending_outbound_session(
     events: mpsc::Sender<PendingSessionEvent>,
     session_id: SessionId,
     remote_addr: SocketAddr,
-    remote_node_id: NodeId,
+    remote_node_id: PeerId,
     secret_key: SecretKey,
     hello: HelloMessage,
     status: Status,
@@ -516,7 +513,7 @@ pub(crate) enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.
-    Outgoing(NodeId),
+    Outgoing(PeerId),
 }
 
 async fn authenticate(

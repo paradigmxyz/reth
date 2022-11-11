@@ -1,7 +1,7 @@
 //! Error cases when handling a [`crate::EthStream`]
 use std::io;
 
-use reth_primitives::{Chain, H256, ValidationError};
+use reth_primitives::{Chain, ValidationError, H256};
 
 use crate::capability::SharedCapabilityError;
 
