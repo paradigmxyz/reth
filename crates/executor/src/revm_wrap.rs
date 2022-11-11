@@ -158,13 +158,12 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
 
 /// Check equality between [`reth_primitives::Log`] and [`revm::Log`]
 pub fn is_log_equal(revm_log: &revm::Log, reth_log: &reth_primitives::Log) -> bool {
-    revm_log.topics.len() == reth_log.topics.len() &&
-        revm_log.address == reth_log.address &&
-        revm_log.data == reth_log.data &&
-        revm_log
+    revm_log.topics.len() == reth_log.topics.len()
+        && revm_log.address == reth_log.address
+        && revm_log.data == reth_log.data
+        && !revm_log
             .topics
             .iter()
             .zip(reth_log.topics.iter())
-            .find(|(revm_topic, reth_topic)| revm_topic != reth_topic)
-            .is_none()
+            .any(|(revm_topic, reth_topic)| revm_topic != reth_topic)
 }

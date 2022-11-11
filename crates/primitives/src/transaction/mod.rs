@@ -175,6 +175,15 @@ impl Transaction {
         }
     }
 
+    /// Geth the transaction's `gas_limit`
+    pub fn gas_limit(&self) -> u64 {
+        match self {
+            Transaction::Legacy { gas_limit, .. } => *gas_limit,
+            Transaction::Eip2930 { gas_limit, .. } => *gas_limit,
+            Transaction::Eip1559 { gas_limit, .. } => *gas_limit,
+        }
+    }
+
     /// Gets the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     pub fn kind(&self) -> &TransactionKind {

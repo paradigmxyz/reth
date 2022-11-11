@@ -10,7 +10,8 @@ readme = "README.md"
 # reth 
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
-reth-rlp = {path = "../common/rlp"}
+reth-rlp = { path = "../common/rlp" }
+reth-consensus = { path = "../consensus" }
 
 revm = "2.1"
 

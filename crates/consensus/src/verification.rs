@@ -142,34 +142,6 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         })
     }
 
-    // check if there is equal number of transactions and receipts.
-    if block.receipts.len() != block.body.len() {
-        return Err(Error::TransactionReceiptCountDiff {
-            transaction_count: block.body.len(),
-            receipt_count: block.receipts.len(),
-        })
-    }
-
-    // check if receipt type matches to transaction type.
-    if block
-        .body
-        .iter()
-        .zip(block.receipts.iter())
-        .find(|(tx, receipt)| tx.tx_type() != receipt.tx_type)
-        .is_some()
-    {
-        return Err(Error::TransactionTypeReceiptTypeDiff)
-    }
-
-    // check receipts root
-    let receipts_root = crate::proofs::calculate_receipt_root(block.receipts.iter());
-    if block.header.receipts_root != receipts_root {
-        return Err(Error::BodyReceiptsRootDiff {
-            got: receipts_root,
-            expected: block.header.receipts_root,
-        })
-    }
-
     Ok(())
 }
 
@@ -427,10 +399,9 @@ mod tests {
         parent.number -= 1;
 
         let ommers = Vec::new();
-        let receipts = Vec::new();
         let body = Vec::new();
 
-        (BlockLocked { header: header.seal(), body, receipts, ommers }, parent)
+        (BlockLocked { header: header.seal(), body, ommers }, parent)
     }
 
     #[test]

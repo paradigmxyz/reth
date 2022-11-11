@@ -6,7 +6,7 @@ use reth_interfaces::{
     executor::{BlockExecutor, Error},
     provider::StateProvider,
 };
-use reth_primitives::BlockLocked;
+use reth_primitives::{bloom::logs_bloom, BlockLocked, Bloom, Log, Receipt};
 use revm::{AnalysisKind, ExecutionResult, SpecId, EVM};
 
 /// Main block executor
@@ -34,71 +34,82 @@ impl Executor {
 
         revm_wrap::fill_block_env(&mut evm.env.block, block);
         let mut cumulative_gas_used = 0;
+        let mut receipts = Vec::with_capacity(block.body.len());
 
-        for (transaction, receipt) in block.body.iter().zip(block.receipts.iter()) {
+        for transaction in block.body.iter() {
+            // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = block.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                });
+            }
+
+            // Fill revm structure.
             revm_wrap::fill_tx_env(&mut evm.env.tx, transaction.as_ref());
 
-            // execute transaction
+            // Execute transaction.
             let ExecutionResult { exit_reason, gas_used, logs, .. } = evm.transact_commit();
 
-            // fatal internal error
+            // Fatal internal error.
             if exit_reason == revm::Return::FatalExternalError {
-                return Err(Error::ExecutionFatalError)
+                return Err(Error::ExecutionFatalError);
             }
 
-            // Success flag was added in `EIP-658: Embedding transaction status code in receipts`
+            // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
             let is_success = matches!(
                 exit_reason,
-                revm::Return::Continue |
-                    revm::Return::Stop |
-                    revm::Return::Return |
-                    revm::Return::SelfDestruct
+                revm::Return::Continue
+                    | revm::Return::Stop
+                    | revm::Return::Return
+                    | revm::Return::SelfDestruct
             );
 
-            if receipt.success != is_success {
-                return Err(Error::ExecutionSuccessDiff {
-                    got: is_success,
-                    expected: receipt.success,
-                })
-            }
-
-            // add spend gas
+            // Add spend gas.
             cumulative_gas_used += gas_used;
 
-            // check if used gas is same as in receipt
-            if cumulative_gas_used != receipt.cumulative_gas_used {
-                return Err(Error::ReceiptCumulativeGasUsedDiff {
-                    got: cumulative_gas_used,
-                    expected: receipt.cumulative_gas_used,
-                })
-            }
+            // Transform logs to reth format.
+            let logs: Vec<Log> = logs
+                .into_iter()
+                .map(|l| Log { address: l.address, topics: l.topics, data: l.data })
+                .collect();
 
-            // check logs count
-            if receipt.logs.len() != logs.len() {
-                return Err(Error::ReceiptLogCountDiff {
-                    got: logs.len(),
-                    expected: receipt.logs.len(),
-                })
-            }
-
-            // iterate over all receipts and try to find difference between them
-            if logs
-                .iter()
-                .zip(receipt.logs.iter())
-                .find(|(revm_log, reth_log)| !revm_wrap::is_log_equal(revm_log, reth_log))
-                .is_some()
-            {
-                return Err(Error::ReceiptLogDiff)
-            }
-
-            // TODO
-            // receipt.bloom;
-
-            // TODO
-            // Sum of the transaction’s gas limit and the gas utilized in this block prior
+            // Push receipts for calculating header bloom filter.
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                success: is_success,
+                cumulative_gas_used,
+                bloom: logs_bloom(logs.iter()), // TODO
+                logs,
+            });
         }
 
-        Err(Error::VerificationFailed)
+        // Check if gas used matches the value set in header.
+        if block.gas_used != cumulative_gas_used {
+            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used });
+        }
+
+        // Check receipts root.
+        let receipts_root = reth_consensus::proofs::calculate_receipt_root(receipts.iter());
+        if block.receipts_root != receipts_root {
+            return Err(Error::ReceiptRootDiff {
+                got: receipts_root,
+                expected: block.receipts_root,
+            });
+        }
+
+        // Create header log bloom.
+        let expected_logs_bloom = receipts.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+        if expected_logs_bloom != block.logs_bloom {
+            return Err(Error::BloomLogDiff {
+                expected: Box::new(block.logs_bloom),
+                got: Box::new(expected_logs_bloom),
+            });
+        }
+
+        Ok(())
     }
 }
 

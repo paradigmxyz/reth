@@ -9,6 +9,7 @@
 
 mod account;
 mod block;
+pub mod bloom;
 mod chain;
 mod error;
 mod header;
@@ -49,16 +50,15 @@ pub type TxHash = H256;
 pub type TxNumber = u64;
 /// Chain identifier type, introduced in EIP-155
 pub type ChainId = u64;
-
 /// Storage Key
 pub type StorageKey = H256;
-
 /// Storage value
 pub type StorageValue = U256;
 
+pub use ethbloom::Bloom;
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 #[doc(hidden)]
