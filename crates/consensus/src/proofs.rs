@@ -75,14 +75,14 @@ pub fn calculate_log_root<'a>(logs: impl IntoIterator<Item = &'a Log>) -> H256 {
     H256::from_slice(out.as_slice())
 }
 
-/// Calculate hash over omners/uncles headers
-pub fn calculate_omners_root<'a>(_omners: impl IntoIterator<Item = &'a Header>) -> H256 {
+/// Calculate hash for ommer/uncle headers
+pub fn calculate_ommers_root<'a>(_ommers: impl IntoIterator<Item = &'a Header>) -> H256 {
     // RLP Encode
     let mut stream = RlpStream::new();
     stream.begin_unbounded_list();
     /* TODO
-    for omner in omners {
-        stream.append(omner)
+    for ommer in ommers {
+        stream.append(ommer)
     }
      */
     stream.finalize_unbounded_list();

@@ -26,7 +26,7 @@ pub struct BlockLocked {
     pub header: SealedHeader,
     /// Transactions with signatures.
     pub body: Vec<TransactionSigned>,
-    /// Omners/uncles header
+    /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
 }
 

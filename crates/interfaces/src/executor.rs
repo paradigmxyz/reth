@@ -37,8 +37,5 @@ pub enum Error {
         block_available_gas: u64,
     },
     #[error("Block gas used {got} is different from expected gas used {expected}.")]
-    BlockGasUsed {
-        got: u64,
-        expected: u64,
-    }
+    BlockGasUsed { got: u64, expected: u64 },
 }
