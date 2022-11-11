@@ -20,20 +20,11 @@ pub enum Error {
     #[error("Fatal internal error")]
     ExecutionFatalError,
     #[error("Receipt cumulative gas used {got:?} is different from expected: {expected:?}")]
-    ReceiptCumulativeGasUsedDiff {
-        got: u64,
-        expected: u64,
-    },
+    ReceiptCumulativeGasUsedDiff { got: u64, expected: u64 },
     #[error("Receipt log count {got:?} is different from expected {expected:?}.")]
-    ReceiptLogCountDiff {
-        got: usize,
-        expected: usize,
-    },
+    ReceiptLogCountDiff { got: usize, expected: usize },
     #[error("Receipt log is different.")]
     ReceiptLogDiff,
     #[error("Receipt log is different.")]
-    ExecutionSuccessDiff {
-        got: bool,
-        expected: bool,
-    }
+    ExecutionSuccessDiff { got: bool, expected: bool },
 }

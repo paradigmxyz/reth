@@ -1,7 +1,7 @@
 use crate::{peers::PeersConfig, session::SessionsConfig};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_eth_wire::forkid::ForkId;
-use reth_primitives::Chain;
+use reth_primitives::{Chain, H256};
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -29,6 +29,8 @@ pub struct NetworkConfig<C> {
     pub fork_id: Option<ForkId>,
     /// The id of the network
     pub chain: Chain,
+    /// Genesis hash of the network
+    pub genesis_hash: H256,
 }
 
 // === impl NetworkConfig ===
@@ -58,6 +60,7 @@ impl<C> NetworkConfig<C> {
 }
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
+#[allow(missing_docs)]
 pub struct NetworkConfigBuilder<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
@@ -73,10 +76,9 @@ pub struct NetworkConfigBuilder<C> {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-
     fork_id: Option<ForkId>,
-
     chain: Chain,
+    genesis_hash: H256,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -94,7 +96,14 @@ impl<C> NetworkConfigBuilder<C> {
             sessions_config: None,
             fork_id: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
+            genesis_hash: Default::default(),
         }
+    }
+
+    /// Sets the genesis hash for the network.
+    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
+        self.genesis_hash = genesis_hash;
+        self
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -109,6 +118,7 @@ impl<C> NetworkConfigBuilder<C> {
             sessions_config,
             fork_id,
             chain,
+            genesis_hash,
         } = self;
         NetworkConfig {
             client,
@@ -124,6 +134,7 @@ impl<C> NetworkConfigBuilder<C> {
             sessions_config: sessions_config.unwrap_or_default(),
             fork_id,
             chain,
+            genesis_hash,
         }
     }
 }

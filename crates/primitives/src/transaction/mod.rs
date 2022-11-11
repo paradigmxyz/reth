@@ -525,7 +525,7 @@ impl Decodable for TransactionSigned {
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
             if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"));
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
             }
 
             // decode common fields

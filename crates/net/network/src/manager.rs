@@ -111,6 +111,7 @@ where
             listener_addr,
             peers_config,
             sessions_config,
+            genesis_hash,
             ..
         } = config;
 
@@ -125,7 +126,7 @@ where
         let local_node_id = discovery.local_id();
 
         let sessions = SessionManager::new(secret_key, sessions_config);
-        let state = NetworkState::new(client, discovery, peers_manger);
+        let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
 

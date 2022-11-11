@@ -1,6 +1,9 @@
 //! Fetch data from the network.
 
-use crate::{message::RequestResult, NodeId};
+use crate::{
+    message::{BlockRequest, RequestResult},
+    NodeId,
+};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, EthMessage};
 use reth_interfaces::p2p::headers::client::HeadersRequest;
@@ -34,13 +37,13 @@ pub struct StateFetcher {
 
 impl StateFetcher {
     /// Invoked when connected to a new peer.
-    pub(crate) fn new_connected_peer(
-        &mut self,
-        _node_id: NodeId,
-        _best_hash: H256,
-        _best_number: U256,
-    ) {
-    }
+    pub(crate) fn new_connected_peer(&mut self, _node_id: NodeId, _best_hash: H256) {}
+
+    /// Invoked when an active session was closed.
+    pub(crate) fn on_session_closed(&mut self, _peer: &NodeId) {}
+
+    /// Invoked when an active session is about to be disconnected.
+    pub(crate) fn on_pending_disconnect(&mut self, _peer: &NodeId) {}
 
     /// Returns the next action to return
     fn poll_action(&mut self) -> Option<FetchAction> {
@@ -94,9 +97,19 @@ impl StateFetcher {
     /// Called on a `GetBlockHeaders` response from a peer
     pub(crate) fn on_block_headers_response(
         &mut self,
-        _from: NodeId,
-        _msg: RequestResult<Vec<Header>>,
-    ) {
+        _peer: NodeId,
+        _res: RequestResult<Vec<Header>>,
+    ) -> Option<BlockResponseOutcome> {
+        None
+    }
+
+    /// Called on a `GetBlockBodies` response from a peer
+    pub(crate) fn on_block_bodies_response(
+        &mut self,
+        _peer: NodeId,
+        _res: RequestResult<Vec<BlockBody>>,
+    ) -> Option<BlockResponseOutcome> {
+        None
     }
 
     /// Returns a new [`HeadersDownloader`] that can send requests to this type
@@ -183,4 +196,16 @@ pub(crate) enum FetchAction {
         /// The request to send
         request: EthMessage,
     },
+}
+
+/// Outcome of a processed response.
+///
+/// Returned after processing a response.
+#[derive(Debug)]
+pub(crate) enum BlockResponseOutcome {
+    /// Continue with another request to the peer.
+    Request(NodeId, BlockRequest),
+    /// How to handle a bad response
+    // TODO this should include some form of reputation change
+    BadResponse(NodeId),
 }

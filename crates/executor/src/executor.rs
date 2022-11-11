@@ -43,23 +43,23 @@ impl Executor {
 
             // fatal internal error
             if exit_reason == revm::Return::FatalExternalError {
-                return Err(Error::ExecutionFatalError);
+                return Err(Error::ExecutionFatalError)
             }
 
             // Success flag was added in `EIP-658: Embedding transaction status code in receipts`
             let is_success = matches!(
                 exit_reason,
-                revm::Return::Continue
-                    | revm::Return::Stop
-                    | revm::Return::Return
-                    | revm::Return::SelfDestruct
+                revm::Return::Continue |
+                    revm::Return::Stop |
+                    revm::Return::Return |
+                    revm::Return::SelfDestruct
             );
 
             if receipt.success != is_success {
                 return Err(Error::ExecutionSuccessDiff {
                     got: is_success,
                     expected: receipt.success,
-                });
+                })
             }
 
             // add spend gas
@@ -70,7 +70,7 @@ impl Executor {
                 return Err(Error::ReceiptCumulativeGasUsedDiff {
                     got: cumulative_gas_used,
                     expected: receipt.cumulative_gas_used,
-                });
+                })
             }
 
             // check logs count
@@ -78,7 +78,7 @@ impl Executor {
                 return Err(Error::ReceiptLogCountDiff {
                     got: logs.len(),
                     expected: receipt.logs.len(),
-                });
+                })
             }
 
             // iterate over all receipts and try to find difference between them
@@ -88,7 +88,7 @@ impl Executor {
                 .find(|(revm_log, reth_log)| !revm_wrap::is_log_equal(revm_log, reth_log))
                 .is_some()
             {
-                return Err(Error::ReceiptLogDiff);
+                return Err(Error::ReceiptLogDiff)
             }
 
             // TODO
