@@ -93,16 +93,11 @@ impl Capabilities {
 
 impl From<Vec<Capability>> for Capabilities {
     fn from(value: Vec<Capability>) -> Self {
-        let mut eth_66 = false;
-        let mut eth_67 = false;
-        for capability in &value {
-            if capability.is_eth_v66() {
-                eth_66 = true;
-            } else if capability.is_eth_v67() {
-                eth_67 = true;
-            }
+        Self {
+            eth_66: value.iter().any(Capability::is_eth_v66),
+            eth_67: value.iter().any(Capability::is_eth_v67),
+            inner: value,
         }
-        Self { inner: value, eth_66, eth_67 }
     }
 }
 
