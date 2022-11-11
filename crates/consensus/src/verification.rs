@@ -18,19 +18,19 @@ pub fn validate_header_standalone(
         return Err(Error::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
-        })
+        });
     }
 
     // Check if timestamp is in future. Clock can drift but this can be consensus issue.
     let present_timestamp =
         SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
     if header.timestamp > present_timestamp {
-        return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp })
+        return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp });
     }
 
     // Check if base fee is set.
     if config.paris_hard_fork_block >= header.number && header.base_fee_per_gas.is_some() {
-        return Err(Error::BaseFeeMissing)
+        return Err(Error::BaseFeeMissing);
     }
 
     Ok(())
@@ -48,19 +48,19 @@ pub fn validate_transaction_regarding_header(
         Transaction::Legacy { chain_id, .. } => *chain_id,
         Transaction::Eip2930 { chain_id, .. } => {
             if config.berlin_hard_fork_block > at_block_number {
-                return Err(Error::TransactionEip2930Disabled)
+                return Err(Error::TransactionEip2930Disabled);
             }
             Some(*chain_id)
         }
         Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
             if config.berlin_hard_fork_block > at_block_number {
-                return Err(Error::TransactionEip1559Disabled)
+                return Err(Error::TransactionEip1559Disabled);
             }
 
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {
-                return Err(Error::TransactionPriorityFeeMoreThenMaxFee)
+                return Err(Error::TransactionPriorityFeeMoreThenMaxFee);
             }
 
             Some(*chain_id)
@@ -68,14 +68,14 @@ pub fn validate_transaction_regarding_header(
     };
     if let Some(chain_id) = chain_id {
         if chain_id != config.chain_id {
-            return Err(Error::TransactionChainId)
+            return Err(Error::TransactionChainId);
         }
     }
     // check basefee and few checks that are related to that.
     // https://github.com/ethereum/EIPs/pull/3594
     if let Some(base_fee_per_gas) = base_fee {
         if transaction.max_fee_per_gas() < base_fee_per_gas as u128 {
-            return Err(Error::TransactionMaxFeeLessThenBaseFee)
+            return Err(Error::TransactionMaxFeeLessThenBaseFee);
         }
     }
 
@@ -89,7 +89,7 @@ pub fn validate_transaction_regarding_account(
 ) -> reth_interfaces::Result<()> {
     // Signer account shoudn't have bytecode. Presence of bytecode means this is a smartcontract.
     if account.has_bytecode() {
-        return Err(Error::SignerAccountHasBytecode.into())
+        return Err(Error::SignerAccountHasBytecode.into());
     }
 
     let (nonce, gas_price, gas_limit, value) = match transaction {
@@ -106,7 +106,7 @@ pub fn validate_transaction_regarding_account(
 
     // check nonce
     if account.nonce + 1 != *nonce {
-        return Err(Error::TransactionNonceNotConsistent.into())
+        return Err(Error::TransactionNonceNotConsistent.into());
     }
 
     // max fee that transaction can potentially spend
@@ -114,9 +114,11 @@ pub fn validate_transaction_regarding_account(
 
     // check if account balance has enought to cover worst case
     if max_fee > account.balance.as_u128() {
-        return Err(
-            Error::InsufficientFunds { max_fee, available_funds: account.balance.as_u128() }.into()
-        )
+        return Err(Error::InsufficientFunds {
+            max_fee,
+            available_funds: account.balance.as_u128(),
+        }
+        .into());
     }
 
     Ok(())
@@ -130,7 +132,7 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         return Err(Error::BodyOmmnersHashDiff {
             got: omners_hash,
             expected: block.header.ommers_hash,
-        })
+        });
     }
 
     // check transaction root
@@ -139,7 +141,26 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         return Err(Error::BodyTransactionRootDiff {
             got: transaction_root,
             expected: block.header.transactions_root,
-        })
+        });
+    }
+
+    // check if there is equal number of transactions and receipts.
+    if block.receipts.len() != block.body.len() {
+        return Err(Error::TransactionReceiptCountDiff {
+            transaction_count: block.body.len(),
+            receipt_count: block.receipts.len(),
+        });
+    }
+
+    // check if receipt type matches to transaction type.
+    if block
+        .body
+        .iter()
+        .zip(block.receipts.iter())
+        .find(|(tx, receipt)| tx.tx_type() != receipt.tx_type)
+        .is_some()
+    {
+        return Err(Error::TransactionTypeReceiptTypeDiff);
     }
 
     // check receipts root
@@ -148,7 +169,7 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         return Err(Error::BodyReceiptsRootDiff {
             got: receipts_root,
             expected: block.header.receipts_root,
-        })
+        });
     }
 
     Ok(())
@@ -159,22 +180,22 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
     let gas_target = gas_limit / config::EIP1559_ELASTICITY_MULTIPLIER;
 
     if gas_used == gas_target {
-        return base_fee
+        return base_fee;
     }
     if gas_used > gas_target {
         let gas_used_delta = gas_used - gas_target;
         let base_fee_delta = std::cmp::max(
             1,
-            base_fee as u128 * gas_used_delta as u128 /
-                gas_target as u128 /
-                config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
+            base_fee as u128 * gas_used_delta as u128
+                / gas_target as u128
+                / config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
         );
         base_fee + (base_fee_delta as u64)
     } else {
         let gas_used_delta = gas_target - gas_used;
-        let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128 /
-            gas_target as u128 /
-            config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
+        let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128
+            / gas_target as u128
+            / config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
 
         base_fee.saturating_sub(base_fee_per_gas_delta as u64)
     }
@@ -191,7 +212,7 @@ pub fn validate_header_regarding_parent(
         return Err(Error::ParentBlockNumberMissmatch {
             parent_block_number: parent.number,
             block_number: child.number,
-        })
+        });
     }
 
     // timestamp in past check
@@ -199,7 +220,7 @@ pub fn validate_header_regarding_parent(
         return Err(Error::TimestampIsInPast {
             parent_timestamp: parent.timestamp,
             timestamp: child.timestamp,
-        })
+        });
     }
 
     // difficulty check is done by consensus.
@@ -221,13 +242,13 @@ pub fn validate_header_regarding_parent(
             return Err(Error::GasLimitInvalidIncrease {
                 parent_gas_limit,
                 child_gas_limit: child.gas_limit,
-            })
+            });
         }
     } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
         return Err(Error::GasLimitInvalidDecrease {
             parent_gas_limit,
             child_gas_limit: child.gas_limit,
-        })
+        });
     }
 
     // EIP-1559 check base fee
@@ -245,7 +266,7 @@ pub fn validate_header_regarding_parent(
             )
         };
         if expected_base_fee != base_fee {
-            return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
+            return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee });
         }
     }
 
@@ -267,7 +288,7 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
 
     // Check if block is known.
     if provider.is_known(&hash)? {
-        return Err(Error::BlockKnown { hash, number: block.header.number }.into())
+        return Err(Error::BlockKnown { hash, number: block.header.number }.into());
     }
 
     // Check if parent is known.

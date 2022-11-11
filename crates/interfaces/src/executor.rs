@@ -12,9 +12,28 @@ pub trait BlockExecutor {
 }
 
 /// BlockExecutor Errors
+#[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// Example of error
     #[error("Example of error.")]
     VerificationFailed,
+    #[error("Fatal internal error")]
+    ExecutionFatalError,
+    #[error("Receipt cumulative gas used {got:?} is different from expected: {expected:?}")]
+    ReceiptCumulativeGasUsedDiff {
+        got: u64,
+        expected: u64,
+    },
+    #[error("Receipt log count {got:?} is different from expected {expected:?}.")]
+    ReceiptLogCountDiff {
+        got: usize,
+        expected: usize,
+    },
+    #[error("Receipt log is different.")]
+    ReceiptLogDiff,
+    #[error("Receipt log is different.")]
+    ExecutionSuccessDiff {
+        got: bool,
+        expected: bool,
+    }
 }

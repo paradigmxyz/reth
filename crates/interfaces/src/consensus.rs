@@ -69,4 +69,10 @@ pub enum Error {
     TransactionEip1559Disabled,
     #[error("Transaction signer recovery error.")]
     TransactionSignerRecoveryError,
+    #[error(
+        "Transaction count {transaction_count} is different from receipt count {receipt_count}"
+    )]
+    TransactionReceiptCountDiff { transaction_count: usize, receipt_count: usize },
+    #[error("Transaction had receipt of different type")]
+    TransactionTypeReceiptTypeDiff,
 }

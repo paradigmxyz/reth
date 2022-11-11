@@ -7,7 +7,7 @@ use reth_interfaces::{
     provider::StateProvider,
 };
 use reth_primitives::BlockLocked;
-use revm::{AnalysisKind, SpecId, EVM};
+use revm::{AnalysisKind, ExecutionResult, SpecId, EVM};
 
 /// Main block executor
 pub struct Executor {
@@ -33,26 +33,69 @@ impl Executor {
         evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
         revm_wrap::fill_block_env(&mut evm.env.block, block);
+        let mut cumulative_gas_used = 0;
 
-        for transaction in block.body.iter() {
-            // TODO Check if Transaction is new
+        for (transaction, receipt) in block.body.iter().zip(block.receipts.iter()) {
             revm_wrap::fill_tx_env(&mut evm.env.tx, transaction.as_ref());
 
-            let res = evm.transact_commit();
+            // execute transaction
+            let ExecutionResult { exit_reason, gas_used, logs, .. } = evm.transact_commit();
 
-            if res.exit_reason == revm::Return::FatalExternalError {
-                // stop executing. Fatal error thrown from database
+            // fatal internal error
+            if exit_reason == revm::Return::FatalExternalError {
+                return Err(Error::ExecutionFatalError);
             }
 
-            // calculate commulative gas used
+            // Success flag was added in `EIP-658: Embedding transaction status code in receipts`
+            let is_success = matches!(
+                exit_reason,
+                revm::Return::Continue
+                    | revm::Return::Stop
+                    | revm::Return::Return
+                    | revm::Return::SelfDestruct
+            );
 
-            // create receipt
-            // bloom filter from logs
+            if receipt.success != is_success {
+                return Err(Error::ExecutionSuccessDiff {
+                    got: is_success,
+                    expected: receipt.success,
+                });
+            }
 
+            // add spend gas
+            cumulative_gas_used += gas_used;
+
+            // check if used gas is same as in receipt
+            if cumulative_gas_used != receipt.cumulative_gas_used {
+                return Err(Error::ReceiptCumulativeGasUsedDiff {
+                    got: cumulative_gas_used,
+                    expected: receipt.cumulative_gas_used,
+                });
+            }
+
+            // check logs count
+            if receipt.logs.len() != logs.len() {
+                return Err(Error::ReceiptLogCountDiff {
+                    got: logs.len(),
+                    expected: receipt.logs.len(),
+                });
+            }
+
+            // iterate over all receipts and try to find difference between them
+            if logs
+                .iter()
+                .zip(receipt.logs.iter())
+                .find(|(revm_log, reth_log)| !revm_wrap::is_log_equal(revm_log, reth_log))
+                .is_some()
+            {
+                return Err(Error::ReceiptLogDiff);
+            }
+
+            // TODO
+            // receipt.bloom;
+
+            // TODO
             // Sum of the transaction’s gas limit and the gas utilized in this block prior
-
-            // Receipt outcome EIP-658: Embedding transaction status code in receipts
-            // EIP-658 supperseeded EIP-98 in Byzantium fork
         }
 
         Err(Error::VerificationFailed)

@@ -185,6 +185,15 @@ impl Transaction {
         }
     }
 
+    /// Get transaction type
+    pub fn tx_type(&self) -> TxType {
+        match self {
+            Transaction::Legacy { .. } => TxType::Legacy,
+            Transaction::Eip2930 { .. } => TxType::EIP2930,
+            Transaction::Eip1559 { .. } => TxType::EIP1559,
+        }
+    }
+
     /// Gets the transaction's value field.
     pub fn value(&self) -> &u128 {
         match self {
@@ -516,7 +525,7 @@ impl Decodable for TransactionSigned {
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
             if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"));
             }
 
             // decode common fields
