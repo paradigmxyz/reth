@@ -23,8 +23,8 @@ pub trait Consensus: Send + Sync {
 pub enum Error {
     #[error("Block used gas ({gas_used:?}) is greater then gas limit ({gas_limit:?})")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
-    #[error("Block ommner hash ({got:?}) is different then expected: ({expected:?})")]
-    BodyOmmnersHashDiff { got: H256, expected: H256 },
+    #[error("Block ommer hash ({got:?}) is different then expected: ({expected:?})")]
+    BodyOmmersHashDiff { got: H256, expected: H256 },
     #[error("Block transaction root ({got:?}) is different then expected: ({expected:?})")]
     BodyTransactionRootDiff { got: H256, expected: H256 },
     #[error("Block receipts root ({got:?}) is different then expected: ({expected:?})")]
@@ -33,8 +33,8 @@ pub enum Error {
     BlockKnown { hash: BlockHash, number: BlockNumber },
     #[error("Block parent [hash:{hash:?}] is not known")]
     ParentUnknown { hash: BlockHash },
-    #[error("Block number {block_number:?} is missmatch with parent block number {parent_block_number:?}")]
-    ParentBlockNumberMissmatch { parent_block_number: BlockNumber, block_number: BlockNumber },
+    #[error("Block number {block_number:?} is mismatch with parent block number {parent_block_number:?}")]
+    ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
     #[error(
         "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}"
     )]
