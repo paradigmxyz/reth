@@ -238,6 +238,18 @@ mod tests {
     #[ignore]
     async fn unwind_missing_tx() {}
 
+    /// Checks that the stage exits if the downloader times out
+    /// TODO: We should probably just exit as "OK", commit the blocks we downloaded successfully and
+    /// try again?
+    #[tokio::test]
+    #[ignore]
+    async fn downloader_timeout() {}
+
+    /// Checks that the stage exits if a header is missing in the block range we were told to sync
+    #[tokio::test]
+    #[ignore]
+    async fn missing_header() {}
+
     mod test_utils {
         use crate::{
             stages::bodies::BodyStage,
