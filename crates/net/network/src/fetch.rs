@@ -1,12 +1,9 @@
 //! Fetch data from the network.
 
-use crate::{
-    message::{BlockRequest, RequestResult},
-    NodeId,
-};
+use crate::{message::BlockRequest, NodeId};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, EthMessage};
-use reth_interfaces::p2p::headers::client::HeadersRequest;
+use reth_interfaces::p2p::{error::RequestResult, headers::client::HeadersRequest};
 use reth_primitives::{Header, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
