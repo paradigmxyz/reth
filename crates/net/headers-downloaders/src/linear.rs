@@ -203,7 +203,8 @@ mod tests {
     use reth_interfaces::{
         p2p::headers::client::HeadersRequest,
         test_utils::{
-            gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
+            generators::{random_header, random_header_range},
+            TestConsensus, TestHeadersClient,
         },
     };
     use reth_primitives::{rpc::BlockId, SealedHeader};
@@ -282,8 +283,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn download_propagates_consensus_validation_error() {
-        let tip_parent = gen_random_header(1, None);
-        let tip = gen_random_header(2, Some(tip_parent.hash()));
+        let tip_parent = random_header(1, None);
+        let tip = random_header(2, Some(tip_parent.hash()));
         let tip_hash = tip.hash();
 
         let (tx, rx) = oneshot::channel();
@@ -318,8 +319,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn download_starts_with_chain_tip() {
-        let head = gen_random_header(1, None);
-        let tip = gen_random_header(2, Some(head.hash()));
+        let head = random_header(1, None);
+        let tip = random_header(2, Some(head.hash()));
 
         let tip_hash = tip.hash();
         let chain_head = head.clone();
@@ -356,8 +357,8 @@ mod tests {
     #[serial]
     async fn download_returns_headers_desc() {
         let (start, end) = (100, 200);
-        let head = gen_random_header(start, None);
-        let mut headers = gen_random_header_range(start + 1..end, head.hash());
+        let head = random_header(start, None);
+        let mut headers = random_header_range(start + 1..end, head.hash());
         headers.reverse();
 
         let tip_hash = headers.first().unwrap().hash();

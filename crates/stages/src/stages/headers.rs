@@ -194,7 +194,10 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::{
         consensus,
-        test_utils::{gen_random_header, gen_random_header_range, TestHeaderDownloader},
+        test_utils::{
+            generators::{random_header, random_header_range},
+            TestHeaderDownloader,
+        },
     };
     use test_utils::HeadersTestRunner;
 
@@ -215,7 +218,7 @@ mod tests {
     /// Check that the execution exits on downloader timeout.
     #[tokio::test]
     async fn execute_timeout() {
-        let head = gen_random_header(0, None);
+        let head = random_header(0, None);
         let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Err(
             DownloadError::Timeout { request_id: 0 },
         )));
@@ -229,7 +232,7 @@ mod tests {
     /// Check that validation error is propagated during the execution.
     #[tokio::test]
     async fn execute_validation_error() {
-        let head = gen_random_header(0, None);
+        let head = random_header(0, None);
         let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Err(
             DownloadError::HeaderValidation {
                 hash: H256::zero(),
@@ -248,8 +251,8 @@ mod tests {
     #[tokio::test]
     async fn execute_no_progress() {
         let (start, end) = (0, 100);
-        let head = gen_random_header(start, None);
-        let headers = gen_random_header_range(start + 1..end, head.hash());
+        let head = random_header(start, None);
+        let headers = random_header_range(start + 1..end, head.hash());
 
         let result = headers.iter().rev().cloned().collect::<Vec<_>>();
         let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Ok(result)));
@@ -272,8 +275,8 @@ mod tests {
     #[tokio::test]
     async fn execute_prev_progress() {
         let (start, end) = (10000, 10241);
-        let head = gen_random_header(start, None);
-        let headers = gen_random_header_range(start + 1..end, head.hash());
+        let head = random_header(start, None);
+        let headers = random_header_range(start + 1..end, head.hash());
 
         let result = headers.iter().rev().cloned().collect::<Vec<_>>();
         let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Ok(result)));
@@ -298,8 +301,8 @@ mod tests {
     #[tokio::test]
     async fn execute_with_linear_downloader() {
         let (start, end) = (1000, 1200);
-        let head = gen_random_header(start, None);
-        let headers = gen_random_header_range(start + 1..end, head.hash());
+        let head = random_header(start, None);
+        let headers = random_header_range(start + 1..end, head.hash());
 
         let runner = HeadersTestRunner::with_linear_downloader();
         runner.insert_header(&head).expect("failed to insert header");
@@ -348,9 +351,9 @@ mod tests {
     #[tokio::test]
     async fn unwind_db_gaps() {
         let runner = HeadersTestRunner::default();
-        let head = gen_random_header(0, None);
-        let first_range = gen_random_header_range(1..20, head.hash());
-        let second_range = gen_random_header_range(50..100, H256::zero());
+        let head = random_header(0, None);
+        let first_range = random_header_range(1..20, head.hash());
+        let second_range = random_header_range(50..100, H256::zero());
         runner.insert_header(&head).expect("failed to insert header");
         runner
             .insert_headers(first_range.iter().chain(second_range.iter()))

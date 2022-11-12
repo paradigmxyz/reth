@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::util::test_utils::{StageTestDB, StageTestRunner};
     use assert_matches::assert_matches;
-    use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
+    use reth_interfaces::{db::models::BlockNumHash, test_utils::generators::random_header_range};
     use reth_primitives::H256;
 
     const TEST_STAGE: StageId = StageId("PrevStage");
@@ -107,7 +107,7 @@ mod tests {
     #[tokio::test]
     async fn execute_no_prev_tx_count() {
         let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
+        let headers = random_header_range(0..10, H256::zero());
         runner
             .db()
             .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
@@ -129,7 +129,7 @@ mod tests {
     async fn execute() {
         let runner = TxIndexTestRunner::default();
         let (start, pivot, end) = (0, 100, 200);
-        let headers = gen_random_header_range(start..end, H256::zero());
+        let headers = random_header_range(start..end, H256::zero());
         runner
             .db()
             .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
@@ -170,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn unwind_no_input() {
         let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
+        let headers = random_header_range(0..10, H256::zero());
         runner
             .db()
             .transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
@@ -195,8 +195,8 @@ mod tests {
     #[tokio::test]
     async fn unwind_with_db_gaps() {
         let runner = TxIndexTestRunner::default();
-        let first_range = gen_random_header_range(0..20, H256::zero());
-        let second_range = gen_random_header_range(50..100, H256::zero());
+        let first_range = random_header_range(0..20, H256::zero());
+        let second_range = random_header_range(50..100, H256::zero());
         runner
             .db()
             .transform_append::<tables::CumulativeTxCount, _, _>(
