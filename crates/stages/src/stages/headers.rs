@@ -194,15 +194,15 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::{
         consensus,
-        test_utils::{gen_random_header, gen_random_header_range},
+        test_utils::{gen_random_header, gen_random_header_range, TestHeaderDownloader},
     };
-    use test_utils::{HeadersTestRunner, TestDownloader};
+    use test_utils::HeadersTestRunner;
 
     const TEST_STAGE: StageId = StageId("Headers");
 
+    /// Check that the execution errors on empty database or
+    /// prev progress missing from the database.
     #[tokio::test]
-    // Check that the execution errors on empty database or
-    // prev progress missing from the database.
     async fn execute_empty_db() {
         let runner = HeadersTestRunner::default();
         let rx = runner.execute(ExecInput::default());
@@ -212,14 +212,13 @@ mod tests {
         );
     }
 
+    /// Check that the execution exits on downloader timeout.
     #[tokio::test]
-    // Check that the execution exits on downloader timeout.
     async fn execute_timeout() {
         let head = gen_random_header(0, None);
-        let runner =
-            HeadersTestRunner::with_downloader(TestDownloader::new(Err(DownloadError::Timeout {
-                request_id: 0,
-            })));
+        let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Err(
+            DownloadError::Timeout { request_id: 0 },
+        )));
         runner.insert_header(&head).expect("failed to insert header");
 
         let rx = runner.execute(ExecInput::default());
@@ -227,11 +226,11 @@ mod tests {
         assert_matches!(rx.await.unwrap(), Ok(ExecOutput { done, .. }) if !done);
     }
 
+    /// Check that validation error is propagated during the execution.
     #[tokio::test]
-    // Check that validation error is propagated during the execution.
     async fn execute_validation_error() {
         let head = gen_random_header(0, None);
-        let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Err(
+        let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Err(
             DownloadError::HeaderValidation {
                 hash: H256::zero(),
                 error: consensus::Error::BaseFeeMissing,
@@ -244,16 +243,16 @@ mod tests {
         assert_matches!(rx.await.unwrap(), Err(StageError::Validation { block, error: consensus::Error::BaseFeeMissing, }) if block == 0);
     }
 
+    /// Validate that all necessary tables are updated after the
+    /// header download on no previous progress.
     #[tokio::test]
-    // Validate that all necessary tables are updated after the
-    // header download on no previous progress.
     async fn execute_no_progress() {
         let (start, end) = (0, 100);
         let head = gen_random_header(start, None);
         let headers = gen_random_header_range(start + 1..end, head.hash());
 
         let result = headers.iter().rev().cloned().collect::<Vec<_>>();
-        let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Ok(result)));
+        let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Ok(result)));
         runner.insert_header(&head).expect("failed to insert header");
 
         let rx = runner.execute(ExecInput::default());
@@ -268,16 +267,16 @@ mod tests {
         assert!(headers.iter().try_for_each(|h| runner.validate_db_header(&h)).is_ok());
     }
 
+    /// Validate that all necessary tables are updated after the
+    /// header download with some previous progress.
     #[tokio::test]
-    // Validate that all necessary tables are updated after the
-    // header download with some previous progress.
     async fn execute_prev_progress() {
         let (start, end) = (10000, 10241);
         let head = gen_random_header(start, None);
         let headers = gen_random_header_range(start + 1..end, head.hash());
 
         let result = headers.iter().rev().cloned().collect::<Vec<_>>();
-        let runner = HeadersTestRunner::with_downloader(TestDownloader::new(Ok(result)));
+        let runner = HeadersTestRunner::with_downloader(TestHeaderDownloader::new(Ok(result)));
         runner.insert_header(&head).expect("failed to insert header");
 
         let rx = runner.execute(ExecInput {
@@ -295,8 +294,8 @@ mod tests {
         assert!(headers.iter().try_for_each(|h| runner.validate_db_header(&h)).is_ok());
     }
 
+    /// Execute the stage with linear downloader
     #[tokio::test]
-    // Execute the stage with linear downloader
     async fn execute_with_linear_downloader() {
         let (start, end) = (1000, 1200);
         let head = gen_random_header(start, None);
@@ -332,8 +331,8 @@ mod tests {
         assert!(headers.iter().try_for_each(|h| runner.validate_db_header(&h)).is_ok());
     }
 
+    /// Check that unwind does not panic on empty database.
     #[tokio::test]
-    // Check that unwind does not panic on empty database.
     async fn unwind_empty_db() {
         let unwind_to = 100;
         let runner = HeadersTestRunner::default();
@@ -345,8 +344,8 @@ mod tests {
         );
     }
 
+    /// Check that unwind can remove headers across gaps
     #[tokio::test]
-    // Check that unwind can remove headers across gaps
     async fn unwind_db_gaps() {
         let runner = HeadersTestRunner::default();
         let head = gen_random_header(0, None);
@@ -388,16 +387,14 @@ mod tests {
             stages::headers::HeaderStage,
             util::test_utils::{StageTestDB, StageTestRunner},
         };
-        use async_trait::async_trait;
         use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
-            consensus::ForkchoiceState,
             db::{self, models::blocks::BlockNumHash, tables, DbTx},
-            p2p::headers::{downloader::HeaderDownloader, error::DownloadError},
-            test_utils::{TestConsensus, TestHeadersClient},
+            p2p::headers::downloader::HeaderDownloader,
+            test_utils::{TestConsensus, TestHeaderDownloader, TestHeadersClient},
         };
         use reth_primitives::{rpc::BigEndianHash, SealedHeader, H256, U256};
-        use std::{ops::Deref, sync::Arc, time::Duration};
+        use std::{ops::Deref, sync::Arc};
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
@@ -406,12 +403,12 @@ mod tests {
             db: StageTestDB,
         }
 
-        impl Default for HeadersTestRunner<TestDownloader> {
+        impl Default for HeadersTestRunner<TestHeaderDownloader> {
             fn default() -> Self {
                 Self {
                     client: Arc::new(TestHeadersClient::default()),
                     consensus: Arc::new(TestConsensus::default()),
-                    downloader: Arc::new(TestDownloader::new(Ok(Vec::default()))),
+                    downloader: Arc::new(TestHeaderDownloader::new(Ok(Vec::default()))),
                     db: StageTestDB::default(),
                 }
             }
@@ -514,43 +511,6 @@ mod tests {
                 }
 
                 Ok(())
-            }
-        }
-
-        #[derive(Debug)]
-        pub(crate) struct TestDownloader {
-            result: Result<Vec<SealedHeader>, DownloadError>,
-        }
-
-        impl TestDownloader {
-            pub(crate) fn new(result: Result<Vec<SealedHeader>, DownloadError>) -> Self {
-                Self { result }
-            }
-        }
-
-        #[async_trait]
-        impl HeaderDownloader for TestDownloader {
-            type Consensus = TestConsensus;
-            type Client = TestHeadersClient;
-
-            fn timeout(&self) -> Duration {
-                Duration::from_secs(1)
-            }
-
-            fn consensus(&self) -> &Self::Consensus {
-                unimplemented!()
-            }
-
-            fn client(&self) -> &Self::Client {
-                unimplemented!()
-            }
-
-            async fn download(
-                &self,
-                _: &SealedHeader,
-                _: &ForkchoiceState,
-            ) -> Result<Vec<SealedHeader>, DownloadError> {
-                self.result.clone()
             }
         }
     }

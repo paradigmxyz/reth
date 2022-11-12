@@ -13,13 +13,13 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-#[derive(Debug)]
 /// A test downloader which just returns the values that have been pushed to it.
-pub struct TestDownloader {
+#[derive(Debug)]
+pub struct TestHeaderDownloader {
     result: Result<Vec<SealedHeader>, DownloadError>,
 }
 
-impl TestDownloader {
+impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
     pub fn new(result: Result<Vec<SealedHeader>, DownloadError>) -> Self {
         Self { result }
@@ -27,7 +27,7 @@ impl TestDownloader {
 }
 
 #[async_trait::async_trait]
-impl HeaderDownloader for TestDownloader {
+impl HeaderDownloader for TestHeaderDownloader {
     type Consensus = TestConsensus;
     type Client = TestHeadersClient;
 
@@ -52,8 +52,8 @@ impl HeaderDownloader for TestDownloader {
     }
 }
 
-#[derive(Debug)]
 /// A test client for fetching headers
+#[derive(Debug)]
 pub struct TestHeadersClient {
     req_tx: mpsc::Sender<(u64, HeadersRequest)>,
     req_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, HeadersRequest)>>>,
@@ -110,7 +110,7 @@ impl HeadersClient for TestHeadersClient {
     }
 }
 
-/// Consensus client impl for testing
+/// Consensus engine implementation for testing
 #[derive(Debug)]
 pub struct TestConsensus {
     /// Watcher over the forkchoice state
@@ -133,14 +133,14 @@ impl Default for TestConsensus {
 }
 
 impl TestConsensus {
-    /// Update the forkchoice state
+    /// Update the fork choice state
     pub fn update_tip(&self, tip: H256) {
         let state = ForkchoiceState {
             head_block_hash: tip,
             finalized_block_hash: H256::zero(),
             safe_block_hash: H256::zero(),
         };
-        self.channel.0.send(state).expect("updating forkchoice state failed");
+        self.channel.0.send(state).expect("updating fork choice state failed");
     }
 
     /// Update the validation flag
