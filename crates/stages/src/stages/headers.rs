@@ -9,10 +9,7 @@ use reth_interfaces::{
         models::blocks::BlockNumHash, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
         DbCursorRW, DbTx, DbTxMut,
     },
-    p2p::headers::{
-        client::HeadersClient,
-        downloader::{DownloadError, HeaderDownloader},
-    },
+    p2p::headers::{client::HeadersClient, downloader::HeaderDownloader, error::DownloadError},
 };
 use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};

@@ -1,23 +1,9 @@
 use reth_eth_wire::BlockBody;
 use reth_primitives::H256;
 
+use crate::p2p::bodies::error::BodiesClientError;
 use async_trait::async_trait;
 use std::fmt::Debug;
-use thiserror::Error;
-
-/// Body client errors.
-#[derive(Error, Debug)]
-pub enum BodiesClientError {
-    /// Timed out while waiting for a response.
-    #[error("Timed out while getting bodies for block {header_hash}.")]
-    Timeout {
-        /// The header hash of the block that timed out.
-        header_hash: H256,
-    },
-    /// The client encountered an internal error.
-    #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
-}
 
 /// The block bodies downloader client
 #[async_trait]

@@ -1,44 +1,9 @@
 use super::client::BodiesClient;
-use crate::p2p::bodies::client::BodiesClientError;
+use crate::p2p::bodies::error::DownloadError;
 use reth_eth_wire::BlockBody;
 use reth_primitives::H256;
-use std::{fmt::Debug, pin::Pin, time::Duration};
-use thiserror::Error;
+use std::{pin::Pin, time::Duration};
 use tokio_stream::Stream;
-
-/// Body downloader errors.
-#[derive(Error, Debug)]
-pub enum DownloadError {
-    /// Timed out while waiting for a response.
-    #[error("Timed out while getting bodies for block {header_hash}.")]
-    Timeout {
-        /// The header hash of the block that timed out.
-        header_hash: H256,
-    },
-    /// The [BodiesClient] used by the downloader experienced an error.
-    #[error("The downloader client encountered an error.")]
-    Client {
-        /// The underlying client error.
-        #[source]
-        source: BodiesClientError,
-    },
-}
-
-impl From<BodiesClientError> for DownloadError {
-    fn from(error: BodiesClientError) -> Self {
-        match error {
-            BodiesClientError::Timeout { header_hash } => DownloadError::Timeout { header_hash },
-            _ => DownloadError::Client { source: error },
-        }
-    }
-}
-
-impl DownloadError {
-    /// Indicates whether this error is retryable or fatal.
-    pub fn is_retryable(&self) -> bool {
-        matches!(self, DownloadError::Timeout { .. })
-    }
-}
 
 /// A downloader capable of fetching block bodies from header hashes.
 ///

@@ -5,7 +5,8 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::headers::{
         client::{HeadersClient, HeadersStream},
-        downloader::{DownloadError, HeaderDownloader},
+        downloader::HeaderDownloader,
+        error::DownloadError,
     },
 };
 use reth_primitives::{rpc::BlockId, SealedHeader};

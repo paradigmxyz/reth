@@ -3,7 +3,8 @@ use crate::{
     consensus::{self, Consensus, Error},
     p2p::headers::{
         client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
-        downloader::{DownloadError, HeaderDownloader},
+        downloader::HeaderDownloader,
+        error::DownloadError,
     },
 };
 use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512, U256};

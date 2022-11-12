@@ -1,7 +1,8 @@
 use futures_util::{stream, StreamExt, TryFutureExt};
 use reth_interfaces::p2p::bodies::{
-    client::{BodiesClient, BodiesClientError},
-    downloader::{BodiesStream, DownloadError, BodyDownloader},
+    client::BodiesClient,
+    downloader::{BodiesStream, BodyDownloader},
+    error::{BodiesClientError, DownloadError},
 };
 use reth_primitives::H256;
 use std::{sync::Arc, time::Duration};
