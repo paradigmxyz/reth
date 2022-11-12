@@ -5,7 +5,7 @@ use crate::p2p::bodies::error::BodiesClientError;
 use async_trait::async_trait;
 use std::fmt::Debug;
 
-/// The block bodies downloader client
+/// A client capable of downloading block bodies.
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: Send + Sync + Debug {

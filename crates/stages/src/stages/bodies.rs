@@ -178,37 +178,139 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    #[ignore]
-    async fn empty_db() {}
+    use super::*;
+    use crate::util::test_utils::StageTestRunner;
+    use assert_matches::assert_matches;
+    use test_utils::*;
 
+    /// Check that the execution is short-circuited if the database is empty.
     #[tokio::test]
-    #[ignore]
-    async fn already_reached_target() {}
+    async fn empty_db() {
+        let runner = BodyTestRunner::new(|| concurrent_downloader(uncallable_client()));
+        let rx = runner.execute(ExecInput::default());
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(ExecOutput { stage_progress: 0, reached_tip: true, done: true })
+        )
+    }
 
+    /// Check that the execution is short-circuited if the target was already reached.
+    #[tokio::test]
+    async fn already_reached_target() {
+        let runner = BodyTestRunner::new(|| concurrent_downloader(uncallable_client()));
+        let rx = runner.execute(ExecInput {
+            previous_stage: Some((StageId("Headers"), 100)),
+            stage_progress: Some(100),
+        });
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(ExecOutput { stage_progress: 100, reached_tip: true, done: true })
+        )
+    }
+
+    /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]
     #[ignore]
     async fn partial_body_download() {}
 
+    /// Same as [partial_body_download] except the `batch_size` is not hit.
     #[tokio::test]
     #[ignore]
     async fn full_body_download() {}
 
+    /// Checks that the stage asks to unwind if pre-validation of the block fails.
     #[tokio::test]
     #[ignore]
     async fn pre_validation_failure() {}
 
+    /// Checks that the transaction pointers in the stored block bodies are all valid.
     #[tokio::test]
     #[ignore]
     async fn block_tx_pointer_validity() {}
 
+    /// Checks that the stage unwinds correctly.
     #[tokio::test]
     #[ignore]
     async fn unwind() {}
 
+    /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
     #[tokio::test]
     #[ignore]
     async fn unwind_missing_tx() {}
 
-    mod test_utils {}
+    mod test_utils {
+        use crate::{
+            stages::bodies::BodyStage,
+            util::test_utils::{StageTestDB, StageTestRunner},
+        };
+        use reth_bodies_downloaders::concurrent::{
+            ConcurrentDownloader, ConcurrentDownloaderBuilder,
+        };
+        use reth_eth_wire::BlockBody;
+        use reth_interfaces::{
+            p2p::bodies::{
+                client::BodiesClient, downloader::BodyDownloader, error::BodiesClientError,
+            },
+            test_utils::{TestBodiesClient, TestConsensus},
+        };
+        use reth_primitives::H256;
+        use std::sync::Arc;
+
+        /// Builds a [ConcurrentDownloader] with the given [BodiesClient].
+        pub(crate) fn concurrent_downloader<C>(client: C) -> ConcurrentDownloader<C>
+        where
+            C: BodiesClient,
+        {
+            ConcurrentDownloaderBuilder::default().build(Arc::new(client))
+        }
+
+        /// A [BodiesClient] that panics if called.
+        pub(crate) fn uncallable_client(
+        ) -> TestBodiesClient<fn(H256) -> Result<BlockBody, BodiesClientError>> {
+            TestBodiesClient {
+                responder: |_| panic!("Block body client was called, but it should not be."),
+            }
+        }
+
+        /// A helper struct for running the [BodyStage].
+        pub(crate) struct BodyTestRunner<F, D>
+        where
+            D: BodyDownloader,
+            F: Fn() -> D,
+        {
+            downloader_builder: F,
+            db: StageTestDB,
+        }
+
+        impl<F, D> BodyTestRunner<F, D>
+        where
+            D: BodyDownloader + 'static,
+            F: Fn() -> D + 'static,
+        {
+            /// Build a new test runner.
+            pub(crate) fn new(downloader_builder: F) -> Self {
+                BodyTestRunner { downloader_builder, db: StageTestDB::default() }
+            }
+        }
+
+        impl<F, D> StageTestRunner for BodyTestRunner<F, D>
+        where
+            D: BodyDownloader + 'static,
+            F: Fn() -> D + 'static,
+        {
+            type S = BodyStage<D, TestConsensus>;
+
+            fn db(&self) -> &StageTestDB {
+                &self.db
+            }
+
+            fn stage(&self) -> Self::S {
+                BodyStage {
+                    downloader: (self.downloader_builder)(),
+                    consensus: TestConsensus::default(),
+                    batch_size: 10,
+                }
+            }
+        }
+    }
 }
