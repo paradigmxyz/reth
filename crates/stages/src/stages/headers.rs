@@ -393,7 +393,7 @@ mod tests {
         use reth_interfaces::{
             consensus::ForkchoiceState,
             db::{self, models::blocks::BlockNumHash, tables, DbTx},
-            p2p::headers::downloader::{DownloadError, HeaderDownloader},
+            p2p::headers::{downloader::HeaderDownloader, error::DownloadError},
             test_utils::{TestConsensus, TestHeadersClient},
         };
         use reth_primitives::{rpc::BigEndianHash, SealedHeader, H256, U256};
@@ -437,8 +437,9 @@ mod tests {
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
                 let consensus = Arc::new(TestConsensus::default());
-                let downloader =
-                    Arc::new(LinearDownloadBuilder::new().build(consensus.clone(), client.clone()));
+                let downloader = Arc::new(
+                    LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
+                );
                 Self { client, consensus, downloader, db: StageTestDB::default() }
             }
         }
