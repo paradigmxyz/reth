@@ -132,12 +132,18 @@ where
     /// Event hook for new actions derived from the peer management set.
     fn on_peer_action(&mut self, action: PeerAction) {
         match action {
-            PeerAction::Connect { node_id, remote_addr } => {
-                self.queued_messages.push_back(StateAction::Connect { node_id, remote_addr });
+            PeerAction::Connect { peer_id, remote_addr } => {
+                self.queued_messages
+                    .push_back(StateAction::Connect { node_id: peer_id, remote_addr });
             }
-            PeerAction::Disconnect { node_id } => {
-                self.state_fetcher.on_pending_disconnect(&node_id);
-                self.queued_messages.push_back(StateAction::Disconnect { node_id });
+            PeerAction::Disconnect { peer_id } => {
+                self.state_fetcher.on_pending_disconnect(&peer_id);
+                self.queued_messages.push_back(StateAction::Disconnect { node_id: peer_id });
+            }
+            PeerAction::DisconnectBannedIncoming { peer_id } => {
+                // TODO: can IP ban
+                self.state_fetcher.on_pending_disconnect(&peer_id);
+                self.queued_messages.push_back(StateAction::Disconnect { node_id: peer_id });
             }
         }
     }
