@@ -9,7 +9,7 @@ use reth_interfaces::{
         models::StoredBlockBody, tables, DBContainer, Database, DbCursorRO, DbCursorRW, DbTx,
         DbTxMut,
     },
-    p2p::bodies::downloader::Downloader,
+    p2p::bodies::downloader::BodyDownloader,
 };
 use reth_primitives::{BlockLocked, SealedHeader};
 use std::fmt::Debug;
@@ -28,7 +28,7 @@ const BODIES: StageId = StageId("Bodies");
 /// - [`BlockBodies`][reth_interfaces::db::tables::BlockBodies]
 /// - [`Transactions`][reth_interfaces::db::tables::Transactions]
 #[derive(Debug)]
-pub struct BodyStage<D: Downloader, C: Consensus> {
+pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
     pub downloader: D,
     /// The consensus engine.
@@ -41,7 +41,7 @@ pub struct BodyStage<D: Downloader, C: Consensus> {
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: Downloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
+impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         BODIES

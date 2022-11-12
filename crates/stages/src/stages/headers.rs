@@ -11,7 +11,7 @@ use reth_interfaces::{
     },
     p2p::headers::{
         client::HeadersClient,
-        downloader::{DownloadError, Downloader},
+        downloader::{DownloadError, HeaderDownloader},
     },
 };
 use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
@@ -32,7 +32,7 @@ const HEADERS: StageId = StageId("Headers");
 /// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
 /// - [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
 #[derive(Debug)]
-pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
+pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
@@ -42,7 +42,7 @@ pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
+impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB>
     for HeaderStage<D, C, H>
 {
     /// Return the id of the stage
@@ -127,7 +127,7 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
     }
 }
 
-impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
+impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     async fn update_head<DB: Database>(
         &self,
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
@@ -396,13 +396,13 @@ mod tests {
         use reth_interfaces::{
             consensus::ForkchoiceState,
             db::{self, models::blocks::BlockNumHash, tables, DbTx},
-            p2p::headers::downloader::{DownloadError, Downloader},
+            p2p::headers::downloader::{DownloadError, HeaderDownloader},
             test_utils::{TestConsensus, TestHeadersClient},
         };
         use reth_primitives::{rpc::BigEndianHash, SealedHeader, H256, U256};
         use std::{ops::Deref, sync::Arc, time::Duration};
 
-        pub(crate) struct HeadersTestRunner<D: Downloader> {
+        pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
@@ -420,7 +420,7 @@ mod tests {
             }
         }
 
-        impl<D: Downloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
 
             fn db(&self) -> &StageTestDB {
@@ -446,7 +446,7 @@ mod tests {
             }
         }
 
-        impl<D: Downloader> HeadersTestRunner<D> {
+        impl<D: HeaderDownloader> HeadersTestRunner<D> {
             pub(crate) fn with_downloader(downloader: D) -> Self {
                 HeadersTestRunner {
                     client: Arc::new(TestHeadersClient::default()),
@@ -531,7 +531,7 @@ mod tests {
         }
 
         #[async_trait]
-        impl Downloader for TestDownloader {
+        impl HeaderDownloader for TestDownloader {
             type Consensus = TestConsensus;
             type Client = TestHeadersClient;
 

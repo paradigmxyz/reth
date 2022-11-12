@@ -5,7 +5,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::headers::{
         client::{HeadersClient, HeadersStream},
-        downloader::{DownloadError, Downloader},
+        downloader::{DownloadError, HeaderDownloader},
     },
 };
 use reth_primitives::{rpc::BlockId, SealedHeader};
@@ -27,7 +27,7 @@ pub struct LinearDownloader<C, H> {
 }
 
 #[async_trait]
-impl<C: Consensus, H: HeadersClient> Downloader for LinearDownloader<C, H> {
+impl<C: Consensus, H: HeadersClient> HeaderDownloader for LinearDownloader<C, H> {
     type Consensus = C;
     type Client = H;
 

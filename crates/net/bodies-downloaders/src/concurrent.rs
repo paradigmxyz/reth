@@ -1,7 +1,7 @@
 use futures_util::{stream, StreamExt, TryFutureExt};
 use reth_interfaces::p2p::bodies::{
     client::{BodiesClient, BodiesClientError},
-    downloader::{BodiesStream, DownloadError, Downloader},
+    downloader::{BodiesStream, DownloadError, BodyDownloader},
 };
 use reth_primitives::H256;
 use std::{sync::Arc, time::Duration};
@@ -21,7 +21,7 @@ pub struct ConcurrentDownloader<C> {
     pub request_retries: usize,
 }
 
-impl<C: BodiesClient> Downloader for ConcurrentDownloader<C> {
+impl<C: BodiesClient> BodyDownloader for ConcurrentDownloader<C> {
     type Client = C;
 
     /// The request timeout duration

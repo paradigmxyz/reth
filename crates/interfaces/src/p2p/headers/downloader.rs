@@ -53,10 +53,13 @@ impl DownloadError {
     }
 }
 
-/// The header downloading strategy
+/// A downloader capable of fetching block headers.
+///
+/// A downloader represents a distinct strategy for submitting requests to download block headers,
+/// while a [HeadersClient] represents a client capable of fulfilling these requests.
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait Downloader: Sync + Send {
+pub trait HeaderDownloader: Sync + Send {
     /// The Consensus used to verify block validity when
     /// downloading
     type Consensus: Consensus;

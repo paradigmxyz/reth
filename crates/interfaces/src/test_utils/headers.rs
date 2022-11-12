@@ -3,7 +3,7 @@ use crate::{
     consensus::{self, Consensus, Error},
     p2p::headers::{
         client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
-        downloader::{DownloadError, Downloader},
+        downloader::{DownloadError, HeaderDownloader},
     },
 };
 use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512, U256};
@@ -26,7 +26,7 @@ impl TestDownloader {
 }
 
 #[async_trait::async_trait]
-impl Downloader for TestDownloader {
+impl HeaderDownloader for TestDownloader {
     type Consensus = TestConsensus;
     type Client = TestHeadersClient;
 

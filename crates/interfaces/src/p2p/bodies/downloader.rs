@@ -44,7 +44,7 @@ impl DownloadError {
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block bodies,
 /// while a [BodiesClient] represents a client capable of fulfilling these requests.
-pub trait Downloader: Sync + Send {
+pub trait BodyDownloader: Sync + Send {
     /// The [BodiesClient] used to fetch the block bodies
     type Client: BodiesClient;
 
