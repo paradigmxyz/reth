@@ -32,7 +32,7 @@ pub trait BodyDownloader: Sync + Send {
     ///
     /// It is *not* guaranteed that all the requested bodies are fetched: the downloader may close
     /// the stream before the entire range has been fetched for any reason
-    fn stream_bodies<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
     where
         I: IntoIterator<Item = H256>,
         <I as IntoIterator>::IntoIter: Send + 'b,

@@ -35,7 +35,7 @@ impl<C: BodiesClient> BodyDownloader for ConcurrentDownloader<C> {
         &self.client
     }
 
-    fn stream_bodies<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
     where
         I: IntoIterator<Item = H256>,
         <I as IntoIterator>::IntoIter: Send + 'b,

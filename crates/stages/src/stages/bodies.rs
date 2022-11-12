@@ -84,7 +84,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut block_number = starting_block;
         while let Some((header_hash, body)) = self
             .downloader
-            .stream_bodies(
+            .bodies_stream(
                 header_hashes_cursor
                     .walk(starting_block)?
                     .filter_map(|item| item.ok().map(|(_, hash)| hash))
