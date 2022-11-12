@@ -78,11 +78,6 @@ impl Default for ConcurrentDownloaderBuilder {
 }
 
 impl ConcurrentDownloaderBuilder {
-    /// Initialize a new builder
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set the request batch size
     pub fn batch_size(mut self, size: usize) -> Self {
         self.batch_size = size;

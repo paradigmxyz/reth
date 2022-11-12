@@ -113,9 +113,9 @@ impl<DB: Database, D: Downloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
             };
 
             // Pre-validate the block and unwind if it is invalid
-            if let Err(error) = self.consensus.pre_validate_block(&block) {
-                return Err(StageError::Validation { block: block_number, error })
-            }
+            self.consensus
+                .pre_validate_block(&block)
+                .map_err(|err| StageError::Validation { block: block_number, error: err })?;
 
             // Write block
             bodies_cursor.append(
