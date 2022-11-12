@@ -127,7 +127,8 @@ pub fn validate_block_standalone(
 ) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let ommers_hash = crate::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+    let ommers_hash =
+        reth_primitives::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
     if block.header.ommers_hash != ommers_hash {
         return Err(Error::BodyOmmersHashDiff {
             got: ommers_hash,
@@ -137,7 +138,7 @@ pub fn validate_block_standalone(
 
     // Check transaction root
     // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let transaction_root = crate::proofs::calculate_transaction_root(block.body.iter());
+    let transaction_root = reth_primitives::proofs::calculate_transaction_root(block.body.iter());
     if block.header.transactions_root != transaction_root {
         return Err(Error::BodyTransactionRootDiff {
             got: transaction_root,
@@ -159,7 +160,7 @@ pub fn validate_block_standalone(
     // NOTE(onbjerg): Pre-validation does not validate the receipts root since we do not have the
     // receipts yet (this validation is before execution). Maybe this should not be in here?
     if validate_receipts {
-        let receipts_root = crate::proofs::calculate_receipt_root(block.receipts.iter());
+        let receipts_root = reth_primitives::proofs::calculate_receipt_root(block.receipts.iter());
         if block.header.receipts_root != receipts_root {
             return Err(Error::BodyReceiptsRootDiff {
                 got: receipts_root,

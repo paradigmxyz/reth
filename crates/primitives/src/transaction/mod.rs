@@ -176,6 +176,15 @@ impl Transaction {
         }
     }
 
+    /// Get the gas limit of the transaction.
+    pub fn gas_limit(&self) -> u64 {
+        match self {
+            Transaction::Legacy { gas_limit, .. } |
+            Transaction::Eip2930 { gas_limit, .. } |
+            Transaction::Eip1559 { gas_limit, .. } => *gas_limit,
+        }
+    }
+
     /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_limit
     pub fn max_fee_per_gas(&self) -> u64 {
         match self {

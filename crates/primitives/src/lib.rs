@@ -22,6 +22,9 @@ mod receipt;
 mod storage;
 mod transaction;
 
+/// Helper function for calculating Merkle proofs and hashes
+pub mod proofs;
+
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;

@@ -1,9 +1,8 @@
+use crate::{keccak256, Bytes, Header, Log, Receipt, TransactionSigned, H256};
+use ethers_core::utils::rlp::RlpStream;
 use hash_db::Hasher;
 use plain_hasher::PlainHasher;
-use reth_primitives::{Bytes, Header, Log, Receipt, TransactionSigned, H256};
 use reth_rlp::Encodable;
-use rlp::RlpStream;
-use sha3::{Digest, Keccak256};
 use triehash::sec_trie_root;
 
 /// A [Hasher] that calculates a keccak256 hash of the given data.
@@ -17,9 +16,7 @@ impl Hasher for KeccakHasher {
     const LENGTH: usize = 32;
 
     fn hash(x: &[u8]) -> Self::Out {
-        let out = Keccak256::digest(x);
-        // TODO make more performant, H256 from slice is not good enough.
-        H256::from_slice(out.as_slice())
+        keccak256(x)
     }
 }
 
@@ -77,8 +74,7 @@ pub fn calculate_log_root<'a>(logs: impl IntoIterator<Item = &'a Log>) -> H256 {
     stream.finalize_unbounded_list();
     let out = stream.out().freeze();
 
-    let out = Keccak256::digest(out);
-    H256::from_slice(out.as_slice())
+    keccak256(out)
 }
 
 /// Calculates the root hash for ommer/uncle headers.
@@ -93,8 +89,7 @@ pub fn calculate_ommers_root<'a>(_ommers: impl IntoIterator<Item = &'a Header>) 
      */
     stream.finalize_unbounded_list();
     let bytes = stream.out().freeze();
-    let out = Keccak256::digest(bytes);
-    H256::from_slice(out.as_slice())
+    keccak256(bytes)
 }
 
 // TODO state root

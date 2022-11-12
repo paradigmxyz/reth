@@ -3072,16 +3072,11 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "eyre",
- "hash-db",
- "plain_hasher",
  "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
- "rlp",
- "sha3",
  "thiserror",
  "tokio",
- "triehash",
 ]
 
 [[package]]
@@ -3348,10 +3343,12 @@ dependencies = [
  "crc",
  "derive_more",
  "ethers-core",
+ "hash-db",
  "hex",
  "hex-literal",
  "maplit",
  "parity-scale-codec",
+ "plain_hasher",
  "reth-codecs",
  "reth-rlp",
  "secp256k1",
@@ -3360,6 +3357,7 @@ dependencies = [
  "sucds",
  "thiserror",
  "tiny-keccak",
+ "triehash",
 ]
 
 [[package]]
