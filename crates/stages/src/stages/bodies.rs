@@ -15,7 +15,7 @@ use reth_primitives::{BlockLocked, SealedHeader};
 use std::fmt::Debug;
 use tracing::warn;
 
-const BODIES: StageId = StageId("BODIES");
+const BODIES: StageId = StageId("Bodies");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
