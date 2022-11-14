@@ -4,7 +4,7 @@ use crate::message::BlockRequest;
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, EthMessage};
 use reth_interfaces::p2p::{error::RequestResult, headers::client::HeadersRequest};
-use reth_primitives::{Header, H256, PeerId, U256};
+use reth_primitives::{Header, PeerId, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},

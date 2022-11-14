@@ -1,5 +1,5 @@
-use reth_primitives::PeerId;
 use futures::StreamExt;
+use reth_primitives::PeerId;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     net::SocketAddr,
