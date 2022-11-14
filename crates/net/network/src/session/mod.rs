@@ -1,6 +1,7 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
 use crate::{
+    message::PeerMessage,
     session::{
         active::ActiveSession,
         handle::{
@@ -386,7 +387,7 @@ pub(crate) enum SessionEvent {
     ValidMessage {
         node_id: NodeId,
         /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {

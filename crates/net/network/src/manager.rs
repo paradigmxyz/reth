@@ -19,7 +19,9 @@ use crate::{
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
+    import::{BlockImport, BlockImportOutcome},
     listener::ConnectionListener,
+    message::{PeerMessage, PeerRequest},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     session::SessionManager,
@@ -77,8 +79,8 @@ pub struct NetworkManager<C> {
     handle: NetworkHandle,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
-    /// Handles block imports.
-    block_import_sink: (),
+    /// Handles block imports according to the `eth` protocol.
+    block_import: Box<dyn BlockImport>,
     /// The address of this node that listens for incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// All listeners for [`Network`] events.
@@ -112,6 +114,7 @@ where
             peers_config,
             sessions_config,
             genesis_hash,
+            block_import,
             ..
         } = config;
 
@@ -145,7 +148,7 @@ where
             swarm,
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
-            block_import_sink: (),
+            block_import,
             listener_address,
             event_listeners: Default::default(),
             num_active_peers,
@@ -171,41 +174,34 @@ where
         // TODO: disconnect?
     }
 
-    /// Handles a received [`CapabilityMessage`] from the peer.
-    fn on_capability_message(&mut self, _node_id: NodeId, msg: CapabilityMessage) {
-        match msg {
-            CapabilityMessage::Eth(eth) => {
-                match eth {
-                    EthMessage::Status(_) => {}
-                    EthMessage::NewBlockHashes(_) => {
-                        // update peer's state, to track what blocks this peer has seen
-                    }
-                    EthMessage::NewBlock(_) => {
-                        // emit new block and track that the peer knows this block
-                    }
-                    EthMessage::Transactions(_) => {
-                        // need to emit this as event/send to tx handler
-                    }
-                    EthMessage::NewPooledTransactionHashes(_) => {
-                        // need to emit this as event/send to tx handler
-                    }
+    /// Handle an incoming request from the peer
+    fn on_eth_request(&mut self, _peer_id: NodeId, req: PeerRequest) {
+        match req {
+            PeerRequest::GetBlockHeaders { .. } => {}
+            PeerRequest::GetBlockBodies { .. } => {}
+            PeerRequest::GetPooledTransactions { .. } => {}
+            PeerRequest::GetNodeData { .. } => {}
+            PeerRequest::GetReceipts { .. } => {}
+        }
+    }
 
-                    // TODO: should remove the response types here, as they are handled separately
-                    EthMessage::GetBlockHeaders(_) => {}
-                    EthMessage::BlockHeaders(_) => {}
-                    EthMessage::GetBlockBodies(_) => {}
-                    EthMessage::BlockBodies(_) => {}
-                    EthMessage::GetPooledTransactions(_) => {}
-                    EthMessage::PooledTransactions(_) => {}
-                    EthMessage::GetNodeData(_) => {}
-                    EthMessage::NodeData(_) => {}
-                    EthMessage::GetReceipts(_) => {}
-                    EthMessage::Receipts(_) => {}
-                }
+    /// Handles a received [`CapabilityMessage`] from the peer.
+    fn on_peer_message(&mut self, peer_id: NodeId, msg: PeerMessage) {
+        match msg {
+            PeerMessage::NewBlockHashes(hashes) => {
+                // update peer's state, to track what blocks this peer has seen
+                self.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
             }
-            CapabilityMessage::Other(_) => {
-                // other subprotocols
+            PeerMessage::NewBlock(block) => {
+                self.swarm.state_mut().on_new_block(peer_id, block.hash);
+                // start block import process
+                self.block_import.on_new_block(peer_id, block);
             }
+            PeerMessage::Transactions(_) => {}
+            PeerMessage::EthRequest(req) => {
+                self.on_eth_request(peer_id, req);
+            }
+            PeerMessage::Other(_) => {}
         }
     }
 
@@ -215,10 +211,14 @@ where
             NetworkHandleMessage::EventListener(tx) => {
                 self.event_listeners.listeners.push(tx);
             }
-            NetworkHandleMessage::NewestBlock(_, _) => {}
-            _ => {}
+            NetworkHandleMessage::AnnounceBlock(block) => {
+                self.swarm.state_mut().announce_block(block);
+            }
         }
     }
+
+    /// Invoked after a `NewBlock` message from the peer was validated
+    fn on_block_import_result(&mut self, _outcome: BlockImportOutcome) {}
 }
 
 impl<C> Future for NetworkManager<C>
@@ -229,6 +229,11 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+
+        // poll new block imports
+        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
+            this.on_block_import_result(outcome);
+        }
 
         // process incoming messages from a handle
         loop {
@@ -248,8 +253,8 @@ where
         while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
             // handle event
             match event {
-                SwarmEvent::CapabilityMessage { node_id, message } => {
-                    this.on_capability_message(node_id, message)
+                SwarmEvent::ValidMessage { node_id, message } => {
+                    this.on_peer_message(node_id, message)
                 }
                 SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message } => {
                     this.on_invalid_message(node_id, capabilities, message)
@@ -292,7 +297,7 @@ where
             }
         }
 
-        todo!()
+        Poll::Pending
     }
 }
 

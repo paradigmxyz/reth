@@ -1,6 +1,7 @@
 use crate::{manager::NetworkEvent, peers::PeersHandle, NodeId};
 use parking_lot::Mutex;
-use reth_primitives::{H256, U256};
+use reth_eth_wire::NewBlock;
+
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
@@ -59,7 +60,7 @@ struct NetworkInner {
     /// The identifier used by this node.
     local_node_id: NodeId,
     /// Access to the all the nodes
-    peers: PeersHandle, // TODO need something to access
+    peers: PeersHandle,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
@@ -67,7 +68,5 @@ pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
-    AnnounceBlock,
-    /// Returns the newest imported block by the network.
-    NewestBlock(H256, U256),
+    AnnounceBlock(NewBlock),
 }

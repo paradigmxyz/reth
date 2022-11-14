@@ -1,29 +1,28 @@
 //! Keeps track of the state of the network.
 
 use crate::{
+    cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
-    fetch::StateFetcher,
-    message::{PeerRequestSender, PeerResponse},
+    fetch::{BlockResponseOutcome, StateFetcher},
+    message::{BlockRequest, PeerRequest, PeerRequestSender, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     NodeId,
 };
-
-use reth_eth_wire::{capability::Capabilities, Status};
+use reth_eth_wire::{capability::Capabilities, BlockHashNumber, NewBlock, Status};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::H256;
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,
+    num::NonZeroUsize,
     sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-
-use crate::{
-    fetch::BlockResponseOutcome,
-    message::{BlockRequest, PeerRequest, PeerResponseResult},
-};
 use tracing::trace;
+
+/// Cache limit of blocks to keep track of for a single peer.
+const PEER_BLOCK_CACHE_LIMIT: usize = 512;
 
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
@@ -91,7 +90,9 @@ where
         // TODO add capacity check
         debug_assert!(self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
-        self.state_fetcher.new_connected_peer(peer, status.blockhash);
+        // find the corresponding block number
+        let block_number = self.client.block_number(status.blockhash).ok().flatten();
+        self.state_fetcher.new_connected_peer(peer, status.blockhash, block_number);
 
         self.connected_peers.insert(
             peer,
@@ -100,6 +101,7 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
+                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
             },
         );
 
@@ -112,12 +114,32 @@ where
         self.state_fetcher.on_session_closed(&peer);
     }
 
-    /// Propagates Block to peers.
-    pub(crate) fn announce_block(&mut self, _hash: H256, _block: ()) {
+    /// Starts propagating the new block to peers that haven't reported the block yet.
+    ///
+    /// This is supposed to be invoked after the block was validated.
+    ///
+    /// > It then sends the block to a small fraction of connected peers (usually the square root of
+    /// > the total number of peers) using the `NewBlock` message.
+    ///
+    /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
+    pub(crate) fn announce_block(&mut self, _new_block: NewBlock) {
         // TODO propagate the newblock messages to all connected peers that haven't seen the block
         // yet
 
         todo!()
+    }
+
+    /// Invoked after a `NewBlock` message was received by the peer.
+    ///
+    /// This will keep track of blocks we know a peer has
+    pub(crate) fn on_new_block(&mut self, _peer_id: NodeId, _hash: H256) {}
+
+    /// Invoked for a `NewBlockHashes` broadcast message.
+    pub(crate) fn on_new_block_hashes(&mut self, peer_id: NodeId, hashes: Vec<BlockHashNumber>) {
+        // Mark the blocks as seen
+        if let Some(peer) = self.connected_peers.get_mut(&peer_id) {
+            peer.blocks.extend(hashes.into_iter().map(|b| b.hash));
+        }
     }
 
     /// Event hook for events received from the discovery service.
@@ -184,7 +206,7 @@ where
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
             }
-            BlockResponseOutcome::BadResponse(_) => {
+            BlockResponseOutcome::BadResponse(_peer, _reputation_change) => {
                 // TODO handle reputation change
             }
         }
@@ -278,6 +300,8 @@ pub struct ConnectedPeer {
     pub(crate) request_tx: PeerRequestSender,
     /// The response receiver for a currently active request to that peer.
     pub(crate) pending_response: Option<PeerResponse>,
+    /// Blocks we know the peer has.
+    pub(crate) blocks: LruCache<H256>,
 }
 
 /// Message variants triggered by the [`State`]

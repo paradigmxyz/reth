@@ -1,5 +1,6 @@
 //! Session handles
 use crate::{
+    message::PeerMessage,
     session::{Direction, SessionId},
     NodeId,
 };
@@ -107,7 +108,7 @@ pub(crate) enum ActiveSessionMessage {
         /// Identifier of the remote peer.
         node_id: NodeId,
         /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {

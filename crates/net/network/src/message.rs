@@ -3,19 +3,26 @@
 //! An RLPx stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the RLPx `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
+use crate::NodeId;
 use futures::FutureExt;
 use reth_eth_wire::{
-    BlockBodies, BlockBody, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetPooledTransactions, GetReceipts, NewBlock, NewBlockHashes, NodeData, PooledTransactions,
-    Receipts, Transactions,
+    capability::CapabilityMessage, BlockBodies, BlockBody, BlockHeaders, GetBlockBodies,
+    GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewBlockHashes,
+    NodeData, PooledTransactions, Receipts, Transactions,
 };
-use std::task::{ready, Context, Poll};
-
-use crate::NodeId;
-use reth_eth_wire::capability::CapabilityMessage;
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{Header, Receipt, TransactionSigned};
+use reth_primitives::{Header, Receipt, TransactionSigned, H256};
+use std::task::{ready, Context, Poll};
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
+
+/// Internal form of a `NewBlock` message
+#[derive(Debug)]
+pub struct IncomingBlock {
+    /// Hash of the block
+    pub hash: H256,
+    /// Raw received message
+    pub block: Box<NewBlock>,
+}
 
 /// Represents all messages that can be sent to a peer session
 #[derive(Debug)]
@@ -23,7 +30,7 @@ pub enum PeerMessage {
     /// Announce new block hashes
     NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
-    NewBlock(Box<NewBlock>),
+    NewBlock(IncomingBlock),
     /// Broadcast transactions.
     Transactions(Transactions),
     /// All `eth` request variants.

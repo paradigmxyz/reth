@@ -1,5 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
+    message::PeerMessage,
     session::{SessionEvent, SessionId, SessionManager},
     state::{AddSessionError, NetworkState, StateAction},
     NodeId,
@@ -78,7 +79,7 @@ where
                 }
             },
             SessionEvent::ValidMessage { node_id, message } => {
-                Some(SwarmEvent::CapabilityMessage { node_id, message })
+                Some(SwarmEvent::ValidMessage { node_id, message })
             }
             SessionEvent::InvalidMessage { node_id, capabilities, message } => {
                 Some(SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message })
@@ -189,11 +190,11 @@ where
 /// network.
 pub enum SwarmEvent {
     /// Events related to the actual network protocol.
-    CapabilityMessage {
+    ValidMessage {
         /// The peer that sent the message
         node_id: NodeId,
         /// Message received from the peer
-        message: CapabilityMessage,
+        message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidCapabilityMessage {
