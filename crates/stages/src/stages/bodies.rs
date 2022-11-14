@@ -233,7 +233,9 @@ mod tests {
     use crate::util::test_utils::StageTestRunner;
     use assert_matches::assert_matches;
     use reth_eth_wire::BlockBody;
-    use reth_interfaces::{consensus, test_utils::generators::random_block_range};
+    use reth_interfaces::{
+        consensus, p2p::bodies::error::DownloadError, test_utils::generators::random_block_range,
+    };
     use reth_primitives::{BlockNumber, H256};
     use std::collections::HashMap;
     use test_utils::*;
@@ -268,23 +270,9 @@ mod tests {
     async fn partial_body_download() {
         // Generate blocks
         let blocks = random_block_range(1..200, GENESIS_HASH);
-        let bodies: HashMap<H256, BlockBody> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body.clone(),
-                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    },
-                )
-            })
-            .collect();
-        let mut runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(
-                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
-            )
-        });
+        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
+            blocks.iter().map(body_by_hash).collect();
+        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
 
         // Set the batch size (max we sync per stage execution) to less than the number of blocks
         // the previous stage synced (10 vs 20)
@@ -319,23 +307,9 @@ mod tests {
     async fn full_body_download() {
         // Generate blocks #1-20
         let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, BlockBody> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body.clone(),
-                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    },
-                )
-            })
-            .collect();
-        let mut runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(
-                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
-            )
-        });
+        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
+            blocks.iter().map(body_by_hash).collect();
+        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
@@ -369,23 +343,9 @@ mod tests {
     async fn sync_from_previous_progress() {
         // Generate blocks #1-20
         let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, BlockBody> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body.clone(),
-                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    },
-                )
-            })
-            .collect();
-        let runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(
-                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
-            )
-        });
+        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
+            blocks.iter().map(body_by_hash).collect();
+        let runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
 
         // Insert required state
         runner.insert_genesis().expect("Could not insert genesis block");
@@ -427,25 +387,11 @@ mod tests {
     /// Checks that the stage asks to unwind if pre-validation of the block fails.
     #[tokio::test]
     async fn pre_validation_failure() {
-        // Generate blocks #1-20
+        // Generate blocks #1-19
         let blocks = random_block_range(1..20, GENESIS_HASH);
-        let bodies: HashMap<H256, BlockBody> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body.clone(),
-                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    },
-                )
-            })
-            .collect();
-        let mut runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(
-                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
-            )
-        });
+        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
+            blocks.iter().map(body_by_hash).collect();
+        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
 
         // Fail validation
         runner.set_fail_validation(true);
@@ -486,23 +432,9 @@ mod tests {
     async fn unwind() {
         // Generate blocks #1-20
         let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, BlockBody> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body.clone(),
-                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    },
-                )
-            })
-            .collect();
-        let mut runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(
-                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
-            )
-        });
+        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
+            blocks.iter().map(body_by_hash).collect();
+        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
@@ -538,15 +470,9 @@ mod tests {
         );
 
         let last_body = runner
-            .db()
-            .container()
-            .get()
-            .cursor::<tables::BlockBodies>()
-            .expect("Could not get a block bodies cursor")
-            .last()
-            .expect("Could not read last block body")
-            .expect("No block bodies left after unwind")
-            .1;
+            .last_block_body()
+            .expect("Could not read database.")
+            .expect("Could not get last body.");
         let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
         runner
             .db()
@@ -563,24 +489,9 @@ mod tests {
     async fn unwind_missing_tx() {
         // Generate blocks #1-20
         let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, BlockBody> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body.clone(),
-                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    },
-                )
-            })
-            .collect();
-
-        let mut runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(
-                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
-            )
-        });
+        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
+            blocks.iter().map(body_by_hash).collect();
+        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
@@ -631,15 +542,9 @@ mod tests {
         );
 
         let last_body = runner
-            .db()
-            .container()
-            .get()
-            .cursor::<tables::BlockBodies>()
-            .expect("Could not get a block bodies cursor")
-            .last()
-            .expect("Could not read last block body")
-            .expect("No block bodies left after unwind")
-            .1;
+            .last_block_body()
+            .expect("Could not read database.")
+            .expect("Could not get last body.");
         let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
         runner
             .db()
@@ -679,10 +584,26 @@ mod tests {
             },
             test_utils::TestConsensus,
         };
-        use reth_primitives::{BigEndianHash, BlockNumber, Header, SealedHeader, H256, U256};
+        use reth_primitives::{
+            BigEndianHash, BlockLocked, BlockNumber, Header, SealedHeader, H256, U256,
+        };
         use std::{collections::HashMap, ops::Deref, time::Duration};
 
+        /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
+
+        /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
+        pub(crate) fn body_by_hash(
+            block: &BlockLocked,
+        ) -> (H256, Result<BlockBody, DownloadError>) {
+            (
+                block.hash(),
+                Ok(BlockBody {
+                    transactions: block.body.clone(),
+                    ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
+                }),
+            )
+        }
 
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner<F>
@@ -826,6 +747,13 @@ mod tests {
                 }
 
                 Ok(())
+            }
+
+            pub(crate) fn last_block_body(&self) -> Result<Option<StoredBlockBody>, db::Error> {
+                let mut body_cursor =
+                    self.db().container().get().cursor::<tables::BlockBodies>()?;
+
+                Ok(body_cursor.last().ok().flatten().map(|(_, body)| body))
             }
         }
 
