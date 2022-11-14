@@ -274,7 +274,7 @@ mod tests {
                 (
                     block.hash(),
                     BlockBody {
-                        transactions: vec![],
+                        transactions: block.body.clone(),
                         ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
                     },
                 )
@@ -325,7 +325,7 @@ mod tests {
                 (
                     block.hash(),
                     BlockBody {
-                        transactions: vec![],
+                        transactions: block.body.clone(),
                         ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
                     },
                 )
@@ -375,7 +375,7 @@ mod tests {
                 (
                     block.hash(),
                     BlockBody {
-                        transactions: vec![],
+                        transactions: block.body.clone(),
                         ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
                     },
                 )
@@ -435,7 +435,7 @@ mod tests {
                 (
                     block.hash(),
                     BlockBody {
-                        transactions: vec![],
+                        transactions: block.body.clone(),
                         ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
                     },
                 )
@@ -483,18 +483,173 @@ mod tests {
 
     /// Checks that the stage unwinds correctly with data.
     #[tokio::test]
-    #[ignore]
-    async fn unwind() {}
+    async fn unwind() {
+        // Generate blocks #1-20
+        let blocks = random_block_range(1..21, GENESIS_HASH);
+        let bodies: HashMap<H256, BlockBody> = blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.hash(),
+                    BlockBody {
+                        transactions: block.body.clone(),
+                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
+                    },
+                )
+            })
+            .collect();
+        let mut runner = BodyTestRunner::new(|| {
+            TestBodyDownloader::new(
+                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
+            )
+        });
+
+        // Set the batch size to more than what the previous stage synced (40 vs 20)
+        runner.set_batch_size(40);
+
+        // Insert required state
+        runner.insert_genesis().expect("Could not insert genesis block");
+        runner
+            .insert_headers(blocks.iter().map(|block| &block.header))
+            .expect("Could not insert headers");
+
+        // Run the stage
+        let rx = runner.execute(ExecInput {
+            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+            stage_progress: None,
+        });
+
+        // Check that we synced all blocks successfully, even though our `batch_size` allows us to
+        // sync more (if there were more headers)
+        let output = rx.await.unwrap();
+        assert_matches!(
+            output,
+            Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
+        );
+        let stage_progress = output.unwrap().stage_progress;
+        runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
+
+        // Unwind all of it
+        let unwind_to = 1;
+        let rx = runner.unwind(UnwindInput { bad_block: None, stage_progress, unwind_to });
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == 1
+        );
+
+        let last_body = runner
+            .db()
+            .container()
+            .get()
+            .cursor::<tables::BlockBodies>()
+            .expect("Could not get a block bodies cursor")
+            .last()
+            .expect("Could not read last block body")
+            .expect("No block bodies left after unwind")
+            .1;
+        let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
+        runner
+            .db()
+            .check_no_entry_above::<tables::BlockBodies, _>(unwind_to, |key| key.number())
+            .expect("Did not unwind block bodies correctly.");
+        runner
+            .db()
+            .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)
+            .expect("Did not unwind transactions correctly.")
+    }
 
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
     #[tokio::test]
-    #[ignore]
-    async fn unwind_missing_tx() {}
+    async fn unwind_missing_tx() {
+        // Generate blocks #1-20
+        let blocks = random_block_range(1..21, GENESIS_HASH);
+        let bodies: HashMap<H256, BlockBody> = blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.hash(),
+                    BlockBody {
+                        transactions: block.body.clone(),
+                        ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
+                    },
+                )
+            })
+            .collect();
 
-    /// Checks that the stage unwinds correctly, even if a block is missing.
-    #[tokio::test]
-    #[ignore]
-    async fn unwind_missing_block() {}
+        let mut runner = BodyTestRunner::new(|| {
+            TestBodyDownloader::new(
+                bodies.clone().into_iter().map(|(hash, body)| (hash, Ok(body))).collect(),
+            )
+        });
+
+        // Set the batch size to more than what the previous stage synced (40 vs 20)
+        runner.set_batch_size(40);
+
+        // Insert required state
+        runner.insert_genesis().expect("Could not insert genesis block");
+        runner
+            .insert_headers(blocks.iter().map(|block| &block.header))
+            .expect("Could not insert headers");
+
+        // Run the stage
+        let rx = runner.execute(ExecInput {
+            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+            stage_progress: None,
+        });
+
+        // Check that we synced all blocks successfully, even though our `batch_size` allows us to
+        // sync more (if there were more headers)
+        let output = rx.await.unwrap();
+        assert_matches!(
+            output,
+            Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
+        );
+        let stage_progress = output.unwrap().stage_progress;
+        runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
+
+        // Delete a transaction
+        {
+            let mut db = runner.db().container();
+            let mut tx_cursor = db
+                .get_mut()
+                .cursor_mut::<tables::Transactions>()
+                .expect("Could not get transaction cursor");
+            tx_cursor
+                .last()
+                .expect("Could not read database")
+                .expect("Could not read last transaction");
+            tx_cursor.delete_current().expect("Could not delete last transaction");
+            db.commit().expect("Could not commit database");
+        }
+
+        // Unwind all of it
+        let unwind_to = 1;
+        let rx = runner.unwind(UnwindInput { bad_block: None, stage_progress, unwind_to });
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == 1
+        );
+
+        let last_body = runner
+            .db()
+            .container()
+            .get()
+            .cursor::<tables::BlockBodies>()
+            .expect("Could not get a block bodies cursor")
+            .last()
+            .expect("Could not read last block body")
+            .expect("No block bodies left after unwind")
+            .1;
+        let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
+        runner
+            .db()
+            .check_no_entry_above::<tables::BlockBodies, _>(unwind_to, |key| key.number())
+            .expect("Did not unwind block bodies correctly.");
+        runner
+            .db()
+            .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)
+            .expect("Did not unwind transactions correctly.")
+    }
 
     /// Checks that the stage exits if the downloader times out
     /// TODO: We should probably just exit as "OK", commit the blocks we downloaded successfully and
