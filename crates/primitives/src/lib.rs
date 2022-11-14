@@ -62,7 +62,10 @@ pub type StorageKey = H256;
 /// Storage value
 pub type StorageValue = U256;
 
-// TODO: document that this is as pubkey type
+// TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to
+// prevent misuse
+/// This represents an uncompressed secp256k1 public key.
+/// This encodes the concatenation of the x and y components of the affine point in bytes.
 pub type PeerId = H512;
 
 pub use ethers_core::{
