@@ -4,7 +4,7 @@ use reth_interfaces::p2p::bodies::{
     downloader::{BodiesStream, BodyDownloader},
     error::{BodiesClientError, DownloadError},
 };
-use reth_primitives::H256;
+use reth_primitives::{BlockNumber, H256};
 use std::{sync::Arc, time::Duration};
 
 /// Downloads bodies in batches.
@@ -37,17 +37,17 @@ impl<C: BodiesClient> BodyDownloader for ConcurrentDownloader<C> {
 
     fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
     where
-        I: IntoIterator<Item = H256>,
+        I: IntoIterator<Item = &'b (BlockNumber, H256)>,
         <I as IntoIterator>::IntoIter: Send + 'b,
         'b: 'a,
     {
         // TODO: Retry
         Box::pin(
-            stream::iter(headers.into_iter().map(|header_hash| {
+            stream::iter(headers.into_iter().map(|(block_number, header_hash)| {
                 {
                     self.client
-                        .get_block_body(header_hash)
-                        .map_ok(move |body| (header_hash, body))
+                        .get_block_body(*header_hash)
+                        .map_ok(move |body| (*block_number, *header_hash, body))
                         .map_err(|err| match err {
                             BodiesClientError::Timeout { header_hash } => {
                                 DownloadError::Timeout { header_hash }

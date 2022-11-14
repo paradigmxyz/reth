@@ -267,7 +267,7 @@ mod tests {
             Ok(ExecOutput { done, reached_tip, stage_progress })
                 if done && reached_tip && stage_progress == tip.number
         );
-        assert!(headers.iter().try_for_each(|h| runner.validate_db_header(&h)).is_ok());
+        assert!(headers.iter().try_for_each(|h| runner.validate_db_header(h)).is_ok());
     }
 
     /// Validate that all necessary tables are updated after the
@@ -294,7 +294,7 @@ mod tests {
             Ok(ExecOutput { done, reached_tip, stage_progress })
                 if done && reached_tip && stage_progress == tip.number
         );
-        assert!(headers.iter().try_for_each(|h| runner.validate_db_header(&h)).is_ok());
+        assert!(headers.iter().try_for_each(|h| runner.validate_db_header(h)).is_ok());
     }
 
     /// Execute the stage with linear downloader
@@ -331,7 +331,7 @@ mod tests {
             Ok(ExecOutput { done, reached_tip, stage_progress })
                 if done && reached_tip && stage_progress == tip.number
         );
-        assert!(headers.iter().try_for_each(|h| runner.validate_db_header(&h)).is_ok());
+        assert!(headers.iter().try_for_each(|h| runner.validate_db_header(h)).is_ok());
     }
 
     /// Check that unwind does not panic on empty database.

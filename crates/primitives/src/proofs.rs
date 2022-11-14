@@ -1,9 +1,18 @@
 use crate::{keccak256, Bytes, Header, Log, Receipt, TransactionSigned, H256};
 use ethers_core::utils::rlp::RlpStream;
 use hash_db::Hasher;
+use hex_literal::hex;
 use plain_hasher::PlainHasher;
 use reth_rlp::Encodable;
 use triehash::sec_trie_root;
+
+/// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
+pub const EMPTY_LIST_HASH: H256 =
+    H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
+
+/// Root hash of an empty trie.
+pub const EMPTY_ROOT: H256 =
+    H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
 
 /// A [Hasher] that calculates a keccak256 hash of the given data.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]

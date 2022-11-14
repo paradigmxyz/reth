@@ -60,6 +60,12 @@ pub enum DatabaseIntegrityError {
         /// The block hash key
         hash: H256,
     },
+    /// A block body is missing.
+    #[error("Block body not found for block #{number}")]
+    BlockBody {
+        /// The block number key
+        number: BlockNumber,
+    },
 }
 
 /// A pipeline execution error.

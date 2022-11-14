@@ -1,8 +1,9 @@
+use crate::p2p::error::RequestError;
 use reth_primitives::H256;
 use thiserror::Error;
 
 /// Body client errors.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum BodiesClientError {
     /// Timed out while waiting for a response.
     #[error("Timed out while getting bodies for block {header_hash}.")]
@@ -12,11 +13,11 @@ pub enum BodiesClientError {
     },
     /// The client encountered an internal error.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] RequestError),
 }
 
 /// Body downloader errors.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum DownloadError {
     /// Timed out while waiting for a response.
     #[error("Timed out while getting bodies for block {header_hash}.")]

@@ -1,7 +1,7 @@
 use super::client::BodiesClient;
 use crate::p2p::bodies::error::DownloadError;
 use reth_eth_wire::BlockBody;
-use reth_primitives::H256;
+use reth_primitives::{BlockNumber, H256};
 use std::{pin::Pin, time::Duration};
 use tokio_stream::Stream;
 
@@ -34,11 +34,11 @@ pub trait BodyDownloader: Sync + Send {
     /// the stream before the entire range has been fetched for any reason
     fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
     where
-        I: IntoIterator<Item = H256>,
+        I: IntoIterator<Item = &'b (BlockNumber, H256)>,
         <I as IntoIterator>::IntoIter: Send + 'b,
         'b: 'a;
 }
 
 /// A stream of block bodies.
 pub type BodiesStream<'a> =
-    Pin<Box<dyn Stream<Item = Result<(H256, BlockBody), DownloadError>> + Send + 'a>>;
+    Pin<Box<dyn Stream<Item = Result<(BlockNumber, H256, BlockBody), DownloadError>> + Send + 'a>>;

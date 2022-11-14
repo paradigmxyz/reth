@@ -1,6 +1,6 @@
 use rand::{thread_rng, Rng};
 use reth_primitives::{
-    proofs, Address, BlockLocked, Bytes, ChainId, Header, SealedHeader, Signature, Transaction,
+    proofs, Address, BlockLocked, Bytes, Header, SealedHeader, Signature, Transaction,
     TransactionKind, TransactionSigned, H256, U256,
 };
 
