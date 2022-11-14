@@ -1,7 +1,7 @@
-use reth_codecs::{use_scale, Compact};
+use reth_codecs::{main_codec, Compact};
 
 /// Transaction Type
-#[use_scale]
+#[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929

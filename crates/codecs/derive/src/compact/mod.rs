@@ -68,6 +68,8 @@ pub fn get_fields(data: &Data) -> FieldList {
 pub fn get_bit_size(ftype: &str) -> u8 {
     if ftype == "u64" {
         return 4
+    } else if ftype == "TxType" {
+        return 2
     } else if ftype == "bool" || ftype == "Option" {
         return 1
     }
