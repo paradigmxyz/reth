@@ -81,7 +81,7 @@ pub struct Block {
     pub rlp: Bytes,
     /// Transactions
     pub transactions: Option<Vec<Transaction>>,
-    /// Uncle/Omner headers.
+    /// Uncle/ommer headers
     pub uncle_headers: Option<Vec<Header>>,
 }
 

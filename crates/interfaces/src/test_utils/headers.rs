@@ -1,3 +1,4 @@
+//! Testing support for headers related interfaces.
 use crate::{
     consensus::{self, Consensus},
     p2p::headers::{
@@ -5,11 +6,9 @@ use crate::{
         downloader::{DownloadError, Downloader},
     },
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
-
 use reth_primitives::{Header, SealedHeader, H256, H512, U256};
 use reth_rpc_types::engine::ForkchoiceState;
-
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
