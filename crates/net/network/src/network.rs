@@ -1,6 +1,6 @@
-use crate::{manager::NetworkEvent, peers::PeersHandle, NodeId};
+use crate::{manager::NetworkEvent, peers::PeersHandle};
 use parking_lot::Mutex;
-use reth_primitives::{H256, U256};
+use reth_primitives::{PeerId, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
@@ -24,7 +24,7 @@ impl NetworkHandle {
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
         to_manager_tx: UnboundedSender<NetworkHandleMessage>,
-        local_node_id: NodeId,
+        local_node_id: PeerId,
         peers: PeersHandle,
     ) -> Self {
         let inner = NetworkInner {
@@ -57,7 +57,7 @@ struct NetworkInner {
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
-    local_node_id: NodeId,
+    local_node_id: PeerId,
     /// Access to the all the nodes
     peers: PeersHandle, // TODO need something to access
 }

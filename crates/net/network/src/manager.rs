@@ -25,7 +25,6 @@ use crate::{
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
-    NodeId,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -34,6 +33,7 @@ use reth_eth_wire::{
     EthMessage,
 };
 use reth_interfaces::provider::BlockProvider;
+use reth_primitives::PeerId;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -88,8 +88,8 @@ pub struct NetworkManager<C> {
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
-    /// Local copy of the `NodeId` of the local node.
-    local_node_id: NodeId,
+    /// Local copy of the `PeerId` of the local node.
+    local_node_id: PeerId,
 }
 
 // === impl NetworkManager ===
@@ -163,7 +163,7 @@ where
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &self,
-        node_id: NodeId,
+        node_id: PeerId,
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
@@ -172,7 +172,7 @@ where
     }
 
     /// Handles a received [`CapabilityMessage`] from the peer.
-    fn on_capability_message(&mut self, _node_id: NodeId, msg: CapabilityMessage) {
+    fn on_capability_message(&mut self, _node_id: PeerId, msg: CapabilityMessage) {
         match msg {
             CapabilityMessage::Eth(eth) => {
                 match eth {
@@ -299,7 +299,7 @@ where
 /// Events emitted by the network that are of interest for subscribers.
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
-    EthMessage { node_id: NodeId, message: EthMessage },
+    EthMessage { node_id: PeerId, message: EthMessage },
 }
 
 /// Bundles all listeners for [`NetworkEvent`]s.

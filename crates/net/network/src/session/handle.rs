@@ -1,13 +1,12 @@
 //! Session handles
-use crate::{
-    session::{Direction, SessionId},
-    NodeId,
-};
+use crate::session::{Direction, SessionId};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    Status,
+    error::EthStreamError,
+    EthStream, P2PStream, Status,
 };
+use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
     net::TcpStream,
@@ -33,7 +32,7 @@ pub(crate) struct ActiveSessionHandle {
     /// The assigned id for this session
     pub(crate) session_id: SessionId,
     /// The identifier of the remote peer
-    pub(crate) remote_id: NodeId,
+    pub(crate) remote_id: PeerId,
     /// The timestamp when the session has been established.
     pub(crate) established: Instant,
     /// Announced capabilities of the peer.
@@ -65,23 +64,24 @@ pub(crate) enum PendingSessionEvent {
     Established {
         session_id: SessionId,
         remote_addr: SocketAddr,
-        node_id: NodeId,
+        /// The remote node's public key
+        node_id: PeerId,
         capabilities: Arc<Capabilities>,
         status: Status,
-        conn: ECIESStream<TcpStream>,
+        conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
         remote_addr: SocketAddr,
         session_id: SessionId,
         direction: Direction,
-        error: Option<ECIESError>,
+        error: Option<EthStreamError>,
     },
     /// Thrown when unable to establish a [`TcpStream`].
     OutgoingConnectionError {
         remote_addr: SocketAddr,
         session_id: SessionId,
-        node_id: NodeId,
+        node_id: PeerId,
         error: io::Error,
     },
     /// Thrown when authentication via Ecies failed.
@@ -101,18 +101,18 @@ pub(crate) enum SessionCommand {
 #[derive(Debug)]
 pub(crate) enum ActiveSessionMessage {
     /// Session disconnected.
-    Closed { node_id: NodeId, remote_addr: SocketAddr },
+    Closed { node_id: PeerId, remote_addr: SocketAddr },
     /// A session received a valid message via RLPx.
     ValidMessage {
         /// Identifier of the remote peer.
-        node_id: NodeId,
+        node_id: PeerId,
         /// Message received from the peer.
         message: CapabilityMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
         /// Identifier of the remote peer.
-        node_id: NodeId,
+        node_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.

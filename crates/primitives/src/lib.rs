@@ -10,7 +10,10 @@
 mod account;
 mod block;
 mod chain;
+mod constants;
 mod error;
+mod forkid;
+mod hardfork;
 mod header;
 mod hex_bytes;
 mod integer_list;
@@ -23,6 +26,9 @@ mod transaction;
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
+pub use constants::MAINNET_GENESIS;
+pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
+pub use hardfork::Hardfork;
 pub use header::{Header, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
@@ -55,6 +61,12 @@ pub type StorageKey = H256;
 
 /// Storage value
 pub type StorageValue = U256;
+
+// TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to
+// prevent misuse
+/// This represents an uncompressed secp256k1 public key.
+/// This encodes the concatenation of the x and y components of the affine point in bytes.
+pub type PeerId = H512;
 
 pub use ethers_core::{
     types as rpc,

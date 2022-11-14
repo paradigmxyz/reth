@@ -5,12 +5,11 @@ use crate::{
     fetch::StateFetcher,
     message::{PeerRequestSender, PeerResponse},
     peers::{PeerAction, PeersManager},
-    NodeId,
 };
 
 use reth_eth_wire::{capability::Capabilities, Status};
 use reth_interfaces::provider::BlockProvider;
-use reth_primitives::H256;
+use reth_primitives::{PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,
@@ -37,7 +36,7 @@ use tracing::trace;
 /// This type is also responsible for responding for received request.
 pub struct NetworkState<C> {
     /// All connected peers and their state.
-    connected_peers: HashMap<NodeId, ConnectedPeer>,
+    connected_peers: HashMap<PeerId, ConnectedPeer>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
@@ -83,7 +82,7 @@ where
     /// should be rejected.
     pub(crate) fn on_session_activated(
         &mut self,
-        peer: NodeId,
+        peer: PeerId,
         capabilities: Arc<Capabilities>,
         status: Status,
         request_tx: PeerRequestSender,
@@ -107,7 +106,7 @@ where
     }
 
     /// Event hook for a disconnected session for the peer.
-    pub(crate) fn on_session_closed(&mut self, peer: NodeId) {
+    pub(crate) fn on_session_closed(&mut self, peer: PeerId) {
         self.connected_peers.remove(&peer);
         self.state_fetcher.on_session_closed(&peer);
     }
@@ -149,7 +148,7 @@ where
     }
 
     /// Disconnect the session
-    fn on_session_disconnected(&mut self, peer: NodeId) {
+    fn on_session_disconnected(&mut self, peer: PeerId) {
         self.connected_peers.remove(&peer);
     }
 
@@ -157,7 +156,7 @@ where
     ///
     /// Caution: this will replace an already pending response. It's the responsibility of the
     /// caller to select the peer.
-    fn handle_block_request(&mut self, peer: NodeId, request: BlockRequest) {
+    fn handle_block_request(&mut self, peer: PeerId, request: BlockRequest) {
         if let Some(ref mut peer) = self.connected_peers.get_mut(&peer) {
             let (request, response) = match request {
                 BlockRequest::GetBlockHeaders(request) => {
@@ -192,7 +191,7 @@ where
     }
 
     /// Invoked when received a response from a connected peer.
-    fn on_eth_response(&mut self, peer: NodeId, resp: PeerResponseResult) -> Option<StateAction> {
+    fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
@@ -283,9 +282,9 @@ pub struct ConnectedPeer {
 /// Message variants triggered by the [`State`]
 pub enum StateAction {
     /// Create a new connection to the given node.
-    Connect { remote_addr: SocketAddr, node_id: NodeId },
+    Connect { remote_addr: SocketAddr, node_id: PeerId },
     /// Disconnect an existing connection
-    Disconnect { node_id: NodeId },
+    Disconnect { node_id: PeerId },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -293,6 +292,6 @@ pub enum AddSessionError {
     #[error("No capacity for new sessions")]
     AtCapacity {
         /// The peer of the session
-        peer: NodeId,
+        peer: PeerId,
     },
 }

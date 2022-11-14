@@ -11,10 +11,9 @@ use reth_eth_wire::{
 };
 use std::task::{ready, Context, Poll};
 
-use crate::NodeId;
 use reth_eth_wire::capability::CapabilityMessage;
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{Header, Receipt, TransactionSigned};
+use reth_primitives::{Header, PeerId, Receipt, TransactionSigned};
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
 
 /// Represents all messages that can be sent to a peer session
@@ -180,7 +179,7 @@ impl PeerResponseResult {
 #[derive(Debug, Clone)]
 pub struct PeerRequestSender {
     /// id of the remote node.
-    pub(crate) peer: NodeId,
+    pub(crate) peer: PeerId,
     /// The Sender half connected to a session.
     pub(crate) to_session_tx: mpsc::Sender<PeerRequest>,
 }
