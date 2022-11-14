@@ -132,6 +132,10 @@ where
             StateAction::Disconnect { node_id } => {
                 self.sessions.disconnect(node_id);
             }
+            StateAction::NewBlock { peer_id, block: msg } => {
+                let msg = PeerMessage::NewBlock(msg);
+                self.sessions.send_message(&peer_id, msg);
+            }
         }
         None
     }

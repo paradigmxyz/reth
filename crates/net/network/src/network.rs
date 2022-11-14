@@ -2,6 +2,7 @@ use crate::{manager::NetworkEvent, peers::PeersHandle, NodeId};
 use parking_lot::Mutex;
 use reth_eth_wire::NewBlock;
 
+use reth_primitives::H256;
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
@@ -68,5 +69,5 @@ pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock),
+    AnnounceBlock(NewBlock, H256),
 }

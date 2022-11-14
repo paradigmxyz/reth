@@ -1,5 +1,5 @@
 use linked_hash_set::LinkedHashSet;
-use std::{hash::Hash, num::NonZeroUsize};
+use std::{borrow::Borrow, hash::Hash, num::NonZeroUsize};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -8,13 +8,13 @@ use std::{hash::Hash, num::NonZeroUsize};
 #[derive(Debug, Clone)]
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
-    set: LinkedHashSet<T>,
+    inner: LinkedHashSet<T>,
 }
 
 impl<T: Hash + Eq> LruCache<T> {
     /// Creates a new `LruCache` using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { set: LinkedHashSet::new(), limit }
+        Self { inner: LinkedHashSet::new(), limit }
     }
 
     /// Insert an element into the set.
@@ -26,14 +26,23 @@ impl<T: Hash + Eq> LruCache<T> {
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
     pub fn insert(&mut self, entry: T) -> bool {
-        if self.set.insert(entry) {
-            if self.limit.get() == self.set.len() {
+        if self.inner.insert(entry) {
+            if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                self.set.pop_front();
+                self.inner.pop_front();
             }
             return true
         }
         false
+    }
+
+    /// Returns `true` if the set contains a value.
+    pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.inner.contains(value)
     }
 }
 

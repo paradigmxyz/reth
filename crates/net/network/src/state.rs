@@ -4,11 +4,14 @@ use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
     fetch::{BlockResponseOutcome, StateFetcher},
-    message::{BlockRequest, PeerRequest, PeerRequestSender, PeerResponse, PeerResponseResult},
+    message::{
+        BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
+        PeerResponseResult,
+    },
     peers::{PeerAction, PeersManager},
     NodeId,
 };
-use reth_eth_wire::{capability::Capabilities, BlockHashNumber, NewBlock, Status};
+use reth_eth_wire::{capability::Capabilities, BlockHashNumber, Status};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::H256;
 use std::{
@@ -122,17 +125,44 @@ where
     /// > the total number of peers) using the `NewBlock` message.
     ///
     /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
-    pub(crate) fn announce_block(&mut self, _new_block: NewBlock) {
-        // TODO propagate the newblock messages to all connected peers that haven't seen the block
-        // yet
+    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage) {
+        // send a `NewBlock` message to a fraction fo the connected peers (square root of the total
+        // number of peers)
+        let num_propagate = (self.connected_peers.len() as f64).sqrt() as u64 + 1;
 
-        todo!()
+        let mut count = 0;
+        for (peer_id, peer) in self.connected_peers.iter_mut() {
+            if peer.blocks.contains(&msg.hash) {
+                // skip peers which already reported the block
+                continue
+            }
+
+            // Queue a `NewBlock` message for the peer
+            if count < num_propagate {
+                self.queued_messages
+                    .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
+
+                // mark the block as seen by the peer
+                peer.blocks.insert(msg.hash);
+
+                count += 1;
+            }
+
+            if count >= num_propagate {
+                break
+            }
+        }
     }
 
     /// Invoked after a `NewBlock` message was received by the peer.
     ///
     /// This will keep track of blocks we know a peer has
-    pub(crate) fn on_new_block(&mut self, _peer_id: NodeId, _hash: H256) {}
+    pub(crate) fn on_new_block(&mut self, peer_id: NodeId, hash: H256) {
+        // Mark the blocks as seen
+        if let Some(peer) = self.connected_peers.get_mut(&peer_id) {
+            peer.blocks.insert(hash);
+        }
+    }
 
     /// Invoked for a `NewBlockHashes` broadcast message.
     pub(crate) fn on_new_block_hashes(&mut self, peer_id: NodeId, hashes: Vec<BlockHashNumber>) {
@@ -306,6 +336,13 @@ pub struct ConnectedPeer {
 
 /// Message variants triggered by the [`State`]
 pub enum StateAction {
+    /// Dispatch a `NewBlock` message to the peer
+    NewBlock {
+        /// Target of the message
+        peer_id: NodeId,
+        /// The `NewBlock` message
+        block: NewBlockMessage,
+    },
     /// Create a new connection to the given node.
     Connect { remote_addr: SocketAddr, node_id: NodeId },
     /// Disconnect an existing connection

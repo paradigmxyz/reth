@@ -12,16 +12,19 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{Header, Receipt, TransactionSigned, H256};
-use std::task::{ready, Context, Poll};
+use std::{
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
 
 /// Internal form of a `NewBlock` message
-#[derive(Debug)]
-pub struct IncomingBlock {
+#[derive(Debug, Clone)]
+pub struct NewBlockMessage {
     /// Hash of the block
     pub hash: H256,
     /// Raw received message
-    pub block: Box<NewBlock>,
+    pub block: Arc<NewBlock>,
 }
 
 /// Represents all messages that can be sent to a peer session
@@ -30,7 +33,7 @@ pub enum PeerMessage {
     /// Announce new block hashes
     NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
-    NewBlock(IncomingBlock),
+    NewBlock(NewBlockMessage),
     /// Broadcast transactions.
     Transactions(Transactions),
     /// All `eth` request variants.

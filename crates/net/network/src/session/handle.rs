@@ -94,7 +94,8 @@ pub(crate) enum PendingSessionEvent {
 pub(crate) enum SessionCommand {
     /// Disconnect the connection
     Disconnect,
-    Message(CapabilityMessage),
+    /// Sends a message to the peer
+    Message(PeerMessage),
 }
 
 /// Message variants an active session can produce and send back to the

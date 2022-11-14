@@ -6,6 +6,7 @@ use crate::{
         active::ActiveSession,
         handle::{
             ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+            SessionCommand,
         },
     },
     NodeId,
@@ -172,6 +173,13 @@ impl SessionManager {
     pub(crate) fn disconnect(&self, node: NodeId) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect();
+        }
+    }
+
+    /// Sends a message to the peer's session
+    pub(crate) fn send_message(&mut self, peer_id: &NodeId, msg: PeerMessage) {
+        if let Some(session) = self.active_sessions.get_mut(peer_id) {
+            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg));
         }
     }
 

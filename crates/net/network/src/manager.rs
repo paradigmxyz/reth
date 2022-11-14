@@ -21,7 +21,7 @@ use crate::{
     error::NetworkError,
     import::{BlockImport, BlockImportOutcome},
     listener::ConnectionListener,
-    message::{PeerMessage, PeerRequest},
+    message::{NewBlockMessage, PeerMessage, PeerRequest},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     session::SessionManager,
@@ -211,8 +211,9 @@ where
             NetworkHandleMessage::EventListener(tx) => {
                 self.event_listeners.listeners.push(tx);
             }
-            NetworkHandleMessage::AnnounceBlock(block) => {
-                self.swarm.state_mut().announce_block(block);
+            NetworkHandleMessage::AnnounceBlock(block, hash) => {
+                let msg = NewBlockMessage { hash, block: Arc::new(block) };
+                self.swarm.state_mut().announce_new_block(msg);
             }
         }
     }
