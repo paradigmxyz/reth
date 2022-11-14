@@ -2,6 +2,7 @@ use crate::{BlockNumber, ForkFilter, ForkHash, ForkId, MAINNET_GENESIS};
 use std::str::FromStr;
 
 /// Ethereum mainnet hardforks
+#[allow(missing_docs)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Hardfork {
     Frontier,
