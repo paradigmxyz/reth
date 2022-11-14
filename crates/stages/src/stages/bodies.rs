@@ -470,9 +470,15 @@ mod tests {
         );
 
         let last_body = runner
-            .last_block_body()
-            .expect("Could not read database.")
-            .expect("Could not get last body.");
+            .db()
+            .container()
+            .get()
+            .cursor::<tables::BlockBodies>()
+            .expect("Could not get a block bodies cursor")
+            .last()
+            .expect("Could not read last block body")
+            .expect("No block bodies left after unwind")
+            .1;
         let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
         runner
             .db()
@@ -542,9 +548,15 @@ mod tests {
         );
 
         let last_body = runner
-            .last_block_body()
-            .expect("Could not read database.")
-            .expect("Could not get last body.");
+            .db()
+            .container()
+            .get()
+            .cursor::<tables::BlockBodies>()
+            .expect("Could not get a block bodies cursor")
+            .last()
+            .expect("Could not read last block body")
+            .expect("No block bodies left after unwind")
+            .1;
         let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
         runner
             .db()
@@ -747,13 +759,6 @@ mod tests {
                 }
 
                 Ok(())
-            }
-
-            pub(crate) fn last_block_body(&self) -> Result<Option<StoredBlockBody>, db::Error> {
-                let mut body_cursor =
-                    self.db().container().get().cursor::<tables::BlockBodies>()?;
-
-                Ok(body_cursor.last().ok().flatten().map(|(_, body)| body))
             }
         }
 

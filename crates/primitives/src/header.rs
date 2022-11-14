@@ -265,6 +265,10 @@ mod tests {
             gas_used: 0x15b3_u64,
             timestamp: 0x1a0a_u64,
             extra_data: Bytes::from_str("7788").unwrap().0,
+            ommers_hash: H256::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
             ..Default::default()
         };
         let mut data = vec![];
@@ -311,6 +315,10 @@ mod tests {
             gas_used: 0x15b3u64,
             timestamp: 0x1a0au64,
             extra_data: Bytes::from_str("7788").unwrap().0,
+            ommers_hash: H256::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
             ..Default::default()
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
