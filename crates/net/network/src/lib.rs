@@ -5,7 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 // TODO remove later
-#![allow(dead_code)]
+#![allow(dead_code, clippy::too_many_arguments)]
 
 //! reth P2P networking.
 //!
