@@ -1,6 +1,5 @@
 use crate::{message::NewBlockMessage, NodeId};
 
-
 use std::task::{Context, Poll};
 
 /// Abstraction over block import.

@@ -1,6 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    message::PeerMessage,
+    message::{PeerMessage, PeerRequestSender},
     session::{SessionEvent, SessionId, SessionManager},
     state::{AddSessionError, NetworkState, StateAction},
     NodeId,
@@ -55,6 +55,11 @@ where
         &mut self.state
     }
 
+    /// Mutable access to the [`SessionManager`].
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
+        &mut self.sessions
+    }
+
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: NodeId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -69,8 +74,18 @@ where
                 capabilities,
                 status,
                 messages,
-            } => match self.state.on_session_activated(node_id, capabilities, status, messages) {
-                Ok(_) => Some(SwarmEvent::SessionEstablished { node_id, remote_addr }),
+            } => match self.state.on_session_activated(
+                node_id,
+                capabilities.clone(),
+                status,
+                messages.clone(),
+            ) {
+                Ok(_) => Some(SwarmEvent::SessionEstablished {
+                    node_id,
+                    remote_addr,
+                    capabilities,
+                    messages,
+                }),
                 Err(err) => {
                     match err {
                         AddSessionError::AtCapacity { peer } => self.sessions.disconnect(peer),
@@ -233,6 +248,8 @@ pub enum SwarmEvent {
     SessionEstablished {
         node_id: NodeId,
         remote_addr: SocketAddr,
+        capabilities: Arc<Capabilities>,
+        messages: PeerRequestSender,
     },
     SessionClosed {
         node_id: NodeId,

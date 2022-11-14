@@ -1,7 +1,8 @@
 use crate::{manager::NetworkEvent, peers::PeersHandle, NodeId};
 use parking_lot::Mutex;
-use reth_eth_wire::NewBlock;
+use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
 
+use crate::message::PeerRequest;
 use reth_primitives::H256;
 use std::{
     net::SocketAddr,
@@ -49,6 +50,16 @@ impl NetworkHandle {
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
         rx
     }
+
+    /// Sends a [`NetworkHandleMessage`] to the manager
+    fn send_message(&self, msg: NetworkHandleMessage) {
+        let _ = self.inner.to_manager_tx.send(msg);
+    }
+
+    /// Sends a [`PeerRequest`] to the given peer's session.
+    pub fn send_request(&mut self, peer_id: NodeId, request: PeerRequest) {
+        self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
+    }
 }
 
 struct NetworkInner {
@@ -65,9 +76,21 @@ struct NetworkInner {
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
+#[allow(missing_docs)]
 pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, H256),
+    /// Sends the list of transactions to the given peer.
+    SendTransaction { peer_id: NodeId, msg: Arc<Transactions> },
+    /// Sends the list of transactions hashes to the given peer.
+    SendPooledTransactionHashes { peer_id: NodeId, msg: Arc<NewPooledTransactionHashes> },
+    /// Send an `eth` protocol request to the peer.
+    EthRequest {
+        /// The peer to send the request to.
+        peer_id: NodeId,
+        /// The request to send to the peer's sessions.
+        request: PeerRequest,
+    },
 }
