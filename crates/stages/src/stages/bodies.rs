@@ -304,10 +304,14 @@ mod tests {
 
         // Check that we only synced around `batch_size` blocks even though the number of blocks
         // synced by the previous stage is higher
+        let output = rx.await.unwrap();
         assert_matches!(
-            rx.await.unwrap(),
+            output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress < 200
-        )
+        );
+        runner
+            .validate_db_blocks(output.unwrap().stage_progress)
+            .expect("Written block data invalid");
     }
 
     /// Same as [partial_body_download] except the `batch_size` is not hit.
@@ -350,15 +354,18 @@ mod tests {
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
+        let output = rx.await.unwrap();
         assert_matches!(
-            rx.await.unwrap(),
+            output,
             Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
-        )
+        );
+        runner
+            .validate_db_blocks(output.unwrap().stage_progress)
+            .expect("Written block data invalid");
     }
 
     /// Same as [full_body_download] except we have made progress before
     #[tokio::test]
-    #[ignore]
     async fn sync_from_previous_progress() {
         // Generate blocks #1-20
         let blocks = random_block_range(1..21, GENESIS_HASH);
@@ -407,15 +414,18 @@ mod tests {
         });
 
         // Check that we synced more blocks
+        let output = rx.await.unwrap();
         assert_matches!(
-            rx.await.unwrap(),
+            output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress > first_run_progress
         );
+        runner
+            .validate_db_blocks(output.unwrap().stage_progress)
+            .expect("Written block data invalid");
     }
 
     /// Checks that the stage asks to unwind if pre-validation of the block fails.
     #[tokio::test]
-    #[ignore]
     async fn pre_validation_failure() {
         // Generate blocks #1-20
         let blocks = random_block_range(1..20, GENESIS_HASH);
@@ -459,12 +469,19 @@ mod tests {
         );
     }
 
-    /// Checks that the transaction pointers in the stored block bodies are all valid.
+    /// Checks that the stage unwinds correctly with no data.
     #[tokio::test]
-    #[ignore]
-    async fn block_tx_pointer_validity() {}
+    async fn unwind_empty_db() {
+        let unwind_to = 10;
+        let runner = BodyTestRunner::new(TestBodyDownloader::default);
+        let rx = runner.unwind(UnwindInput { bad_block: None, stage_progress: 20, unwind_to });
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
+        )
+    }
 
-    /// Checks that the stage unwinds correctly.
+    /// Checks that the stage unwinds correctly with data.
     #[tokio::test]
     #[ignore]
     async fn unwind() {}
@@ -474,6 +491,11 @@ mod tests {
     #[ignore]
     async fn unwind_missing_tx() {}
 
+    /// Checks that the stage unwinds correctly, even if a block is missing.
+    #[tokio::test]
+    #[ignore]
+    async fn unwind_missing_block() {}
+
     /// Checks that the stage exits if the downloader times out
     /// TODO: We should probably just exit as "OK", commit the blocks we downloaded successfully and
     /// try again?
@@ -481,23 +503,19 @@ mod tests {
     #[ignore]
     async fn downloader_timeout() {}
 
-    /// Checks that the stage exits if a header is missing in the block range we were told to sync
-    #[tokio::test]
-    #[ignore]
-    async fn missing_header() {}
-
     mod test_utils {
         use crate::{
             stages::bodies::BodyStage,
             util::test_utils::{StageTestDB, StageTestRunner},
         };
+        use assert_matches::assert_matches;
         use async_trait::async_trait;
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             db,
             db::{
                 models::{BlockNumHash, StoredBlockBody},
-                tables, DbTxMut,
+                tables, DbCursorRO, DbTx, DbTxMut,
             },
             p2p::bodies::{
                 client::BodiesClient,
@@ -618,8 +636,46 @@ mod tests {
 
                 Ok(())
             }
+
+            /// Validate that the inserted block data is valid
+            pub(crate) fn validate_db_blocks(
+                &self,
+                highest_block: BlockNumber,
+            ) -> Result<(), db::Error> {
+                let db = self.db.container();
+                let tx = db.get();
+
+                let mut block_body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
+
+                let mut entry = block_body_cursor.first()?;
+                let mut prev_max_tx_id = 0;
+                while let Some((key, body)) = entry {
+                    assert!(
+                        key.number() <= highest_block,
+                        "We wrote a block body outside of our synced range. Found block with number {}, highest block according to stage is {}",
+                        key.number(), highest_block
+                    );
+
+                    assert!(prev_max_tx_id == body.base_tx_id, "Transaction IDs are malformed.");
+                    for num in 0..body.tx_amount {
+                        let tx_id = body.base_tx_id + num;
+                        assert_matches!(
+                            transaction_cursor.seek_exact(tx_id),
+                            Ok(Some(_)),
+                            "A transaction is missing."
+                        );
+                    }
+                    prev_max_tx_id = body.base_tx_id + body.tx_amount;
+                    entry = block_body_cursor.next()?;
+                }
+
+                Ok(())
+            }
         }
 
+        // TODO(onbjerg): Move
+        /// A [BodiesClient] that should not be called.
         #[derive(Debug)]
         pub(crate) struct NoopClient;
 
@@ -630,6 +686,8 @@ mod tests {
             }
         }
 
+        // TODO(onbjerg): Move
+        /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug, Default)]
         pub(crate) struct TestBodyDownloader {
             responses: HashMap<H256, Result<BlockBody, DownloadError>>,
