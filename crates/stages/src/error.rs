@@ -34,13 +34,13 @@ pub enum DatabaseIntegrityError {
     // TODO(onbjerg): What's the difference between this and the one below?
     /// The canonical hash for a block is missing from the database.
     #[error("No canonical hash for block #{number}")]
-    CannonicalHash {
+    CanonicalHash {
         /// The block number key
         number: BlockNumber,
     },
     /// The canonical header for a block is missing from the database.
     #[error("No canonical hash for block #{number}")]
-    CannonicalHeader {
+    CanonicalHeader {
         /// The block number key
         number: BlockNumber,
     },

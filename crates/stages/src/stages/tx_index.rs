@@ -37,13 +37,13 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: last_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: last_block })?;
 
         // The start block for this iteration
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: start_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: start_block })?;
 
         // The maximum block that this stage should insert to
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
@@ -100,7 +100,7 @@ mod tests {
         let rx = runner.execute(ExecInput::default());
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CannonicalHeader { .. }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { .. }))
         );
     }
 
