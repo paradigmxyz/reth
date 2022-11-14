@@ -145,7 +145,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
 
     // Sets the TypeFlags with the buffer length
     for (field_num, (name, ftype, is_compact)) in fields.iter().enumerate() {
-        let (name, _, _, len) = get_field_idents(name);
+        let (name, _, len) = get_field_idents(name);
 
         assert!(
             known_types.contains(&ftype.as_str()) ||
@@ -208,7 +208,7 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
 
     // Sets the TypeFlags with the buffer length
     for (name, ftype, is_compact) in fields {
-        let (name, set_len_method, _, len) = get_field_idents(name);
+        let (name, set_len_method, len) = get_field_idents(name);
 
         // H256 with #[maybe_zero] attribute for example
         if *is_compact && !is_flag_type(ftype) {

@@ -86,10 +86,9 @@ pub fn is_flag_type(ftype: &str) -> bool {
 
 /// Given the field name in a string format, returns various [`Ident`] necessary to generate code
 /// with [`quote`].
-pub fn get_field_idents(name: &str) -> (Ident, Ident, Ident, Ident) {
+pub fn get_field_idents(name: &str) -> (Ident, Ident, Ident) {
     let name = format_ident!("{name}");
     let set_len_method = format_ident!("set_{name}_len");
-    let slice = format_ident!("{name}_slice");
     let len = format_ident!("{name}_len");
-    (name, set_len_method, slice, len)
+    (name, set_len_method, len)
 }
