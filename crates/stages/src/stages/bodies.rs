@@ -469,16 +469,7 @@ mod tests {
             Ok(UnwindOutput { stage_progress }) if stage_progress == 1
         );
 
-        let last_body = runner
-            .db()
-            .container()
-            .get()
-            .cursor::<tables::BlockBodies>()
-            .expect("Could not get a block bodies cursor")
-            .last()
-            .expect("Could not read last block body")
-            .expect("No block bodies left after unwind")
-            .1;
+        let last_body = runner.last_body().expect("Could not read last body");
         let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
         runner
             .db()
@@ -547,16 +538,7 @@ mod tests {
             Ok(UnwindOutput { stage_progress }) if stage_progress == 1
         );
 
-        let last_body = runner
-            .db()
-            .container()
-            .get()
-            .cursor::<tables::BlockBodies>()
-            .expect("Could not get a block bodies cursor")
-            .last()
-            .expect("Could not read last block body")
-            .expect("No block bodies left after unwind")
-            .1;
+        let last_body = runner.last_body().expect("Could not read last body");
         let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
         runner
             .db()
@@ -723,6 +705,19 @@ mod tests {
                 })?;
 
                 Ok(())
+            }
+
+            pub(crate) fn last_body(&self) -> Option<StoredBlockBody> {
+                Some(
+                    self.db()
+                        .container()
+                        .get()
+                        .cursor::<tables::BlockBodies>()
+                        .ok()?
+                        .last()
+                        .ok()??
+                        .1,
+                )
             }
 
             /// Validate that the inserted block data is valid
