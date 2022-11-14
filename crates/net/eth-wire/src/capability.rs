@@ -91,6 +91,16 @@ impl Capabilities {
     }
 }
 
+impl From<Vec<Capability>> for Capabilities {
+    fn from(value: Vec<Capability>) -> Self {
+        Self {
+            eth_66: value.iter().any(Capability::is_eth_v66),
+            eth_67: value.iter().any(Capability::is_eth_v67),
+            inner: value,
+        }
+    }
+}
+
 impl Encodable for Capabilities {
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.encode(out)

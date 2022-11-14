@@ -24,7 +24,7 @@ pub struct Discv4Config {
     pub find_node_timeout: Duration,
     /// The duration we set for neighbours responses
     pub neighbours_timeout: Duration,
-    /// A set of lists that permit or ban IP's or NodeIds from the server. See
+    /// A set of lists that permit or ban IP's or PeerIds from the server. See
     /// `crate::PermitBanList`.
     pub permit_ban_list: PermitBanList,
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
@@ -110,7 +110,7 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// A set of lists that permit or ban IP's or NodeIds from the server. See
+    /// A set of lists that permit or ban IP's or PeerIds from the server. See
     /// `crate::PermitBanList`.
     pub fn permit_ban_list(&mut self, list: PermitBanList) -> &mut Self {
         self.config.permit_ban_list = list;

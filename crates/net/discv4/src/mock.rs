@@ -6,7 +6,7 @@ use crate::{
     node::NodeRecord,
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
-    IngressReceiver, NodeId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
+    IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
 use reth_primitives::H256;
@@ -40,8 +40,8 @@ pub struct MockDiscovery {
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
     egress: EgressSender,
-    pending_pongs: HashSet<NodeId>,
-    pending_neighbours: HashMap<NodeId, Vec<NodeRecord>>,
+    pending_pongs: HashSet<PeerId>,
+    pending_neighbours: HashMap<PeerId, Vec<NodeRecord>>,
     command_rx: mpsc::Receiver<MockCommand>,
 }
 
@@ -51,7 +51,7 @@ impl MockDiscovery {
         let mut rng = thread_rng();
         let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
         let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-        let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
         let local_enr = NodeRecord {
@@ -95,12 +95,12 @@ impl MockDiscovery {
     }
 
     /// Queue a pending pong.
-    pub fn queue_pong(&mut self, from: NodeId) {
+    pub fn queue_pong(&mut self, from: PeerId) {
         self.pending_pongs.insert(from);
     }
 
     /// Queue a pending Neighbours response.
-    pub fn queue_neighbours(&mut self, target: NodeId, nodes: Vec<NodeRecord>) {
+    pub fn queue_neighbours(&mut self, target: PeerId, nodes: Vec<NodeRecord>) {
         self.pending_neighbours.insert(target, nodes);
     }
 
@@ -195,8 +195,8 @@ pub enum MockEvent {
 
 /// Command for interacting with the `MockDiscovery` service
 pub enum MockCommand {
-    MockPong { node_id: NodeId },
-    MockNeighbours { target: NodeId, nodes: Vec<NodeRecord> },
+    MockPong { node_id: PeerId },
+    MockNeighbours { target: PeerId, nodes: Vec<NodeRecord> },
 }
 
 /// Creates a new testing instance for [`Discv4`] and its service
@@ -209,7 +209,7 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let mut rng = thread_rng();
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+    let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
     let external_addr = public_ip::addr().await.unwrap_or_else(|| socket.ip());
     let local_enr =
         NodeRecord { address: external_addr, tcp_port: socket.port(), udp_port: socket.port(), id };
@@ -231,21 +231,21 @@ pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
 
 pub fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
     let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
-    NodeRecord { address, tcp_port, udp_port, id: NodeId::random() }
+    NodeRecord { address, tcp_port, udp_port, id: PeerId::random() }
 }
 
 pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 16];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V6(ip.into());
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: NodeId::random() }
+    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: PeerId::random() }
 }
 
 pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 4];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V4(ip.into());
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: NodeId::random() }
+    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: PeerId::random() }
 }
 
 pub fn rng_message(rng: &mut impl RngCore) -> Message {
@@ -256,7 +256,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
             expire: rng.gen(),
         }),
         2 => Message::Pong(Pong { to: rng_endpoint(rng), echo: H256::random(), expire: rng.gen() }),
-        3 => Message::FindNode(FindNode { id: NodeId::random(), expire: rng.gen() }),
+        3 => Message::FindNode(FindNode { id: PeerId::random(), expire: rng.gen() }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
             Message::Neighbours(Neighbours {

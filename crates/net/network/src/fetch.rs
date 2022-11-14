@@ -1,10 +1,10 @@
 //! Fetch data from the network.
 
-use crate::{message::BlockRequest, NodeId};
+use crate::message::BlockRequest;
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, EthMessage};
 use reth_interfaces::p2p::{error::RequestResult, headers::client::HeadersRequest};
-use reth_primitives::{Header, H256, U256};
+use reth_primitives::{Header, PeerId, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
@@ -19,9 +19,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// peers and sends the response once ready.
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests: HashMap<NodeId, Request<HeadersRequest, RequestResult<Vec<Header>>>>,
+    inflight_headers_requests: HashMap<PeerId, Request<HeadersRequest, RequestResult<Vec<Header>>>>,
     /// The list of available peers for requests.
-    peers: HashMap<NodeId, Peer>,
+    peers: HashMap<PeerId, Peer>,
     /// Requests queued for processing
     queued_requests: VecDeque<DownloadRequest>,
     /// Receiver for new incoming download requests
@@ -34,13 +34,13 @@ pub struct StateFetcher {
 
 impl StateFetcher {
     /// Invoked when connected to a new peer.
-    pub(crate) fn new_connected_peer(&mut self, _node_id: NodeId, _best_hash: H256) {}
+    pub(crate) fn new_connected_peer(&mut self, _node_id: PeerId, _best_hash: H256) {}
 
     /// Invoked when an active session was closed.
-    pub(crate) fn on_session_closed(&mut self, _peer: &NodeId) {}
+    pub(crate) fn on_session_closed(&mut self, _peer: &PeerId) {}
 
     /// Invoked when an active session is about to be disconnected.
-    pub(crate) fn on_pending_disconnect(&mut self, _peer: &NodeId) {}
+    pub(crate) fn on_pending_disconnect(&mut self, _peer: &PeerId) {}
 
     /// Returns the next action to return
     fn poll_action(&mut self) -> Option<FetchAction> {
@@ -94,7 +94,7 @@ impl StateFetcher {
     /// Called on a `GetBlockHeaders` response from a peer
     pub(crate) fn on_block_headers_response(
         &mut self,
-        _peer: NodeId,
+        _peer: PeerId,
         _res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
         None
@@ -103,7 +103,7 @@ impl StateFetcher {
     /// Called on a `GetBlockBodies` response from a peer
     pub(crate) fn on_block_bodies_response(
         &mut self,
-        _peer: NodeId,
+        _peer: PeerId,
         _res: RequestResult<Vec<BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
         None
@@ -189,7 +189,7 @@ enum DownloadRequest {
 pub(crate) enum FetchAction {
     /// Dispatch an eth request to the given peer.
     EthRequest {
-        node_id: NodeId,
+        node_id: PeerId,
         /// The request to send
         request: EthMessage,
     },
@@ -201,8 +201,8 @@ pub(crate) enum FetchAction {
 #[derive(Debug)]
 pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
-    Request(NodeId, BlockRequest),
+    Request(PeerId, BlockRequest),
     /// How to handle a bad response
     // TODO this should include some form of reputation change
-    BadResponse(NodeId),
+    BadResponse(PeerId),
 }

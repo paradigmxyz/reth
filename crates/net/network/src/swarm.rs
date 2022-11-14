@@ -2,12 +2,14 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     session::{SessionEvent, SessionId, SessionManager},
     state::{AddSessionError, NetworkState, StateAction},
-    NodeId,
 };
 use futures::Stream;
-use reth_ecies::ECIESError;
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    error::EthStreamError,
+};
 use reth_interfaces::provider::BlockProvider;
+use reth_primitives::PeerId;
 use std::{
     io,
     net::SocketAddr,
@@ -55,7 +57,7 @@ where
     }
 
     /// Triggers a new outgoing connection to the given node
-    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: NodeId) {
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
     }
 
@@ -191,13 +193,13 @@ pub enum SwarmEvent {
     /// Events related to the actual network protocol.
     CapabilityMessage {
         /// The peer that sent the message
-        node_id: NodeId,
+        node_id: PeerId,
         /// Message received from the peer
         message: CapabilityMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidCapabilityMessage {
-        node_id: NodeId,
+        node_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
@@ -226,28 +228,28 @@ pub enum SwarmEvent {
         remote_addr: SocketAddr,
     },
     SessionEstablished {
-        node_id: NodeId,
+        node_id: PeerId,
         remote_addr: SocketAddr,
     },
     SessionClosed {
-        node_id: NodeId,
+        node_id: PeerId,
         remote_addr: SocketAddr,
     },
     /// Closed an incoming pending session during authentication.
     IncomingPendingSessionClosed {
         remote_addr: SocketAddr,
-        error: Option<ECIESError>,
+        error: Option<EthStreamError>,
     },
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
-        node_id: NodeId,
-        error: Option<ECIESError>,
+        node_id: PeerId,
+        error: Option<EthStreamError>,
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError {
         remote_addr: SocketAddr,
-        node_id: NodeId,
+        node_id: PeerId,
         error: io::Error,
     },
 }
