@@ -40,7 +40,7 @@ where
         for element in self {
             // TODO: elias fano?
             let mut inner = Vec::with_capacity(32);
-            buf.put_u16(element.to_compact(&mut inner) as u16);
+            buf.put_u32(element.to_compact(&mut inner) as u32);
             buf.put_slice(&inner);
         }
         0
@@ -53,7 +53,7 @@ where
             #[allow(unused_assignments)]
             let mut element = T::default();
 
-            let len = buf.get_u16();
+            let len = buf.get_u32();
             (element, buf) = T::from_compact(buf, len as usize);
 
             list.push(element);

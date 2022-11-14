@@ -13,7 +13,7 @@ pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     // Find out the adequate bit size for the length of each field, if applicable.
     for (name, ftype, is_compact) in fields {
         if *is_compact {
-            if !not_flag_type(ftype) {
+            if is_flag_type(ftype) {
                 let name = format_ident!("{name}_len");
                 let bitsize = get_bit_size(ftype);
                 let bsize = format_ident!("B{bitsize}");
@@ -141,21 +141,31 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
 
+    let known_types = ["H256", "H160", "Address", "Bloom", "Vec"];
+
     // Sets the TypeFlags with the buffer length
-    for (name, ftype, is_compact) in fields {
+    for (field_num, (name, ftype, is_compact)) in fields.iter().enumerate() {
         let (name, _, _, len) = get_field_idents(name);
+
+        assert!(
+            known_types.contains(&ftype.as_str()) ||
+                is_flag_type(ftype) ||
+                field_num == fields.len() - 1,
+            "{ftype} field should be placed as the last one since it's not known. "
+        );
 
         if ftype == "bytes::Bytes" {
             lines.push(quote! {
                 let mut #name = bytes::Bytes::new();
-                (#name, buf) = bytes::Bytes::from_compact(buf, flags.#len() as usize);
+                (#name, buf) = bytes::Bytes::from_compact(buf, buf.len() as usize);
             })
         } else {
             let ident_type = format_ident!("{ftype}");
             lines.push(quote! {
                 let mut #name = #ident_type::default();
             });
-            if not_flag_type(ftype) {
+            if !is_flag_type(ftype) {
+                // It's a type that handles its own length requirements. (h256, Custom, ...)
                 lines.push(quote! {
                     (#name, buf) = #ident_type::from_compact(buf, buf.len());
                 })
@@ -167,9 +177,6 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
                 todo!()
             }
         }
-        lines.push(quote! {
-            dbg!(&#name);
-        });
     }
 
     let fields = fields
@@ -182,6 +189,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
         })
         .collect::<Vec<_>>();
 
+    // Builds the object instantiation.
     lines.push(quote! {
         let obj = #ident {
             #(#fields)*
@@ -201,12 +209,11 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
     // Sets the TypeFlags with the buffer length
     for (name, ftype, is_compact) in fields {
         let (name, set_len_method, _, len) = get_field_idents(name);
-        if *is_compact && not_flag_type(ftype) {
+
+        // H256 with #[maybe_zero] attribute for example
+        if *is_compact && !is_flag_type(ftype) {
             let itype = format_ident!("{ftype}");
             let set_bool_method = format_ident!("set_{name}");
-            lines.push(quote! {
-                dbg!(&self.#name);
-            });
             lines.push(quote! {
                 if self.#name != #itype::zero() {
                     flags.#set_bool_method(true);
@@ -219,7 +226,7 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
             });
         }
 
-        if !not_flag_type(ftype) {
+        if is_flag_type(ftype) {
             lines.push(quote! {
                 flags.#set_len_method(#len as u8);
                 total_len += #len;
@@ -227,7 +234,7 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
         }
     }
 
-    // Replaces flag bits with the real ones.
+    // Places the flag bits.
     lines.push(quote! {
         let flags = flags.into_bytes();
         total_len += flags.len();

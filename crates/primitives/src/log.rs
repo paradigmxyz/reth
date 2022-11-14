@@ -1,6 +1,4 @@
 use crate::{Address, H256};
-use bytes::Buf;
-use modular_bitfield::prelude::*;
 use reth_codecs::{use_compact, Compact};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 

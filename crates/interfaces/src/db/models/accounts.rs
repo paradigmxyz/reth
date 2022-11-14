@@ -7,8 +7,7 @@ use crate::{
     },
     impl_fixed_arbitrary,
 };
-use bytes::{Buf, Bytes};
-use modular_bitfield::prelude::*;
+use bytes::Bytes;
 use reth_codecs::{use_compact, Compact};
 use reth_primitives::{Account, Address, TxNumber};
 use serde::{Deserialize, Serialize};

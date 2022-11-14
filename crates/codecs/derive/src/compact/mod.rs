@@ -44,7 +44,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                                 ftype.push_str("::");
                             }
                         }
-                        let should_compact = !not_flag_type(&ftype) ||
+                        let should_compact = is_flag_type(&ftype) ||
                             field.attrs.iter().any(|attr| {
                                 attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
                             });
@@ -66,21 +66,22 @@ pub fn get_fields(data: &Data) -> FieldList {
 /// Given the field type in a string format, return the amount of bits necessary to save its maximum
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
-    if ftype == "u64" {
+    if ftype == "u64" || ftype == "BlockNumber" {
         return 4
     } else if ftype == "TxType" {
         return 2
     } else if ftype == "bool" || ftype == "Option" {
         return 1
+    } else if ftype == "U256" {
+        return 6
     }
-    6
+    0
 }
 
-/// Given the field type in a string format, checks if it's type that shouldn't be added to the
+/// Given the field type in a string format, checks if its type should be added to the
 /// StructFlags.
-pub fn not_flag_type(ftype: &str) -> bool {
-    let known = ["H256", "H160", "Address", "Bloom"];
-    known.contains(&ftype) || ftype.starts_with("Vec")
+pub fn is_flag_type(ftype: &str) -> bool {
+    get_bit_size(ftype) > 0
 }
 
 /// Given the field name in a string format, returns various [`Ident`] necessary to generate code

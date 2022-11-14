@@ -54,7 +54,5 @@ impl sealed::Sealed for Vec<u8> {}
 
 impl_scale!(U256, H256, H160);
 impl_scale!(TransactionSigned);
-// impl_scale!(Header, Account, Log, Receipt, TxType, StorageEntry, TransactionSigned);
-// impl_scale!(AccountBeforeTx);
 
 impl_scale_value!(u8, u32, u16, u64);
