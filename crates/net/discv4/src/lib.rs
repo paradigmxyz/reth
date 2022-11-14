@@ -137,7 +137,8 @@ impl Discv4 {
     /// use std::str::FromStr;
     /// use rand::thread_rng;
     /// use secp256k1::SECP256K1;
-    /// use reth_discv4::{Discv4, Discv4Config, PeerId, NodeRecord};
+    /// use reth_primitives::PeerId;
+    /// use reth_discv4::{Discv4, Discv4Config, NodeRecord};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
     ///  let mut rng = thread_rng();
