@@ -194,6 +194,10 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 }
 
 impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
+    /// Computes a list of `(block_number, header_hash)` for blocks that we need to download bodies
+    /// for.
+    ///
+    /// This skips empty blocks (i.e. no ommers, no transactions).
     fn bodies_to_download<DB: Database>(
         &self,
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
