@@ -34,10 +34,13 @@ impl Consensus for EthConsensus {
 
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
         verification::validate_header_standalone(header, &self.config)?;
-        verification::validate_header_regarding_parent(parent, header, &self.config)
+        verification::validate_header_regarding_parent(parent, header, &self.config)?;
 
-        // TODO Consensus checks for:
-        //  * mix_hash & nonce PoW stuf
-        //  * extra_data
+        if header.number < self.config.paris_hard_fork_block {
+            // TODO Consensus checks for old blocks:
+            //  * difficulty, mix_hash & nonce aka PoW stuff
+            // low priority as syncing is done in reverse order
+        }
+        Ok(())
     }
 }

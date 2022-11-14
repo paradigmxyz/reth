@@ -86,6 +86,8 @@ impl Executor {
             });
         }
 
+        // TODO do state root.
+
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })

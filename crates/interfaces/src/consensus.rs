@@ -65,6 +65,8 @@ pub enum Error {
     InsufficientFunds { max_fee: u128, available_funds: u128 },
     #[error("Eip2930 transaction is enabled after berlin hardfork.")]
     TransactionEip2930Disabled,
+    #[error("Old legacy transaction before Spurious Dragon should not have chain_id.")]
+    TransactionOldLegacyChainId,
     #[error("Eip2930 transaction is enabled after london hardfork.")]
     TransactionEip1559Disabled,
     #[error("Transaction signer recovery error.")]
@@ -75,4 +77,14 @@ pub enum Error {
     TransactionReceiptCountDiff { transaction_count: usize, receipt_count: usize },
     #[error("Transaction had receipt of different type")]
     TransactionTypeReceiptTypeDiff,
+    #[error("Extra data {len} exceeds max length: ")]
+    ExtraDataExceedsMax { len: usize },
+    #[error("Difficulty after merge is not zero")]
+    TheMergeDifficultyIsNotZero,
+    #[error("Nonce after merge is not zero")]
+    TheMergeNonceIsNotZero,
+    #[error("Ommer root after merge is not empty")]
+    TheMergeOmmerRootIsNotEmpty,
+    #[error("Mix hash after merge is not zero")]
+    TheMergeMixHashIsNotZero,
 }

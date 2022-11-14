@@ -5,7 +5,9 @@ use reth_interfaces::{
     provider::{AccountProvider, HeaderProvider},
     Result as RethResult,
 };
-use reth_primitives::{Account, BlockLocked, BlockNumber, SealedHeader, Transaction};
+use reth_primitives::{
+    Account, BlockLocked, BlockNumber, SealedHeader, Transaction, EMPTY_OMMER_ROOT, H256, U256,
+};
 use std::time::SystemTime;
 
 /// Validate header standalone
@@ -28,9 +30,35 @@ pub fn validate_header_standalone(
         return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp })
     }
 
+    // From yellow papper: extraData: An arbitrary byte array containing data
+    // relevant to this block. This must be 32 bytes or fewer; formally Hx.
+    if header.extra_data.len() > 32 {
+        return Err(Error::ExtraDataExceedsMax { len: header.extra_data.len() })
+    }
+
     // Check if base fee is set.
-    if config.paris_hard_fork_block >= header.number && header.base_fee_per_gas.is_some() {
+    if header.number >= config.london_hard_fork_block && header.base_fee_per_gas.is_none() {
         return Err(Error::BaseFeeMissing)
+    }
+
+    // EIP-3675: Upgrade consensus to Proof-of-Stake:
+    // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
+    if header.number >= config.paris_hard_fork_block {
+        if header.difficulty != U256::zero() {
+            return Err(Error::TheMergeDifficultyIsNotZero)
+        }
+
+        if header.nonce != 0 {
+            return Err(Error::TheMergeNonceIsNotZero)
+        }
+
+        if header.ommers_hash != EMPTY_OMMER_ROOT {
+            return Err(Error::TheMergeOmmerRootIsNotEmpty)
+        }
+
+        if header.mix_hash != H256::zero() {
+            return Err(Error::TheMergeMixHashIsNotZero)
+        }
     }
 
     Ok(())
@@ -46,14 +74,22 @@ pub fn validate_transaction_regarding_header(
     base_fee: Option<u64>,
 ) -> Result<(), Error> {
     let chain_id = match transaction {
-        Transaction::Legacy { chain_id, .. } => *chain_id,
+        Transaction::Legacy { chain_id, .. } => {
+            // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
+            if config.spurious_dragon_hard_fork_block <= at_block_number && chain_id.is_some() {
+                return Err(Error::TransactionOldLegacyChainId)
+            }
+            *chain_id
+        }
         Transaction::Eip2930 { chain_id, .. } => {
+            // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
             if config.berlin_hard_fork_block > at_block_number {
                 return Err(Error::TransactionEip2930Disabled)
             }
             Some(*chain_id)
         }
         Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+            // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
             if config.berlin_hard_fork_block > at_block_number {
                 return Err(Error::TransactionEip1559Disabled)
             }

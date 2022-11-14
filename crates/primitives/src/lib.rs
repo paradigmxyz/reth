@@ -81,8 +81,12 @@ pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     output.into()
 }
 
+use hex_literal::hex;
+
 /// Keccak256 over empty array.
-pub const KECCAK_EMPTY: H256 = H256([
-    0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
-    0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04, 0x5d, 0x85, 0xa4, 0x70,
-]);
+pub const KECCAK_EMPTY: H256 =
+    H256(hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"));
+
+/// Ommer root of empty list.
+pub const EMPTY_OMMER_ROOT: H256 =
+    H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
