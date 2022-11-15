@@ -139,15 +139,18 @@ pub(crate) mod unwind {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use reth_db::{
-        kv::{test_utils::create_test_db, Env, EnvKind},
-        mdbx::WriteMap,
+        kv::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
+        mdbx::{WriteMap, RW},
     };
     use reth_interfaces::db::{DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table};
     use reth_primitives::BlockNumber;
     use std::{borrow::Borrow, sync::Arc};
     use tokio::sync::oneshot;
 
-    use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+    use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+
+    /// The previous test stage id mock used for testing
+    pub(crate) const PREV_STAGE_ID: StageId = StageId("PrevStage");
 
     /// The [StageTestDB] is used as an internal
     /// database for testing stage implementation.
@@ -178,6 +181,30 @@ pub(crate) mod test_utils {
             DBContainer::new(self.db.borrow()).expect("failed to create db container")
         }
 
+        fn commit<F>(&self, f: F) -> Result<(), Error>
+        where
+            F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), Error>,
+        {
+            let mut db = self.container();
+            let tx = db.get_mut();
+            f(tx)?;
+            db.commit()?;
+            Ok(())
+        }
+
+        /// Put a single value into the table
+        pub(crate) fn put<T: Table>(&self, k: T::Key, v: T::Value) -> Result<(), Error> {
+            self.commit(|tx| tx.put::<T>(k, v))
+        }
+
+        /// Delete a single value from the table
+        pub(crate) fn delete<T: Table>(&self, k: T::Key) -> Result<(), Error> {
+            self.commit(|tx| {
+                tx.delete::<T>(k, None)?;
+                Ok(())
+            })
+        }
+
         /// Map a collection of values and store them in the database.
         /// This function commits the transaction before exiting.
         ///
@@ -191,14 +218,12 @@ pub(crate) mod test_utils {
             S: Clone,
             F: FnMut(&S) -> (T::Key, T::Value),
         {
-            let mut db = self.container();
-            let tx = db.get_mut();
-            values.iter().try_for_each(|src| {
-                let (k, v) = map(src);
-                tx.put::<T>(k, v)
-            })?;
-            db.commit()?;
-            Ok(())
+            self.commit(|tx| {
+                values.iter().try_for_each(|src| {
+                    let (k, v) = map(src);
+                    tx.put::<T>(k, v)
+                })
+            })
         }
 
         /// Transform a collection of values using a callback and store
@@ -221,17 +246,15 @@ pub(crate) mod test_utils {
             S: Clone,
             F: FnMut(&Option<<T as Table>::Value>, &S) -> (T::Key, T::Value),
         {
-            let mut db = self.container();
-            let tx = db.get_mut();
-            let mut cursor = tx.cursor_mut::<T>()?;
-            let mut last = cursor.last()?.map(|(_, v)| v);
-            values.iter().try_for_each(|src| {
-                let (k, v) = transform(&last, src);
-                last = Some(v.clone());
-                cursor.append(k, v)
-            })?;
-            db.commit()?;
-            Ok(())
+            self.commit(|tx| {
+                let mut cursor = tx.cursor_mut::<T>()?;
+                let mut last = cursor.last()?.map(|(_, v)| v);
+                values.iter().try_for_each(|src| {
+                    let (k, v) = transform(&last, src);
+                    last = Some(v.clone());
+                    cursor.append(k, v)
+                })
+            })
         }
 
         /// Check that there is no table entry above a given
@@ -289,6 +312,18 @@ pub(crate) mod test_utils {
 
         /// Return an instance of a Stage.
         fn stage(&self) -> Self::S;
+    }
+
+    #[async_trait::async_trait]
+    pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
+        /// Seed database for stage execution
+        fn seed_execution(
+            &mut self,
+            input: ExecInput,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+        /// Validate stage execution
+        fn validate_execution(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
         /// Run [Stage::execute] and return a receiver for the result.
         fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
@@ -302,6 +337,26 @@ pub(crate) mod test_utils {
             });
             rx
         }
+
+        /// Run a hook after [Stage::execute]. Required for Headers & Bodies stages.
+        async fn after_execution(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    pub(crate) trait UnwindStageTestRunner: StageTestRunner {
+        /// Seed database for stage unwind
+        fn seed_unwind(
+            &mut self,
+            input: UnwindInput,
+            highest_entry: u64,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+        /// Validate the unwind
+        fn validate_unwind(
+            &self,
+            input: UnwindInput,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
         /// Run [Stage::unwind] and return a receiver for the result.
         fn unwind(
@@ -320,4 +375,71 @@ pub(crate) mod test_utils {
             rx
         }
     }
+
+    macro_rules! stage_test_suite {
+        ($runner:ident) => {
+            #[tokio::test]
+            // Check that the execution errors on empty database or
+            // prev progress missing from the database.
+            async fn execute_empty_db() {
+                let runner = $runner::default();
+                let rx = runner.execute(crate::stage::ExecInput::default());
+                assert_matches!(
+                    rx.await.unwrap(),
+                    Err(crate::error::StageError::DatabaseIntegrity(_))
+                );
+                assert!(runner.validate_execution().is_ok(), "execution validation");
+            }
+
+            #[tokio::test]
+            async fn execute() {
+                let (previous_stage, stage_progress) = (1000, 100);
+                let mut runner = $runner::default();
+                let input = crate::stage::ExecInput {
+                    previous_stage: Some((crate::util::test_utils::PREV_STAGE_ID, previous_stage)),
+                    stage_progress: Some(stage_progress),
+                };
+                runner.seed_execution(input).expect("failed to seed");
+                let rx = runner.execute(input);
+                runner.after_execution().await.expect("failed to run after execution hook");
+                assert_matches!(
+                    rx.await.unwrap(),
+                    Ok(ExecOutput { done, reached_tip, stage_progress })
+                        if done && reached_tip && stage_progress == previous_stage
+                );
+                assert!(runner.validate_execution().is_ok(), "execution validation");
+            }
+
+            #[tokio::test]
+            // Check that unwind does not panic on empty database.
+            async fn unwind_empty_db() {
+                let runner = $runner::default();
+                let input = crate::stage::UnwindInput::default();
+                let rx = runner.unwind(input);
+                assert_matches!(
+                    rx.await.unwrap(),
+                    Ok(UnwindOutput { stage_progress }) if stage_progress == input.unwind_to
+                );
+                assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
+            }
+
+            #[tokio::test]
+            async fn unwind() {
+                let (unwind_to, highest_entry) = (100, 200);
+                let mut runner = $runner::default();
+                let input = crate::stage::UnwindInput {
+                    unwind_to, stage_progress: unwind_to, bad_block: None,
+                };
+                runner.seed_unwind(input, highest_entry).expect("failed to seed");
+                let rx = runner.unwind(input);
+                assert_matches!(
+                    rx.await.unwrap(),
+                    Ok(UnwindOutput { stage_progress }) if stage_progress == input.unwind_to
+                );
+                assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
+            }
+        };
+    }
+
+    pub(crate) use stage_test_suite;
 }

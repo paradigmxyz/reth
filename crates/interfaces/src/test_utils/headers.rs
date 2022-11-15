@@ -92,6 +92,12 @@ impl TestHeadersClient {
     pub fn send_header_response(&self, id: u64, headers: Vec<Header>) {
         self.res_tx.send((id, headers).into()).expect("failed to send header response");
     }
+
+    /// Helper for pushing responses to the client
+    pub async fn send_header_response_delayed(&self, id: u64, headers: Vec<Header>, secs: u64) {
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        self.send_header_response(id, headers);
+    }
 }
 
 #[async_trait::async_trait]
@@ -105,6 +111,9 @@ impl HeadersClient for TestHeadersClient {
     }
 
     async fn stream_headers(&self) -> HeadersStream {
+        if !self.res_rx.is_empty() {
+            println!("WARNING: broadcast receiver already contains messages.")
+        }
         Box::pin(BroadcastStream::new(self.res_rx.resubscribe()).filter_map(|e| e.ok()))
     }
 }
