@@ -1,9 +1,13 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
-use crate::session::{
-    active::ActiveSession,
-    handle::{
-        ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+use crate::{
+    message::PeerMessage,
+    session::{
+        active::ActiveSession,
+        handle::{
+            ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+            SessionCommand,
+        },
     },
 };
 use fnv::FnvHashMap;
@@ -191,6 +195,13 @@ impl SessionManager {
     pub(crate) fn disconnect(&self, node: PeerId) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect();
+        }
+    }
+
+    /// Sends a message to the peer's session
+    pub(crate) fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage) {
+        if let Some(session) = self.active_sessions.get_mut(peer_id) {
+            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg));
         }
     }
 
@@ -406,7 +417,7 @@ pub(crate) enum SessionEvent {
     ValidMessage {
         node_id: PeerId,
         /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {

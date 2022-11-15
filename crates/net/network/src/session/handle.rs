@@ -1,5 +1,8 @@
 //! Session handles
-use crate::session::{Direction, SessionId};
+use crate::{
+    message::PeerMessage,
+    session::{Direction, SessionId},
+};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -93,7 +96,8 @@ pub(crate) enum PendingSessionEvent {
 pub(crate) enum SessionCommand {
     /// Disconnect the connection
     Disconnect,
-    Message(CapabilityMessage),
+    /// Sends a message to the peer
+    Message(PeerMessage),
 }
 
 /// Message variants an active session can produce and send back to the
@@ -107,7 +111,7 @@ pub(crate) enum ActiveSessionMessage {
         /// Identifier of the remote peer.
         node_id: PeerId,
         /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {

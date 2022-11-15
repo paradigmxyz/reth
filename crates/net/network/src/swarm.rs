@@ -1,5 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
+    message::{PeerMessage, PeerRequestSender},
     session::{SessionEvent, SessionId, SessionManager},
     state::{AddSessionError, NetworkState, StateAction},
 };
@@ -56,6 +57,11 @@ where
         &mut self.state
     }
 
+    /// Mutable access to the [`SessionManager`].
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
+        &mut self.sessions
+    }
+
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -70,8 +76,18 @@ where
                 capabilities,
                 status,
                 messages,
-            } => match self.state.on_session_activated(node_id, capabilities, status, messages) {
-                Ok(_) => Some(SwarmEvent::SessionEstablished { node_id, remote_addr }),
+            } => match self.state.on_session_activated(
+                node_id,
+                capabilities.clone(),
+                status,
+                messages.clone(),
+            ) {
+                Ok(_) => Some(SwarmEvent::SessionEstablished {
+                    node_id,
+                    remote_addr,
+                    capabilities,
+                    messages,
+                }),
                 Err(err) => {
                     match err {
                         AddSessionError::AtCapacity { peer } => self.sessions.disconnect(peer),
@@ -80,7 +96,7 @@ where
                 }
             },
             SessionEvent::ValidMessage { node_id, message } => {
-                Some(SwarmEvent::CapabilityMessage { node_id, message })
+                Some(SwarmEvent::ValidMessage { node_id, message })
             }
             SessionEvent::InvalidMessage { node_id, capabilities, message } => {
                 Some(SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message })
@@ -132,6 +148,10 @@ where
             }
             StateAction::Disconnect { node_id } => {
                 self.sessions.disconnect(node_id);
+            }
+            StateAction::NewBlock { peer_id, block: msg } => {
+                let msg = PeerMessage::NewBlock(msg);
+                self.sessions.send_message(&peer_id, msg);
             }
         }
         None
@@ -191,11 +211,11 @@ where
 /// network.
 pub enum SwarmEvent {
     /// Events related to the actual network protocol.
-    CapabilityMessage {
+    ValidMessage {
         /// The peer that sent the message
         node_id: PeerId,
         /// Message received from the peer
-        message: CapabilityMessage,
+        message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidCapabilityMessage {
@@ -230,6 +250,8 @@ pub enum SwarmEvent {
     SessionEstablished {
         node_id: PeerId,
         remote_addr: SocketAddr,
+        capabilities: Arc<Capabilities>,
+        messages: PeerRequestSender,
     },
     SessionClosed {
         node_id: PeerId,
