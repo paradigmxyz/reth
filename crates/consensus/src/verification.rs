@@ -165,9 +165,7 @@ pub fn validate_transaction_regarding_account(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(
-    block: &BlockLocked,
-) -> Result<(), Error> {
+pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let ommers_hash =
@@ -433,7 +431,7 @@ mod tests {
             gas_used: 0x6e813,
             timestamp: 0x635f9657,
             extra_data: hex!("")[..].into(),
-            mix_hash: hex!("f8c29910a0a2fd65b260d83ffa2547a6db279095d109a6e64527d14035263cfc").into(),
+            mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
         };
