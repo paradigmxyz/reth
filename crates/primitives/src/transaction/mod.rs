@@ -13,8 +13,9 @@ use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPT
 pub use signature::Signature;
 pub use tx_type::TxType;
 
-/// Raw Transaction.
-/// Transaction type is introduced in EIP-2718: https://eips.ethereum.org/EIPS/eip-2718
+/// A raw transaction.
+///
+/// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Transaction {
@@ -49,7 +50,7 @@ pub enum Transaction {
         /// input data of the message call, formally Td.
         input: Bytes,
     },
-    /// Transaction with AccessList. https://eips.ethereum.org/EIPS/eip-2930
+    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
     Eip2930 {
         /// Added as EIP-155: Simple replay attack protection
         chain_id: ChainId,
@@ -86,7 +87,7 @@ pub enum Transaction {
         /// accessing outside the list.
         access_list: AccessList,
     },
-    /// Transaction with priority fee. https://eips.ethereum.org/EIPS/eip-1559
+    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
     Eip1559 {
         /// Added as EIP-155: Simple replay attack protection
         chain_id: u64,
@@ -172,6 +173,15 @@ impl Transaction {
             Transaction::Legacy { nonce, .. } => *nonce,
             Transaction::Eip2930 { nonce, .. } => *nonce,
             Transaction::Eip1559 { nonce, .. } => *nonce,
+        }
+    }
+
+    /// Get the gas limit of the transaction.
+    pub fn gas_limit(&self) -> u64 {
+        match self {
+            Transaction::Legacy { gas_limit, .. } |
+            Transaction::Eip2930 { gas_limit, .. } |
+            Transaction::Eip1559 { gas_limit, .. } => *gas_limit,
         }
     }
 

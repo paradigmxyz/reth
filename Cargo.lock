@@ -3053,6 +3053,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bodies-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "futures-util",
+ "once_cell",
+ "rand 0.8.5",
+ "reth-eth-wire",
+ "reth-interfaces",
+ "reth-primitives",
+ "serial_test",
+ "tokio",
+]
+
+[[package]]
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
@@ -3066,16 +3081,11 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "eyre",
- "hash-db",
- "plain_hasher",
  "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
- "rlp",
- "sha3",
  "thiserror",
  "tokio",
- "triehash",
 ]
 
 [[package]]
@@ -3234,6 +3244,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-db",
+ "reth-eth-wire",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
@@ -3342,10 +3353,12 @@ dependencies = [
  "crc",
  "derive_more",
  "ethers-core",
+ "hash-db",
  "hex",
  "hex-literal",
  "maplit",
  "parity-scale-codec",
+ "plain_hasher",
  "reth-codecs",
  "reth-rlp",
  "secp256k1",
@@ -3354,6 +3367,7 @@ dependencies = [
  "sucds",
  "thiserror",
  "tiny-keccak",
+ "triehash",
 ]
 
 [[package]]
@@ -3426,9 +3440,12 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
+ "futures-util",
  "metrics",
  "rand 0.8.5",
+ "reth-bodies-downloaders",
  "reth-db",
+ "reth-eth-wire",
  "reth-headers-downloaders",
  "reth-interfaces",
  "reth-primitives",

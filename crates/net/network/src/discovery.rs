@@ -1,8 +1,9 @@
 //! Discovery support for the network.
 
-use crate::{error::NetworkError, NodeId};
+use crate::error::NetworkError;
 use futures::StreamExt;
 use reth_discv4::{Discv4, Discv4Config, NodeRecord, TableUpdate};
+use reth_primitives::PeerId;
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -19,7 +20,7 @@ pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
-    discovered_nodes: HashMap<NodeId, SocketAddr>,
+    discovered_nodes: HashMap<PeerId, SocketAddr>,
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
@@ -66,12 +67,12 @@ impl Discovery {
     }
 
     /// Returns the id with which the local identifies itself in the network
-    pub(crate) fn local_id(&self) -> NodeId {
+    pub(crate) fn local_id(&self) -> PeerId {
         self.local_enr.id
     }
 
     /// Manually adds an address to the set.
-    pub(crate) fn add_known_address(&mut self, node_id: NodeId, addr: SocketAddr) {
+    pub(crate) fn add_known_address(&mut self, node_id: PeerId, addr: SocketAddr) {
         self.on_discv4_update(TableUpdate::Added(NodeRecord {
             address: addr.ip(),
             tcp_port: addr.port(),
@@ -81,7 +82,7 @@ impl Discovery {
     }
 
     /// Returns all nodes we know exist in the network.
-    pub fn known_nodes(&mut self) -> &HashMap<NodeId, SocketAddr> {
+    pub fn known_nodes(&mut self) -> &HashMap<PeerId, SocketAddr> {
         &self.discovered_nodes
     }
 
@@ -131,7 +132,7 @@ impl Discovery {
 /// Events produced by the [`Discovery`] manager.
 pub enum DiscoveryEvent {
     /// A new node was discovered
-    Discovered(NodeId, SocketAddr),
+    Discovered(PeerId, SocketAddr),
 }
 
 #[cfg(test)]

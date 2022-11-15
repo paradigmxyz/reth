@@ -18,6 +18,7 @@ members = [
     "crates/net/rpc-api",
     "crates/net/rpc-types",
     "crates/net/headers-downloaders",
+    "crates/net/bodies-downloaders",
     "crates/primitives",
     "crates/stages",
     "crates/transaction-pool",

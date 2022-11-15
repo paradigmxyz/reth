@@ -3,7 +3,6 @@
 //! An RLPx stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the RLPx `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-use crate::NodeId;
 use futures::FutureExt;
 use reth_eth_wire::{
     capability::CapabilityMessage, BlockBodies, BlockBody, BlockHeaders, GetBlockBodies,
@@ -11,7 +10,7 @@ use reth_eth_wire::{
     NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, Transactions,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{Header, Receipt, TransactionSigned, H256};
+use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -192,7 +191,7 @@ impl PeerResponseResult {
 #[derive(Debug, Clone)]
 pub struct PeerRequestSender {
     /// id of the remote node.
-    pub(crate) peer: NodeId,
+    pub(crate) peer: PeerId,
     /// The Sender half connected to a session.
     pub(crate) to_session_tx: mpsc::Sender<PeerRequest>,
 }

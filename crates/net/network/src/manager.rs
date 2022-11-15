@@ -27,7 +27,6 @@ use crate::{
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
-    NodeId,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -36,6 +35,7 @@ use reth_eth_wire::{
     GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, provider::BlockProvider};
+use reth_primitives::PeerId;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -90,8 +90,8 @@ pub struct NetworkManager<C> {
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
-    /// Local copy of the `NodeId` of the local node.
-    local_node_id: NodeId,
+    /// Local copy of the `PeerId` of the local node.
+    local_node_id: PeerId,
 }
 
 // === impl NetworkManager ===
@@ -166,7 +166,7 @@ where
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &self,
-        node_id: NodeId,
+        node_id: PeerId,
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
@@ -175,7 +175,7 @@ where
     }
 
     /// Handle an incoming request from the peer
-    fn on_eth_request(&mut self, peer_id: NodeId, req: PeerRequest) {
+    fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
         match req {
             PeerRequest::GetBlockHeaders { .. } => {}
             PeerRequest::GetBlockBodies { .. } => {}
@@ -192,8 +192,8 @@ where
         }
     }
 
-    /// Handles a received [`CapabilityMessage`] from the peer.
-    fn on_peer_message(&mut self, peer_id: NodeId, msg: PeerMessage) {
+    /// Handles a received Message from the peer.
+    fn on_peer_message(&mut self, peer_id: PeerId, msg: PeerMessage) {
         match msg {
             PeerMessage::NewBlockHashes(hashes) => {
                 // update peer's state, to track what blocks this peer has seen
@@ -344,20 +344,20 @@ where
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     /// Closed the peer session.
-    SessionClosed { peer_id: NodeId },
+    SessionClosed { peer_id: PeerId },
     /// Established a new session with the given peer.
     SessionEstablished {
-        peer_id: NodeId,
+        peer_id: PeerId,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
     },
     /// Received list of transactions to the given peer.
-    IncomingTransactions { peer_id: NodeId, msg: Arc<Transactions> },
+    IncomingTransactions { peer_id: PeerId, msg: Arc<Transactions> },
     /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: NodeId, msg: Arc<NewPooledTransactionHashes> },
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
-        peer_id: NodeId,
+        peer_id: PeerId,
         request: GetPooledTransactions,
         response: Arc<oneshot::Sender<RequestResult<PooledTransactions>>>,
     },

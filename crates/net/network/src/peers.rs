@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use reth_discv4::NodeId;
+use reth_primitives::PeerId;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     net::SocketAddr,
@@ -32,7 +32,7 @@ pub struct PeersHandle {
 /// The [`PeersManager`] will be notified on peer related changes
 pub(crate) struct PeersManager {
     /// All peers known to the network
-    peers: HashMap<NodeId, Peer>,
+    peers: HashMap<PeerId, Peer>,
     /// Copy of the receiver half, so new [`PeersHandle`] can be created on demand.
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
     /// Receiver half of the command channel.
@@ -74,7 +74,7 @@ impl PeersManager {
     ///
     /// If the reputation of the peer is below the `BANNED_REPUTATION` threshold, a disconnect will
     /// be scheduled.
-    pub(crate) fn on_active_session(&mut self, peer_id: NodeId, addr: SocketAddr) {
+    pub(crate) fn on_active_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
@@ -96,7 +96,7 @@ impl PeersManager {
     /// Called when a session to a peer was disconnected.
     ///
     /// Accepts an additional [`ReputationChange`] value to apply to the peer.
-    pub(crate) fn on_disconnected(&mut self, peer: NodeId, reputation_change: ReputationChange) {
+    pub(crate) fn on_disconnected(&mut self, peer: PeerId, reputation_change: ReputationChange) {
         if let Some(mut peer) = self.peers.get_mut(&peer) {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
@@ -108,7 +108,7 @@ impl PeersManager {
     ///
     /// If the peer already exists, then the address will e updated. If the addresses differ, the
     /// old address is returned
-    pub(crate) fn add_discovered_node(&mut self, peer_id: NodeId, addr: SocketAddr) {
+    pub(crate) fn add_discovered_node(&mut self, peer_id: PeerId, addr: SocketAddr) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let node = entry.get_mut();
@@ -121,7 +121,7 @@ impl PeersManager {
     }
 
     /// Removes the tracked node from the set.
-    pub(crate) fn remove_discovered_node(&mut self, peer_id: NodeId) {
+    pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
         if let Some(entry) = self.peers.remove(&peer_id) {
             if entry.state.is_connected() {
                 self.connection_info.decr_state(entry.state);
@@ -133,11 +133,11 @@ impl PeersManager {
     /// Returns the idle peer with the highest reputation.
     ///
     /// Returns `None` if no peer is available.
-    fn best_unconnected(&mut self) -> Option<(NodeId, &mut Peer)> {
+    fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         self.peers
             .iter_mut()
             .filter(|(_, peer)| peer.state.is_unconnected())
-            .fold(None::<(&NodeId, &mut Peer)>, |mut best_peer, candidate| {
+            .fold(None::<(&PeerId, &mut Peer)>, |mut best_peer, candidate| {
                 if let Some(best_peer) = best_peer.take() {
                     if best_peer.1.reputation >= candidate.1.reputation {
                         return Some(best_peer)
@@ -331,14 +331,14 @@ pub(crate) enum PeerCommand {
     /// Command for manually add
     Add {
         /// Identifier of the peer.
-        peer_id: NodeId,
+        peer_id: PeerId,
         /// The address of the peer
         addr: SocketAddr,
     },
     /// Remove a peer from the set
     ///
     /// If currently connected this will disconnect the sessin
-    Remove(NodeId),
+    Remove(PeerId),
 }
 
 /// Actions the peer manager can trigger.
@@ -347,17 +347,17 @@ pub enum PeerAction {
     /// Start a new connection to a peer.
     Connect {
         /// The peer to connect to.
-        peer_id: NodeId,
+        peer_id: PeerId,
         /// Where to reach the node
         remote_addr: SocketAddr,
     },
     /// Disconnect an existing connection.
-    Disconnect { peer_id: NodeId },
+    Disconnect { peer_id: PeerId },
     /// Disconnect an existing incoming connection, because the peers reputation is below the
     /// banned threshold.
     DisconnectBannedIncoming {
         /// Peer id of the established connection.
-        peer_id: NodeId,
+        peer_id: PeerId,
     },
 }
 

@@ -1,10 +1,8 @@
 //! Transaction management for the p2p network.
 
-use crate::{
-    cache::LruCache, manager::NetworkEvent, message::PeerRequestSender, NetworkHandle, NodeId,
-};
+use crate::{cache::LruCache, manager::NetworkEvent, message::PeerRequestSender, NetworkHandle};
 use futures::stream::FuturesUnordered;
-use reth_primitives::{Transaction, H256};
+use reth_primitives::{PeerId, Transaction, H256};
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -58,11 +56,11 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<H256, Vec<NodeId>>,
+    transactions_by_peers: HashMap<H256, Vec<PeerId>>,
     /// Transactions that are currently imported into the `Pool`
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// All the connected peers.
-    peers: HashMap<NodeId, Peer>,
+    peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].

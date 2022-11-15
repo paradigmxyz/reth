@@ -10,9 +10,6 @@ pub mod config;
 pub mod consensus;
 pub mod verification;
 
-/// Helper function for calculating Merkle proofs and hashes
-pub mod proofs;
-
 pub use config::Config;
 pub use consensus::EthConsensus;
 pub use reth_interfaces::consensus::Error;

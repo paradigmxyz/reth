@@ -9,15 +9,16 @@ use crate::{
             SessionCommand,
         },
     },
-    NodeId,
 };
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
-use reth_ecies::{stream::ECIESStream, ECIESError};
+use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    Status, UnauthedEthStream,
+    error::EthStreamError,
+    HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_primitives::{ForkFilter, Hardfork, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashMap,
@@ -50,7 +51,13 @@ pub(crate) struct SessionManager {
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The node id of node
-    node_id: NodeId,
+    node_id: PeerId,
+    /// The `Status` message to send to peers.
+    status: Status,
+    /// THe `Hello` message to send to peers.
+    hello: HelloMessage,
+    /// The [`ForkFilter`] used to validate the peer's `Status` message.
+    fork_filter: ForkFilter,
     /// Size of the command buffer per session.
     session_command_buffer: usize,
     /// All spawned session tasks.
@@ -63,7 +70,7 @@ pub(crate) struct SessionManager {
     /// session is authenticated, it can be moved to the `active_session` set.
     pending_sessions: FnvHashMap<SessionId, PendingSessionHandle>,
     /// All active sessions that are ready to exchange messages.
-    active_sessions: HashMap<NodeId, ActiveSessionHandle>,
+    active_sessions: HashMap<PeerId, ActiveSessionHandle>,
     /// The original Sender half of the [`PendingSessionEvent`] channel.
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
@@ -89,12 +96,21 @@ impl SessionManager {
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
 
         let pk = secret_key.public_key(SECP256K1);
-        let node_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let node_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+
+        // TODO: make sure this is the right place to put these builders - maybe per-Network rather
+        // than per-Session?
+        let hello = HelloBuilder::new(node_id).build();
+        let status = StatusBuilder::default().build();
+        let fork_filter = Hardfork::Frontier.fork_filter();
 
         Self {
             next_id: 0,
             secret_key,
             node_id,
+            status,
+            hello,
+            fork_filter,
             session_command_buffer: config.session_command_buffer,
             spawned_tasks: Default::default(),
             pending_sessions: Default::default(),
@@ -141,6 +157,9 @@ impl SessionManager {
             pending_events,
             remote_addr,
             self.secret_key,
+            self.hello.clone(),
+            self.status,
+            self.fork_filter.clone(),
         ));
 
         let handle = PendingSessionHandle { disconnect_tx };
@@ -149,7 +168,7 @@ impl SessionManager {
     }
 
     /// Starts a new pending session from the local node to the given remote node.
-    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_node_id: NodeId) {
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_node_id: PeerId) {
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
@@ -160,6 +179,9 @@ impl SessionManager {
             remote_addr,
             remote_node_id,
             self.secret_key,
+            self.hello.clone(),
+            self.status,
+            self.fork_filter.clone(),
         ));
 
         let handle = PendingSessionHandle { disconnect_tx };
@@ -170,14 +192,14 @@ impl SessionManager {
     ///
     /// This will trigger the disconnect on the session task to gracefully terminate. The result
     /// will be picked up by the receiver.
-    pub(crate) fn disconnect(&self, node: NodeId) {
+    pub(crate) fn disconnect(&self, node: PeerId) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect();
         }
     }
 
     /// Sends a message to the peer's session
-    pub(crate) fn send_message(&mut self, peer_id: &NodeId, msg: PeerMessage) {
+    pub(crate) fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage) {
         if let Some(session) = self.active_sessions.get_mut(peer_id) {
             let _ = session.commands_to_session.try_send(SessionCommand::Message(msg));
         }
@@ -385,7 +407,7 @@ pub(crate) enum SessionEvent {
     ///
     /// This session is now able to exchange data.
     SessionEstablished {
-        node_id: NodeId,
+        node_id: PeerId,
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         status: Status,
@@ -393,30 +415,30 @@ pub(crate) enum SessionEvent {
     },
     /// A session received a valid message via RLPx.
     ValidMessage {
-        node_id: NodeId,
+        node_id: PeerId,
         /// Message received from the peer.
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
-        node_id: NodeId,
+        node_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
         message: CapabilityMessage,
     },
     /// Closed an incoming pending session during authentication.
-    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<ECIESError> },
+    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
-        node_id: NodeId,
-        error: Option<ECIESError>,
+        node_id: PeerId,
+        error: Option<EthStreamError>,
     },
     /// Failed to establish a tcp stream
-    OutgoingConnectionError { remote_addr: SocketAddr, node_id: NodeId, error: io::Error },
+    OutgoingConnectionError { remote_addr: SocketAddr, node_id: PeerId, error: io::Error },
     /// Active session was disconnected.
-    Disconnected { node_id: NodeId, remote_addr: SocketAddr },
+    Disconnected { node_id: PeerId, remote_addr: SocketAddr },
 }
 
 /// The error thrown when the max configured limit has been reached and no more connections are
@@ -435,6 +457,9 @@ async fn start_pending_incoming_session(
     events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
+    hello: HelloMessage,
+    status: Status,
+    fork_filter: ForkFilter,
 ) {
     authenticate(
         disconnect_rx,
@@ -444,6 +469,9 @@ async fn start_pending_incoming_session(
         remote_addr,
         secret_key,
         Direction::Incoming,
+        hello,
+        status,
+        fork_filter,
     )
     .await
 }
@@ -455,8 +483,11 @@ async fn start_pending_outbound_session(
     events: mpsc::Sender<PendingSessionEvent>,
     session_id: SessionId,
     remote_addr: SocketAddr,
-    remote_node_id: NodeId,
+    remote_node_id: PeerId,
     secret_key: SecretKey,
+    hello: HelloMessage,
+    status: Status,
+    fork_filter: ForkFilter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => stream,
@@ -480,6 +511,9 @@ async fn start_pending_outbound_session(
         remote_addr,
         secret_key,
         Direction::Outgoing(remote_node_id),
+        hello,
+        status,
+        fork_filter,
     )
     .await
 }
@@ -490,7 +524,7 @@ pub(crate) enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.
-    Outgoing(NodeId),
+    Outgoing(PeerId),
 }
 
 async fn authenticate(
@@ -501,6 +535,9 @@ async fn authenticate(
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     direction: Direction,
+    hello: HelloMessage,
+    status: Status,
+    fork_filter: ForkFilter,
 ) {
     let stream = match direction {
         Direction::Incoming => match ECIESStream::incoming(stream, secret_key).await {
@@ -529,8 +566,17 @@ async fn authenticate(
         }
     };
 
-    let unauthed = UnauthedEthStream::new(stream);
-    let auth = authenticate_stream(unauthed, session_id, remote_addr, direction).boxed();
+    let unauthed = UnauthedP2PStream::new(stream);
+    let auth = authenticate_stream(
+        unauthed,
+        session_id,
+        remote_addr,
+        direction,
+        hello,
+        status,
+        fork_filter,
+    )
+    .boxed();
 
     match futures::future::select(disconnect_rx, auth).await {
         Either::Left((_, _)) => {
@@ -553,10 +599,47 @@ async fn authenticate(
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`]
 async fn authenticate_stream(
-    _stream: UnauthedEthStream<ECIESStream<TcpStream>>,
-    _session_id: SessionId,
-    _remote_addr: SocketAddr,
-    _direction: Direction,
+    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
+    session_id: SessionId,
+    remote_addr: SocketAddr,
+    direction: Direction,
+    hello: HelloMessage,
+    status: Status,
+    fork_filter: ForkFilter,
 ) -> PendingSessionEvent {
-    todo!()
+    // conduct the p2p handshake and return the authenticated stream
+    let (p2p_stream, their_hello) = match stream.handshake(hello).await {
+        Ok(stream_res) => stream_res,
+        Err(err) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(err.into()),
+            }
+        }
+    };
+
+    // if the hello handshake was successful we can try status handshake
+    let eth_unauthed = UnauthedEthStream::new(p2p_stream);
+    let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
+        Ok(stream_res) => stream_res,
+        Err(err) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(err),
+            }
+        }
+    };
+
+    PendingSessionEvent::Established {
+        session_id,
+        remote_addr,
+        node_id: their_hello.id,
+        capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
+        status: their_status,
+        conn: eth_stream,
+    }
 }

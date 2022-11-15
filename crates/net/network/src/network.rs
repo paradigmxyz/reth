@@ -1,9 +1,7 @@
-use crate::{manager::NetworkEvent, peers::PeersHandle, NodeId};
+use crate::{manager::NetworkEvent, message::PeerRequest, peers::PeersHandle};
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
-
-use crate::message::PeerRequest;
-use reth_primitives::H256;
+use reth_primitives::{PeerId, H256};
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
@@ -27,7 +25,7 @@ impl NetworkHandle {
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
         to_manager_tx: UnboundedSender<NetworkHandleMessage>,
-        local_node_id: NodeId,
+        local_node_id: PeerId,
         peers: PeersHandle,
     ) -> Self {
         let inner = NetworkInner {
@@ -57,7 +55,7 @@ impl NetworkHandle {
     }
 
     /// Sends a [`PeerRequest`] to the given peer's session.
-    pub fn send_request(&mut self, peer_id: NodeId, request: PeerRequest) {
+    pub fn send_request(&mut self, peer_id: PeerId, request: PeerRequest) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
     }
 }
@@ -70,7 +68,7 @@ struct NetworkInner {
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
-    local_node_id: NodeId,
+    local_node_id: PeerId,
     /// Access to the all the nodes
     peers: PeersHandle,
 }
@@ -83,13 +81,13 @@ pub(crate) enum NetworkHandleMessage {
     /// Broadcast event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, H256),
     /// Sends the list of transactions to the given peer.
-    SendTransaction { peer_id: NodeId, msg: Arc<Transactions> },
+    SendTransaction { peer_id: PeerId, msg: Arc<Transactions> },
     /// Sends the list of transactions hashes to the given peer.
-    SendPooledTransactionHashes { peer_id: NodeId, msg: Arc<NewPooledTransactionHashes> },
+    SendPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
     /// Send an `eth` protocol request to the peer.
     EthRequest {
         /// The peer to send the request to.
-        peer_id: NodeId,
+        peer_id: PeerId,
         /// The request to send to the peer's sessions.
         request: PeerRequest,
     },
