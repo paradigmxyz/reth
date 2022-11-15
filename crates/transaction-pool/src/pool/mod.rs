@@ -73,7 +73,6 @@ use crate::{
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
-use futures::channel::mpsc::{channel, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash, H256};
 use std::{
@@ -81,6 +80,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+use tokio::sync::mpsc;
 use tracing::warn;
 
 mod best;
@@ -107,9 +107,9 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Manages listeners for transaction state change events.
     event_listener: RwLock<PoolEventListener<TxHash>>,
     /// Listeners for new ready transactions.
-    pending_transaction_listener: Mutex<Vec<Sender<TxHash>>>,
+    pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
-    transaction_listener: Mutex<Vec<Sender<NewTransactionEvent<T::Transaction>>>>,
+    transaction_listener: Mutex<Vec<mpsc::Sender<NewTransactionEvent<T::Transaction>>>>,
 }
 
 // === impl PoolInner ===
@@ -149,17 +149,23 @@ where
 
     /// Adds a new transaction listener to the pool that gets notified about every new _ready_
     /// transaction
-    pub fn add_pending_listener(&self) -> Receiver<TxHash> {
+    pub fn add_pending_listener(&self) -> mpsc::Receiver<TxHash> {
         const TX_LISTENER_BUFFER_SIZE: usize = 2048;
-        let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
+        let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
         self.pending_transaction_listener.lock().push(tx);
         rx
     }
 
+    /// Returns hashes of _all_ transactions in the pool.
+    pub(crate) fn pooled_transactions(&self) -> Vec<TxHash> {
+        let pool = self.pool.read();
+        pool.all().hashes_iter().collect()
+    }
+
     /// Adds a new transaction listener to the pool that gets notified about every new transaction
-    pub fn add_transaction_listener(&self) -> Receiver<NewTransactionEvent<T::Transaction>> {
+    pub fn add_transaction_listener(&self) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
         const TX_LISTENER_BUFFER_SIZE: usize = 1024;
-        let (tx, rx) = channel(TX_LISTENER_BUFFER_SIZE);
+        let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
         self.transaction_listener.lock().push(tx);
         rx
     }
@@ -256,8 +262,8 @@ where
         let mut transaction_listeners = self.pending_transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| match listener.try_send(*ready) {
             Ok(()) => true,
-            Err(e) => {
-                if e.is_full() {
+            Err(err) => {
+                if matches!(err, mpsc::error::TrySendError::Full(_)) {
                     warn!(
                         target: "txpool",
                         "[{:?}] dropping full ready transaction listener",
@@ -277,8 +283,8 @@ where
 
         transaction_listeners.retain_mut(|listener| match listener.try_send(event.clone()) {
             Ok(()) => true,
-            Err(e) => {
-                if e.is_full() {
+            Err(err) => {
+                if matches!(err, mpsc::error::TrySendError::Full(_)) {
                     warn!(
                         target: "txpool",
                         "dropping full transaction listener",
@@ -323,6 +329,12 @@ where
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn ready_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
+    }
+
+    /// Removes all transactions transactions that are missing in the pool.
+    pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
+        let pool = self.pool.read();
+        hashes.retain(|tx| !pool.contains(tx))
     }
 
     /// Returns the transaction by hash.
