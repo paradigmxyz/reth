@@ -44,7 +44,7 @@ impl Executor {
                 return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
-                })
+                });
             }
 
             // Fill revm structure.
@@ -55,16 +55,16 @@ impl Executor {
 
             // Fatal internal error.
             if exit_reason == revm::Return::FatalExternalError {
-                return Err(Error::ExecutionFatalError)
+                return Err(Error::ExecutionFatalError);
             }
 
             // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
             let is_success = matches!(
                 exit_reason,
-                revm::Return::Continue |
-                    revm::Return::Stop |
-                    revm::Return::Return |
-                    revm::Return::SelfDestruct
+                revm::Return::Continue
+                    | revm::Return::Stop
+                    | revm::Return::Return
+                    | revm::Return::SelfDestruct
             );
 
             // Add spend gas.
@@ -90,13 +90,16 @@ impl Executor {
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
-            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
+            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used });
         }
 
         // Check receipts root.
-        let receipts_root = reth_consensus::proofs::calculate_receipt_root(receipts.iter());
+        let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts.iter());
         if block.receipts_root != receipts_root {
-            return Err(Error::ReceiptRootDiff { got: receipts_root, expected: block.receipts_root })
+            return Err(Error::ReceiptRootDiff {
+                got: receipts_root,
+                expected: block.receipts_root,
+            });
         }
 
         // Create header log bloom.
@@ -105,7 +108,7 @@ impl Executor {
             return Err(Error::BloomLogDiff {
                 expected: Box::new(block.logs_bloom),
                 got: Box::new(expected_logs_bloom),
-            })
+            });
         }
 
         Ok(())

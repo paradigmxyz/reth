@@ -33,6 +33,7 @@ pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
 pub use constants::MAINNET_GENESIS;
+pub use ethbloom::Bloom;
 pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, SealedHeader};

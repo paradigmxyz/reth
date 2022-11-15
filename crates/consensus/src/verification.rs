@@ -167,7 +167,6 @@ pub fn validate_transaction_regarding_account(
 /// - (Optionally) Compares the receipts root in the block header to the block body
 pub fn validate_block_standalone(
     block: &BlockLocked,
-    validate_receipts: bool,
 ) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
@@ -325,7 +324,7 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     config: &Config,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, config)?;
-    validate_block_standalone(block, true)?;
+    validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
 

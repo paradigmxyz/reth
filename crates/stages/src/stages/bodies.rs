@@ -90,7 +90,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.batch_size);
         if target <= previous_block {
-            return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
+            return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true });
         }
 
         let bodies_to_download = self.bodies_to_download::<DB>(tx, starting_block, target)?;
@@ -126,8 +126,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     header_hash,
                 ),
                 body: body.transactions,
-                // TODO: We should have a type w/o receipts probably, no reason to allocate here
-                receipts: vec![],
                 ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
             };
 
@@ -177,7 +175,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut entry = block_body_cursor.last()?;
         while let Some((key, body)) = entry {
             if key.number() <= input.unwind_to {
-                break
+                break;
             }
 
             for num in 0..body.tx_amount {
@@ -219,7 +217,7 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
                 .ok_or(DatabaseIntegrityError::Header { number: block_number, hash: header_hash })?
                 .1;
             if header.ommers_hash == EMPTY_LIST_HASH && header.transactions_root == EMPTY_ROOT {
-                continue
+                continue;
             }
 
             bodies_to_download.push((block_number, header_hash));

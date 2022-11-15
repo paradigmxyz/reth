@@ -45,6 +45,6 @@ impl Consensus for EthConsensus {
     }
 
     fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error> {
-        verification::validate_block_standalone(block, false)
+        verification::validate_block_standalone(block)
     }
 }
