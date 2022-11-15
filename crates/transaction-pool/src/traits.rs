@@ -23,6 +23,14 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// affects the dynamic fee requirement of pending transactions in the pool.
     fn on_new_block(&self, event: OnNewBlockEvent);
 
+    /// Imports an _external_ transaction.
+    ///
+    /// This is intended to be used by the network to insert incoming transactions received over the
+    /// p2p network.
+    async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
+        self.add_transaction(TransactionOrigin::External, transaction).await
+    }
+
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC

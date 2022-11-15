@@ -1,9 +1,9 @@
 //! Error cases when handling a [`crate::EthStream`]
 use std::io;
 
-use reth_primitives::{Chain, H256};
+use reth_primitives::{Chain, ValidationError, H256};
 
-use crate::{capability::SharedCapabilityError, types::forkid::ValidationError};
+use crate::capability::SharedCapabilityError;
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]

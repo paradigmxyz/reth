@@ -159,10 +159,20 @@ pub fn validate_transaction_regarding_account(
     Ok(())
 }
 
-/// Validate block standalone
-pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
-    // check ommers hash
-    let ommers_hash = crate::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+/// Validate a block without regard for state:
+///
+/// - Compares the ommer hash in the block header to the block body
+/// - Compares the transactions root in the block header to the block body
+/// - Pre-execution transaction validation
+/// - (Optionally) Compares the receipts root in the block header to the block body
+pub fn validate_block_standalone(
+    block: &BlockLocked,
+    validate_receipts: bool,
+) -> Result<(), Error> {
+    // Check ommers hash
+    // TODO(onbjerg): This should probably be accessible directly on [Block]
+    let ommers_hash =
+        reth_primitives::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
     if block.header.ommers_hash != ommers_hash {
         return Err(Error::BodyOmmersHashDiff {
             got: ommers_hash,
@@ -170,8 +180,9 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         })
     }
 
-    // check transaction root
-    let transaction_root = crate::proofs::calculate_transaction_root(block.body.iter());
+    // Check transaction root
+    // TODO(onbjerg): This should probably be accessible directly on [Block]
+    let transaction_root = reth_primitives::proofs::calculate_transaction_root(block.body.iter());
     if block.header.transactions_root != transaction_root {
         return Err(Error::BodyTransactionRootDiff {
             got: transaction_root,
@@ -314,7 +325,7 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     config: &Config,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, config)?;
-    validate_block_standalone(block)?;
+    validate_block_standalone(block, true)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
 
