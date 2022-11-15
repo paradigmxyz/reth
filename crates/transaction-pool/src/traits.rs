@@ -1,6 +1,6 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, BlockID};
 use futures::{channel::mpsc::Receiver, future::Shared};
-use reth_primitives::{Address, TxHash, H256, U256};
+use reth_primitives::{Address, FromRecoveredTransaction, TxHash, H256, U256};
 use std::{fmt, sync::Arc};
 
 /// General purpose abstraction fo a transaction-pool.
@@ -174,7 +174,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
+pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
