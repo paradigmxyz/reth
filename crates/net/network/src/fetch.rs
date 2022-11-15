@@ -43,7 +43,7 @@ impl StateFetcher {
         &mut self,
         peer_id: PeerId,
         best_hash: H256,
-        best_number: Option<u64>,
+        best_number: u64,
     ) {
         self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
     }
@@ -59,6 +59,20 @@ impl StateFetcher {
         if let Some(req) = self.inflight_bodies_requests.remove(peer) {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
+    }
+
+    /// Updates the block information for the peer.
+    ///
+    /// Returns `true` if this a newer block
+    pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: H256, number: u64) -> bool {
+        if let Some(peer) = self.peers.get_mut(peer_id) {
+            if number > peer.best_number {
+                peer.best_hash = hash;
+                peer.best_number = number;
+                return true
+            }
+        }
+        false
     }
 
     /// Invoked when an active session is about to be disconnected.
@@ -246,7 +260,7 @@ struct Peer {
     /// Best known hash that the peer has
     best_hash: H256,
     /// Tracks the best number of the peer.
-    best_number: Option<u64>,
+    best_number: u64,
 }
 
 /// Tracks the state of an individual peer
