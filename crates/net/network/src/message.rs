@@ -26,11 +26,20 @@ pub struct NewBlockMessage {
     pub block: Arc<NewBlock>,
 }
 
+// === impl NewBlockMessage ===
+
+impl NewBlockMessage {
+    /// Returns the block number of the block
+    pub fn number(&self) -> u64 {
+        self.block.block.header.number
+    }
+}
+
 /// Represents all messages that can be sent to a peer session
 #[derive(Debug)]
 pub enum PeerMessage {
     /// Announce new block hashes
-    NewBlockHashes(NewBlockHashes),
+    NewBlockHashes(Arc<NewBlockHashes>),
     /// Broadcast new block.
     NewBlock(NewBlockMessage),
     /// Broadcast transactions.

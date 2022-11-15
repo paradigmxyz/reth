@@ -22,11 +22,33 @@ pub struct BlockImportOutcome {
     /// Sender of the `NewBlock` message.
     pub peer: PeerId,
     /// The result after validating the block
-    pub result: Result<NewBlockMessage, BlockImportError>,
+    pub result: Result<BlockValidation, BlockImportError>,
+}
+
+/// Represents the successful validation of a received `NewBlock` message.
+#[derive(Debug)]
+pub enum BlockValidation {
+    /// Basic Header validity check, after which the block should be relayed to peers via a
+    /// `NewBlock` message
+    ValidHeader {
+        /// received block
+        block: NewBlockMessage,
+    },
+    /// Successfully imported: state-root matches after execution. The block should be relayed via
+    /// `NewBlockHashes`
+    ValidBlock {
+        /// validated block.
+        block: NewBlockMessage,
+    },
 }
 
 /// Represents the error case of a failed block import
-pub enum BlockImportError {}
+#[derive(Debug, thiserror::Error)]
+pub enum BlockImportError {
+    /// Consensus error
+    #[error(transparent)]
+    Consensus(#[from] reth_interfaces::consensus::Error),
+}
 
 /// An implementation of `BlockImport` that does nothing
 #[derive(Debug, Default)]
