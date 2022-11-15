@@ -186,7 +186,6 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{gen_random_header, gen_random_header_range};
     use test_runner::HeadersTestRunner;
 
     stage_test_suite!(HeadersTestRunner);
@@ -195,104 +194,52 @@ mod tests {
     // Validate that the execution does not fail on timeout
     async fn execute_timeout() {
         let mut runner = HeadersTestRunner::default();
-        let (stage_progress, previous_stage) = (0, 0);
-        runner
-            .seed_execution(ExecInput {
-                previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-                stage_progress: Some(stage_progress),
-            })
-            .expect("failed to seed execution");
-
-        let rx = runner.execute(ExecInput::default());
-        runner.after_execution().await.expect("failed to run after execution hook");
+        let input = ExecInput::default();
+        runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+        runner.consensus.update_tip(H256::from_low_u64_be(1));
+        let result = rx.await.unwrap();
         assert_matches!(
-            rx.await.unwrap(),
+            result,
             Ok(ExecOutput { done, reached_tip, stage_progress: out_stage_progress })
-                if !done && !reached_tip && out_stage_progress == stage_progress
+                if !done && !reached_tip && out_stage_progress == 0
         );
-        assert!(runner.validate_execution().is_ok(), "validation failed");
+        assert!(runner.validate_execution(input).is_ok(), "validation failed");
     }
 
     #[tokio::test]
-    // Validate that all necessary tables are updated after the
-    // header download with some previous progress.
-    async fn execute_prev_progress() {
-        let mut runner = HeadersTestRunner::default();
-        let (stage_progress, previous_stage) = (10000, 10241);
+    // Execute the stage with linear downloader
+    async fn execute_with_linear_downloader() {
+        let mut runner = HeadersTestRunner::with_linear_downloader();
+        let (stage_progress, previous_stage) = (1000, 1200);
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
         };
         runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
-        runner.after_execution().await.expect("failed to run after execution hook");
+
+        // skip `after_execution` hook for linear downloader
+        let headers = runner.context.as_ref().unwrap();
+        let tip = headers.last().unwrap();
+        runner.consensus.update_tip(tip.hash());
+
+        let download_result = headers.clone();
+        runner
+            .client
+            .on_header_request(1, |id, _| {
+                let response = download_result.clone().into_iter().map(|h| h.unseal()).collect();
+                runner.client.send_header_response(id, response)
+            })
+            .await;
+
         assert_matches!(
             rx.await.unwrap(),
             Ok(ExecOutput { done, reached_tip, stage_progress })
-                if done && reached_tip && stage_progress == stage_progress
+                if done && reached_tip && stage_progress == tip.number
         );
-        assert!(runner.validate_execution().is_ok(), "validation failed");
+        assert!(runner.validate_execution(input).is_ok(), "validation failed");
     }
-
-    // TODO:
-    // #[tokio::test]
-    // // Execute the stage with linear downloader
-    // async fn execute_with_linear_downloader() {
-    //     let mut runner = HeadersTestRunner::with_linear_downloader();
-    //     let (stage_progress, previous_stage) = (1000, 1200);
-    //     let input = ExecInput {
-    //         previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-    //         stage_progress: Some(stage_progress),
-    //     };
-    //     runner.seed_execution(input).expect("failed to seed execution");
-    //     let rx = runner.execute(input);
-
-    //     // skip hook for linear downloader
-    //     let headers = runner.context.as_ref().unwrap();
-    //     let tip = headers.first().unwrap();
-    //     runner.consensus.update_tip(tip.hash());
-
-    //     // TODO:
-    //     let mut download_result = headers.clone();
-    //     download_result.insert(0, headers.last().unwrap().clone());
-    //     runner
-    //         .client
-    //         .on_header_request(1, |id, _| {
-    //             let response = download_result.clone().into_iter().map(|h| h.unseal()).collect();
-    //             runner.client.send_header_response(id, response)
-    //         })
-    //         .await;
-
-    //     assert_matches!(
-    //         rx.await.unwrap(),
-    //         Ok(ExecOutput { done, reached_tip, stage_progress })
-    //             if done && reached_tip && stage_progress == tip.number
-    //     );
-    //     assert!(runner.validate_execution().is_ok(), "validation failed");
-    // }
-
-    // TODO:
-    // #[tokio::test]
-    // // Check that unwind can remove headers across gaps
-    // async fn unwind_db_gaps() {
-    //     let runner = HeadersTestRunner::default();
-    //     let head = gen_random_header(0, None);
-    //     let first_range = gen_random_header_range(1..20, head.hash());
-    //     let second_range = gen_random_header_range(50..100, H256::zero());
-    //     runner.insert_header(&head).expect("failed to insert header");
-    //     runner
-    //         .insert_headers(first_range.iter().chain(second_range.iter()))
-    //         .expect("failed to insert headers");
-
-    //     let unwind_to = 15;
-    //     let input = UnwindInput { bad_block: None, stage_progress: unwind_to, unwind_to };
-    //     let rx = runner.unwind(input);
-    //     assert_matches!(
-    //         rx.await.unwrap(),
-    //         Ok(UnwindOutput {stage_progress} ) if stage_progress == unwind_to
-    //     );
-    //     assert!(runner.validate_unwind(input).is_ok(), "validation failed");
-    // }
 
     mod test_runner {
         use crate::{
@@ -370,7 +317,7 @@ mod tests {
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
                 if end > start + 1 {
                     let mut headers = gen_random_header_range(start + 1..end, head.hash());
-                    headers.reverse();
+                    headers.insert(0, head);
                     self.context = Some(headers);
                 }
                 Ok(())
@@ -381,27 +328,28 @@ mod tests {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let (tip, headers) = match self.context {
                     Some(ref headers) if headers.len() > 1 => {
-                        // headers are in reverse
-                        (headers.first().unwrap().hash(), headers.clone())
+                        (headers.last().unwrap().hash(), headers.clone())
                     }
                     _ => (H256::from_low_u64_be(rand::random()), Vec::default()),
                 };
                 self.consensus.update_tip(tip);
-                if !headers.is_empty() {
-                    self.client
-                        .send_header_response_delayed(
-                            0,
-                            headers.iter().cloned().map(|h| h.unseal()).collect(),
-                            1,
-                        )
-                        .await;
-                }
+                self.client
+                    .send_header_response_delayed(
+                        0,
+                        headers.iter().cloned().map(|h| h.unseal()).collect(),
+                        1,
+                    )
+                    .await;
                 Ok(())
             }
 
-            fn validate_execution(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            fn validate_execution(
+                &self,
+                _input: ExecInput,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 if let Some(ref headers) = self.context {
-                    headers.iter().try_for_each(|h| self.validate_db_header(&h))?;
+                    // skip head and validate each
+                    headers.iter().skip(1).try_for_each(|h| self.validate_db_header(&h))?;
                 }
                 Ok(())
             }
@@ -546,11 +494,18 @@ mod tests {
                 _: &ForkchoiceState,
             ) -> Result<Vec<SealedHeader>, DownloadError> {
                 let stream = self.client.stream_headers().await;
-                let stream = stream.timeout(Duration::from_secs(3));
+                let stream = stream.timeout(Duration::from_secs(1));
 
                 match Box::pin(stream).try_next().await {
                     Ok(Some(res)) => {
-                        Ok(res.headers.iter().map(|h| h.clone().seal()).collect::<Vec<_>>())
+                        let mut headers =
+                            res.headers.iter().map(|h| h.clone().seal()).collect::<Vec<_>>();
+                        if !headers.is_empty() {
+                            headers.sort_unstable_by_key(|h| h.number);
+                            headers.remove(0); // remove head from response
+                            headers.reverse();
+                        }
+                        Ok(headers)
                     }
                     _ => Err(DownloadError::Timeout { request_id: 0 }),
                 }

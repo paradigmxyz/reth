@@ -181,6 +181,7 @@ pub(crate) mod test_utils {
             DBContainer::new(self.db.borrow()).expect("failed to create db container")
         }
 
+        /// Invoke a callback with transaction committing it afterwards
         fn commit<F>(&self, f: F) -> Result<(), Error>
         where
             F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), Error>,
@@ -190,19 +191,6 @@ pub(crate) mod test_utils {
             f(tx)?;
             db.commit()?;
             Ok(())
-        }
-
-        /// Put a single value into the table
-        pub(crate) fn put<T: Table>(&self, k: T::Key, v: T::Value) -> Result<(), Error> {
-            self.commit(|tx| tx.put::<T>(k, v))
-        }
-
-        /// Delete a single value from the table
-        pub(crate) fn delete<T: Table>(&self, k: T::Key) -> Result<(), Error> {
-            self.commit(|tx| {
-                tx.delete::<T>(k, None)?;
-                Ok(())
-            })
         }
 
         /// Map a collection of values and store them in the database.
@@ -323,7 +311,10 @@ pub(crate) mod test_utils {
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
         /// Validate stage execution
-        fn validate_execution(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
         /// Run [Stage::execute] and return a receiver for the result.
         fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
@@ -383,12 +374,32 @@ pub(crate) mod test_utils {
             // prev progress missing from the database.
             async fn execute_empty_db() {
                 let runner = $runner::default();
-                let rx = runner.execute(crate::stage::ExecInput::default());
+                let input = crate::stage::ExecInput::default();
+                let rx = runner.execute(input);
                 assert_matches!(
                     rx.await.unwrap(),
                     Err(crate::error::StageError::DatabaseIntegrity(_))
                 );
-                assert!(runner.validate_execution().is_ok(), "execution validation");
+                assert!(runner.validate_execution(input).is_ok(), "execution validation");
+            }
+
+            #[tokio::test]
+            async fn execute_no_progress() {
+                let stage_progress = 1000;
+                let mut runner = $runner::default();
+                let input = crate::stage::ExecInput {
+                    previous_stage: Some((crate::util::test_utils::PREV_STAGE_ID, stage_progress)),
+                    stage_progress: Some(stage_progress),
+                };
+                runner.seed_execution(input).expect("failed to seed");
+                let rx = runner.execute(input);
+                runner.after_execution().await.expect("failed to run after execution hook");
+                assert_matches!(
+                    rx.await.unwrap(),
+                    Ok(ExecOutput { done, reached_tip, stage_progress })
+                        if done && reached_tip && stage_progress == stage_progress
+                );
+                assert!(runner.validate_execution(input).is_ok(), "execution validation");
             }
 
             #[tokio::test]
@@ -407,7 +418,7 @@ pub(crate) mod test_utils {
                     Ok(ExecOutput { done, reached_tip, stage_progress })
                         if done && reached_tip && stage_progress == previous_stage
                 );
-                assert!(runner.validate_execution().is_ok(), "execution validation");
+                assert!(runner.validate_execution(input).is_ok(), "execution validation");
             }
 
             #[tokio::test]

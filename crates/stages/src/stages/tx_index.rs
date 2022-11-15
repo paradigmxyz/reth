@@ -89,90 +89,13 @@ mod tests {
     use super::*;
     use crate::util::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner,
-        UnwindStageTestRunner, PREV_STAGE_ID,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
     use reth_primitives::H256;
 
     stage_test_suite!(TxIndexTestRunner);
-
-    #[tokio::test]
-    async fn execute_no_prev_tx_count() {
-        let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
-        runner
-            .db()
-            .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
-            .expect("failed to insert");
-
-        let (head, tail) = (headers.first().unwrap(), headers.last().unwrap());
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, tail.number)),
-            stage_progress: Some(head.number),
-        };
-        let rx = runner.execute(input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CumulativeTxCount { .. }))
-        );
-    }
-
-    #[tokio::test]
-    async fn unwind_no_input() {
-        let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
-        runner
-            .db()
-            .transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
-                (
-                    BlockNumHash((h.number, h.hash())),
-                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                )
-            })
-            .expect("failed to insert");
-
-        let rx = runner.unwind(UnwindInput::default());
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == 0
-        );
-        runner
-            .db()
-            .check_no_entry_above::<tables::CumulativeTxCount, _>(0, |h| h.number())
-            .expect("failed to check tx count");
-    }
-
-    #[tokio::test]
-    async fn unwind_with_db_gaps() {
-        let runner = TxIndexTestRunner::default();
-        let first_range = gen_random_header_range(0..20, H256::zero());
-        let second_range = gen_random_header_range(50..100, H256::zero());
-        runner
-            .db()
-            .transform_append::<tables::CumulativeTxCount, _, _>(
-                &first_range.iter().chain(second_range.iter()).collect::<Vec<_>>(),
-                |prev, h| {
-                    (
-                        BlockNumHash((h.number, h.hash())),
-                        prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                    )
-                },
-            )
-            .expect("failed to insert");
-
-        let unwind_to = 10;
-        let input = UnwindInput { unwind_to, ..Default::default() };
-        let rx = runner.unwind(input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
-        );
-        runner
-            .db()
-            .check_no_entry_above::<tables::CumulativeTxCount, _>(unwind_to, |h| h.number())
-            .expect("failed to check tx count");
-    }
 
     #[derive(Default)]
     pub(crate) struct TxIndexTestRunner {
@@ -198,24 +121,60 @@ mod tests {
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let pivot = input.stage_progress.unwrap_or_default();
             let start = pivot.saturating_sub(100);
-            let end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
+            let mut end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
+            end += 2; // generate 2 additional headers to account for start header lookup
             let headers = gen_random_header_range(start..end, H256::zero());
-            self.db()
-                .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))?;
+
+            let headers =
+                headers.into_iter().map(|h| (h, rand::random::<u8>())).collect::<Vec<_>>();
+
+            self.db().map_put::<tables::CanonicalHeaders, _, _>(&headers, |(h, _)| {
+                (h.number, h.hash())
+            })?;
+            self.db().map_put::<tables::BlockBodies, _, _>(&headers, |(h, count)| {
+                (BlockNumHash((h.number, h.hash())), *count as u16)
+            })?;
+
+            let slice_up_to =
+                std::cmp::min(pivot.saturating_sub(start) as usize, headers.len() - 1);
             self.db().transform_append::<tables::CumulativeTxCount, _, _>(
-                &headers[..=(pivot as usize)],
-                |prev, h| {
-                    (
-                        BlockNumHash((h.number, h.hash())),
-                        prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                    )
+                &headers[..=slice_up_to],
+                |prev, (h, count)| {
+                    (BlockNumHash((h.number, h.hash())), prev.unwrap_or_default() + (*count as u64))
                 },
             )?;
+
             Ok(())
         }
 
-        fn validate_execution(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            // TODO:
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let db = self.db().container();
+            let tx = db.get();
+            let (start, end) = (
+                input.stage_progress.unwrap_or_default(),
+                input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default(),
+            );
+            if start >= end {
+                return Ok(())
+            }
+
+            let start_hash =
+                tx.get::<tables::CanonicalHeaders>(start)?.expect("no canonical found");
+            let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
+            let mut tx_count_walker = tx_count_cursor.walk((start, start_hash).into())?;
+            let mut count = tx_count_walker.next().unwrap()?.1;
+            let mut last_num = start;
+            while let Some(entry) = tx_count_walker.next() {
+                let (key, db_count) = entry?;
+                count += tx.get::<tables::BlockBodies>(key)?.unwrap() as u64;
+                assert_eq!(db_count, count);
+                last_num = key.number();
+            }
+            assert_eq!(last_num, end);
+
             Ok(())
         }
     }
@@ -226,7 +185,6 @@ mod tests {
             input: UnwindInput,
             highest_entry: u64,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            // TODO: accept range
             let headers = gen_random_header_range(input.unwind_to..highest_entry, H256::zero());
             self.db().transform_append::<tables::CumulativeTxCount, _, _>(
                 &headers,
