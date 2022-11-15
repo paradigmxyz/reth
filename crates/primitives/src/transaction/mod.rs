@@ -571,6 +571,8 @@ impl TransactionSigned {
     }
 
     /// Recover signer from signature and hash.
+    ///
+    /// Returns `None` if the transaction's signature is invalid.
     pub fn recover_signer(&self) -> Option<Address> {
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -721,6 +723,22 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
     #[inline]
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         tx
+    }
+}
+
+/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// network
+pub trait IntoRecoveredTransaction {
+    /// Converts to this type into a [`TransactionSignedEcRecovered`].
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
+}
+
+impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.clone()
     }
 }
 

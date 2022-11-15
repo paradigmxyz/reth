@@ -3465,7 +3465,7 @@ dependencies = [
  "async-trait",
  "bitflags",
  "fnv",
- "futures",
+ "futures-util",
  "linked-hash-map",
  "parking_lot 0.12.1",
  "paste",
@@ -3473,6 +3473,7 @@ dependencies = [
  "reth-primitives",
  "serde",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
