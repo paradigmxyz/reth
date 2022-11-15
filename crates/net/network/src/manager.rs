@@ -19,7 +19,9 @@ use crate::{
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
+    import::{BlockImport, BlockImportOutcome},
     listener::ConnectionListener,
+    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     session::SessionManager,
@@ -30,9 +32,9 @@ use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    EthMessage,
+    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
 };
-use reth_interfaces::provider::BlockProvider;
+use reth_interfaces::{p2p::error::RequestResult, provider::BlockProvider};
 use reth_primitives::PeerId;
 use std::{
     net::SocketAddr,
@@ -43,7 +45,7 @@ use std::{
     },
     task::{Context, Poll},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, trace};
 
@@ -77,8 +79,8 @@ pub struct NetworkManager<C> {
     handle: NetworkHandle,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
-    /// Handles block imports.
-    block_import_sink: (),
+    /// Handles block imports according to the `eth` protocol.
+    block_import: Box<dyn BlockImport>,
     /// The address of this node that listens for incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// All listeners for [`Network`] events.
@@ -112,6 +114,7 @@ where
             peers_config,
             sessions_config,
             genesis_hash,
+            block_import,
             ..
         } = config;
 
@@ -145,7 +148,7 @@ where
             swarm,
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
-            block_import_sink: (),
+            block_import,
             listener_address,
             event_listeners: Default::default(),
             num_active_peers,
@@ -171,41 +174,47 @@ where
         // TODO: disconnect?
     }
 
-    /// Handles a received [`CapabilityMessage`] from the peer.
-    fn on_capability_message(&mut self, _node_id: PeerId, msg: CapabilityMessage) {
-        match msg {
-            CapabilityMessage::Eth(eth) => {
-                match eth {
-                    EthMessage::Status(_) => {}
-                    EthMessage::NewBlockHashes(_) => {
-                        // update peer's state, to track what blocks this peer has seen
-                    }
-                    EthMessage::NewBlock(_) => {
-                        // emit new block and track that the peer knows this block
-                    }
-                    EthMessage::Transactions(_) => {
-                        // need to emit this as event/send to tx handler
-                    }
-                    EthMessage::NewPooledTransactionHashes(_) => {
-                        // need to emit this as event/send to tx handler
-                    }
+    /// Handle an incoming request from the peer
+    fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
+        match req {
+            PeerRequest::GetBlockHeaders { .. } => {}
+            PeerRequest::GetBlockBodies { .. } => {}
+            PeerRequest::GetPooledTransactions { request, response } => {
+                // notify listeners about this request
+                self.event_listeners.send(NetworkEvent::GetPooledTransactions {
+                    peer_id,
+                    request,
+                    response: Arc::new(response),
+                });
+            }
+            PeerRequest::GetNodeData { .. } => {}
+            PeerRequest::GetReceipts { .. } => {}
+        }
+    }
 
-                    // TODO: should remove the response types here, as they are handled separately
-                    EthMessage::GetBlockHeaders(_) => {}
-                    EthMessage::BlockHeaders(_) => {}
-                    EthMessage::GetBlockBodies(_) => {}
-                    EthMessage::BlockBodies(_) => {}
-                    EthMessage::GetPooledTransactions(_) => {}
-                    EthMessage::PooledTransactions(_) => {}
-                    EthMessage::GetNodeData(_) => {}
-                    EthMessage::NodeData(_) => {}
-                    EthMessage::GetReceipts(_) => {}
-                    EthMessage::Receipts(_) => {}
-                }
+    /// Handles a received Message from the peer.
+    fn on_peer_message(&mut self, peer_id: PeerId, msg: PeerMessage) {
+        match msg {
+            PeerMessage::NewBlockHashes(hashes) => {
+                // update peer's state, to track what blocks this peer has seen
+                self.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
             }
-            CapabilityMessage::Other(_) => {
-                // other subprotocols
+            PeerMessage::NewBlock(block) => {
+                self.swarm.state_mut().on_new_block(peer_id, block.hash);
+                // start block import process
+                self.block_import.on_new_block(peer_id, block);
             }
+            PeerMessage::PooledTransactions(msg) => {
+                self.event_listeners
+                    .send(NetworkEvent::IncomingPooledTransactionHashes { peer_id, msg });
+            }
+            PeerMessage::Transactions(msg) => {
+                self.event_listeners.send(NetworkEvent::IncomingTransactions { peer_id, msg });
+            }
+            PeerMessage::EthRequest(req) => {
+                self.on_eth_request(peer_id, req);
+            }
+            PeerMessage::Other(_) => {}
         }
     }
 
@@ -215,10 +224,25 @@ where
             NetworkHandleMessage::EventListener(tx) => {
                 self.event_listeners.listeners.push(tx);
             }
-            NetworkHandleMessage::NewestBlock(_, _) => {}
-            _ => {}
+            NetworkHandleMessage::AnnounceBlock(block, hash) => {
+                let msg = NewBlockMessage { hash, block: Arc::new(block) };
+                self.swarm.state_mut().announce_new_block(msg);
+            }
+            NetworkHandleMessage::EthRequest { peer_id, request } => {
+                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
+            }
+            NetworkHandleMessage::SendTransaction { peer_id, msg } => {
+                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::Transactions(msg))
+            }
+            NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => self
+                .swarm
+                .sessions_mut()
+                .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
         }
     }
+
+    /// Invoked after a `NewBlock` message from the peer was validated
+    fn on_block_import_result(&mut self, _outcome: BlockImportOutcome) {}
 }
 
 impl<C> Future for NetworkManager<C>
@@ -229,6 +253,11 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+
+        // poll new block imports
+        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
+            this.on_block_import_result(outcome);
+        }
 
         // process incoming messages from a handle
         loop {
@@ -248,8 +277,8 @@ where
         while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
             // handle event
             match event {
-                SwarmEvent::CapabilityMessage { node_id, message } => {
-                    this.on_capability_message(node_id, message)
+                SwarmEvent::ValidMessage { node_id, message } => {
+                    this.on_peer_message(node_id, message)
                 }
                 SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message } => {
                     this.on_invalid_message(node_id, capabilities, message)
@@ -266,25 +295,38 @@ where
                 SwarmEvent::OutgoingTcpConnection { remote_addr } => {
                     trace!(?remote_addr, target = "net", "Starting outbound connection.");
                 }
-                SwarmEvent::SessionEstablished { node_id, remote_addr } => {
+                SwarmEvent::SessionEstablished {
+                    node_id: peer_id,
+                    remote_addr,
+                    capabilities,
+                    messages,
+                } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                     trace!(
                         ?remote_addr,
-                        ?node_id,
+                        ?peer_id,
                         ?total_active,
                         target = "net",
                         "Session established"
                     );
+
+                    this.event_listeners.send(NetworkEvent::SessionEstablished {
+                        peer_id,
+                        capabilities,
+                        messages,
+                    });
                 }
-                SwarmEvent::SessionClosed { node_id, remote_addr } => {
+                SwarmEvent::SessionClosed { node_id: peer_id, remote_addr } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                     trace!(
                         ?remote_addr,
-                        ?node_id,
+                        ?peer_id,
                         ?total_active,
                         target = "net",
                         "Session disconnected"
                     );
+
+                    this.event_listeners.send(NetworkEvent::SessionClosed { peer_id });
                 }
                 SwarmEvent::IncomingPendingSessionClosed { .. } => {}
                 SwarmEvent::OutgoingPendingSessionClosed { .. } => {}
@@ -292,14 +334,33 @@ where
             }
         }
 
-        todo!()
+        Poll::Pending
     }
 }
 
 /// Events emitted by the network that are of interest for subscribers.
+///
+/// This includes any event types that may be relevant to tasks
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
-    EthMessage { node_id: PeerId, message: EthMessage },
+    /// Closed the peer session.
+    SessionClosed { peer_id: PeerId },
+    /// Established a new session with the given peer.
+    SessionEstablished {
+        peer_id: PeerId,
+        capabilities: Arc<Capabilities>,
+        messages: PeerRequestSender,
+    },
+    /// Received list of transactions to the given peer.
+    IncomingTransactions { peer_id: PeerId, msg: Arc<Transactions> },
+    /// Received list of transactions hashes to the given peer.
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
+    /// Incoming `GetPooledTransactions` request from a peer.
+    GetPooledTransactions {
+        peer_id: PeerId,
+        request: GetPooledTransactions,
+        response: Arc<oneshot::Sender<RequestResult<PooledTransactions>>>,
+    },
 }
 
 /// Bundles all listeners for [`NetworkEvent`]s.

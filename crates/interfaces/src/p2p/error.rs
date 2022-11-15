@@ -11,6 +11,8 @@ pub enum RequestError {
     ChannelClosed,
     #[error("Not connected to the peer.")]
     NotConnected,
+    #[error("Connection to a peer dropped while handling the request.")]
+    ConnectionDropped,
     #[error("Capability Message is not supported by remote peer.")]
     UnsupportedCapability,
     #[error("Request timed out while awaiting response.")]

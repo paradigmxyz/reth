@@ -1,4 +1,8 @@
-use crate::{peers::PeersConfig, session::SessionsConfig};
+use crate::{
+    import::{BlockImport, NoopBlockImport},
+    peers::PeersConfig,
+    session::SessionsConfig,
+};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{Chain, ForkId, H256};
 use secp256k1::SecretKey;
@@ -30,6 +34,8 @@ pub struct NetworkConfig<C> {
     pub chain: Chain,
     /// Genesis hash of the network
     pub genesis_hash: H256,
+    /// The block importer type.
+    pub block_import: Box<dyn BlockImport>,
 }
 
 // === impl NetworkConfig ===
@@ -82,6 +88,8 @@ pub struct NetworkConfigBuilder<C> {
     chain: Chain,
     /// Network genesis hash
     genesis_hash: H256,
+    /// The block importer type.
+    block_import: Box<dyn BlockImport>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -100,12 +108,19 @@ impl<C> NetworkConfigBuilder<C> {
             fork_id: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
             genesis_hash: Default::default(),
+            block_import: Box::<NoopBlockImport>::default(),
         }
     }
 
     /// Sets the genesis hash for the network.
     pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
         self.genesis_hash = genesis_hash;
+        self
+    }
+
+    /// Sets the [`BlockImport`] type to configure.
+    pub fn block_import<T: BlockImport + 'static>(mut self, block_import: T) -> Self {
+        self.block_import = Box::new(block_import);
         self
     }
 
@@ -122,6 +137,7 @@ impl<C> NetworkConfigBuilder<C> {
             fork_id,
             chain,
             genesis_hash,
+            block_import,
         } = self;
         NetworkConfig {
             client,
@@ -138,6 +154,7 @@ impl<C> NetworkConfigBuilder<C> {
             fork_id,
             chain,
             genesis_hash,
+            block_import,
         }
     }
 }

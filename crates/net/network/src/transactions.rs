@@ -1,11 +1,24 @@
 //! Transaction management for the p2p network.
 
-use crate::{manager::NetworkEvent, NetworkHandle};
-use reth_primitives::{Transaction, H256};
+use crate::{cache::LruCache, manager::NetworkEvent, message::PeerRequestSender, NetworkHandle};
+use futures::stream::FuturesUnordered;
+use reth_primitives::{PeerId, Transaction, H256};
 use reth_transaction_pool::TransactionPool;
-use std::collections::HashMap;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    future::Future,
+    num::NonZeroUsize,
+    pin::Pin,
+    sync::Arc,
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+/// Cache limit of transactions to keep track of for a single peer.
+const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024;
+
+/// The future for inserting a function into the pool
+pub type PoolImportFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Api to interact with [`TransactionsManager`] task.
 pub struct TransactionsHandle {
@@ -39,10 +52,15 @@ pub struct TransactionsManager<Pool> {
     ///
     /// From which we get all new incoming transaction related messages.
     network_events: UnboundedReceiverStream<NetworkEvent>,
-    /// All currently pending transactions
-    pending_transactions: (),
-    /// All the peers that have sent the same transactions.
-    peers: HashMap<H256, Vec<()>>,
+    /// All currently pending transactions grouped by peers.
+    ///
+    /// This way we can track incoming transactions and prevent multiple pool imports for the same
+    /// transaction
+    transactions_by_peers: HashMap<H256, Vec<PeerId>>,
+    /// Transactions that are currently imported into the `Pool`
+    pool_imports: FuturesUnordered<PoolImportFuture>,
+    /// All the connected peers.
+    peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
@@ -64,7 +82,8 @@ where
             pool,
             network,
             network_events: UnboundedReceiverStream::new(network_events),
-            pending_transactions: (),
+            transactions_by_peers: Default::default(),
+            pool_imports: Default::default(),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -76,8 +95,62 @@ where
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 
+    /// Handles a received event
+    async fn on_event(&mut self, event: NetworkEvent) {
+        match event {
+            NetworkEvent::SessionClosed { peer_id } => {
+                // remove the peer
+                self.peers.remove(&peer_id);
+            }
+            NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
+                // insert a new peer
+                self.peers.insert(
+                    peer_id,
+                    Peer {
+                        transactions: LruCache::new(
+                            NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
+                        ),
+                        request_tx: messages,
+                    },
+                );
+
+                // TODO send `NewPooledTransactionHashes
+            }
+            NetworkEvent::IncomingTransactions { peer_id, msg } => {
+                let transactions = Arc::try_unwrap(msg).unwrap_or_else(|arc| (*arc).clone());
+
+                if let Some(peer) = self.peers.get_mut(&peer_id) {
+                    for tx in transactions.0 {
+                        // track that the peer knows this transaction
+                        peer.transactions.insert(tx.hash);
+
+                        match self.transactions_by_peers.entry(tx.hash) {
+                            Entry::Occupied(mut entry) => {
+                                // transaction was already inserted
+                                entry.get_mut().push(peer_id);
+                            }
+                            Entry::Vacant(_) => {
+                                // TODO import into the pool
+                            }
+                        }
+                    }
+                }
+            }
+            NetworkEvent::IncomingPooledTransactionHashes { .. } => {}
+            NetworkEvent::GetPooledTransactions { .. } => {}
+        }
+    }
+
     /// Executes an endless future
     pub async fn run(self) {}
+}
+
+/// Tracks a single peer
+struct Peer {
+    /// Keeps track of transactions that we know the peer has seen.
+    transactions: LruCache<H256>,
+    /// A communication channel directly to the session task.
+    request_tx: PeerRequestSender,
 }
 
 /// Commands to send to the [`TransactionManager`]

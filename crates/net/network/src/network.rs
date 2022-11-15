@@ -1,6 +1,7 @@
-use crate::{manager::NetworkEvent, peers::PeersHandle};
+use crate::{manager::NetworkEvent, message::PeerRequest, peers::PeersHandle};
 use parking_lot::Mutex;
-use reth_primitives::{PeerId, H256, U256};
+use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
+use reth_primitives::{PeerId, H256};
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicUsize, Arc},
@@ -47,6 +48,16 @@ impl NetworkHandle {
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
         rx
     }
+
+    /// Sends a [`NetworkHandleMessage`] to the manager
+    fn send_message(&self, msg: NetworkHandleMessage) {
+        let _ = self.inner.to_manager_tx.send(msg);
+    }
+
+    /// Sends a [`PeerRequest`] to the given peer's session.
+    pub fn send_request(&mut self, peer_id: PeerId, request: PeerRequest) {
+        self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
+    }
 }
 
 struct NetworkInner {
@@ -59,15 +70,25 @@ struct NetworkInner {
     /// The identifier used by this node.
     local_node_id: PeerId,
     /// Access to the all the nodes
-    peers: PeersHandle, // TODO need something to access
+    peers: PeersHandle,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
+#[allow(missing_docs)]
 pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
-    AnnounceBlock,
-    /// Returns the newest imported block by the network.
-    NewestBlock(H256, U256),
+    AnnounceBlock(NewBlock, H256),
+    /// Sends the list of transactions to the given peer.
+    SendTransaction { peer_id: PeerId, msg: Arc<Transactions> },
+    /// Sends the list of transactions hashes to the given peer.
+    SendPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
+    /// Send an `eth` protocol request to the peer.
+    EthRequest {
+        /// The peer to send the request to.
+        peer_id: PeerId,
+        /// The request to send to the peer's sessions.
+        request: PeerRequest,
+    },
 }
