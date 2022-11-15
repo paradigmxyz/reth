@@ -2,7 +2,7 @@
 
 use crate::{message::BlockRequest, peers::ReputationChange, NodeId};
 use futures::StreamExt;
-use reth_eth_wire::{BlockBody, BlockHashOrNumber, GetBlockBodies, GetBlockHeaders};
+use reth_eth_wire::{BlockBody, GetBlockBodies};
 use reth_interfaces::p2p::{
     error::{RequestError, RequestResult},
     headers::client::HeadersRequest,
@@ -142,13 +142,13 @@ impl StateFetcher {
 
                 unimplemented!("unify start types");
 
-                BlockRequest::GetBlockHeaders(GetBlockHeaders {
-                    // TODO: this should be converted
-                    start_block: BlockHashOrNumber::Number(0),
-                    limit: request.limit,
-                    skip: 0,
-                    reverse: request.reverse,
-                })
+                // BlockRequest::GetBlockHeaders(GetBlockHeaders {
+                //     // TODO: this should be converted
+                //     start_block: BlockHashOrNumber::Number(0),
+                //     limit: request.limit,
+                //     skip: 0,
+                //     reverse: request.reverse,
+                // })
             }
             DownloadRequest::GetBlockBodies { request, response } => {
                 let inflight = Request { request: request.clone(), response, started };
