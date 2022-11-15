@@ -1,9 +1,9 @@
 //! Listeners for the transaction-pool
 
 use crate::pool::events::TransactionEvent;
-use futures::channel::mpsc::UnboundedSender;
 use reth_primitives::H256;
 use std::{collections::HashMap, hash};
+use tokio::sync::mpsc::UnboundedSender;
 
 type EventSink<Hash> = UnboundedSender<TransactionEvent<Hash>>;
 
@@ -75,7 +75,7 @@ struct PoolEventNotifier<Hash> {
 
 impl<Hash: Clone> PoolEventNotifier<Hash> {
     fn notify(&mut self, event: TransactionEvent<Hash>) {
-        self.senders.retain(|sender| sender.unbounded_send(event.clone()).is_ok())
+        self.senders.retain(|sender| sender.send(event.clone()).is_ok())
     }
 
     fn is_done(&self) -> bool {

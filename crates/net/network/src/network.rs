@@ -50,7 +50,7 @@ impl NetworkHandle {
     }
 
     /// Sends a [`NetworkHandleMessage`] to the manager
-    fn send_message(&self, msg: NetworkHandleMessage) {
+    pub(crate) fn send_message(&self, msg: NetworkHandleMessage) {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
