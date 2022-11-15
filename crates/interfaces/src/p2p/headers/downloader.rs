@@ -1,9 +1,7 @@
 use super::client::{HeadersClient, HeadersRequest, HeadersStream};
-use crate::consensus::Consensus;
-
-use crate::p2p::headers::error::DownloadError;
+use crate::{consensus::Consensus, p2p::headers::error::DownloadError};
 use async_trait::async_trait;
-use reth_primitives::{rpc::BlockId, Header, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, Header, SealedHeader};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::time::Duration;
 use tokio_stream::StreamExt;
@@ -46,7 +44,7 @@ pub trait HeaderDownloader: Sync + Send {
     async fn download_headers(
         &self,
         stream: &mut HeadersStream,
-        start: BlockId,
+        start: BlockHashOrNumber,
         limit: u64,
     ) -> Result<Vec<Header>, DownloadError> {
         let request_id = rand::random();

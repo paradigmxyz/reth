@@ -1,8 +1,9 @@
 use crate::p2p::MessageStream;
 
-use reth_primitives::{rpc::BlockId, Header, H256, H512};
+use reth_primitives::{Header, H256, H512};
 
 use async_trait::async_trait;
+use reth_primitives::BlockHashOrNumber;
 use std::{collections::HashSet, fmt::Debug};
 
 /// Each peer returns a list of headers and the request id corresponding
@@ -31,7 +32,7 @@ impl From<(u64, Vec<Header>)> for HeadersResponse {
 #[derive(Clone, Debug)]
 pub struct HeadersRequest {
     /// The starting block
-    pub start: BlockId,
+    pub start: BlockHashOrNumber,
     /// The response max size
     pub limit: u64,
     /// Flag indicating whether the blocks should
