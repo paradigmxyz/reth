@@ -1,5 +1,5 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::db::Error as DbError;
+use reth_interfaces::{consensus, db::Error as DbError};
 use reth_primitives::{BlockNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -8,12 +8,13 @@ use tokio::sync::mpsc::error::SendError;
 #[derive(Error, Debug)]
 pub enum StageError {
     /// The stage encountered a state validation error.
-    ///
-    /// TODO: This depends on the consensus engine and should include the validation failure reason
-    #[error("Stage encountered a validation error in block {block}.")]
+    #[error("Stage encountered a validation error in block {block}: {error}.")]
     Validation {
         /// The block that failed validation.
         block: BlockNumber,
+        /// The underlying consensus error.
+        #[source]
+        error: consensus::Error,
     },
     /// The stage encountered a database error.
     #[error("An internal database error occurred.")]
@@ -30,33 +31,40 @@ pub enum StageError {
 /// The sender stage error
 #[derive(Error, Debug)]
 pub enum DatabaseIntegrityError {
-    /// Cannonical hash is missing from db
-    #[error("no cannonical hash for block #{number}")]
-    CannonicalHash {
+    // TODO(onbjerg): What's the difference between this and the one below?
+    /// The canonical hash for a block is missing from the database.
+    #[error("No canonical hash for block #{number}")]
+    CanonicalHash {
         /// The block number key
         number: BlockNumber,
     },
-    /// Cannonical header is missing from db
-    #[error("no cannonical hash for block #{number}")]
-    CannonicalHeader {
+    /// The canonical header for a block is missing from the database.
+    #[error("No canonical hash for block #{number}")]
+    CanonicalHeader {
         /// The block number key
         number: BlockNumber,
     },
-    /// Header is missing from db
-    #[error("no header for block #{number} ({hash})")]
+    /// A header is missing from the database.
+    #[error("No header for block #{number} ({hash})")]
     Header {
         /// The block number key
         number: BlockNumber,
         /// The block hash key
         hash: H256,
     },
-    /// Cumulative transaction count is missing from db
-    #[error("no cumulative tx count for ${number} ({hash})")]
+    /// The cumulative transaction count is missing from the database.
+    #[error("No cumulative tx count for ${number} ({hash})")]
     CumulativeTxCount {
         /// The block number key
         number: BlockNumber,
         /// The block hash key
         hash: H256,
+    },
+    /// A block body is missing.
+    #[error("Block body not found for block #{number}")]
+    BlockBody {
+        /// The block number key
+        number: BlockNumber,
     },
 }
 

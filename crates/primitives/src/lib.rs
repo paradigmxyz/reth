@@ -6,6 +6,8 @@
 ))]
 
 //! Commonly used types in reth.
+//!
+//! This crate contains Ethereum primitive types and helper functions.
 
 mod account;
 mod block;
@@ -22,6 +24,9 @@ mod log;
 mod receipt;
 mod storage;
 mod transaction;
+
+/// Helper function for calculating Merkle proofs and hashes
+pub mod proofs;
 
 pub use account::Account;
 pub use block::{Block, BlockLocked};
@@ -41,25 +46,24 @@ pub use transaction::{
     TransactionSignedEcRecovered, TxType,
 };
 
-/// Block hash.
+/// A block hash.
 pub type BlockHash = H256;
-/// Block Number is height of chain
+/// A block number.
 pub type BlockNumber = u64;
-/// Ethereum address
+/// An Ethereum address.
 pub type Address = H160;
+// TODO(onbjerg): Is this not the same as [BlockHash]?
 /// BlockId is Keccak hash of the header
 pub type BlockID = H256;
-/// TxHash is Kecack hash of rlp encoded signed transaction
+/// A transaction hash is a kecack hash of an RLP encoded signed transaction.
 pub type TxHash = H256;
-/// TxNumber is sequence number of all existing transactions
+/// The sequence number of all existing transactions.
 pub type TxNumber = u64;
-/// Chain identifier type, introduced in EIP-155
+/// Chain identifier type (introduced in EIP-155).
 pub type ChainId = u64;
-
-/// Storage Key
+/// An account storage key.
 pub type StorageKey = H256;
-
-/// Storage value
+/// An account storage value.
 pub type StorageValue = U256;
 
 // TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to

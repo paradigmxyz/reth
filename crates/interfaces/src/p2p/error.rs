@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 pub type RequestResult<T> = Result<T, RequestError>;
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 #[allow(missing_docs)]
 pub enum RequestError {
     #[error("Closed channel to the peer.")]

@@ -9,3 +9,6 @@ pub mod client;
 /// [`Consensus`]: crate::consensus::Consensus
 /// [`HeadersClient`]: client::HeadersClient
 pub mod downloader;
+
+/// Error types.
+pub mod error;

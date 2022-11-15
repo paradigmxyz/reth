@@ -1,4 +1,7 @@
-use crate::{BlockHash, BlockNumber, Bloom, H160, H256, U256};
+use crate::{
+    proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
+    BlockHash, BlockNumber, Bloom, H160, H256, U256,
+};
 use bytes::{BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
 use reth_codecs::main_codec;
@@ -7,7 +10,7 @@ use std::ops::Deref;
 
 /// Block header
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.
@@ -62,6 +65,29 @@ pub struct Header {
     /// above the gas target, and decreasing when blocks are below the gas target. The base fee per
     /// gas is burned.
     pub base_fee_per_gas: Option<u64>,
+}
+
+impl Default for Header {
+    fn default() -> Self {
+        Header {
+            parent_hash: Default::default(),
+            ommers_hash: EMPTY_LIST_HASH,
+            beneficiary: Default::default(),
+            state_root: EMPTY_ROOT,
+            transactions_root: EMPTY_ROOT,
+            receipts_root: EMPTY_ROOT,
+            logs_bloom: Default::default(),
+            difficulty: Default::default(),
+            number: 0,
+            gas_limit: 0,
+            gas_used: 0,
+            timestamp: 0,
+            extra_data: Default::default(),
+            mix_hash: Default::default(),
+            nonce: 0,
+            base_fee_per_gas: None,
+        }
+    }
 }
 
 impl Header {
@@ -239,6 +265,10 @@ mod tests {
             gas_used: 0x15b3_u64,
             timestamp: 0x1a0a_u64,
             extra_data: Bytes::from_str("7788").unwrap().0,
+            ommers_hash: H256::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
             ..Default::default()
         };
         let mut data = vec![];
@@ -285,6 +315,10 @@ mod tests {
             gas_used: 0x15b3u64,
             timestamp: 0x1a0au64,
             extra_data: Bytes::from_str("7788").unwrap().0,
+            ommers_hash: H256::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
             ..Default::default()
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();

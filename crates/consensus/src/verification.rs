@@ -115,10 +115,20 @@ pub fn validate_transaction_regarding_state<AP: AccountProvider>(
     Ok(())
 }
 
-/// Validate block standalone
-pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
-    // check ommers hash
-    let ommers_hash = crate::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+/// Validate a block without regard for state:
+///
+/// - Compares the ommer hash in the block header to the block body
+/// - Compares the transactions root in the block header to the block body
+/// - Pre-execution transaction validation
+/// - (Optionally) Compares the receipts root in the block header to the block body
+pub fn validate_block_standalone(
+    block: &BlockLocked,
+    validate_receipts: bool,
+) -> Result<(), Error> {
+    // Check ommers hash
+    // TODO(onbjerg): This should probably be accessible directly on [Block]
+    let ommers_hash =
+        reth_primitives::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
     if block.header.ommers_hash != ommers_hash {
         return Err(Error::BodyOmmersHashDiff {
             got: ommers_hash,
@@ -126,8 +136,9 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         })
     }
 
-    // check transaction root
-    let transaction_root = crate::proofs::calculate_transaction_root(block.body.iter());
+    // Check transaction root
+    // TODO(onbjerg): This should probably be accessible directly on [Block]
+    let transaction_root = reth_primitives::proofs::calculate_transaction_root(block.body.iter());
     if block.header.transactions_root != transaction_root {
         return Err(Error::BodyTransactionRootDiff {
             got: transaction_root,
@@ -135,18 +146,27 @@ pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
         })
     }
 
-    // TODO transaction verification, Maybe make it configurable as in check only
+    // TODO: transaction verification,maybe make it configurable as in check only
     // signatures/limits/types
+    // Things to probably check:
+    // - Chain ID
+    // - Base fee per gas (if applicable)
+    // - Max priority fee per gas (if applicable)
 
-    // check if all transactions limit does not goes over block limit
+    // TODO: Check if all transaction gas total does not go over block limit
 
-    // check receipts root
-    let receipts_root = crate::proofs::calculate_receipt_root(block.receipts.iter());
-    if block.header.receipts_root != receipts_root {
-        return Err(Error::BodyReceiptsRootDiff {
-            got: receipts_root,
-            expected: block.header.receipts_root,
-        })
+    // Check receipts root
+    // TODO(onbjerg): This should probably be accessible directly on [Block]
+    // NOTE(onbjerg): Pre-validation does not validate the receipts root since we do not have the
+    // receipts yet (this validation is before execution). Maybe this should not be in here?
+    if validate_receipts {
+        let receipts_root = reth_primitives::proofs::calculate_receipt_root(block.receipts.iter());
+        if block.header.receipts_root != receipts_root {
+            return Err(Error::BodyReceiptsRootDiff {
+                got: receipts_root,
+                expected: block.header.receipts_root,
+            })
+        }
     }
 
     Ok(())
@@ -284,7 +304,7 @@ pub fn full_validation<PROV: HeaderProvider>(
     config: &Config,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, config)?;
-    validate_block_standalone(block)?;
+    validate_block_standalone(block, true)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
     Ok(())
