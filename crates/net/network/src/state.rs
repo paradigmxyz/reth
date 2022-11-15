@@ -10,7 +10,7 @@ use crate::{
     },
     peers::{PeerAction, PeersManager},
 };
-use reth_eth_wire::{capability::Capabilities, BlockHashNumber, Status};
+use reth_eth_wire::{capability::Capabilities, BlockHashNumber, NewBlockHashes, Status};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{PeerId, H256};
 use std::{
@@ -93,7 +93,8 @@ where
         debug_assert!(self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
-        let block_number = self.client.block_number(status.blockhash).ok().flatten();
+        let block_number =
+            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
         self.state_fetcher.new_connected_peer(peer, status.blockhash, block_number);
 
         self.connected_peers.insert(
@@ -129,6 +130,7 @@ where
         // number of peers)
         let num_propagate = (self.connected_peers.len() as f64).sqrt() as u64 + 1;
 
+        let number = msg.block.block.header.number;
         let mut count = 0;
         for (peer_id, peer) in self.connected_peers.iter_mut() {
             if peer.blocks.contains(&msg.hash) {
@@ -141,6 +143,11 @@ where
                 self.queued_messages
                     .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
 
+                // update peer block info
+                if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
+                    peer.best_hash = msg.hash;
+                }
+
                 // mark the block as seen by the peer
                 peer.blocks.insert(msg.hash);
 
@@ -151,6 +158,36 @@ where
                 break
             }
         }
+    }
+
+    /// Completes the block propagation process started in [`NetworkState::announce_new_block()`]
+    /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
+    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
+        let number = msg.block.block.header.number;
+        let hashes = Arc::new(NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]));
+        for (peer_id, peer) in self.connected_peers.iter_mut() {
+            if peer.blocks.contains(&msg.hash) {
+                // skip peers which already reported the block
+                continue
+            }
+
+            if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
+                peer.best_hash = msg.hash;
+            }
+
+            self.queued_messages.push_back(StateAction::NewBlockHashes {
+                peer_id: *peer_id,
+                hashes: Arc::clone(&hashes),
+            });
+        }
+    }
+
+    /// Updates the block information for the peer.
+    pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: H256, number: u64) {
+        if let Some(peer) = self.connected_peers.get_mut(peer_id) {
+            peer.best_hash = hash;
+        }
+        self.state_fetcher.update_peer_block(peer_id, hash, number);
     }
 
     /// Invoked after a `NewBlock` message was received by the peer.
@@ -341,6 +378,12 @@ pub enum StateAction {
         peer_id: PeerId,
         /// The `NewBlock` message
         block: NewBlockMessage,
+    },
+    NewBlockHashes {
+        /// Target of the message
+        peer_id: PeerId,
+        /// `NewBlockHashes` message to send to the peer.
+        hashes: Arc<NewBlockHashes>,
     },
     /// Create a new connection to the given node.
     Connect { remote_addr: SocketAddr, node_id: PeerId },

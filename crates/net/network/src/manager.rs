@@ -19,7 +19,7 @@ use crate::{
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
-    import::{BlockImport, BlockImportOutcome},
+    import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     network::{NetworkHandle, NetworkHandleMessage},
@@ -192,10 +192,30 @@ where
         }
     }
 
+    /// Invoked after a `NewBlock` message from the peer was validated
+    fn on_block_import_result(&mut self, outcome: BlockImportOutcome) {
+        let BlockImportOutcome { peer, result } = outcome;
+        match result {
+            Ok(validated_block) => match validated_block {
+                BlockValidation::ValidHeader { block } => {
+                    self.swarm.state_mut().update_peer_block(&peer, block.hash, block.number());
+                    self.swarm.state_mut().announce_new_block(block);
+                }
+                BlockValidation::ValidBlock { block } => {
+                    self.swarm.state_mut().announce_new_block_hash(block);
+                }
+            },
+            Err(_err) => {
+                // TODO report peer for bad block
+            }
+        }
+    }
+
     /// Handles a received Message from the peer.
     fn on_peer_message(&mut self, peer_id: PeerId, msg: PeerMessage) {
         match msg {
             PeerMessage::NewBlockHashes(hashes) => {
+                let hashes = Arc::try_unwrap(hashes).unwrap_or_else(|arc| (*arc).clone());
                 // update peer's state, to track what blocks this peer has seen
                 self.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
             }
@@ -240,9 +260,6 @@ where
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
         }
     }
-
-    /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, _outcome: BlockImportOutcome) {}
 }
 
 impl<C> Future for NetworkManager<C>

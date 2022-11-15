@@ -153,6 +153,10 @@ where
                 let msg = PeerMessage::NewBlock(msg);
                 self.sessions.send_message(&peer_id, msg);
             }
+            StateAction::NewBlockHashes { peer_id, hashes } => {
+                let msg = PeerMessage::NewBlockHashes(hashes);
+                self.sessions.send_message(&peer_id, msg);
+            }
         }
         None
     }
