@@ -3,7 +3,7 @@
 use crate::db::{
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
-        blocks::{BlockNumHash, HeaderHash, NumTransactions, NumTxesInBlock},
+        blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockBody},
         ShardedKey,
     },
     DupSort,
@@ -13,7 +13,7 @@ use reth_primitives::{
     TransactionSigned, TxNumber, H256,
 };
 
-/// Enum for the type of table present in libmdbx.
+/// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
 pub enum TableType {
     /// key value table
@@ -119,8 +119,10 @@ table!(
     Headers => BlockNumHash => Header);
 
 table!(
-    /// Stores the number of transactions of a block.
-    BlockBodies => BlockNumHash => NumTxesInBlock);
+    /// Stores a pointer to the first transaction in the block, the number of transactions in the block, and the uncles/ommers of the block.
+    /// 
+    /// The transaction IDs point to the [`Transactions`] table.
+    BlockBodies => BlockNumHash => StoredBlockBody);
 
 table!(
     /// Stores the maximum [`TxNumber`] from which this particular block starts.
@@ -131,19 +133,19 @@ table!(
     NonCanonicalTransactions => BlockNumHashTxNumber => TransactionSigned);
 
 table!(
-    /// Stores the transaction body from canonical transactions. Canonical only
+    /// (Canonical only) Stores the transaction body for canonical transactions.
     Transactions => TxNumber => TransactionSigned);
 
 table!(
-    /// Stores transaction receipts. Canonical only
+    /// (Canonical only) Stores transaction receipts.
     Receipts => TxNumber => Receipt);
 
 table!(
-    /// Stores transaction logs. Canonical only
+    /// (Canonical only) Stores transaction logs.
     Logs => TxNumber => Receipt);
 
 table!(
-    /// Stores the current state of an Account.
+    /// Stores the current state of an [`Account`].
     PlainAccountState => Address => Account);
 
 table!(
@@ -200,27 +202,27 @@ table!(
     AccountHistory => ShardedKey<Address> => TxNumberList);
 
 table!(
-    /// Stores the transaction numbers that changed each storage key.
+    /// Stores pointers to transactions that changed each storage key.
     StorageHistory => AddressStorageKey => TxNumberList);
 
 dupsort!(
-    /// Stores state of an account before a certain transaction changed it.
+    /// Stores the state of an account before a certain transaction changed it.
     AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
 
 dupsort!(
-    /// Stores state of a storage key before a certain transaction changed it.
+    /// Stores the state of a storage key before a certain transaction changed it.
     StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
 
 table!(
-    /// Stores the transaction sender from each transaction.
+    /// Stores the transaction sender for each transaction.
     TxSenders => TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
 
 table!(
-    /// Config.
+    /// Configuration values.
     Config => ConfigKey => ConfigValue);
 
 table!(
-    /// Stores the block number of each stage id.
+    /// Stores the highest synced block number of each stage.
     SyncStage => StageId => BlockNumber);
 
 ///

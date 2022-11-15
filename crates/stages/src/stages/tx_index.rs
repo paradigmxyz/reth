@@ -37,13 +37,13 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: last_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: last_block })?;
 
         // The start block for this iteration
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: start_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: start_block })?;
 
         // The maximum block that this stage should insert to
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
@@ -65,8 +65,8 @@ impl<DB: Database> Stage<DB> for TxIndex {
 
         // Aggregate and insert cumulative transaction count for each block number
         for entry in entries {
-            let (key, tx_count) = entry?;
-            count += tx_count as u64;
+            let (key, body) = entry?;
+            count += body.tx_amount;
             cursor.append(key, count)?;
         }
 
@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::util::test_utils::{StageTestDB, StageTestRunner};
     use assert_matches::assert_matches;
-    use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
+    use reth_interfaces::{db::models::BlockNumHash, test_utils::generators::random_header_range};
     use reth_primitives::H256;
 
     const TEST_STAGE: StageId = StageId("PrevStage");
@@ -100,14 +100,14 @@ mod tests {
         let rx = runner.execute(ExecInput::default());
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CannonicalHeader { .. }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { .. }))
         );
     }
 
     #[tokio::test]
     async fn execute_no_prev_tx_count() {
         let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
+        let headers = random_header_range(0..10, H256::zero());
         runner
             .db()
             .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
@@ -129,7 +129,7 @@ mod tests {
     async fn execute() {
         let runner = TxIndexTestRunner::default();
         let (start, pivot, end) = (0, 100, 200);
-        let headers = gen_random_header_range(start..end, H256::zero());
+        let headers = random_header_range(start..end, H256::zero());
         runner
             .db()
             .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
@@ -170,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn unwind_no_input() {
         let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
+        let headers = random_header_range(0..10, H256::zero());
         runner
             .db()
             .transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
@@ -195,8 +195,8 @@ mod tests {
     #[tokio::test]
     async fn unwind_with_db_gaps() {
         let runner = TxIndexTestRunner::default();
-        let first_range = gen_random_header_range(0..20, H256::zero());
-        let second_range = gen_random_header_range(50..100, H256::zero());
+        let first_range = random_header_range(0..20, H256::zero());
+        let second_range = random_header_range(50..100, H256::zero());
         runner
             .db()
             .transform_append::<tables::CumulativeTxCount, _, _>(

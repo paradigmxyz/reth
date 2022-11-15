@@ -5,7 +5,8 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::headers::{
         client::{HeadersClient, HeadersStream},
-        downloader::{DownloadError, Downloader},
+        downloader::HeaderDownloader,
+        error::DownloadError,
     },
 };
 use reth_primitives::{rpc::BlockId, SealedHeader};
@@ -27,7 +28,7 @@ pub struct LinearDownloader<C, H> {
 }
 
 #[async_trait]
-impl<C: Consensus, H: HeadersClient> Downloader for LinearDownloader<C, H> {
+impl<C: Consensus, H: HeadersClient> HeaderDownloader for LinearDownloader<C, H> {
     type Consensus = C;
     type Client = H;
 
@@ -161,11 +162,6 @@ impl Default for LinearDownloadBuilder {
 }
 
 impl LinearDownloadBuilder {
-    /// Initialize a new builder
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set the request batch size
     pub fn batch_size(mut self, size: u64) -> Self {
         self.batch_size = size;
@@ -207,7 +203,8 @@ mod tests {
     use reth_interfaces::{
         p2p::headers::client::HeadersRequest,
         test_utils::{
-            gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
+            generators::{random_header, random_header_range},
+            TestConsensus, TestHeadersClient,
         },
     };
     use reth_primitives::{rpc::BlockId, SealedHeader};
@@ -233,7 +230,7 @@ mod tests {
         let retries = 5;
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new()
+            let downloader = LinearDownloadBuilder::default()
                 .retries(retries)
                 .build(CONSENSUS.clone(), CLIENT.clone());
             let result =
@@ -257,7 +254,7 @@ mod tests {
         let retries = 5;
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new()
+            let downloader = LinearDownloadBuilder::default()
                 .retries(retries)
                 .build(CONSENSUS.clone(), CLIENT.clone());
             let result =
@@ -286,14 +283,14 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn download_propagates_consensus_validation_error() {
-        let tip_parent = gen_random_header(1, None);
-        let tip = gen_random_header(2, Some(tip_parent.hash()));
+        let tip_parent = random_header(1, None);
+        let tip = random_header(2, Some(tip_parent.hash()));
         let tip_hash = tip.hash();
 
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
             let downloader =
-                LinearDownloadBuilder::new().build(CONSENSUS_FAIL.clone(), CLIENT.clone());
+                LinearDownloadBuilder::default().build(CONSENSUS_FAIL.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
             let result = downloader.download(&SealedHeader::default(), &forkchoice).await;
             tx.send(result).expect("failed to forward download response");
@@ -322,14 +319,15 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn download_starts_with_chain_tip() {
-        let head = gen_random_header(1, None);
-        let tip = gen_random_header(2, Some(head.hash()));
+        let head = random_header(1, None);
+        let tip = random_header(2, Some(head.hash()));
 
         let tip_hash = tip.hash();
         let chain_head = head.clone();
         let (tx, mut rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new().build(CONSENSUS.clone(), CLIENT.clone());
+            let downloader =
+                LinearDownloadBuilder::default().build(CONSENSUS.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
             let result = downloader.download(&chain_head, &forkchoice).await;
             tx.send(result).expect("failed to forward download response");
@@ -359,15 +357,16 @@ mod tests {
     #[serial]
     async fn download_returns_headers_desc() {
         let (start, end) = (100, 200);
-        let head = gen_random_header(start, None);
-        let mut headers = gen_random_header_range(start + 1..end, head.hash());
+        let head = random_header(start, None);
+        let mut headers = random_header_range(start + 1..end, head.hash());
         headers.reverse();
 
         let tip_hash = headers.first().unwrap().hash();
         let chain_head = head.clone();
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let downloader = LinearDownloadBuilder::new().build(CONSENSUS.clone(), CLIENT.clone());
+            let downloader =
+                LinearDownloadBuilder::default().build(CONSENSUS.clone(), CLIENT.clone());
             let forkchoice = ForkchoiceState { head_block_hash: tip_hash, ..Default::default() };
             let result = downloader.download(&chain_head, &forkchoice).await;
             tx.send(result).expect("failed to forward download response");

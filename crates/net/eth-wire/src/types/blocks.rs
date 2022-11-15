@@ -108,6 +108,7 @@ impl From<Vec<H256>> for GetBlockBodies {
     }
 }
 
+// TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct BlockBody {

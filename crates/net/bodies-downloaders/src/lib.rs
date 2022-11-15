@@ -5,11 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Reth consensus.
-pub mod config;
-pub mod consensus;
-pub mod verification;
+//! Implements body downloader algorithms.
 
-pub use config::Config;
-pub use consensus::EthConsensus;
-pub use reth_interfaces::consensus::Error;
+/// A naive concurrent downloader.
+pub mod concurrent;
