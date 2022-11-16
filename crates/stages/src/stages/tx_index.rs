@@ -88,7 +88,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
 mod tests {
     use super::*;
     use crate::util::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner,
+        stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
         UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
@@ -96,7 +96,7 @@ mod tests {
         db::models::{BlockNumHash, StoredBlockBody},
         test_utils::generators::random_header_range,
     };
-    use reth_primitives::H256;
+    use reth_primitives::{SealedHeader, H256};
 
     stage_test_suite!(TxIndexTestRunner);
 
@@ -118,10 +118,9 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for TxIndexTestRunner {
-        fn seed_execution(
-            &mut self,
-            input: ExecInput,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        type Seed = ();
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let pivot = input.stage_progress.unwrap_or_default();
             let start = pivot.saturating_sub(100);
             let mut end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
@@ -156,31 +155,33 @@ mod tests {
         fn validate_execution(
             &self,
             input: ExecInput,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            let db = self.db.container();
-            let tx = db.get();
-            let (start, end) = (
-                input.stage_progress.unwrap_or_default(),
-                input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default(),
-            );
-            if start >= end {
-                return Ok(())
-            }
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            self.db.query(|tx| {
+                let (start, end) = (
+                    input.stage_progress.unwrap_or_default(),
+                    input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default(),
+                );
+                if start >= end {
+                    return Ok(())
+                }
 
-            let start_hash =
-                tx.get::<tables::CanonicalHeaders>(start)?.expect("no canonical found");
-            let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
-            let mut tx_count_walker = tx_count_cursor.walk((start, start_hash).into())?;
-            let mut count = tx_count_walker.next().unwrap()?.1;
-            let mut last_num = start;
-            while let Some(entry) = tx_count_walker.next() {
-                let (key, db_count) = entry?;
-                count += tx.get::<tables::BlockBodies>(key)?.unwrap().tx_amount as u64;
-                assert_eq!(db_count, count);
-                last_num = key.number();
-            }
-            assert_eq!(last_num, end);
+                let start_hash =
+                    tx.get::<tables::CanonicalHeaders>(start)?.expect("no canonical found");
+                let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
+                let mut tx_count_walker = tx_count_cursor.walk((start, start_hash).into())?;
+                let mut count = tx_count_walker.next().unwrap()?.1;
+                let mut last_num = start;
+                while let Some(entry) = tx_count_walker.next() {
+                    let (key, db_count) = entry?;
+                    count += tx.get::<tables::BlockBodies>(key)?.unwrap().tx_amount as u64;
+                    assert_eq!(db_count, count);
+                    last_num = key.number();
+                }
+                assert_eq!(last_num, end);
 
+                Ok(())
+            })?;
             Ok(())
         }
     }
@@ -190,7 +191,7 @@ mod tests {
             &mut self,
             input: UnwindInput,
             highest_entry: u64,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<(), TestRunnerError> {
             let headers = random_header_range(input.unwind_to..highest_entry, H256::zero());
             self.db.transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
                 (
@@ -201,10 +202,7 @@ mod tests {
             Ok(())
         }
 
-        fn validate_unwind(
-            &self,
-            input: UnwindInput,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.db.check_no_entry_above::<tables::CumulativeTxCount, _>(input.unwind_to, |h| {
                 h.number()
             })?;

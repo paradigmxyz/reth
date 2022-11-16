@@ -198,6 +198,8 @@ mod tests {
 
     stage_test_suite!(HeadersTestRunner);
 
+    // TODO: test consensus propagation error
+
     /// Check that the execution errors on empty database or
     /// prev progress missing from the database.
     #[tokio::test]
@@ -208,12 +210,12 @@ mod tests {
         runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
+        let result = rx.await.unwrap();
         assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { done, reached_tip, stage_progress: out_stage_progress })
-                if !done && !reached_tip && out_stage_progress == 0
+            result,
+            Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 0 })
         );
-        assert!(runner.validate_execution(input).is_ok(), "validation failed");
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
     /// Execute the stage with linear downloader
@@ -225,11 +227,10 @@ mod tests {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
         };
-        runner.seed_execution(input).expect("failed to seed execution");
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
 
         // skip `after_execution` hook for linear downloader
-        let headers = runner.context.as_ref().unwrap();
         let tip = headers.last().unwrap();
         runner.consensus.update_tip(tip.hash());
 
@@ -242,21 +243,22 @@ mod tests {
             })
             .await;
 
+        let result = rx.await.unwrap();
         assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { done, reached_tip, stage_progress })
-                if done && reached_tip && stage_progress == tip.number
+            result,
+            Ok(ExecOutput { done: true, reached_tip: true, stage_progress }) if stage_progress == tip.number
         );
-        assert!(runner.validate_execution(input).is_ok(), "validation failed");
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
     mod test_runner {
         use crate::{
             stages::headers::HeaderStage,
             util::test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, UnwindStageTestRunner,
+                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                UnwindStageTestRunner,
             },
-            ExecInput, UnwindInput,
+            ExecInput, ExecOutput, UnwindInput,
         };
         use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
@@ -273,7 +275,6 @@ mod tests {
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
-            pub(crate) context: Option<Vec<SealedHeader>>,
             downloader: Arc<D>,
             db: StageTestDB,
         }
@@ -286,7 +287,6 @@ mod tests {
                     consensus: Arc::new(TestConsensus::default()),
                     downloader: Arc::new(TestHeaderDownloader::new(client)),
                     db: StageTestDB::default(),
-                    context: None,
                 }
             }
         }
@@ -309,38 +309,36 @@ mod tests {
 
         #[async_trait::async_trait]
         impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
-            fn seed_execution(
-                &mut self,
-                input: ExecInput,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            type Seed = Vec<SealedHeader>;
+
+            fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
                 let head = random_header(start, None);
                 self.insert_header(&head)?;
 
                 // use previous progress as seed size
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
-                if end > start + 1 {
-                    let mut headers = random_header_range(start + 1..end, head.hash());
-                    headers.insert(0, head);
-                    self.context = Some(headers);
+
+                if start + 1 >= end {
+                    return Ok(Vec::default())
                 }
-                Ok(())
+
+                let mut headers = random_header_range(start + 1..end, head.hash());
+                headers.insert(0, head);
+                Ok(headers)
             }
 
-            async fn after_execution(
-                &self,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                let (tip, headers) = match self.context {
-                    Some(ref headers) if headers.len() > 1 => {
-                        (headers.last().unwrap().hash(), headers.clone())
-                    }
-                    _ => (H256::from_low_u64_be(rand::random()), Vec::default()),
+            async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
+                let tip = if !headers.is_empty() {
+                    headers.last().unwrap().hash()
+                } else {
+                    H256::from_low_u64_be(rand::random())
                 };
                 self.consensus.update_tip(tip);
                 self.client
                     .send_header_response_delayed(
                         0,
-                        headers.iter().cloned().map(|h| h.unseal()).collect(),
+                        headers.into_iter().map(|h| h.unseal()).collect(),
                         1,
                     )
                     .await;
@@ -350,11 +348,13 @@ mod tests {
             fn validate_execution(
                 &self,
                 _input: ExecInput,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                if let Some(ref headers) = self.context {
-                    // skip head and validate each
-                    headers.iter().skip(1).try_for_each(|h| self.validate_db_header(&h))?;
-                }
+                _output: Option<ExecOutput>,
+            ) -> Result<(), TestRunnerError> {
+                // TODO: refine
+                // if let Some(ref headers) = self.context {
+                //     // skip head and validate each
+                //     headers.iter().skip(1).try_for_each(|h| self.validate_db_header(&h))?;
+                // }
                 Ok(())
             }
         }
@@ -364,17 +364,14 @@ mod tests {
                 &mut self,
                 input: UnwindInput,
                 highest_entry: u64,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            ) -> Result<(), TestRunnerError> {
                 let lowest_entry = input.unwind_to.saturating_sub(100);
                 let headers = random_header_range(lowest_entry..highest_entry, H256::zero());
                 self.insert_headers(headers.iter())?;
                 Ok(())
             }
 
-            fn validate_unwind(
-                &self,
-                input: UnwindInput,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 let unwind_to = input.unwind_to;
                 self.db.check_no_entry_above_by_value::<tables::HeaderNumbers, _>(
                     unwind_to,
@@ -397,7 +394,7 @@ mod tests {
                 let downloader = Arc::new(
                     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
                 );
-                Self { client, consensus, downloader, db: StageTestDB::default(), context: None }
+                Self { client, consensus, downloader, db: StageTestDB::default() }
             }
         }
 
@@ -438,30 +435,31 @@ mod tests {
                 &self,
                 header: &SealedHeader,
             ) -> Result<(), db::Error> {
-                let db = self.db.container();
-                let tx = db.get();
-                let key: BlockNumHash = (header.number, header.hash()).into();
+                self.db.query(|tx| {
+                    let key: BlockNumHash = (header.number, header.hash()).into();
 
-                let db_number = tx.get::<tables::HeaderNumbers>(header.hash())?;
-                assert_eq!(db_number, Some(header.number));
+                    let db_number = tx.get::<tables::HeaderNumbers>(header.hash())?;
+                    assert_eq!(db_number, Some(header.number));
 
-                let db_header = tx.get::<tables::Headers>(key)?;
-                assert_eq!(db_header, Some(header.clone().unseal()));
+                    let db_header = tx.get::<tables::Headers>(key)?;
+                    assert_eq!(db_header, Some(header.clone().unseal()));
 
-                let db_canonical_header = tx.get::<tables::CanonicalHeaders>(header.number)?;
-                assert_eq!(db_canonical_header, Some(header.hash()));
+                    let db_canonical_header = tx.get::<tables::CanonicalHeaders>(header.number)?;
+                    assert_eq!(db_canonical_header, Some(header.hash()));
 
-                if header.number != 0 {
-                    let parent_key: BlockNumHash = (header.number - 1, header.parent_hash).into();
-                    let parent_td = tx.get::<tables::HeaderTD>(parent_key)?;
-                    let td = U256::from_big_endian(&tx.get::<tables::HeaderTD>(key)?.unwrap());
-                    assert_eq!(
-                        parent_td.map(|td| U256::from_big_endian(&td) + header.difficulty),
-                        Some(td)
-                    );
-                }
+                    if header.number != 0 {
+                        let parent_key: BlockNumHash =
+                            (header.number - 1, header.parent_hash).into();
+                        let parent_td = tx.get::<tables::HeaderTD>(parent_key)?;
+                        let td = U256::from_big_endian(&tx.get::<tables::HeaderTD>(key)?.unwrap());
+                        assert_eq!(
+                            parent_td.map(|td| U256::from_big_endian(&td) + header.difficulty),
+                            Some(td)
+                        );
+                    }
 
-                Ok(())
+                    Ok(())
+                })
             }
         }
     }

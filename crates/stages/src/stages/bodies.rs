@@ -232,7 +232,7 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::StageTestRunner;
+    use crate::util::test_utils::{ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID};
     use assert_matches::assert_matches;
     use reth_eth_wire::BlockBody;
     use reth_interfaces::{
@@ -260,7 +260,7 @@ mod tests {
     async fn already_reached_target() {
         let runner = BodyTestRunner::new(TestBodyDownloader::default);
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), 100)),
+            previous_stage: Some((PREV_STAGE_ID, 100)),
             stage_progress: Some(100),
         });
         assert_matches!(
@@ -289,10 +289,11 @@ mod tests {
             .expect("Could not insert headers");
 
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: None,
-        });
+        };
+        let rx = runner.execute(input);
 
         // Check that we only synced around `batch_size` blocks even though the number of blocks
         // synced by the previous stage is higher
@@ -301,9 +302,7 @@ mod tests {
             output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress < 200
         );
-        runner
-            .validate_db_blocks(output.unwrap().stage_progress)
-            .expect("Written block data invalid");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Same as [partial_body_download] except the `batch_size` is not hit.
@@ -325,10 +324,11 @@ mod tests {
             .expect("Could not insert headers");
 
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: None,
-        });
+        };
+        let rx = runner.execute(input);
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
@@ -337,9 +337,7 @@ mod tests {
             output,
             Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
         );
-        runner
-            .validate_db_blocks(output.unwrap().stage_progress)
-            .expect("Written block data invalid");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Same as [full_body_download] except we have made progress before
@@ -359,7 +357,7 @@ mod tests {
 
         // Run the stage
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: None,
         });
 
@@ -372,10 +370,11 @@ mod tests {
         let first_run_progress = first_run.unwrap().stage_progress;
 
         // Execute again on top of the previous run
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: Some(first_run_progress),
-        });
+        };
+        let rx = runner.execute(input);
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
@@ -383,9 +382,7 @@ mod tests {
             output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress > first_run_progress
         );
-        runner
-            .validate_db_blocks(output.unwrap().stage_progress)
-            .expect("Written block data invalid");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Checks that the stage asks to unwind if pre-validation of the block fails.
@@ -408,7 +405,7 @@ mod tests {
 
         // Run the stage
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: None,
         });
 
@@ -424,11 +421,13 @@ mod tests {
     async fn unwind_empty_db() {
         let unwind_to = 10;
         let runner = BodyTestRunner::new(TestBodyDownloader::default);
-        let rx = runner.unwind(UnwindInput { bad_block: None, stage_progress: 20, unwind_to });
+        let input = UnwindInput { bad_block: None, stage_progress: 20, unwind_to };
+        let rx = runner.unwind(input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
-        )
+        );
+        assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
     }
 
     /// Checks that the stage unwinds correctly with data.
@@ -450,10 +449,11 @@ mod tests {
             .expect("Could not insert headers");
 
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+        let execute_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: None,
-        });
+        };
+        let rx = runner.execute(execute_input);
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
@@ -462,27 +462,19 @@ mod tests {
             output,
             Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
         );
-        let stage_progress = output.unwrap().stage_progress;
-        runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
+        let output = output.unwrap();
+        assert!(runner.validate_execution(execute_input, Some(output.clone())).is_ok(), "execution validation");
 
         // Unwind all of it
         let unwind_to = 1;
-        let rx = runner.unwind(UnwindInput { bad_block: None, stage_progress, unwind_to });
+        let unwind_input = UnwindInput { bad_block: None, stage_progress: output.stage_progress, unwind_to };
+        let rx = runner.unwind(unwind_input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput { stage_progress }) if stage_progress == 1
         );
 
-        let last_body = runner.last_body().expect("Could not read last body");
-        let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
-        runner
-            .db()
-            .check_no_entry_above::<tables::BlockBodies, _>(unwind_to, |key| key.number())
-            .expect("Did not unwind block bodies correctly.");
-        runner
-            .db()
-            .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)
-            .expect("Did not unwind transactions correctly.")
+        assert!(runner.validate_unwind(unwind_input).is_ok(), "unwind validation");
     }
 
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
@@ -505,7 +497,7 @@ mod tests {
 
         // Run the stage
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), blocks.len() as BlockNumber)),
+            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
             stage_progress: None,
         });
 
@@ -520,38 +512,23 @@ mod tests {
         runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
 
         // Delete a transaction
-        {
-            let mut db = runner.db().container();
-            let mut tx_cursor = db
-                .get_mut()
-                .cursor_mut::<tables::Transactions>()
-                .expect("Could not get transaction cursor");
-            tx_cursor
-                .last()
-                .expect("Could not read database")
-                .expect("Could not read last transaction");
-            tx_cursor.delete_current().expect("Could not delete last transaction");
-            db.commit().expect("Could not commit database");
-        }
+        runner.db().commit(|tx| {
+            let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
+            tx_cursor.last()?.expect("Could not read last transaction");
+            tx_cursor.delete_current()?;
+            Ok(())
+        }).expect("Could not delete a transaction");
 
         // Unwind all of it
         let unwind_to = 1;
-        let rx = runner.unwind(UnwindInput { bad_block: None, stage_progress, unwind_to });
+        let input = UnwindInput { bad_block: None, stage_progress, unwind_to };
+        let rx = runner.unwind(input);
         assert_matches!(
             rx.await.unwrap(),
             Ok(UnwindOutput { stage_progress }) if stage_progress == 1
         );
 
-        let last_body = runner.last_body().expect("Could not read last body");
-        let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
-        runner
-            .db()
-            .check_no_entry_above::<tables::BlockBodies, _>(unwind_to, |key| key.number())
-            .expect("Did not unwind block bodies correctly.");
-        runner
-            .db()
-            .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)
-            .expect("Did not unwind transactions correctly.")
+        assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
     }
 
     /// Checks that the stage exits if the downloader times out
@@ -574,7 +551,7 @@ mod tests {
 
         // Run the stage
         let rx = runner.execute(ExecInput {
-            previous_stage: Some((StageId("Headers"), 1)),
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             stage_progress: None,
         });
 
@@ -585,7 +562,10 @@ mod tests {
     mod test_utils {
         use crate::{
             stages::bodies::BodyStage,
-            util::test_utils::{StageTestDB, StageTestRunner},
+            util::test_utils::{
+                ExecuteStageTestRunner, StageTestDB, StageTestRunner, UnwindStageTestRunner, TestRunnerError,
+            },
+            ExecInput, UnwindInput, ExecOutput,
         };
         use assert_matches::assert_matches;
         use async_trait::async_trait;
@@ -680,6 +660,61 @@ mod tests {
             }
         }
 
+        impl<F> ExecuteStageTestRunner for BodyTestRunner<F>
+        where
+            F: Fn() -> TestBodyDownloader,
+        {
+            type Seed = ();
+
+            fn seed_execution(
+                &mut self,
+                input: ExecInput,
+            ) -> Result<(), TestRunnerError> {
+                self.insert_genesis()?;
+                // TODO:
+                // self
+                //     .insert_headers(blocks.iter().map(|block| &block.header))
+                //     .expect("Could not insert headers");
+                Ok(())
+            }
+
+            fn validate_execution(
+                &self,
+                input: ExecInput,
+                output: Option<ExecOutput>,
+            ) -> Result<(), TestRunnerError> {
+                if let Some(output) = output {
+                    self.validate_db_blocks(output.stage_progress)?;
+                }
+                Ok(())
+            }
+        }
+
+        impl<F> UnwindStageTestRunner for BodyTestRunner<F>
+        where
+            F: Fn() -> TestBodyDownloader,
+        {
+            fn seed_unwind(
+                &mut self,
+                input: UnwindInput,
+                highest_entry: u64,
+            ) -> Result<(), TestRunnerError> {
+                unimplemented!()
+            }
+
+            fn validate_unwind(
+                &self,
+                input: UnwindInput,
+            ) -> Result<(), TestRunnerError> {
+                self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| key.number())?;
+                if let Some(last_body) =self.last_body(){
+                    let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
+                    self.db.check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
+                }
+                Ok(())
+            }
+        }
+
         impl<F> BodyTestRunner<F>
         where
             F: Fn() -> TestBodyDownloader,
@@ -690,13 +725,12 @@ mod tests {
             /// same hash.
             pub(crate) fn insert_genesis(&self) -> Result<(), db::Error> {
                 self.insert_header(&SealedHeader::new(Header::default(), GENESIS_HASH))?;
-                let mut db = self.db.container();
-                let tx = db.get_mut();
-                tx.put::<tables::BlockBodies>(
-                    (0, GENESIS_HASH).into(),
-                    StoredBlockBody { base_tx_id: 0, tx_amount: 0, ommers: vec![] },
-                )?;
-                db.commit()?;
+                self.db.commit(|tx| {
+                    tx.put::<tables::BlockBodies>(
+                        (0, GENESIS_HASH).into(),
+                        StoredBlockBody { base_tx_id: 0, tx_amount: 0, ommers: vec![] },
+                    )
+                })?;
 
                 Ok(())
             }
@@ -707,6 +741,7 @@ mod tests {
             }
 
             /// Insert headers into tables
+            /// TODO: move to common inserter
             pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
             where
                 I: Iterator<Item = &'a SealedHeader>,
@@ -733,9 +768,10 @@ mod tests {
             }
 
             pub(crate) fn last_body(&self) -> Option<StoredBlockBody> {
-                Some(
-                    self.db.container().get().cursor::<tables::BlockBodies>().ok()?.last().ok()??.1,
-                )
+                self.db
+                    .query(|tx| Ok(tx.cursor::<tables::BlockBodies>()?.last()?.map(|e| e.1)))
+                    .ok()
+                    .flatten()
             }
 
             /// Validate that the inserted block data is valid
@@ -743,35 +779,34 @@ mod tests {
                 &self,
                 highest_block: BlockNumber,
             ) -> Result<(), db::Error> {
-                let db = self.db.container();
-                let tx = db.get();
-
-                let mut block_body_cursor = tx.cursor::<tables::BlockBodies>()?;
-                let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
-
-                let mut entry = block_body_cursor.first()?;
-                let mut prev_max_tx_id = 0;
-                while let Some((key, body)) = entry {
-                    assert!(
-                        key.number() <= highest_block,
-                        "We wrote a block body outside of our synced range. Found block with number {}, highest block according to stage is {}",
-                        key.number(), highest_block
-                    );
-
-                    assert!(prev_max_tx_id == body.base_tx_id, "Transaction IDs are malformed.");
-                    for num in 0..body.tx_amount {
-                        let tx_id = body.base_tx_id + num;
-                        assert_matches!(
-                            transaction_cursor.seek_exact(tx_id),
-                            Ok(Some(_)),
-                            "A transaction is missing."
+                self.db.query(|tx| {
+                    let mut block_body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
+    
+                    let mut entry = block_body_cursor.first()?;
+                    let mut prev_max_tx_id = 0;
+                    while let Some((key, body)) = entry {
+                        assert!(
+                            key.number() <= highest_block,
+                            "We wrote a block body outside of our synced range. Found block with number {}, highest block according to stage is {}",
+                            key.number(), highest_block
                         );
+    
+                        assert!(prev_max_tx_id == body.base_tx_id, "Transaction IDs are malformed.");
+                        for num in 0..body.tx_amount {
+                            let tx_id = body.base_tx_id + num;
+                            assert_matches!(
+                                transaction_cursor.seek_exact(tx_id),
+                                Ok(Some(_)),
+                                "A transaction is missing."
+                            );
+                        }
+                        prev_max_tx_id = body.base_tx_id + body.tx_amount;
+                        entry = block_body_cursor.next()?;
                     }
-                    prev_max_tx_id = body.base_tx_id + body.tx_amount;
-                    entry = block_body_cursor.next()?;
-                }
-
-                Ok(())
+    
+                    Ok(())
+                })
             }
         }
 

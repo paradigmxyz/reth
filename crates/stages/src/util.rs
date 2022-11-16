@@ -142,7 +142,7 @@ pub(crate) mod test_utils {
         kv::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
         mdbx::{WriteMap, RW},
     };
-    use reth_interfaces::db::{DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table};
+    use reth_interfaces::db::{self, DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table};
     use reth_primitives::BlockNumber;
     use std::{borrow::Borrow, sync::Arc};
     use tokio::sync::oneshot;
@@ -171,20 +171,20 @@ pub(crate) mod test_utils {
     }
 
     impl StageTestDB {
+        /// Return a database wrapped in [DBContainer].
+        fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
+            DBContainer::new(self.db.borrow()).expect("failed to create db container")
+        }
+
         /// Get a pointer to an internal database.
         pub(crate) fn inner(&self) -> Arc<Env<WriteMap>> {
             self.db.clone()
         }
 
-        /// Return a database wrapped in [DBContainer].
-        pub(crate) fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
-            DBContainer::new(self.db.borrow()).expect("failed to create db container")
-        }
-
         /// Invoke a callback with transaction committing it afterwards
-        fn commit<F>(&self, f: F) -> Result<(), Error>
+        pub(crate) fn commit<F>(&self, f: F) -> Result<(), db::Error>
         where
-            F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), Error>,
+            F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), db::Error>,
         {
             let mut db = self.container();
             let tx = db.get_mut();
@@ -193,10 +193,10 @@ pub(crate) mod test_utils {
             Ok(())
         }
 
-        /// Invoke a callback with transaction
-        fn query<F, R>(&self, f: F) -> Result<R, Error>
+        /// Invoke a callback with a read transaction
+        pub(crate) fn query<F, R>(&self, f: F) -> Result<R, db::Error>
         where
-            F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, Error>,
+            F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, db::Error>,
         {
             f(self.container().get())
         }
@@ -208,7 +208,7 @@ pub(crate) mod test_utils {
         /// let db = StageTestDB::default();
         /// db.map_put::<Table, _, _>(&items, |item| item)?;
         /// ```
-        pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), Error>
+        pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), db::Error>
         where
             T: Table,
             S: Clone,
@@ -235,7 +235,7 @@ pub(crate) mod test_utils {
             &self,
             values: &[S],
             mut transform: F,
-        ) -> Result<(), Error>
+        ) -> Result<(), db::Error>
         where
             T: Table,
             <T as Table>::Value: Clone,
@@ -259,7 +259,7 @@ pub(crate) mod test_utils {
             &self,
             block: BlockNumber,
             mut selector: F,
-        ) -> Result<(), Error>
+        ) -> Result<(), db::Error>
         where
             T: Table,
             F: FnMut(T::Key) -> BlockNumber,
@@ -279,7 +279,7 @@ pub(crate) mod test_utils {
             &self,
             block: BlockNumber,
             mut selector: F,
-        ) -> Result<(), Error>
+        ) -> Result<(), db::Error>
         where
             T: Table,
             F: FnMut(T::Value) -> BlockNumber,
@@ -292,6 +292,14 @@ pub(crate) mod test_utils {
                 Ok(())
             })
         }
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub(crate) enum TestRunnerError {
+        #[error("Database error occured.")]
+        Database(#[from] db::Error),
+        #[error("Internal runner error occured.")]
+        Internal(#[from] Box<dyn std::error::Error>),
     }
 
     /// A generic test runner for stages.
@@ -308,17 +316,17 @@ pub(crate) mod test_utils {
 
     #[async_trait::async_trait]
     pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
+        type Seed: Send + Sync;
+
         /// Seed database for stage execution
-        fn seed_execution(
-            &mut self,
-            input: ExecInput,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError>;
 
         /// Validate stage execution
         fn validate_execution(
             &self,
             input: ExecInput,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError>;
 
         /// Run [Stage::execute] and return a receiver for the result.
         fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
@@ -334,7 +342,7 @@ pub(crate) mod test_utils {
         }
 
         /// Run a hook after [Stage::execute]. Required for Headers & Bodies stages.
-        async fn after_execution(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn after_execution(&self, seed: Self::Seed) -> Result<(), TestRunnerError> {
             Ok(())
         }
     }
@@ -345,13 +353,10 @@ pub(crate) mod test_utils {
             &mut self,
             input: UnwindInput,
             highest_entry: u64,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        ) -> Result<(), TestRunnerError>;
 
         /// Validate the unwind
-        fn validate_unwind(
-            &self,
-            input: UnwindInput,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
         /// Run [Stage::unwind] and return a receiver for the result.
         fn unwind(
@@ -373,37 +378,37 @@ pub(crate) mod test_utils {
 
     macro_rules! stage_test_suite {
         ($runner:ident) => {
+            /// Check that the execution is short-circuited if the database is empty.
             #[tokio::test]
-            // Check that the execution errors on empty database or
-            // prev progress missing from the database.
             async fn execute_empty_db() {
                 let runner = $runner::default();
                 let input = crate::stage::ExecInput::default();
-                let rx = runner.execute(input);
+                let result = runner.execute(input).await.unwrap();
                 assert_matches!(
-                    rx.await.unwrap(),
+                    result,
                     Err(crate::error::StageError::DatabaseIntegrity(_))
                 );
-                assert!(runner.validate_execution(input).is_ok(), "execution validation");
+                assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
             }
 
             #[tokio::test]
-            async fn execute_no_progress() {
+            async fn execute_already_reached_target() {
                 let stage_progress = 1000;
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
                     previous_stage: Some((crate::util::test_utils::PREV_STAGE_ID, stage_progress)),
                     stage_progress: Some(stage_progress),
                 };
-                runner.seed_execution(input).expect("failed to seed");
+                let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);
-                runner.after_execution().await.expect("failed to run after execution hook");
+                runner.after_execution(seed).await.expect("failed to run after execution hook");
+                let result = rx.await.unwrap();
                 assert_matches!(
-                    rx.await.unwrap(),
+                    result,
                     Ok(ExecOutput { done, reached_tip, stage_progress })
                         if done && reached_tip && stage_progress == stage_progress
                 );
-                assert!(runner.validate_execution(input).is_ok(), "execution validation");
+                assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
             }
 
             #[tokio::test]
@@ -414,15 +419,16 @@ pub(crate) mod test_utils {
                     previous_stage: Some((crate::util::test_utils::PREV_STAGE_ID, previous_stage)),
                     stage_progress: Some(stage_progress),
                 };
-                runner.seed_execution(input).expect("failed to seed");
+                let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);
-                runner.after_execution().await.expect("failed to run after execution hook");
+                runner.after_execution(seed).await.expect("failed to run after execution hook");
+                let result = rx.await.unwrap();
                 assert_matches!(
-                    rx.await.unwrap(),
+                    result,
                     Ok(ExecOutput { done, reached_tip, stage_progress })
                         if done && reached_tip && stage_progress == previous_stage
                 );
-                assert!(runner.validate_execution(input).is_ok(), "execution validation");
+                assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
             }
 
             #[tokio::test]
