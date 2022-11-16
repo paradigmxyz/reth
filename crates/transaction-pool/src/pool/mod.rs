@@ -105,7 +105,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventListener<TxHash>>,
+    event_listener: RwLock<PoolEventListener>,
     /// Listeners for new ready transactions.
     pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
