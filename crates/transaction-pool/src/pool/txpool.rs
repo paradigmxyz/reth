@@ -102,6 +102,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Returns access to the [`AllTransactions`] container.
+    pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
+        &self.all_transactions
+    }
+
     /// Returns stats about the pool.
     pub(crate) fn status(&self) -> PoolStatus {
         PoolStatus {
@@ -417,10 +422,6 @@ impl<T: TransactionOrdering> TxPool<T> {
 #[cfg(test)]
 #[allow(missing_docs)]
 impl<T: TransactionOrdering> TxPool<T> {
-    pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
-        &self.all_transactions
-    }
-
     pub(crate) fn pending(&self) -> &PendingPool<T> {
         &self.pending_pool
     }
@@ -461,6 +462,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Create a new instance
     fn new(max_account_slots: usize) -> Self {
         Self { max_account_slots, ..Default::default() }
+    }
+
+    /// Returns an iterator over all _unique_ hashes in the pool
+    pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
+        self.by_hash.keys().copied()
     }
 
     /// Returns if the transaction for the given hash is already included in this pool

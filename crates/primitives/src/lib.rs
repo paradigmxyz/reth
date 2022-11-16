@@ -30,7 +30,7 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
-pub use block::{Block, BlockLocked};
+pub use block::{Block, BlockHashOrNumber, BlockLocked};
 pub use chain::Chain;
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;
@@ -44,8 +44,8 @@ pub use log::Log;
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
-    AccessList, AccessListItem, Signature, Transaction, TransactionKind, TransactionSigned,
-    TransactionSignedEcRecovered, TxType,
+    AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
+    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 
 /// A block hash.

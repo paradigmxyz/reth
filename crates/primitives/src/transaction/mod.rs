@@ -1,8 +1,3 @@
-mod access_list;
-mod signature;
-mod tx_type;
-mod util;
-
 use crate::{Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
@@ -13,13 +8,18 @@ use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPT
 pub use signature::Signature;
 pub use tx_type::TxType;
 
+mod access_list;
+mod signature;
+mod tx_type;
+mod util;
+
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Transaction {
-    /// Legacy transaciton.
+    /// Legacy transaction.
     Legacy {
         /// Added as EIP-155: Simple replay attack protection
         chain_id: Option<ChainId>,
@@ -608,6 +608,8 @@ impl TransactionSigned {
     }
 
     /// Recover signer from signature and hash.
+    ///
+    /// Returns `None` if the transaction's signature is invalid.
     pub fn recover_signer(&self) -> Option<Address> {
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -744,10 +746,41 @@ impl TransactionSignedEcRecovered {
     }
 }
 
+/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredTransaction {
+    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+}
+
+// Noop conversion
+impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+        tx
+    }
+}
+
+/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// network
+pub trait IntoRecoveredTransaction {
+    /// Converts to this type into a [`TransactionSignedEcRecovered`].
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
+}
+
+impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use crate::{
         transaction::{signature::Signature, TransactionKind},
         AccessList, Address, Bytes, Transaction, TransactionSigned, H256, U256,
@@ -755,6 +788,7 @@ mod tests {
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     #[test]
     fn test_decode_create() {

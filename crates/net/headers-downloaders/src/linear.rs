@@ -9,7 +9,7 @@ use reth_interfaces::{
         error::DownloadError,
     },
 };
-use reth_primitives::{rpc::BlockId, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_rpc_types::engine::ForkchoiceState;
 
 /// Download headers in batches
@@ -101,8 +101,7 @@ impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
     ) -> Result<LinearDownloadResult, DownloadError> {
         // Request headers starting from tip or earliest cached
         let start = earliest.map_or(forkchoice.head_block_hash, |h| h.parent_hash);
-        let mut headers =
-            self.download_headers(stream, BlockId::Hash(start), self.batch_size).await?;
+        let mut headers = self.download_headers(stream, start.into(), self.batch_size).await?;
         headers.sort_unstable_by_key(|h| h.number);
 
         let mut out = Vec::with_capacity(headers.len());
@@ -207,7 +206,7 @@ mod tests {
             TestConsensus, TestHeadersClient,
         },
     };
-    use reth_primitives::{rpc::BlockId, SealedHeader};
+    use reth_primitives::{BlockHashOrNumber, SealedHeader};
 
     use assert_matches::assert_matches;
     use once_cell::sync::Lazy;
@@ -301,7 +300,7 @@ mod tests {
         assert_matches!(
             request,
             Some((_, HeadersRequest { start, .. }))
-                if matches!(start, BlockId::Hash(hash) if *hash == tip_hash)
+                if matches!(start, BlockHashOrNumber::Hash(hash) if *hash == tip_hash)
         );
 
         let request = request.unwrap();

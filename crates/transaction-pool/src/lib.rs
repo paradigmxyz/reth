@@ -87,9 +87,9 @@ use crate::{
     traits::{NewTransactionEvent, PoolStatus, TransactionOrigin},
     validate::ValidPoolTransaction,
 };
-use futures::channel::mpsc::Receiver;
 use reth_primitives::{BlockID, TxHash, U256, U64};
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::mpsc::Receiver;
 
 mod config;
 pub mod error;
@@ -131,11 +131,12 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
     ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
-        let outcome =
-            futures::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
-                .await
-                .into_iter()
-                .collect::<HashMap<_, _>>();
+        let outcome = futures_util::future::join_all(
+            transactions.into_iter().map(|tx| self.validate(origin, tx)),
+        )
+        .await
+        .into_iter()
+        .collect::<HashMap<_, _>>();
 
         Ok(outcome)
     }
@@ -209,6 +210,10 @@ where
         self.pool.add_transaction_listener()
     }
 
+    fn pooled_transactions(&self) -> Vec<TxHash> {
+        self.pool.pooled_transactions()
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -220,6 +225,10 @@ where
         _tx_hashes: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         todo!()
+    }
+
+    fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
+        self.pool.retain_unknown(hashes)
     }
 
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
