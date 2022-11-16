@@ -278,6 +278,8 @@ impl SessionManager {
                         inflight_requests: Default::default(),
                         conn,
                         buffered_outgoing: Default::default(),
+                        received_requests: Default::default(),
+                        is_gracefully_disconnecting: false,
                     };
 
                     self.spawn(session);
