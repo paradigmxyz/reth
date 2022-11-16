@@ -126,8 +126,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     header_hash,
                 ),
                 body: body.transactions,
-                // TODO: We should have a type w/o receipts probably, no reason to allocate here
-                receipts: vec![],
                 ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
             };
 
