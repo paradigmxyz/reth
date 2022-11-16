@@ -138,6 +138,7 @@ where
 /// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
 /// protocol messages.
 #[pin_project]
+#[derive(Debug)]
 pub struct P2PStream<S> {
     #[pin]
     inner: S,

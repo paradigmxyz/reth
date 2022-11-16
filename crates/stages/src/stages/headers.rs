@@ -9,10 +9,7 @@ use reth_interfaces::{
         models::blocks::BlockNumHash, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
         DbCursorRW, DbTx, DbTxMut,
     },
-    p2p::headers::{
-        client::HeadersClient,
-        downloader::{DownloadError, Downloader},
-    },
+    p2p::headers::{client::HeadersClient, downloader::HeaderDownloader, error::DownloadError},
 };
 use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
@@ -20,9 +17,19 @@ use tracing::*;
 
 const HEADERS: StageId = StageId("Headers");
 
-/// The headers stage implementation for staged sync
+/// The headers stage.
+///
+/// The headers stage downloads all block headers from the highest block in the local database to
+/// the perceived highest block on the network.
+///
+/// The headers are processed and data is inserted into these tables:
+///
+/// - [`HeaderNumbers`][reth_interfaces::db::tables::HeaderNumbers]
+/// - [`Headers`][reth_interfaces::db::tables::Headers]
+/// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
+/// - [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
 #[derive(Debug)]
-pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
+pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
@@ -32,7 +39,7 @@ pub struct HeaderStage<D: Downloader, C: Consensus, H: HeadersClient> {
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
+impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB>
     for HeaderStage<D, C, H>
 {
     /// Return the id of the stage
@@ -55,7 +62,7 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
         // TODO: handle input.max_block
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block_num)?
-            .ok_or(DatabaseIntegrityError::CannonicalHash { number: last_block_num })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHash { number: last_block_num })?;
         let last_header =
             tx.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or({
                 DatabaseIntegrityError::Header { number: last_block_num, hash: last_hash }
@@ -81,14 +88,15 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
                         done: false,
                     })
                 }
-                DownloadError::HeaderValidation { hash, details } => {
-                    warn!("validation error for header {hash}: {details}");
-                    return Err(StageError::Validation { block: last_block_num })
+                DownloadError::HeaderValidation { hash, error } => {
+                    warn!("Validation error for header {hash}: {error}");
+                    return Err(StageError::Validation { block: last_block_num, error })
                 }
                 // TODO: this error is never propagated, clean up
-                DownloadError::MismatchedHeaders { .. } => {
-                    return Err(StageError::Validation { block: last_block_num })
-                }
+                // DownloadError::MismatchedHeaders { .. } => {
+                //     return Err(StageError::Validation { block: last_block_num })
+                // }
+                _ => unreachable!(),
             },
         };
         let stage_progress = self.write_headers::<DB>(tx, headers).await?.unwrap_or(last_block_num);
@@ -116,7 +124,7 @@ impl<DB: Database, D: Downloader, C: Consensus, H: HeadersClient> Stage<DB>
     }
 }
 
-impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
+impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     async fn update_head<DB: Database>(
         &self,
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
@@ -124,7 +132,7 @@ impl<D: Downloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     ) -> Result<(), StageError> {
         let hash = tx
             .get::<tables::CanonicalHeaders>(height)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: height })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: height })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
         self.client.update_status(height, hash, H256::from_slice(&td)).await;
         Ok(())
@@ -190,6 +198,8 @@ mod tests {
 
     stage_test_suite!(HeadersTestRunner);
 
+    /// Check that the execution errors on empty database or
+    /// prev progress missing from the database.
     #[tokio::test]
     // Validate that the execution does not fail on timeout
     async fn execute_timeout() {
@@ -206,8 +216,8 @@ mod tests {
         assert!(runner.validate_execution(input).is_ok(), "validation failed");
     }
 
+    /// Execute the stage with linear downloader
     #[tokio::test]
-    // Execute the stage with linear downloader
     async fn execute_with_linear_downloader() {
         let mut runner = HeadersTestRunner::with_linear_downloader();
         let (stage_progress, previous_stage) = (1000, 1200);
@@ -248,24 +258,19 @@ mod tests {
             },
             ExecInput, UnwindInput,
         };
-        use async_trait::async_trait;
         use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
-            consensus::ForkchoiceState,
             db::{self, models::blocks::BlockNumHash, tables, DbTx},
-            p2p::headers::{
-                client::HeadersClient,
-                downloader::{DownloadError, Downloader},
-            },
+            p2p::headers::downloader::HeaderDownloader,
             test_utils::{
-                gen_random_header, gen_random_header_range, TestConsensus, TestHeadersClient,
+                generators::{random_header, random_header_range},
+                TestConsensus, TestHeaderDownloader, TestHeadersClient,
             },
         };
         use reth_primitives::{rpc::BigEndianHash, SealedHeader, H256, U256};
-        use std::{ops::Deref, sync::Arc, time::Duration};
-        use tokio_stream::StreamExt;
+        use std::{ops::Deref, sync::Arc};
 
-        pub(crate) struct HeadersTestRunner<D: Downloader> {
+        pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             pub(crate) context: Option<Vec<SealedHeader>>,
@@ -273,20 +278,20 @@ mod tests {
             db: StageTestDB,
         }
 
-        impl Default for HeadersTestRunner<TestDownloader> {
+        impl Default for HeadersTestRunner<TestHeaderDownloader> {
             fn default() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
                 Self {
                     client: client.clone(),
                     consensus: Arc::new(TestConsensus::default()),
-                    downloader: Arc::new(TestDownloader::new(client)),
+                    downloader: Arc::new(TestHeaderDownloader::new(client)),
                     db: StageTestDB::default(),
                     context: None,
                 }
             }
         }
 
-        impl<D: Downloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
 
             fn db(&self) -> &StageTestDB {
@@ -303,19 +308,19 @@ mod tests {
         }
 
         #[async_trait::async_trait]
-        impl<D: Downloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
             fn seed_execution(
                 &mut self,
                 input: ExecInput,
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let start = input.stage_progress.unwrap_or_default();
-                let head = gen_random_header(start, None);
+                let head = random_header(start, None);
                 self.insert_header(&head)?;
 
                 // use previous progress as seed size
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
                 if end > start + 1 {
-                    let mut headers = gen_random_header_range(start + 1..end, head.hash());
+                    let mut headers = random_header_range(start + 1..end, head.hash());
                     headers.insert(0, head);
                     self.context = Some(headers);
                 }
@@ -354,14 +359,14 @@ mod tests {
             }
         }
 
-        impl<D: Downloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
             fn seed_unwind(
                 &mut self,
                 input: UnwindInput,
                 highest_entry: u64,
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let lowest_entry = input.unwind_to.saturating_sub(100);
-                let headers = gen_random_header_range(lowest_entry..highest_entry, H256::zero());
+                let headers = random_header_range(lowest_entry..highest_entry, H256::zero());
                 self.insert_headers(headers.iter())?;
                 Ok(())
             }
@@ -371,15 +376,15 @@ mod tests {
                 input: UnwindInput,
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let unwind_to = input.unwind_to;
-                self.db().check_no_entry_above_by_value::<tables::HeaderNumbers, _>(
+                self.db.check_no_entry_above_by_value::<tables::HeaderNumbers, _>(
                     unwind_to,
                     |val| val,
                 )?;
-                self.db()
+                self.db
                     .check_no_entry_above::<tables::CanonicalHeaders, _>(unwind_to, |key| key)?;
-                self.db()
+                self.db
                     .check_no_entry_above::<tables::Headers, _>(unwind_to, |key| key.number())?;
-                self.db()
+                self.db
                     .check_no_entry_above::<tables::HeaderTD, _>(unwind_to, |key| key.number())?;
                 Ok(())
             }
@@ -389,13 +394,14 @@ mod tests {
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
                 let consensus = Arc::new(TestConsensus::default());
-                let downloader =
-                    Arc::new(LinearDownloadBuilder::new().build(consensus.clone(), client.clone()));
+                let downloader = Arc::new(
+                    LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
+                );
                 Self { client, consensus, downloader, db: StageTestDB::default(), context: None }
             }
         }
 
-        impl<D: Downloader> HeadersTestRunner<D> {
+        impl<D: HeaderDownloader> HeadersTestRunner<D> {
             /// Insert header into tables
             pub(crate) fn insert_header(&self, header: &SealedHeader) -> Result<(), db::Error> {
                 self.insert_headers(std::iter::once(header))
@@ -456,58 +462,6 @@ mod tests {
                 }
 
                 Ok(())
-            }
-        }
-
-        #[derive(Debug)]
-        pub(crate) struct TestDownloader {
-            client: Arc<TestHeadersClient>,
-        }
-
-        impl TestDownloader {
-            pub(crate) fn new(client: Arc<TestHeadersClient>) -> Self {
-                Self { client }
-            }
-        }
-
-        #[async_trait]
-        impl Downloader for TestDownloader {
-            type Consensus = TestConsensus;
-            type Client = TestHeadersClient;
-
-            fn timeout(&self) -> Duration {
-                Duration::from_secs(1)
-            }
-
-            fn consensus(&self) -> &Self::Consensus {
-                unimplemented!()
-            }
-
-            fn client(&self) -> &Self::Client {
-                &self.client
-            }
-
-            async fn download(
-                &self,
-                _: &SealedHeader,
-                _: &ForkchoiceState,
-            ) -> Result<Vec<SealedHeader>, DownloadError> {
-                let stream = self.client.stream_headers().await;
-                let stream = stream.timeout(Duration::from_secs(1));
-
-                match Box::pin(stream).try_next().await {
-                    Ok(Some(res)) => {
-                        let mut headers =
-                            res.headers.iter().map(|h| h.clone().seal()).collect::<Vec<_>>();
-                        if !headers.is_empty() {
-                            headers.sort_unstable_by_key(|h| h.number);
-                            headers.remove(0); // remove head from response
-                            headers.reverse();
-                        }
-                        Ok(headers)
-                    }
-                    _ => Err(DownloadError::Timeout { request_id: 0 }),
-                }
             }
         }
     }

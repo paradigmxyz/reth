@@ -22,3 +22,17 @@ pub enum PoolError {
     #[error("[{0:?}] Transaction discarded outright due to pool size constraints.")]
     DiscardedOnInsert(TxHash),
 }
+
+// === impl PoolError ===
+
+impl PoolError {
+    /// Returns the hash of the transaction that resulted in this error.
+    pub fn hash(&self) -> &TxHash {
+        match self {
+            PoolError::ReplacementUnderpriced(hash) => hash,
+            PoolError::ProtocolFeeCapTooLow(hash, _) => hash,
+            PoolError::SpammerExceededCapacity(_, hash) => hash,
+            PoolError::DiscardedOnInsert(hash) => hash,
+        }
+    }
+}

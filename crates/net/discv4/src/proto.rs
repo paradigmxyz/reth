@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use crate::{error::DecodePacketError, node::NodeRecord, NodeId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use reth_primitives::{keccak256, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
@@ -136,7 +136,7 @@ impl Message {
         let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_bytes())?;
 
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
-        let node_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let node_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
 
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
@@ -156,7 +156,7 @@ impl Message {
 #[derive(Debug)]
 pub struct Packet {
     pub msg: Message,
-    pub node_id: NodeId,
+    pub node_id: PeerId,
     pub hash: H256,
 }
 
@@ -223,7 +223,7 @@ impl From<NodeRecord> for NodeEndpoint {
 /// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct FindNode {
-    pub id: NodeId,
+    pub id: PeerId,
     pub expire: u64,
 }
 
@@ -499,7 +499,7 @@ mod tests {
         for _ in 0..100 {
             let msg = rng_message(&mut rng);
             let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-            let sender_id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+            let sender_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
 
             let (buf, _) = msg.encode(&secret_key);
 

@@ -193,6 +193,14 @@ pub(crate) mod test_utils {
             Ok(())
         }
 
+        /// Invoke a callback with transaction
+        fn query<F, R>(&self, f: F) -> Result<R, Error>
+        where
+            F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, Error>,
+        {
+            f(self.container().get())
+        }
+
         /// Map a collection of values and store them in the database.
         /// This function commits the transaction before exiting.
         ///
@@ -256,15 +264,13 @@ pub(crate) mod test_utils {
             T: Table,
             F: FnMut(T::Key) -> BlockNumber,
         {
-            let db = self.container();
-            let tx = db.get();
-
-            let mut cursor = tx.cursor::<T>()?;
-            if let Some((key, _)) = cursor.last()? {
-                assert!(selector(key) <= block);
-            }
-
-            Ok(())
+            self.query(|tx| {
+                let mut cursor = tx.cursor::<T>()?;
+                if let Some((key, _)) = cursor.last()? {
+                    assert!(selector(key) <= block);
+                }
+                Ok(())
+            })
         }
 
         /// Check that there is no table entry above a given
@@ -278,15 +284,13 @@ pub(crate) mod test_utils {
             T: Table,
             F: FnMut(T::Value) -> BlockNumber,
         {
-            let db = self.container();
-            let tx = db.get();
-
-            let mut cursor = tx.cursor::<T>()?;
-            if let Some((_, value)) = cursor.last()? {
-                assert!(selector(value) <= block);
-            }
-
-            Ok(())
+            self.query(|tx| {
+                let mut cursor = tx.cursor::<T>()?;
+                if let Some((_, value)) = cursor.last()? {
+                    assert!(selector(value) <= block);
+                }
+                Ok(())
+            })
         }
     }
 

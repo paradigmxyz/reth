@@ -11,7 +11,10 @@ use rand::{
     distributions::{Uniform, WeightedIndex},
     prelude::Distribution,
 };
-use reth_primitives::{Address, TxHash, H256, U256};
+use reth_primitives::{
+    Address, FromRecoveredTransaction, Transaction, TransactionSignedEcRecovered, TxHash, H256,
+    U256,
+};
 use std::{ops::Range, sync::Arc, time::Instant};
 
 pub type MockTxPool = TxPool<MockOrdering>;
@@ -330,6 +333,48 @@ impl PoolTransaction for MockTransaction {
 
     fn size(&self) -> usize {
         0
+    }
+}
+
+impl FromRecoveredTransaction for MockTransaction {
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+        let sender = tx.signer();
+        let transaction = tx.into_signed();
+        let hash = transaction.hash;
+        match transaction.transaction {
+            Transaction::Legacy { chain_id, nonce, gas_price, gas_limit, to, value, input } => {
+                MockTransaction::Legacy {
+                    hash,
+                    sender,
+                    nonce,
+                    gas_price: gas_price.into(),
+                    gas_limit,
+                    value,
+                }
+            }
+            Transaction::Eip1559 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                input,
+                access_list,
+            } => MockTransaction::Eip1559 {
+                hash,
+                sender,
+                nonce,
+                max_fee_per_gas: max_fee_per_gas.into(),
+                max_priority_fee_per_gas: max_priority_fee_per_gas.into(),
+                gas_limit,
+                value,
+            },
+            Transaction::Eip2930 { .. } => {
+                unimplemented!()
+            }
+        }
     }
 }
 

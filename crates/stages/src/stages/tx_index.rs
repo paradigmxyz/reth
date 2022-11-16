@@ -37,13 +37,13 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: last_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: last_block })?;
 
         // The start block for this iteration
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: start_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: start_block })?;
 
         // The maximum block that this stage should insert to
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
@@ -65,8 +65,8 @@ impl<DB: Database> Stage<DB> for TxIndex {
 
         // Aggregate and insert cumulative transaction count for each block number
         for entry in entries {
-            let (key, tx_count) = entry?;
-            count += tx_count as u64;
+            let (key, body) = entry?;
+            count += body.tx_amount;
             cursor.append(key, count)?;
         }
 
@@ -92,7 +92,10 @@ mod tests {
         UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
+    use reth_interfaces::{
+        db::models::{BlockNumHash, StoredBlockBody},
+        test_utils::generators::random_header_range,
+    };
     use reth_primitives::H256;
 
     stage_test_suite!(TxIndexTestRunner);
@@ -123,21 +126,24 @@ mod tests {
             let start = pivot.saturating_sub(100);
             let mut end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
             end += 2; // generate 2 additional headers to account for start header lookup
-            let headers = gen_random_header_range(start..end, H256::zero());
+            let headers = random_header_range(start..end, H256::zero());
 
             let headers =
                 headers.into_iter().map(|h| (h, rand::random::<u8>())).collect::<Vec<_>>();
 
-            self.db().map_put::<tables::CanonicalHeaders, _, _>(&headers, |(h, _)| {
+            self.db.map_put::<tables::CanonicalHeaders, _, _>(&headers, |(h, _)| {
                 (h.number, h.hash())
             })?;
-            self.db().map_put::<tables::BlockBodies, _, _>(&headers, |(h, count)| {
-                (BlockNumHash((h.number, h.hash())), *count as u16)
+            self.db.map_put::<tables::BlockBodies, _, _>(&headers, |(h, count)| {
+                (
+                    BlockNumHash((h.number, h.hash())),
+                    StoredBlockBody { base_tx_id: 0, tx_amount: *count as u64, ommers: vec![] },
+                )
             })?;
 
             let slice_up_to =
                 std::cmp::min(pivot.saturating_sub(start) as usize, headers.len() - 1);
-            self.db().transform_append::<tables::CumulativeTxCount, _, _>(
+            self.db.transform_append::<tables::CumulativeTxCount, _, _>(
                 &headers[..=slice_up_to],
                 |prev, (h, count)| {
                     (BlockNumHash((h.number, h.hash())), prev.unwrap_or_default() + (*count as u64))
@@ -151,7 +157,7 @@ mod tests {
             &self,
             input: ExecInput,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            let db = self.db().container();
+            let db = self.db.container();
             let tx = db.get();
             let (start, end) = (
                 input.stage_progress.unwrap_or_default(),
@@ -169,7 +175,7 @@ mod tests {
             let mut last_num = start;
             while let Some(entry) = tx_count_walker.next() {
                 let (key, db_count) = entry?;
-                count += tx.get::<tables::BlockBodies>(key)?.unwrap() as u64;
+                count += tx.get::<tables::BlockBodies>(key)?.unwrap().tx_amount as u64;
                 assert_eq!(db_count, count);
                 last_num = key.number();
             }
@@ -185,16 +191,13 @@ mod tests {
             input: UnwindInput,
             highest_entry: u64,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            let headers = gen_random_header_range(input.unwind_to..highest_entry, H256::zero());
-            self.db().transform_append::<tables::CumulativeTxCount, _, _>(
-                &headers,
-                |prev, h| {
-                    (
-                        BlockNumHash((h.number, h.hash())),
-                        prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                    )
-                },
-            )?;
+            let headers = random_header_range(input.unwind_to..highest_entry, H256::zero());
+            self.db.transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
+                (
+                    BlockNumHash((h.number, h.hash())),
+                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
+                )
+            })?;
             Ok(())
         }
 
@@ -202,10 +205,9 @@ mod tests {
             &self,
             input: UnwindInput,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.db()
-                .check_no_entry_above::<tables::CumulativeTxCount, _>(input.unwind_to, |h| {
-                    h.number()
-                })?;
+            self.db.check_no_entry_above::<tables::CumulativeTxCount, _>(input.unwind_to, |h| {
+                h.number()
+            })?;
             Ok(())
         }
     }

@@ -3,9 +3,9 @@
 #![deny(missing_docs)]
 #![allow(clippy::redundant_else, clippy::too_many_lines)]
 
+use crate::{BlockNumber, H256};
 use crc::crc32;
 use maplit::btreemap;
-use reth_primitives::{BlockNumber, H256};
 use reth_rlp::*;
 use std::{
     collections::{BTreeMap, BTreeSet},

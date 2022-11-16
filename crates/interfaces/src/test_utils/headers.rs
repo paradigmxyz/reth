@@ -1,32 +1,33 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, Consensus},
+    consensus::{self, Consensus, Error},
     p2p::headers::{
         client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
-        downloader::{DownloadError, Downloader},
+        downloader::HeaderDownloader,
+        error::DownloadError,
     },
 };
-use reth_primitives::{Header, SealedHeader, H256, H512, U256};
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-#[derive(Debug)]
 /// A test downloader which just returns the values that have been pushed to it.
-pub struct TestDownloader {
-    result: Result<Vec<SealedHeader>, DownloadError>,
+#[derive(Debug)]
+pub struct TestHeaderDownloader {
+    client: Arc<TestHeadersClient>,
 }
 
-impl TestDownloader {
+impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(result: Result<Vec<SealedHeader>, DownloadError>) -> Self {
-        Self { result }
+    pub fn new(client: Arc<TestHeadersClient>) -> Self {
+        Self { client }
     }
 }
 
 #[async_trait::async_trait]
-impl Downloader for TestDownloader {
+impl HeaderDownloader for TestHeaderDownloader {
     type Consensus = TestConsensus;
     type Client = TestHeadersClient;
 
@@ -39,7 +40,7 @@ impl Downloader for TestDownloader {
     }
 
     fn client(&self) -> &Self::Client {
-        unimplemented!()
+        &self.client
     }
 
     async fn download(
@@ -47,12 +48,26 @@ impl Downloader for TestDownloader {
         _: &SealedHeader,
         _: &ForkchoiceState,
     ) -> Result<Vec<SealedHeader>, DownloadError> {
-        self.result.clone()
+        let stream = self.client.stream_headers().await;
+        let stream = stream.timeout(Duration::from_secs(1));
+
+        match Box::pin(stream).try_next().await {
+            Ok(Some(res)) => {
+                let mut headers = res.headers.iter().map(|h| h.clone().seal()).collect::<Vec<_>>();
+                if !headers.is_empty() {
+                    headers.sort_unstable_by_key(|h| h.number);
+                    headers.remove(0); // remove head from response
+                    headers.reverse();
+                }
+                Ok(headers)
+            }
+            _ => Err(DownloadError::Timeout { request_id: 0 }),
+        }
     }
 }
 
-#[derive(Debug)]
 /// A test client for fetching headers
+#[derive(Debug)]
 pub struct TestHeadersClient {
     req_tx: mpsc::Sender<(u64, HeadersRequest)>,
     req_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, HeadersRequest)>>>,
@@ -118,7 +133,7 @@ impl HeadersClient for TestHeadersClient {
     }
 }
 
-/// Consensus client impl for testing
+/// Consensus engine implementation for testing
 #[derive(Debug)]
 pub struct TestConsensus {
     /// Watcher over the forkchoice state
@@ -141,14 +156,14 @@ impl Default for TestConsensus {
 }
 
 impl TestConsensus {
-    /// Update the forkchoice state
+    /// Update the fork choice state
     pub fn update_tip(&self, tip: H256) {
         let state = ForkchoiceState {
             head_block_hash: tip,
             finalized_block_hash: H256::zero(),
             safe_block_hash: H256::zero(),
         };
-        self.channel.0.send(state).expect("updating forkchoice state failed");
+        self.channel.0.send(state).expect("updating fork choice state failed");
     }
 
     /// Update the validation flag
@@ -174,29 +189,12 @@ impl Consensus for TestConsensus {
             Ok(())
         }
     }
-}
 
-/// Generate a range of random header. The parent hash of the first header
-/// in the result will be equal to head
-pub fn gen_random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<SealedHeader> {
-    let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
-    for idx in rng {
-        headers.push(gen_random_header(
-            idx,
-            Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
-        ));
+    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), Error> {
+        if self.fail_validation {
+            Err(consensus::Error::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
     }
-    headers
-}
-
-/// Generate a random header
-pub fn gen_random_header(number: u64, parent: Option<H256>) -> SealedHeader {
-    let header = reth_primitives::Header {
-        number,
-        nonce: rand::random(),
-        difficulty: U256::from(rand::random::<u32>()),
-        parent_hash: parent.unwrap_or_default(),
-        ..Default::default()
-    };
-    header.seal()
 }
