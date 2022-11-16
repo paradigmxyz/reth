@@ -130,6 +130,16 @@ impl<S> EthStream<S> {
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
+
+    /// Returns the underlying stream.
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+
+    /// Returns mutable access to the underlying stream.
+    pub fn inner_mut(&mut self) -> &mut S {
+        &mut self.inner
+    }
 }
 
 impl<S, E> Stream for EthStream<S>
