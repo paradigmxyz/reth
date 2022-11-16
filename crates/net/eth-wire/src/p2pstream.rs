@@ -14,7 +14,7 @@ use std::{
     fmt::Display,
     io,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio_stream::Stream;
@@ -186,24 +186,6 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        // try to send any buffered outgoing messages
-        while let Some(message) = this.outgoing_messages.pop_front() {
-            // let pinned_inner = Pin::new(&mut this.inner);
-            match Pin::new(&mut this.inner).poll_ready(cx) {
-                Poll::Ready(Ok(())) => {
-                    if let Err(e) = Pin::new(&mut this.inner).start_send(message) {
-                        return Poll::Ready(Some(Err(P2PStreamError::Io(e))))
-                    }
-                }
-                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(P2PStreamError::Io(e)))),
-                Poll::Pending => {
-                    // we need to buffer the message and try again later
-                    this.outgoing_messages.push_front(message);
-                    break
-                }
-            }
-        }
-
         // poll the pinger to determine if we should send a ping
         match this.pinger.poll_ping(cx) {
             Poll::Pending => {}
@@ -212,38 +194,24 @@ where
                 let mut ping_bytes = BytesMut::new();
                 P2PMessage::Ping.encode(&mut ping_bytes);
 
-                if Pin::new(&mut this.inner).poll_ready(cx).is_ready() {
-                    // send the ping message
-                    Pin::new(&mut this.inner).start_send(ping_bytes.into())?
-                } else {
-                    // check if the buffer is full
-                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                    }
-
-                    // if the sink is not ready, buffer the message
-                    this.outgoing_messages.push_back(ping_bytes.into());
+                // check if the buffer is full
+                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                    return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
                 }
+
+                // if the sink is not ready, buffer the message
+                this.outgoing_messages.push_back(ping_bytes.into());
             }
             _ => {
                 // encode the disconnect message
                 let mut disconnect_bytes = BytesMut::new();
                 P2PMessage::Disconnect(DisconnectReason::PingTimeout).encode(&mut disconnect_bytes);
 
-                if Pin::new(&mut this.inner).poll_ready(cx).is_ready() {
-                    // send the disconnect message
-                    Pin::new(&mut this.inner).start_send(disconnect_bytes.into())?
-                } else {
-                    // check if the buffer is full
-                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                    }
+                // clear any buffered messages so that the next message will be disconnect
+                this.outgoing_messages.clear();
+                this.outgoing_messages.push_back(disconnect_bytes.freeze());
 
-                    // if the sink is not ready, buffer the message
-                    this.outgoing_messages.push_back(disconnect_bytes.into());
-                }
-
-                // since the ping stream has timed out, let's send a None
+                // End the stream after ping related error
                 return Poll::Ready(None)
             }
         }
@@ -264,18 +232,11 @@ where
                 let mut pong_bytes = BytesMut::new();
                 P2PMessage::Pong.encode(&mut pong_bytes);
 
-                if Pin::new(&mut this.inner).poll_ready(cx).is_ready() {
-                    // send the pong message
-                    Pin::new(&mut this.inner).start_send(pong_bytes.into())?
-                } else {
-                    // check if the buffer is full
-                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                    }
-
-                    // if the sink is not ready, buffer the message
-                    this.outgoing_messages.push_back(pong_bytes.into());
+                // check if the buffer is full
+                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                    return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
                 }
+                this.outgoing_messages.push_back(pong_bytes.into());
 
                 // continue to the next message if there is one
             } else if id == P2PMessageID::Disconnect as u8 {
@@ -330,12 +291,35 @@ where
 {
     type Error = P2PStreamError;
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_ready(cx).map_err(Into::into)
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut this = self.as_mut();
+
+        match this.inner.poll_ready_unpin(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
+            Poll::Ready(Ok(())) => {
+                let flushed = this.poll_flush(cx);
+                if flushed.is_ready() {
+                    return flushed
+                }
+            }
+        }
+
+        if self.outgoing_messages.len() < MAX_P2P_CAPACITY {
+            // still has capacity
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let this = self.project();
+
+        // ensure we have free capacity
+        if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+            return Err(P2PStreamError::SendBufferFull)
+        }
 
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
 
@@ -348,16 +332,35 @@ where
         // id)
         compressed.truncate(compressed_size + 1);
 
-        this.inner.start_send(compressed.freeze())?;
+        this.outgoing_messages.push_back(compressed.freeze());
+
         Ok(())
     }
 
+    /// Returns Poll::Ready(Ok(())) when no buffered items remain and the sink has been successfully
+    /// closed.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_flush(cx).map_err(Into::into)
+        let mut this = self.project();
+        loop {
+            match ready!(this.inner.as_mut().poll_flush(cx)) {
+                Err(err) => return Poll::Ready(Err(err.into())),
+                Ok(()) => {
+                    if let Some(message) = this.outgoing_messages.pop_front() {
+                        if let Err(err) = this.inner.as_mut().start_send(message) {
+                            return Poll::Ready(Err(err.into()))
+                        }
+                    } else {
+                        return Poll::Ready(Ok(()))
+                    }
+                }
+            }
+        }
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_close(cx).map_err(Into::into)
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_flush(cx))?;
+
+        Poll::Ready(Ok(()))
     }
 }
 
