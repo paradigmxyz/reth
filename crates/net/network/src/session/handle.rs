@@ -7,7 +7,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    EthStream, P2PStream, Status,
+    DisconnectReason, EthStream, P2PStream, Status,
 };
 use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
@@ -48,9 +48,9 @@ pub(crate) struct ActiveSessionHandle {
 
 impl ActiveSessionHandle {
     /// Sends a disconnect command to the session.
-    pub(crate) fn disconnect(&self) {
+    pub(crate) fn disconnect(&self, reason: Option<DisconnectReason>) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
-        let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect);
+        let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
     }
 }
 
@@ -95,7 +95,10 @@ pub(crate) enum PendingSessionEvent {
 #[derive(Debug)]
 pub(crate) enum SessionCommand {
     /// Disconnect the connection
-    Disconnect,
+    Disconnect {
+        /// Why the disconnect was initiated
+        reason: Option<DisconnectReason>,
+    },
     /// Sends a message to the peer
     Message(PeerMessage),
 }

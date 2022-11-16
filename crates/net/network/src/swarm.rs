@@ -8,6 +8,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
+    DisconnectReason,
 };
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
@@ -90,7 +91,9 @@ where
                 }),
                 Err(err) => {
                     match err {
-                        AddSessionError::AtCapacity { peer } => self.sessions.disconnect(peer),
+                        AddSessionError::AtCapacity { peer } => {
+                            self.sessions.disconnect(peer, Some(DisconnectReason::TooManyPeers))
+                        }
                     };
                     None
                 }
@@ -146,8 +149,8 @@ where
             StateAction::Connect { remote_addr, node_id } => {
                 self.sessions.dial_outbound(remote_addr, node_id);
             }
-            StateAction::Disconnect { node_id } => {
-                self.sessions.disconnect(node_id);
+            StateAction::Disconnect { peer_id: node_id, reason } => {
+                self.sessions.disconnect(node_id, reason);
             }
             StateAction::NewBlock { peer_id, block: msg } => {
                 let msg = PeerMessage::NewBlock(msg);
