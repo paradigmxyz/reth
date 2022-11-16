@@ -115,6 +115,7 @@ where
             sessions_config,
             genesis_hash,
             block_import,
+            network_mode,
             ..
         } = config;
 
@@ -142,6 +143,7 @@ where
             to_manager_tx,
             local_node_id,
             peers_handle,
+            network_mode,
         );
 
         Ok(Self {
@@ -211,18 +213,40 @@ where
         }
     }
 
+    /// Enforces [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p) consensus rules for the network protocol
+    ///
+    /// Depending on the mode of the network:
+    ///    - disconnect peer if in POS
+    ///    - execute the closure if in POW
+    fn within_pow_or_disconnect<F>(&mut self, peer_id: PeerId, only_pow: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        // reject message in POS
+        if self.handle.mode().is_stake() {
+            // connections to peers which send invalid messages should be terminated
+            self.swarm.sessions_mut().disconnect(peer_id);
+        } else {
+            only_pow(self);
+        }
+    }
+
     /// Handles a received Message from the peer.
     fn on_peer_message(&mut self, peer_id: PeerId, msg: PeerMessage) {
         match msg {
             PeerMessage::NewBlockHashes(hashes) => {
-                let hashes = Arc::try_unwrap(hashes).unwrap_or_else(|arc| (*arc).clone());
-                // update peer's state, to track what blocks this peer has seen
-                self.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
+                self.within_pow_or_disconnect(peer_id, |this| {
+                    let hashes = Arc::try_unwrap(hashes).unwrap_or_else(|arc| (*arc).clone());
+                    // update peer's state, to track what blocks this peer has seen
+                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
+                })
             }
             PeerMessage::NewBlock(block) => {
-                self.swarm.state_mut().on_new_block(peer_id, block.hash);
-                // start block import process
-                self.block_import.on_new_block(peer_id, block);
+                self.within_pow_or_disconnect(peer_id, move |this| {
+                    this.swarm.state_mut().on_new_block(peer_id, block.hash);
+                    // start block import process
+                    this.block_import.on_new_block(peer_id, block);
+                });
             }
             PeerMessage::PooledTransactions(msg) => {
                 self.event_listeners
@@ -245,6 +269,10 @@ where
                 self.event_listeners.listeners.push(tx);
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
+                if self.handle.mode().is_stake() {
+                    error!(target = "net", "Block propagation is not supported in POS - [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)");
+                    return
+                }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
             }

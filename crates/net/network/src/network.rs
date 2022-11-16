@@ -1,4 +1,4 @@
-use crate::{manager::NetworkEvent, message::PeerRequest, peers::PeersHandle};
+use crate::{config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle};
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
 use reth_primitives::{PeerId, H256};
@@ -27,6 +27,7 @@ impl NetworkHandle {
         to_manager_tx: UnboundedSender<NetworkHandleMessage>,
         local_node_id: PeerId,
         peers: PeersHandle,
+        network_mode: NetworkMode,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -34,6 +35,7 @@ impl NetworkHandle {
             listener_address,
             local_node_id,
             peers,
+            network_mode,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -47,6 +49,11 @@ impl NetworkHandle {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
         rx
+    }
+
+    /// Returns the mode of the network, either pow, or pos
+    pub fn mode(&self) -> &NetworkMode {
+        &self.inner.network_mode
     }
 
     /// Sends a [`NetworkHandleMessage`] to the manager
@@ -71,6 +78,8 @@ struct NetworkInner {
     local_node_id: PeerId,
     /// Access to the all the nodes
     peers: PeersHandle,
+    /// The mode of the network
+    network_mode: NetworkMode,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
