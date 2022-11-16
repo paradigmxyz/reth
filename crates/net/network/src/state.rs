@@ -10,7 +10,9 @@ use crate::{
     },
     peers::{PeerAction, PeersManager},
 };
-use reth_eth_wire::{capability::Capabilities, BlockHashNumber, NewBlockHashes, Status};
+use reth_eth_wire::{
+    capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
+};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{PeerId, H256};
 use std::{
@@ -224,14 +226,14 @@ where
                 self.queued_messages
                     .push_back(StateAction::Connect { node_id: peer_id, remote_addr });
             }
-            PeerAction::Disconnect { peer_id } => {
+            PeerAction::Disconnect { peer_id, reason } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { node_id: peer_id });
+                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
             PeerAction::DisconnectBannedIncoming { peer_id } => {
                 // TODO: can IP ban
                 self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { node_id: peer_id });
+                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
         }
     }
@@ -388,7 +390,11 @@ pub enum StateAction {
     /// Create a new connection to the given node.
     Connect { remote_addr: SocketAddr, node_id: PeerId },
     /// Disconnect an existing connection
-    Disconnect { node_id: PeerId },
+    Disconnect {
+        peer_id: PeerId,
+        /// Why the disconnect was initiated
+        reason: Option<DisconnectReason>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
