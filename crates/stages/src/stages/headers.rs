@@ -198,9 +198,8 @@ mod tests {
         runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
-        let result = rx.await.unwrap();
         assert_matches!(
-            result,
+            rx.await.unwrap(),
             Ok(ExecOutput { done, reached_tip, stage_progress: out_stage_progress })
                 if !done && !reached_tip && out_stage_progress == 0
         );
@@ -228,7 +227,7 @@ mod tests {
         runner
             .client
             .on_header_request(1, |id, _| {
-                let response = download_result.clone().into_iter().map(|h| h.unseal()).collect();
+                let response = download_result.iter().map(|h| h.clone().unseal()).collect();
                 runner.client.send_header_response(id, response)
             })
             .await;
