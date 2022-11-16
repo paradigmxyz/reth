@@ -5,7 +5,7 @@ use reth_interfaces::p2p::bodies::{
     error::{BodiesClientError, DownloadError},
 };
 use reth_primitives::{BlockNumber, H256};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 /// Downloads bodies in batches.
 ///
@@ -16,19 +16,10 @@ pub struct ConcurrentDownloader<C> {
     client: Arc<C>,
     /// The batch size per one request
     pub batch_size: usize,
-    /// A single request timeout
-    pub request_timeout: Duration,
-    /// The number of retries for downloading
-    pub request_retries: usize,
 }
 
 impl<C: BodiesClient> BodyDownloader for ConcurrentDownloader<C> {
     type Client = C;
-
-    /// The request timeout duration
-    fn timeout(&self) -> Duration {
-        self.request_timeout
-    }
 
     /// The block bodies client
     fn client(&self) -> &Self::Client {
@@ -61,53 +52,6 @@ impl<C: BodiesClient> BodyDownloader for ConcurrentDownloader<C> {
     }
 }
 
-/// A [ConcurrentDownloader] builder.
-#[derive(Debug)]
-pub struct ConcurrentDownloaderBuilder {
-    /// The batch size per one request
-    batch_size: usize,
-    /// A single request timeout
-    request_timeout: Duration,
-    /// The number of retries for downloading
-    request_retries: usize,
-}
-
-impl Default for ConcurrentDownloaderBuilder {
-    fn default() -> Self {
-        Self { batch_size: 100, request_timeout: Duration::from_millis(100), request_retries: 5 }
-    }
-}
-
-impl ConcurrentDownloaderBuilder {
-    /// Set the request batch size
-    pub fn batch_size(mut self, size: usize) -> Self {
-        self.batch_size = size;
-        self
-    }
-
-    /// Set the request timeout
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.request_timeout = timeout;
-        self
-    }
-
-    /// Set the number of retries per request
-    pub fn retries(mut self, retries: usize) -> Self {
-        self.request_retries = retries;
-        self
-    }
-
-    /// Build [ConcurrentDownloader] with the provided client
-    pub fn build<C: BodiesClient>(self, client: Arc<C>) -> ConcurrentDownloader<C> {
-        ConcurrentDownloader {
-            client,
-            batch_size: self.batch_size,
-            request_timeout: self.request_timeout,
-            request_retries: self.request_retries,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -121,12 +65,4 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn client_failure() {}
-
-    #[tokio::test]
-    #[ignore]
-    async fn retries_requests() {}
-
-    #[tokio::test]
-    #[ignore]
-    async fn timeout() {}
 }

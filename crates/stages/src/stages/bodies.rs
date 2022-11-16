@@ -606,7 +606,7 @@ mod tests {
         use reth_primitives::{
             BigEndianHash, BlockLocked, BlockNumber, Header, SealedHeader, H256, U256,
         };
-        use std::{collections::HashMap, ops::Deref, time::Duration};
+        use std::{collections::HashMap, ops::Deref};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
@@ -809,10 +809,6 @@ mod tests {
 
         impl BodyDownloader for TestBodyDownloader {
             type Client = NoopClient;
-
-            fn timeout(&self) -> Duration {
-                unreachable!()
-            }
 
             fn client(&self) -> &Self::Client {
                 unreachable!()
