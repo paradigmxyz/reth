@@ -1,8 +1,12 @@
 //! ALl functions for verification of block
 use crate::{config, Config};
-use reth_interfaces::{consensus::Error, provider::HeaderProvider, Result as RethResult};
+use reth_interfaces::{
+    consensus::Error,
+    provider::{AccountProvider, HeaderProvider},
+    Result as RethResult,
+};
 use reth_primitives::{
-    Account, Address, BlockLocked, SealedHeader, Transaction, TransactionSigned,
+    Account, BlockLocked, BlockNumber, SealedHeader, Transaction, EMPTY_OMMER_ROOT, H256, U256,
 };
 use std::time::SystemTime;
 
@@ -26,38 +30,36 @@ pub fn validate_header_standalone(
         return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp })
     }
 
+    // From yellow papper: extraData: An arbitrary byte array containing data
+    // relevant to this block. This must be 32 bytes or fewer; formally Hx.
+    if header.extra_data.len() > 32 {
+        return Err(Error::ExtraDataExceedsMax { len: header.extra_data.len() })
+    }
+
     // Check if base fee is set.
-    if config.paris_hard_fork_block >= header.number && header.base_fee_per_gas.is_some() {
+    if header.number >= config.london_hard_fork_block && header.base_fee_per_gas.is_none() {
         return Err(Error::BaseFeeMissing)
     }
 
-    Ok(())
-}
-
-/// Validate transactions standalone
-pub fn validate_transactions_standalone(
-    transaction: &Transaction,
-    config: &Config,
-) -> Result<(), Error> {
-    let chain_id = match transaction {
-        Transaction::Legacy { chain_id, .. } => *chain_id,
-        Transaction::Eip2930 { chain_id, .. } => Some(*chain_id),
-        Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
-            // EIP-1559: add more constraints to the tx validation
-            // https://github.com/ethereum/EIPs/pull/3594
-            if max_priority_fee_per_gas > max_fee_per_gas {
-                return Err(Error::TransactionPriorityFeeMoreThenMaxFee)
-            }
-            Some(*chain_id)
+    // EIP-3675: Upgrade consensus to Proof-of-Stake:
+    // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
+    if header.number >= config.paris_hard_fork_block {
+        if header.difficulty != U256::zero() {
+            return Err(Error::TheMergeDifficultyIsNotZero)
         }
-    };
-    if let Some(chain_id) = chain_id {
-        if chain_id != config.chain_id {
-            return Err(Error::TransactionChainId)
+
+        if header.nonce != 0 {
+            return Err(Error::TheMergeNonceIsNotZero)
+        }
+
+        if header.ommers_hash != EMPTY_OMMER_ROOT {
+            return Err(Error::TheMergeOmmerRootIsNotEmpty)
+        }
+
+        if header.mix_hash != H256::zero() {
+            return Err(Error::TheMergeMixHashIsNotZero)
         }
     }
-
-    // signature validation?
 
     Ok(())
 }
@@ -67,12 +69,49 @@ pub fn validate_transactions_standalone(
 /// The only parameter from the header that affects the transaction is `base_fee`.
 pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
+    config: &Config,
+    at_block_number: BlockNumber,
     base_fee: Option<u64>,
 ) -> Result<(), Error> {
-    // check base fee and few checks that are related to that.
+    let chain_id = match transaction {
+        Transaction::Legacy { chain_id, .. } => {
+            // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
+            if config.spurious_dragon_hard_fork_block <= at_block_number && chain_id.is_some() {
+                return Err(Error::TransactionOldLegacyChainId)
+            }
+            *chain_id
+        }
+        Transaction::Eip2930 { chain_id, .. } => {
+            // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
+            if config.berlin_hard_fork_block > at_block_number {
+                return Err(Error::TransactionEip2930Disabled)
+            }
+            Some(*chain_id)
+        }
+        Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+            // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
+            if config.berlin_hard_fork_block > at_block_number {
+                return Err(Error::TransactionEip1559Disabled)
+            }
+
+            // EIP-1559: add more constraints to the tx validation
+            // https://github.com/ethereum/EIPs/pull/3594
+            if max_priority_fee_per_gas > max_fee_per_gas {
+                return Err(Error::TransactionPriorityFeeMoreThenMaxFee)
+            }
+
+            Some(*chain_id)
+        }
+    };
+    if let Some(chain_id) = chain_id {
+        if chain_id != config.chain_id {
+            return Err(Error::TransactionChainId)
+        }
+    }
+    // Check basefee and few checks that are related to that.
     // https://github.com/ethereum/EIPs/pull/3594
     if let Some(base_fee_per_gas) = base_fee {
-        if transaction.max_fee_per_gas() < base_fee_per_gas {
+        if transaction.max_fee_per_gas() < base_fee_per_gas as u128 {
             return Err(Error::TransactionMaxFeeLessThenBaseFee)
         }
     }
@@ -80,38 +119,43 @@ pub fn validate_transaction_regarding_header(
     Ok(())
 }
 
-/// Account provider
-pub trait AccountProvider {
-    /// Get basic account information.
-    fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>>;
-}
-
 /// Validate transaction in regards of State
-pub fn validate_transaction_regarding_state<AP: AccountProvider>(
-    _transaction: &TransactionSigned,
-    _config: &Config,
-    _account_provider: &AP,
-) -> Result<(), Error> {
-    // sanity check: if account has a bytecode. This is not allowed.s
-    // check nonce
-    // gas_price*gas_limit+value < account.balance
+pub fn validate_transaction_regarding_account(
+    transaction: &Transaction,
+    account: &Account,
+) -> reth_interfaces::Result<()> {
+    // Signer account shoudn't have bytecode. Presence of bytecode means this is a smartcontract.
+    if account.has_bytecode() {
+        return Err(Error::SignerAccountHasBytecode.into())
+    }
 
-    // let max_gas_cost = U512::from(message.gas_limit())
-    //     * U512::from(ethereum_types::U256::from(message.max_fee_per_gas().to_be_bytes()));
-    // // See YP, Eq (57) in Section 6.2 "Execution"
-    // let v0 = max_gas_cost +
-    // U512::from(ethereum_types::U256::from(message.value().to_be_bytes()));
-    // let available_balance =
-    //     ethereum_types::U256::from(self.state.get_balance(sender)?.to_be_bytes()).into();
-    // if available_balance < v0 {
-    //     return Err(TransactionValidationError::Validation(
-    //         BadTransactionError::InsufficientFunds {
-    //             account: sender,
-    //             available: available_balance,
-    //             required: v0,
-    //         },
-    //     ));
-    // }
+    let (nonce, gas_price, gas_limit, value) = match transaction {
+        Transaction::Legacy { nonce, gas_price, gas_limit, value, .. } => {
+            (nonce, gas_price, gas_limit, value)
+        }
+        Transaction::Eip2930 { nonce, gas_price, gas_limit, value, .. } => {
+            (nonce, gas_price, gas_limit, value)
+        }
+        Transaction::Eip1559 { nonce, gas_limit, max_fee_per_gas, value, .. } => {
+            (nonce, max_fee_per_gas, gas_limit, value)
+        }
+    };
+
+    // check nonce
+    if account.nonce + 1 != *nonce {
+        return Err(Error::TransactionNonceNotConsistent.into())
+    }
+
+    // max fee that transaction can potentially spend
+    let max_fee = (*gas_limit as u128).saturating_mul(*gas_price).saturating_add(*value);
+
+    // check if account balance has enought to cover worst case
+    if max_fee > account.balance.as_u128() {
+        return Err(
+            Error::InsufficientFunds { max_fee, available_funds: account.balance.as_u128() }.into()
+        )
+    }
+
     Ok(())
 }
 
@@ -121,10 +165,7 @@ pub fn validate_transaction_regarding_state<AP: AccountProvider>(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(
-    block: &BlockLocked,
-    validate_receipts: bool,
-) -> Result<(), Error> {
+pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let ommers_hash =
@@ -144,29 +185,6 @@ pub fn validate_block_standalone(
             got: transaction_root,
             expected: block.header.transactions_root,
         })
-    }
-
-    // TODO: transaction verification,maybe make it configurable as in check only
-    // signatures/limits/types
-    // Things to probably check:
-    // - Chain ID
-    // - Base fee per gas (if applicable)
-    // - Max priority fee per gas (if applicable)
-
-    // TODO: Check if all transaction gas total does not go over block limit
-
-    // Check receipts root
-    // TODO(onbjerg): This should probably be accessible directly on [Block]
-    // NOTE(onbjerg): Pre-validation does not validate the receipts root since we do not have the
-    // receipts yet (this validation is before execution). Maybe this should not be in here?
-    if validate_receipts {
-        let receipts_root = reth_primitives::proofs::calculate_receipt_root(block.receipts.iter());
-        if block.header.receipts_root != receipts_root {
-            return Err(Error::BodyReceiptsRootDiff {
-                got: receipts_root,
-                expected: block.header.receipts_root,
-            })
-        }
     }
 
     Ok(())
@@ -298,22 +316,40 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
 }
 
 /// Full validation of block before execution.
-pub fn full_validation<PROV: HeaderProvider>(
+pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     block: &BlockLocked,
-    provider: PROV,
+    provider: Provider,
     config: &Config,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, config)?;
-    validate_block_standalone(block, true)?;
+    validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
+
+    for transaction in block.body.iter() {
+        validate_transaction_regarding_header(
+            transaction,
+            config,
+            block.header.number,
+            block.header.base_fee_per_gas,
+        )?;
+
+        // NOTE: depending on the need of the stages, recovery could be done in different place.
+        let recovered =
+            transaction.try_ecrecovered().ok_or(Error::TransactionSignerRecoveryError)?;
+
+        let account =
+            provider.basic_account(recovered.signer())?.ok_or(Error::SignerAccountNotExisting)?;
+
+        validate_transaction_regarding_account(transaction, &account)?;
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use reth_interfaces::Result;
-    use reth_primitives::{hex_literal::hex, BlockHash, Header};
+    use reth_primitives::{hex_literal::hex, Address, BlockHash, Header};
 
     use super::*;
 
@@ -347,16 +383,23 @@ mod tests {
     struct Provider {
         is_known: bool,
         parent: Option<Header>,
+        account: Option<Account>,
     }
 
     impl Provider {
         /// New provider with parent
         fn new(parent: Option<Header>) -> Self {
-            Self { is_known: false, parent }
+            Self { is_known: false, parent, account: None }
         }
         /// New provider where is_known is always true
         fn new_known() -> Self {
-            Self { is_known: true, parent: None }
+            Self { is_known: true, parent: None, account: None }
+        }
+    }
+
+    impl AccountProvider for Provider {
+        fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
+            Ok(self.account)
         }
     }
 
@@ -388,7 +431,7 @@ mod tests {
             gas_used: 0x6e813,
             timestamp: 0x635f9657,
             extra_data: hex!("")[..].into(),
-            mix_hash: hex!("f8c29910a0a2fd65b260d83ffa2547a6db279095d109a6e64527d14035263cfc").into(),
+            mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
         };
@@ -401,10 +444,9 @@ mod tests {
         parent.number -= 1;
 
         let ommers = Vec::new();
-        let receipts = Vec::new();
         let body = Vec::new();
 
-        (BlockLocked { header: header.seal(), body, receipts, ommers }, parent)
+        (BlockLocked { header: header.seal(), body, ommers }, parent)
     }
 
     #[test]

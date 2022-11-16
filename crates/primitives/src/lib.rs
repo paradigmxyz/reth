@@ -11,6 +11,7 @@
 
 mod account;
 mod block;
+pub mod bloom;
 mod chain;
 mod constants;
 mod error;
@@ -31,7 +32,8 @@ pub mod proofs;
 pub use account::Account;
 pub use block::{Block, BlockHashOrNumber, BlockLocked};
 pub use chain::Chain;
-pub use constants::MAINNET_GENESIS;
+pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
+pub use ethbloom::Bloom;
 pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, SealedHeader};
@@ -74,7 +76,7 @@ pub type PeerId = H512;
 
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, Bloom, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, H128, H160, H256, H512, H64, U128, U256, U64},
 };
 
 #[doc(hidden)]

@@ -10,5 +10,12 @@ pub struct Account {
     /// Account balance.
     pub balance: U256,
     /// Hash of the bytecode.
-    pub bytecode_hash: H256,
+    pub bytecode_hash: Option<H256>,
+}
+
+impl Account {
+    /// Does account has a bytecode.
+    pub fn has_bytecode(&self) -> bool {
+        self.bytecode_hash.is_some()
+    }
 }

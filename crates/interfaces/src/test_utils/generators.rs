@@ -120,7 +120,6 @@ pub fn random_block(number: u64, parent: Option<H256>) -> BlockLocked {
         .seal(),
         body: transactions,
         ommers: ommers.into_iter().map(|ommer| ommer.seal()).collect(),
-        ..Default::default()
     }
 }
 
