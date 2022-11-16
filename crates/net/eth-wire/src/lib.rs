@@ -23,5 +23,5 @@ pub use types::*;
 
 pub use crate::{
     ethstream::{EthStream, UnauthedEthStream},
-    p2pstream::{HelloMessage, P2PStream, UnauthedP2PStream},
+    p2pstream::{DisconnectReason, HelloMessage, P2PStream, UnauthedP2PStream},
 };

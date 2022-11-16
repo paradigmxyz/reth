@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use reth_eth_wire::DisconnectReason;
 use reth_primitives::PeerId;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -124,8 +125,9 @@ impl PeersManager {
     pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
         if let Some(entry) = self.peers.remove(&peer_id) {
             if entry.state.is_connected() {
+                // TODO(mattsse): is this right to disconnect peers?
                 self.connection_info.decr_state(entry.state);
-                self.queued_actions.push_back(PeerAction::Disconnect { peer_id })
+                self.queued_actions.push_back(PeerAction::Disconnect { peer_id, reason: None })
             }
         }
     }
@@ -352,7 +354,7 @@ pub enum PeerAction {
         remote_addr: SocketAddr,
     },
     /// Disconnect an existing connection.
-    Disconnect { peer_id: PeerId },
+    Disconnect { peer_id: PeerId, reason: Option<DisconnectReason> },
     /// Disconnect an existing incoming connection, because the peers reputation is below the
     /// banned threshold.
     DisconnectBannedIncoming {
