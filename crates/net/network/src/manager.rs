@@ -27,14 +27,12 @@ use crate::{
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
+    transactions::NetworkTransactionEvent,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
-};
-use reth_interfaces::{p2p::error::RequestResult, provider::BlockProvider};
+use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
+use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
 use std::{
     net::SocketAddr,
@@ -45,7 +43,7 @@ use std::{
     },
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, trace};
 
@@ -85,6 +83,8 @@ pub struct NetworkManager<C> {
     listener_address: Arc<Mutex<SocketAddr>>,
     /// All listeners for [`Network`] events.
     event_listeners: NetworkEventListeners,
+    /// Sender half to send events to the [`TransactionsManager`] task, if configured.
+    to_transactions: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -153,9 +153,15 @@ where
             block_import,
             listener_address,
             event_listeners: Default::default(),
+            to_transactions: None,
             num_active_peers,
             local_node_id,
         })
+    }
+
+    /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
+    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
+        self.to_transactions = Some(tx);
     }
 
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
@@ -176,17 +182,23 @@ where
         // TODO: disconnect?
     }
 
+    /// Sends an event to the [`TransactionsManager`] if configured
+    fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
+        if let Some(ref tx) = self.to_transactions {
+            let _ = tx.send(event);
+        }
+    }
+
     /// Handle an incoming request from the peer
     fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
         match req {
             PeerRequest::GetBlockHeaders { .. } => {}
             PeerRequest::GetBlockBodies { .. } => {}
             PeerRequest::GetPooledTransactions { request, response } => {
-                // notify listeners about this request
-                self.event_listeners.send(NetworkEvent::GetPooledTransactions {
+                self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,
                     request,
-                    response: Arc::new(response),
+                    response,
                 });
             }
             PeerRequest::GetNodeData { .. } => {}
@@ -249,11 +261,16 @@ where
                 });
             }
             PeerMessage::PooledTransactions(msg) => {
-                self.event_listeners
-                    .send(NetworkEvent::IncomingPooledTransactionHashes { peer_id, msg });
+                self.notify_tx_manager(NetworkTransactionEvent::IncomingPooledTransactionHashes {
+                    peer_id,
+                    msg,
+                });
             }
             PeerMessage::Transactions(msg) => {
-                self.event_listeners.send(NetworkEvent::IncomingTransactions { peer_id, msg });
+                self.notify_tx_manager(NetworkTransactionEvent::IncomingTransactions {
+                    peer_id,
+                    msg,
+                });
             }
             PeerMessage::EthRequest(req) => {
                 self.on_eth_request(peer_id, req);
@@ -383,9 +400,10 @@ where
     }
 }
 
-/// Events emitted by the network that are of interest for subscribers.
+/// (Non-exhaustive) Events emitted by the network that are of interest for subscribers.
 ///
-/// This includes any event types that may be relevant to tasks
+/// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
+/// etc.
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     /// Closed the peer session.
@@ -395,16 +413,6 @@ pub enum NetworkEvent {
         peer_id: PeerId,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
-    },
-    /// Received list of transactions to the given peer.
-    IncomingTransactions { peer_id: PeerId, msg: Arc<Transactions> },
-    /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
-    /// Incoming `GetPooledTransactions` request from a peer.
-    GetPooledTransactions {
-        peer_id: PeerId,
-        request: GetPooledTransactions,
-        response: Arc<oneshot::Sender<RequestResult<PooledTransactions>>>,
     },
 }
 

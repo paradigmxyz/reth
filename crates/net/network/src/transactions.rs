@@ -8,7 +8,9 @@ use crate::{
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
-use reth_eth_wire::{GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions};
+use reth_eth_wire::{
+    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
+};
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
@@ -22,7 +24,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, oneshot, oneshot::Sender};
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 
 /// Cache limit of transactions to keep track of for a single peer.
@@ -80,6 +82,8 @@ pub struct TransactionsManager<Pool> {
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
+    /// Incoming events from the [`NetworkManager`]
+    transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
 }
 
 // === impl TransactionsManager ===
@@ -90,7 +94,13 @@ where
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     /// Sets up a new instance.
-    pub fn new(network: NetworkHandle, pool: Pool) -> Self {
+    ///
+    /// Note: This expects an existing [`NetworkManager`] instance.
+    pub fn new(
+        network: NetworkHandle,
+        pool: Pool,
+        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
+    ) -> Self {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
@@ -108,6 +118,7 @@ where
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
+            transaction_events: UnboundedReceiverStream::new(from_network),
         }
     }
 
@@ -121,7 +132,7 @@ where
         &mut self,
         peer_id: PeerId,
         request: GetPooledTransactions,
-        response: Sender<RequestResult<PooledTransactions>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let transactions = self
@@ -171,8 +182,24 @@ where
         }
     }
 
-    /// Handles a received event
-    fn on_event(&mut self, event: NetworkEvent) {
+    /// Handles dedicated transaction events related tot the `eth` protocol.
+    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+        match event {
+            NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
+                let transactions = Arc::try_unwrap(msg).unwrap_or_else(|arc| (*arc).clone());
+                self.import_transactions(peer_id, transactions.0);
+            }
+            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                self.on_new_pooled_transactions(peer_id, msg)
+            }
+            NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
+                self.on_get_pooled_transactions(peer_id, request, response)
+            }
+        }
+    }
+
+    /// Handles a received event related to common network events.
+    fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::SessionClosed { peer_id } => {
                 // remove the peer
@@ -197,20 +224,6 @@ where
                     peer_id,
                     msg,
                 })
-            }
-            NetworkEvent::IncomingTransactions { peer_id, msg } => {
-                let transactions = Arc::try_unwrap(msg).unwrap_or_else(|arc| (*arc).clone());
-                self.import_transactions(peer_id, transactions.0);
-            }
-            NetworkEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                self.on_new_pooled_transactions(peer_id, msg)
-            }
-            NetworkEvent::GetPooledTransactions { peer_id, request, response } => {
-                if let Ok(response) = Arc::try_unwrap(response) {
-                    // TODO(mattsse): there should be a dedicated channel for the transaction
-                    // manager instead
-                    self.on_get_pooled_transactions(peer_id, request, response)
-                }
             }
         }
     }
@@ -278,6 +291,15 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        // drain incoming events
+        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
+            this.on_network_tx_event(event);
+        }
+
+        while let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
+            this.on_network_event(event);
+        }
+
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
             match import_res {
@@ -337,4 +359,19 @@ struct Peer {
 /// Commands to send to the [`TransactionManager`]
 enum TransactionsCommand {
     Propagate(H256),
+}
+
+/// All events related to transactions emitted by the network
+#[derive(Debug)]
+pub enum NetworkTransactionEvent {
+    /// Received list of transactions to the given peer.
+    IncomingTransactions { peer_id: PeerId, msg: Arc<Transactions> },
+    /// Received list of transactions hashes to the given peer.
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
+    /// Incoming `GetPooledTransactions` request from a peer.
+    GetPooledTransactions {
+        peer_id: PeerId,
+        request: GetPooledTransactions,
+        response: oneshot::Sender<RequestResult<PooledTransactions>>,
+    },
 }
