@@ -1,5 +1,5 @@
 use crate::{
-    import::{BlockImport, NoopBlockImport},
+    import::{BlockImport, ProofOfStakeBlockImport},
     peers::PeersConfig,
     session::SessionsConfig,
 };
@@ -36,6 +36,8 @@ pub struct NetworkConfig<C> {
     pub genesis_hash: H256,
     /// The block importer type.
     pub block_import: Box<dyn BlockImport>,
+    /// The default mode of the network.
+    pub network_mode: NetworkMode,
 }
 
 // === impl NetworkConfig ===
@@ -90,6 +92,8 @@ pub struct NetworkConfigBuilder<C> {
     genesis_hash: H256,
     /// The block importer type.
     block_import: Box<dyn BlockImport>,
+    /// The default mode of the network.
+    network_mode: NetworkMode,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -108,7 +112,8 @@ impl<C> NetworkConfigBuilder<C> {
             fork_id: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
             genesis_hash: Default::default(),
-            block_import: Box::<NoopBlockImport>::default(),
+            block_import: Box::<ProofOfStakeBlockImport>::default(),
+            network_mode: Default::default(),
         }
     }
 
@@ -138,6 +143,7 @@ impl<C> NetworkConfigBuilder<C> {
             chain,
             genesis_hash,
             block_import,
+            network_mode,
         } = self;
         NetworkConfig {
             client,
@@ -155,6 +161,30 @@ impl<C> NetworkConfigBuilder<C> {
             chain,
             genesis_hash,
             block_import,
+            network_mode,
         }
+    }
+}
+
+/// Describes the mode of the network wrt. POS or POW.
+///
+/// This affects block propagation in the `eth` sub-protocol [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+///
+/// In POS `NewBlockHashes` and `NewBlock` messages become invalid.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+pub enum NetworkMode {
+    /// Network is in proof-of-work mode.
+    Work,
+    /// Network is in proof-of-stake mode
+    #[default]
+    Stake,
+}
+
+// === impl NetworkMode ===
+
+impl NetworkMode {
+    /// Returns true if network has entered proof-of-stake
+    pub fn is_stake(&self) -> bool {
+        matches!(self, NetworkMode::Stake)
     }
 }
