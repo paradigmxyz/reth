@@ -3203,6 +3203,7 @@ dependencies = [
  "auto_impl",
  "eyre",
  "hash-db",
+ "hashbrown 0.12.3",
  "plain_hasher",
  "reth-consensus",
  "reth-interfaces",
