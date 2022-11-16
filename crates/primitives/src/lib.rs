@@ -32,7 +32,7 @@ pub mod proofs;
 pub use account::Account;
 pub use block::{Block, BlockLocked};
 pub use chain::Chain;
-pub use constants::MAINNET_GENESIS;
+pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;
 pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
 pub use hardfork::Hardfork;
@@ -98,13 +98,3 @@ pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     keccak.finalize(&mut output);
     output.into()
 }
-
-use hex_literal::hex;
-
-/// Keccak256 over empty array.
-pub const KECCAK_EMPTY: H256 =
-    H256(hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"));
-
-/// Ommer root of empty list.
-pub const EMPTY_OMMER_ROOT: H256 =
-    H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
