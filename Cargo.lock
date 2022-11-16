@@ -3069,6 +3069,7 @@ name = "reth-bodies-downloaders"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "async-trait",
  "backon",
  "futures-util",
  "once_cell",
@@ -3076,7 +3077,6 @@ dependencies = [
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
- "serial_test",
  "tokio",
 ]
 
