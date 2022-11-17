@@ -1,4 +1,4 @@
-use crate::{Header, Receipt, SealedHeader, Transaction, TransactionSigned, H256};
+use crate::{Header, SealedHeader, Transaction, TransactionSigned, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use std::ops::Deref;
 
@@ -9,8 +9,6 @@ pub struct Block {
     pub header: Header,
     /// Transactions in this block.
     pub body: Vec<Transaction>,
-    /// Block receipts.
-    pub receipts: Vec<Receipt>,
     /// Ommers/uncles header
     pub ommers: Vec<SealedHeader>,
 }
@@ -29,8 +27,6 @@ pub struct BlockLocked {
     pub header: SealedHeader,
     /// Transactions with signatures.
     pub body: Vec<TransactionSigned>,
-    /// Block receipts.
-    pub receipts: Vec<Receipt>,
     /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
 }

@@ -1,7 +1,7 @@
 //! Provides everything related to `eth_` namespace
 
 use reth_interfaces::{
-    provider::{BlockProvider, StorageProvider},
+    provider::{BlockProvider, StateProviderFactory},
     Result,
 };
 use reth_primitives::{Transaction, U256, U64};
@@ -27,7 +27,7 @@ pub struct EthApi<Pool, Client> {
 impl<Pool, Client> EthApi<Pool, Client>
 where
     Pool: TransactionPool<Transaction = Transaction> + Clone,
-    Client: BlockProvider + StorageProvider,
+    Client: BlockProvider + StateProviderFactory,
 {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool) -> Self {

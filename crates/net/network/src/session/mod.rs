@@ -16,7 +16,8 @@ use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+    DisconnectReason, HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream,
+    UnauthedP2PStream,
 };
 use reth_primitives::{ForkFilter, Hardfork, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
@@ -192,9 +193,9 @@ impl SessionManager {
     ///
     /// This will trigger the disconnect on the session task to gracefully terminate. The result
     /// will be picked up by the receiver.
-    pub(crate) fn disconnect(&self, node: PeerId) {
+    pub(crate) fn disconnect(&self, node: PeerId, reason: Option<DisconnectReason>) {
         if let Some(session) = self.active_sessions.get(&node) {
-            session.disconnect();
+            session.disconnect(reason);
         }
     }
 

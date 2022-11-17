@@ -9,16 +9,24 @@ description = "Commonly used types in reth."
 
 [dependencies]
 # reth
-reth-rlp = { path = "../common/rlp", features = ["std", "derive", "ethereum-types"]}
+reth-rlp = { path = "../common/rlp", features = [
+    "std",
+    "derive",
+    "ethereum-types",
+] }
 reth-codecs = { version = "0.1.0", path = "../codecs" }
 
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
+ethbloom = { version = "0.12", features = ["codec"] }
 
 # crypto
-secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery"] }
+secp256k1 = { version = "0.24.0", default-features = false, features = [
+    "alloc",
+    "recovery",
+] }
 
 #used for forkid
 crc = "1"
@@ -29,7 +37,7 @@ bytes = "1.2"
 serde = "1.0"
 thiserror = "1"
 sucds = "0.5.0"
-arbitrary = { version = "1.1.7", features = ["derive"], optional = true}
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 hex = "0.4"
 hex-literal = "0.3"
 derive_more = "0.99"
@@ -41,6 +49,6 @@ plain_hasher = "0.2"
 hash-db = "0.15"
 
 [dev-dependencies]
-arbitrary = { version = "1.1.7", features = ["derive"]}
+arbitrary = { version = "1.1.7", features = ["derive"] }
 serde_json = "1.0"
 hex-literal = "0.3"

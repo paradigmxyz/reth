@@ -49,7 +49,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // Remove the next independent tx with the highest priority
-            let best = self.independent.pop_last()?;
+            let best = self.independent.iter().next_back()?.clone();
+            let best = self.independent.take(&best)?;
             let hash = best.transaction.hash();
 
             // skip transactions that were marked as invalid

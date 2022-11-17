@@ -349,7 +349,7 @@ impl FromRecoveredTransaction for MockTransaction {
                     nonce,
                     gas_price: gas_price.into(),
                     gas_limit,
-                    value,
+                    value: value.into(),
                 }
             }
             Transaction::Eip1559 {
@@ -369,7 +369,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 max_fee_per_gas: max_fee_per_gas.into(),
                 max_priority_fee_per_gas: max_priority_fee_per_gas.into(),
                 gas_limit,
-                value,
+                value: value.into(),
             },
             Transaction::Eip2930 { .. } => {
                 unimplemented!()

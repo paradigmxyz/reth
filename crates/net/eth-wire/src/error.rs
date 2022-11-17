@@ -59,8 +59,8 @@ pub enum P2PStreamError {
     EmptyProtocolMessage,
     #[error(transparent)]
     PingerError(#[from] PingerError),
-    #[error("ping timed out with {0} retries")]
-    PingTimeout(u8),
+    #[error("ping timed out with")]
+    PingTimeout,
     #[error(transparent)]
     ParseVersionError(#[from] SharedCapabilityError),
     #[error("mismatched protocol version in Hello message. expected: {expected:?}, got: {got:?}")]
