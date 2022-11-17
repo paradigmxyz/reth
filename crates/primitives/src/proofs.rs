@@ -53,7 +53,7 @@ pub fn calculate_transaction_root<'a>(
 }
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root<'a>(receipts: impl IntoIterator<Item = &'a Receipt>) -> H256 {
+pub fn calculate_receipt_root<'a>(receipts: impl Iterator<Item = &'a Receipt>) -> H256 {
     sec_trie_root::<KeccakHasher, _, _, _>(
         receipts
             .into_iter()
@@ -70,7 +70,7 @@ pub fn calculate_receipt_root<'a>(receipts: impl IntoIterator<Item = &'a Receipt
 }
 
 /// Calculates the log root for a header.
-pub fn calculate_log_root<'a>(logs: impl IntoIterator<Item = &'a Log>) -> H256 {
+pub fn calculate_log_root<'a>(logs: impl Iterator<Item = &'a Log>) -> H256 {
     //https://github.com/ethereum/go-ethereum/blob/356bbe343a30789e77bb38f25983c8f2f2bfbb47/cmd/evm/internal/t8ntool/execution.go#L255
     let mut stream = RlpStream::new();
     stream.begin_unbounded_list();
