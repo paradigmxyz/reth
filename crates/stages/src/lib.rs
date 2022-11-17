@@ -20,6 +20,9 @@ mod pipeline;
 mod stage;
 mod util;
 
+#[cfg(test)]
+mod test_utils;
+
 /// Implementations of stages.
 pub mod stages;
 

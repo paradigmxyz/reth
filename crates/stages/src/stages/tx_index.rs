@@ -87,7 +87,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::{
+    use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
         UnwindStageTestRunner,
     };
@@ -96,7 +96,7 @@ mod tests {
         db::models::{BlockNumHash, StoredBlockBody},
         test_utils::generators::random_header_range,
     };
-    use reth_primitives::{SealedHeader, H256};
+    use reth_primitives::H256;
 
     stage_test_suite!(TxIndexTestRunner);
 
@@ -155,7 +155,7 @@ mod tests {
         fn validate_execution(
             &self,
             input: ExecInput,
-            output: Option<ExecOutput>,
+            _output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             self.db.query(|tx| {
                 let (start, end) = (
@@ -187,21 +187,6 @@ mod tests {
     }
 
     impl UnwindStageTestRunner for TxIndexTestRunner {
-        fn seed_unwind(
-            &mut self,
-            input: UnwindInput,
-            highest_entry: u64,
-        ) -> Result<(), TestRunnerError> {
-            let headers = random_header_range(input.unwind_to..highest_entry, H256::zero());
-            self.db.transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
-                (
-                    BlockNumHash((h.number, h.hash())),
-                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                )
-            })?;
-            Ok(())
-        }
-
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.db.check_no_entry_above::<tables::CumulativeTxCount, _>(input.unwind_to, |h| {
                 h.number()

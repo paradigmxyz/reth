@@ -15,7 +15,7 @@ use reth_primitives::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockLocked, BlockNumber, SealedHeader, H256,
 };
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 use tracing::warn;
 
 const BODIES: StageId = StageId("Bodies");
@@ -51,9 +51,9 @@ const BODIES: StageId = StageId("Bodies");
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
-    pub downloader: D,
+    pub downloader: Arc<D>,
     /// The consensus engine.
-    pub consensus: C,
+    pub consensus: Arc<C>,
     /// The maximum amount of block bodies to process in one stage execution.
     ///
     /// Smaller batch sizes result in less memory usage, but more disk I/O. Larger batch sizes
@@ -232,67 +232,47 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::{ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID};
+    use crate::test_utils::{ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID, stage_test_suite};
     use assert_matches::assert_matches;
-    use reth_eth_wire::BlockBody;
     use reth_interfaces::{
         consensus,
         p2p::bodies::error::DownloadError,
-        test_utils::generators::{random_block, random_block_range},
     };
-    use reth_primitives::{BlockNumber, H256};
     use std::collections::HashMap;
     use test_utils::*;
 
-    /// Check that the execution is short-circuited if the database is empty.
-    #[tokio::test]
-    async fn empty_db() {
-        let runner = BodyTestRunner::new(TestBodyDownloader::default);
-        let rx = runner.execute(ExecInput::default());
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: 0, reached_tip: true, done: true })
-        )
-    }
+    stage_test_suite!(BodyTestRunner);
 
-    /// Check that the execution is short-circuited if the target was already reached.
-    #[tokio::test]
-    async fn already_reached_target() {
-        let runner = BodyTestRunner::new(TestBodyDownloader::default);
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 100)),
-            stage_progress: Some(100),
-        });
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: 100, reached_tip: true, done: true })
-        )
-    }
+    /// Check that the execution is short-circuited if the database is empty.
+    // #[tokio::test]
+    // TODO:
+    // async fn empty_db() {
+    //     let runner = BodyTestRunner::new(TestBodyDownloader::default);
+    //     let rx = runner.execute(ExecInput::default());
+    //     assert_matches!(
+    //         rx.await.unwrap(),
+    //         Ok(ExecOutput { stage_progress: 0, reached_tip: true, done: true })
+    //     )
+    // }
 
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]
     async fn partial_body_download() {
-        // Generate blocks
-        let blocks = random_block_range(1..200, GENESIS_HASH);
-        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
-            blocks.iter().map(body_by_hash).collect();
-        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
+        let (stage_progress, previous_stage) = (1, 200);
+
+        // Set up test runner
+        let mut runner = BodyTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        runner.seed_execution(input).expect("failed to seed execution");
 
         // Set the batch size (max we sync per stage execution) to less than the number of blocks
         // the previous stage synced (10 vs 20)
         runner.set_batch_size(10);
 
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner
-            .insert_headers(blocks.iter().map(|block| &block.header))
-            .expect("Could not insert headers");
-
         // Run the stage
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
-            stage_progress: None,
-        };
         let rx = runner.execute(input);
 
         // Check that we only synced around `batch_size` blocks even though the number of blocks
@@ -308,26 +288,20 @@ mod tests {
     /// Same as [partial_body_download] except the `batch_size` is not hit.
     #[tokio::test]
     async fn full_body_download() {
-        // Generate blocks #1-20
-        let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
-            blocks.iter().map(body_by_hash).collect();
-        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
+        let (stage_progress, previous_stage) = (1, 21);
+
+        // Set up test runner
+        let mut runner = BodyTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        runner.seed_execution(input).expect("failed to seed execution");
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
 
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner
-            .insert_headers(blocks.iter().map(|block| &block.header))
-            .expect("Could not insert headers");
-
         // Run the stage
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
-            stage_progress: None,
-        };
         let rx = runner.execute(input);
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
@@ -343,23 +317,18 @@ mod tests {
     /// Same as [full_body_download] except we have made progress before
     #[tokio::test]
     async fn sync_from_previous_progress() {
-        // Generate blocks #1-20
-        let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
-            blocks.iter().map(body_by_hash).collect();
-        let runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
+        let (stage_progress, previous_stage) = (1, 21);
 
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner
-            .insert_headers(blocks.iter().map(|block| &block.header))
-            .expect("Could not insert headers");
+        // Set up test runner
+        let mut runner = BodyTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        runner.seed_execution(input).expect("failed to seed execution");
 
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
-            stage_progress: None,
-        });
+        let rx = runner.execute(input);
 
         // Check that we synced at least 10 blocks
         let first_run = rx.await.unwrap();
@@ -371,7 +340,7 @@ mod tests {
 
         // Execute again on top of the previous run
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(first_run_progress),
         };
         let rx = runner.execute(input);
@@ -388,118 +357,48 @@ mod tests {
     /// Checks that the stage asks to unwind if pre-validation of the block fails.
     #[tokio::test]
     async fn pre_validation_failure() {
-        // Generate blocks #1-19
-        let blocks = random_block_range(1..20, GENESIS_HASH);
-        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
-            blocks.iter().map(body_by_hash).collect();
-        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
+        let (stage_progress, previous_stage) = (1, 20);
+
+        // Set up test runner
+        let mut runner = BodyTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        runner.seed_execution(input).expect("failed to seed execution");
 
         // Fail validation
-        runner.set_fail_validation(true);
-
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner
-            .insert_headers(blocks.iter().map(|block| &block.header))
-            .expect("Could not insert headers");
+        runner.consensus.set_fail_validation(true);
 
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
-            stage_progress: None,
-        });
+        let rx = runner.execute(input);
 
         // Check that the error bubbles up
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::Validation { block: 1, error: consensus::Error::BaseFeeMissing })
+            Err(StageError::Validation { error: consensus::Error::BaseFeeMissing, .. })
         );
-    }
-
-    /// Checks that the stage unwinds correctly with no data.
-    #[tokio::test]
-    async fn unwind_empty_db() {
-        let unwind_to = 10;
-        let runner = BodyTestRunner::new(TestBodyDownloader::default);
-        let input = UnwindInput { bad_block: None, stage_progress: 20, unwind_to };
-        let rx = runner.unwind(input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
-        );
-        assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
-    }
-
-    /// Checks that the stage unwinds correctly with data.
-    #[tokio::test]
-    async fn unwind() {
-        // Generate blocks #1-20
-        let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
-            blocks.iter().map(body_by_hash).collect();
-        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
-
-        // Set the batch size to more than what the previous stage synced (40 vs 20)
-        runner.set_batch_size(40);
-
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner
-            .insert_headers(blocks.iter().map(|block| &block.header))
-            .expect("Could not insert headers");
-
-        // Run the stage
-        let execute_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
-            stage_progress: None,
-        };
-        let rx = runner.execute(execute_input);
-
-        // Check that we synced all blocks successfully, even though our `batch_size` allows us to
-        // sync more (if there were more headers)
-        let output = rx.await.unwrap();
-        assert_matches!(
-            output,
-            Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
-        );
-        let output = output.unwrap();
-        assert!(runner.validate_execution(execute_input, Some(output.clone())).is_ok(), "execution validation");
-
-        // Unwind all of it
-        let unwind_to = 1;
-        let unwind_input = UnwindInput { bad_block: None, stage_progress: output.stage_progress, unwind_to };
-        let rx = runner.unwind(unwind_input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == 1
-        );
-
-        assert!(runner.validate_unwind(unwind_input).is_ok(), "unwind validation");
+        assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
     }
 
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
     #[tokio::test]
     async fn unwind_missing_tx() {
-        // Generate blocks #1-20
-        let blocks = random_block_range(1..21, GENESIS_HASH);
-        let bodies: HashMap<H256, Result<BlockBody, DownloadError>> =
-            blocks.iter().map(body_by_hash).collect();
-        let mut runner = BodyTestRunner::new(|| TestBodyDownloader::new(bodies.clone()));
+        let (stage_progress, previous_stage) = (1, 21);
+
+        // Set up test runner
+        let mut runner = BodyTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        runner.seed_execution(input).expect("failed to seed execution");
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
 
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner
-            .insert_headers(blocks.iter().map(|block| &block.header))
-            .expect("Could not insert headers");
-
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, blocks.len() as BlockNumber)),
-            stage_progress: None,
-        });
+        let rx = runner.execute(input);
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
@@ -536,42 +435,42 @@ mod tests {
     /// try again?
     #[tokio::test]
     async fn downloader_timeout() {
-        // Generate a header
-        let header = random_block(1, Some(GENESIS_HASH)).header;
-        let runner = BodyTestRunner::new(|| {
-            TestBodyDownloader::new(HashMap::from([(
-                header.hash(),
-                Err(DownloadError::Timeout { header_hash: header.hash() }),
-            )]))
-        });
+        let (stage_progress, previous_stage) = (1, 3);
 
-        // Insert required state
-        runner.insert_genesis().expect("Could not insert genesis block");
-        runner.insert_header(&header).expect("Could not insert header");
+        // Set up test runner
+        let mut runner = BodyTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress), // TODO: None?
+        };
+        let blocks = runner.seed_execution(input).expect("failed to seed execution");
+
+        // overwrite responses
+        let header = blocks.last().unwrap();
+        runner.set_responses(HashMap::from([(
+            header.hash(),
+            Err(DownloadError::Timeout { header_hash: header.hash() }),
+        )]));
 
         // Run the stage
-        let rx = runner.execute(ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
-            stage_progress: None,
-        });
+        let rx = runner.execute(input);
 
         // Check that the error bubbles up
         assert_matches!(rx.await.unwrap(), Err(StageError::Internal(_)));
+        assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
     }
 
     mod test_utils {
         use crate::{
             stages::bodies::BodyStage,
-            util::test_utils::{
+            test_utils::{
                 ExecuteStageTestRunner, StageTestDB, StageTestRunner, UnwindStageTestRunner, TestRunnerError,
             },
             ExecInput, UnwindInput, ExecOutput,
         };
         use assert_matches::assert_matches;
-        use async_trait::async_trait;
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
-            db,
             db::{
                 models::{BlockNumHash, StoredBlockBody},
                 tables, DbCursorRO, DbTx, DbTxMut,
@@ -581,12 +480,12 @@ mod tests {
                 downloader::{BodiesStream, BodyDownloader},
                 error::{BodiesClientError, DownloadError},
             },
-            test_utils::TestConsensus,
+            test_utils::{TestConsensus, generators::random_block_range},
         };
         use reth_primitives::{
             BigEndianHash, BlockLocked, BlockNumber, Header, SealedHeader, H256, U256,
         };
-        use std::{collections::HashMap, ops::Deref, time::Duration};
+        use std::{collections::HashMap, ops::Deref, time::Duration, sync::Arc};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
@@ -605,43 +504,35 @@ mod tests {
         }
 
         /// A helper struct for running the [BodyStage].
-        pub(crate) struct BodyTestRunner<F>
-        where
-            F: Fn() -> TestBodyDownloader,
-        {
-            downloader_builder: F,
+        pub(crate) struct BodyTestRunner {
+            pub(crate) consensus: Arc<TestConsensus>,
+            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
             db: StageTestDB,
             batch_size: u64,
-            fail_validation: bool,
         }
 
-        impl<F> BodyTestRunner<F>
-        where
-            F: Fn() -> TestBodyDownloader,
-        {
-            /// Build a new test runner.
-            pub(crate) fn new(downloader_builder: F) -> Self {
-                BodyTestRunner {
-                    downloader_builder,
+        impl Default for BodyTestRunner {
+            fn default() -> Self {
+                Self {
+                    consensus: Arc::new(TestConsensus::default()),
+                    responses: HashMap::default(),
                     db: StageTestDB::default(),
                     batch_size: 10,
-                    fail_validation: false,
                 }
             }
+        }
 
+        impl BodyTestRunner {
             pub(crate) fn set_batch_size(&mut self, batch_size: u64) {
                 self.batch_size = batch_size;
             }
 
-            pub(crate) fn set_fail_validation(&mut self, fail_validation: bool) {
-                self.fail_validation = fail_validation;
+            pub(crate) fn set_responses(&mut self, responses: HashMap<H256, Result<BlockBody, DownloadError>>) {
+                self.responses = responses;
             }
         }
 
-        impl<F> StageTestRunner for BodyTestRunner<F>
-        where
-            F: Fn() -> TestBodyDownloader,
-        {
+        impl StageTestRunner for BodyTestRunner {
             type S = BodyStage<TestBodyDownloader, TestConsensus>;
 
             fn db(&self) -> &StageTestDB {
@@ -649,33 +540,29 @@ mod tests {
             }
 
             fn stage(&self) -> Self::S {
-                let mut consensus = TestConsensus::default();
-                consensus.set_fail_validation(self.fail_validation);
-
                 BodyStage {
-                    downloader: (self.downloader_builder)(),
-                    consensus,
+                    downloader: Arc::new(TestBodyDownloader::new(self.responses.clone())),
+                    consensus: self.consensus.clone(),
                     batch_size: self.batch_size,
                 }
             }
         }
 
-        impl<F> ExecuteStageTestRunner for BodyTestRunner<F>
-        where
-            F: Fn() -> TestBodyDownloader,
-        {
-            type Seed = ();
+        #[async_trait::async_trait]
+        impl ExecuteStageTestRunner for BodyTestRunner {
+            type Seed = Vec<BlockLocked>;
 
             fn seed_execution(
                 &mut self,
                 input: ExecInput,
-            ) -> Result<(), TestRunnerError> {
+            ) -> Result<Self::Seed, TestRunnerError> {
+                let start = input.stage_progress.unwrap_or_default();
+                let end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
+                let blocks = random_block_range(start..end, GENESIS_HASH);
                 self.insert_genesis()?;
-                // TODO:
-                // self
-                //     .insert_headers(blocks.iter().map(|block| &block.header))
-                //     .expect("Could not insert headers");
-                Ok(())
+                self.insert_headers(blocks.iter().map(|block| &block.header))?;
+                self.set_responses(blocks.iter().map(body_by_hash).collect());
+                Ok(blocks)
             }
 
             fn validate_execution(
@@ -683,31 +570,21 @@ mod tests {
                 input: ExecInput,
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
-                if let Some(output) = output {
-                    self.validate_db_blocks(output.stage_progress)?;
-                }
-                Ok(())
+                let highest_block = match output.as_ref() {
+                    Some(output) => output.stage_progress,
+                    None => input.stage_progress.unwrap_or_default(),
+                };
+                self.validate_db_blocks(highest_block)
             }
         }
 
-        impl<F> UnwindStageTestRunner for BodyTestRunner<F>
-        where
-            F: Fn() -> TestBodyDownloader,
-        {
-            fn seed_unwind(
-                &mut self,
-                input: UnwindInput,
-                highest_entry: u64,
-            ) -> Result<(), TestRunnerError> {
-                unimplemented!()
-            }
-
+        impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(
                 &self,
                 input: UnwindInput,
             ) -> Result<(), TestRunnerError> {
                 self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| key.number())?;
-                if let Some(last_body) =self.last_body(){
+                if let Some(last_body) = self.last_body() {
                     let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
                     self.db.check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
                 }
@@ -715,15 +592,12 @@ mod tests {
             }
         }
 
-        impl<F> BodyTestRunner<F>
-        where
-            F: Fn() -> TestBodyDownloader,
-        {
+        impl BodyTestRunner {
             /// Insert the genesis block into the appropriate tables
             ///
             /// The genesis block always has no transactions and no ommers, and it always has the
             /// same hash.
-            pub(crate) fn insert_genesis(&self) -> Result<(), db::Error> {
+            pub(crate) fn insert_genesis(&self) -> Result<(), TestRunnerError> {
                 self.insert_header(&SealedHeader::new(Header::default(), GENESIS_HASH))?;
                 self.db.commit(|tx| {
                     tx.put::<tables::BlockBodies>(
@@ -736,13 +610,14 @@ mod tests {
             }
 
             /// Insert header into tables
-            pub(crate) fn insert_header(&self, header: &SealedHeader) -> Result<(), db::Error> {
-                self.insert_headers(std::iter::once(header))
+            pub(crate) fn insert_header(&self, header: &SealedHeader) -> Result<(), TestRunnerError> {
+                self.insert_headers(std::iter::once(header))?;
+                Ok(())
             }
 
             /// Insert headers into tables
             /// TODO: move to common inserter
-            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
+            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), TestRunnerError>
             where
                 I: Iterator<Item = &'a SealedHeader>,
             {
@@ -778,7 +653,7 @@ mod tests {
             pub(crate) fn validate_db_blocks(
                 &self,
                 highest_block: BlockNumber,
-            ) -> Result<(), db::Error> {
+            ) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut block_body_cursor = tx.cursor::<tables::BlockBodies>()?;
                     let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
@@ -806,7 +681,8 @@ mod tests {
                     }
     
                     Ok(())
-                })
+                })?;
+                Ok(())
             }
         }
 
@@ -815,7 +691,7 @@ mod tests {
         #[derive(Debug)]
         pub(crate) struct NoopClient;
 
-        #[async_trait]
+        #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
             async fn get_block_body(&self, _: H256) -> Result<BlockBody, BodiesClientError> {
                 panic!("Noop client should not be called")
@@ -824,7 +700,7 @@ mod tests {
 
         // TODO(onbjerg): Move
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
-        #[derive(Debug, Default)]
+        #[derive(Debug, Default, Clone)]
         pub(crate) struct TestBodyDownloader {
             responses: HashMap<H256, Result<BlockBody, DownloadError>>,
         }
@@ -854,14 +730,11 @@ mod tests {
             {
                 Box::pin(futures_util::stream::iter(hashes.into_iter().map(
                     |(block_number, hash)| {
-                        Ok((
-                            *block_number,
-                            *hash,
-                            self.responses
-                                .get(hash)
-                                .expect("Stage tried downloading a block we do not have.")
-                                .clone()?,
-                        ))
+                        let result = self.responses
+                            .get(hash)
+                            .expect("Stage tried downloading a block we do not have.")
+                            .clone()?;
+                        Ok((*block_number, *hash, result))
                     },
                 )))
             }

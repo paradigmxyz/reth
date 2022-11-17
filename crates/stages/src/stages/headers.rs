@@ -190,15 +190,13 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::{
+    use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use test_runner::HeadersTestRunner;
 
     stage_test_suite!(HeadersTestRunner);
-
-    // TODO: test consensus propagation error
 
     /// Check that the execution errors on empty database or
     /// prev progress missing from the database.
@@ -215,6 +213,20 @@ mod tests {
             result,
             Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 0 })
         );
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+    }
+
+    /// Check that validation error is propagated during the execution.
+    #[tokio::test]
+    async fn execute_validation_error() {
+        let mut runner = HeadersTestRunner::default();
+        runner.consensus.set_fail_validation(true);
+        let input = ExecInput::default();
+        let seed = runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+        runner.after_execution(seed).await.expect("failed to run after execution hook");
+        let result = rx.await.unwrap();
+        assert_matches!(result, Err(StageError::Validation { .. }));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -254,7 +266,7 @@ mod tests {
     mod test_runner {
         use crate::{
             stages::headers::HeaderStage,
-            util::test_utils::{
+            test_utils::{
                 ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
                 UnwindStageTestRunner,
             },
@@ -262,14 +274,14 @@ mod tests {
         };
         use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
-            db::{self, models::blocks::BlockNumHash, tables, DbTx},
+            db::{models::blocks::BlockNumHash, tables, DbTx},
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
                 TestConsensus, TestHeaderDownloader, TestHeadersClient,
             },
         };
-        use reth_primitives::{rpc::BigEndianHash, SealedHeader, H256, U256};
+        use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
         use std::{ops::Deref, sync::Arc};
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -282,10 +294,11 @@ mod tests {
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
             fn default() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
+                let consensus = Arc::new(TestConsensus::default());
                 Self {
                     client: client.clone(),
-                    consensus: Arc::new(TestConsensus::default()),
-                    downloader: Arc::new(TestHeaderDownloader::new(client)),
+                    consensus: consensus.clone(),
+                    downloader: Arc::new(TestHeaderDownloader::new(client, consensus)),
                     db: StageTestDB::default(),
                 }
             }
@@ -345,45 +358,58 @@ mod tests {
                 Ok(())
             }
 
+            /// Validate stored headers
             fn validate_execution(
                 &self,
-                _input: ExecInput,
-                _output: Option<ExecOutput>,
+                input: ExecInput,
+                output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
-                // TODO: refine
-                // if let Some(ref headers) = self.context {
-                //     // skip head and validate each
-                //     headers.iter().skip(1).try_for_each(|h| self.validate_db_header(&h))?;
-                // }
+                let initial_stage_progress = input.stage_progress.unwrap_or_default();
+                match output {
+                    Some(output) if output.stage_progress > initial_stage_progress => {
+                        self.db.query(|tx| {
+                            for block_num in (initial_stage_progress..output.stage_progress).rev() {
+                                // look up the header hash
+                                let hash = tx
+                                    .get::<tables::CanonicalHeaders>(block_num)?
+                                    .expect("no header hash");
+                                let key: BlockNumHash = (block_num, hash).into();
+
+                                // validate the header number
+                                assert_eq!(tx.get::<tables::HeaderNumbers>(hash)?, Some(block_num));
+
+                                // validate the header
+                                let header = tx.get::<tables::Headers>(key)?;
+                                assert!(header.is_some());
+                                let header = header.unwrap().seal();
+                                assert_eq!(header.hash(), hash);
+
+                                // validate td consistency in the database
+                                if header.number > initial_stage_progress {
+                                    let parent_td = tx.get::<tables::HeaderTD>(
+                                        (header.number - 1, header.parent_hash).into(),
+                                    )?;
+                                    let td = tx.get::<tables::HeaderTD>(key)?.unwrap();
+                                    assert_eq!(
+                                        parent_td.map(
+                                            |td| U256::from_big_endian(&td) + header.difficulty
+                                        ),
+                                        Some(U256::from_big_endian(&td))
+                                    );
+                                }
+                            }
+                            Ok(())
+                        })?;
+                    }
+                    _ => self.check_no_header_entry_above(initial_stage_progress)?,
+                };
                 Ok(())
             }
         }
 
         impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
-            fn seed_unwind(
-                &mut self,
-                input: UnwindInput,
-                highest_entry: u64,
-            ) -> Result<(), TestRunnerError> {
-                let lowest_entry = input.unwind_to.saturating_sub(100);
-                let headers = random_header_range(lowest_entry..highest_entry, H256::zero());
-                self.insert_headers(headers.iter())?;
-                Ok(())
-            }
-
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                let unwind_to = input.unwind_to;
-                self.db.check_no_entry_above_by_value::<tables::HeaderNumbers, _>(
-                    unwind_to,
-                    |val| val,
-                )?;
-                self.db
-                    .check_no_entry_above::<tables::CanonicalHeaders, _>(unwind_to, |key| key)?;
-                self.db
-                    .check_no_entry_above::<tables::Headers, _>(unwind_to, |key| key.number())?;
-                self.db
-                    .check_no_entry_above::<tables::HeaderTD, _>(unwind_to, |key| key.number())?;
-                Ok(())
+                self.check_no_header_entry_above(input.unwind_to)
             }
         }
 
@@ -400,12 +426,15 @@ mod tests {
 
         impl<D: HeaderDownloader> HeadersTestRunner<D> {
             /// Insert header into tables
-            pub(crate) fn insert_header(&self, header: &SealedHeader) -> Result<(), db::Error> {
+            pub(crate) fn insert_header(
+                &self,
+                header: &SealedHeader,
+            ) -> Result<(), TestRunnerError> {
                 self.insert_headers(std::iter::once(header))
             }
 
             /// Insert headers into tables
-            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
+            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), TestRunnerError>
             where
                 I: Iterator<Item = &'a SealedHeader>,
             {
@@ -430,36 +459,16 @@ mod tests {
                 Ok(())
             }
 
-            /// Validate stored header against provided
-            pub(crate) fn validate_db_header(
+            pub(crate) fn check_no_header_entry_above(
                 &self,
-                header: &SealedHeader,
-            ) -> Result<(), db::Error> {
-                self.db.query(|tx| {
-                    let key: BlockNumHash = (header.number, header.hash()).into();
-
-                    let db_number = tx.get::<tables::HeaderNumbers>(header.hash())?;
-                    assert_eq!(db_number, Some(header.number));
-
-                    let db_header = tx.get::<tables::Headers>(key)?;
-                    assert_eq!(db_header, Some(header.clone().unseal()));
-
-                    let db_canonical_header = tx.get::<tables::CanonicalHeaders>(header.number)?;
-                    assert_eq!(db_canonical_header, Some(header.hash()));
-
-                    if header.number != 0 {
-                        let parent_key: BlockNumHash =
-                            (header.number - 1, header.parent_hash).into();
-                        let parent_td = tx.get::<tables::HeaderTD>(parent_key)?;
-                        let td = U256::from_big_endian(&tx.get::<tables::HeaderTD>(key)?.unwrap());
-                        assert_eq!(
-                            parent_td.map(|td| U256::from_big_endian(&td) + header.difficulty),
-                            Some(td)
-                        );
-                    }
-
-                    Ok(())
-                })
+                block: BlockNumber,
+            ) -> Result<(), TestRunnerError> {
+                self.db
+                    .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
+                self.db.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.db.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
+                self.db.check_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
+                Ok(())
             }
         }
     }

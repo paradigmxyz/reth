@@ -1,6 +1,6 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, Consensus, Error},
+    consensus::{self, Consensus},
     p2p::headers::{
         client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
         downloader::HeaderDownloader,
@@ -9,7 +9,11 @@ use crate::{
 };
 use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512};
 use reth_rpc_types::engine::ForkchoiceState;
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
@@ -17,12 +21,13 @@ use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 #[derive(Debug)]
 pub struct TestHeaderDownloader {
     client: Arc<TestHeadersClient>,
+    consensus: Arc<TestConsensus>,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(client: Arc<TestHeadersClient>) -> Self {
-        Self { client }
+    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>) -> Self {
+        Self { client, consensus }
     }
 }
 
@@ -36,7 +41,7 @@ impl HeaderDownloader for TestHeaderDownloader {
     }
 
     fn consensus(&self) -> &Self::Consensus {
-        unimplemented!()
+        &self.consensus
     }
 
     fn client(&self) -> &Self::Client {
@@ -48,6 +53,12 @@ impl HeaderDownloader for TestHeaderDownloader {
         _: &SealedHeader,
         _: &ForkchoiceState,
     ) -> Result<Vec<SealedHeader>, DownloadError> {
+        // call consensus stub first. fails if the flag is set
+        let empty = SealedHeader::default();
+        self.consensus
+            .validate_header(&empty, &empty)
+            .map_err(|error| DownloadError::HeaderValidation { hash: empty.hash(), error })?;
+
         let stream = self.client.stream_headers().await;
         let stream = stream.timeout(Duration::from_secs(1));
 
@@ -139,7 +150,7 @@ pub struct TestConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Flag whether the header validation should purposefully fail
-    fail_validation: bool,
+    fail_validation: Mutex<bool>,
 }
 
 impl Default for TestConsensus {
@@ -150,7 +161,7 @@ impl Default for TestConsensus {
                 finalized_block_hash: H256::zero(),
                 safe_block_hash: H256::zero(),
             }),
-            fail_validation: false,
+            fail_validation: Mutex::new(false),
         }
     }
 }
@@ -166,9 +177,14 @@ impl TestConsensus {
         self.channel.0.send(state).expect("updating fork choice state failed");
     }
 
+    /// Acquire lock on failed validation flag
+    pub fn fail_validation(&self) -> MutexGuard<'_, bool> {
+        self.fail_validation.lock().expect("failed to acquite consensus mutex")
+    }
+
     /// Update the validation flag
-    pub fn set_fail_validation(&mut self, val: bool) {
-        self.fail_validation = val;
+    pub fn set_fail_validation(&self, val: bool) {
+        *self.fail_validation() = val;
     }
 }
 
@@ -183,15 +199,15 @@ impl Consensus for TestConsensus {
         _header: &SealedHeader,
         _parent: &SealedHeader,
     ) -> Result<(), consensus::Error> {
-        if self.fail_validation {
+        if *self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {
             Ok(())
         }
     }
 
-    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), Error> {
-        if self.fail_validation {
+    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), consensus::Error> {
+        if *self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {
             Ok(())
