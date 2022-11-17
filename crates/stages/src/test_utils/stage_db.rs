@@ -6,7 +6,7 @@ use reth_interfaces::db::{
     self, models::BlockNumHash, tables, DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
 };
 use reth_primitives::{BigEndianHash, BlockNumber, SealedHeader, H256, U256};
-use std::{borrow::Borrow, ops::Deref, sync::Arc};
+use std::{borrow::Borrow, sync::Arc};
 
 /// The [StageTestDB] is used as an internal
 /// database for testing stage implementation.
@@ -155,21 +155,25 @@ impl StageTestDB {
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        let headers = headers.collect::<Vec<_>>();
-        self.map_put::<tables::HeaderNumbers, _, _>(&headers, |h| (h.hash(), h.number))?;
-        self.map_put::<tables::Headers, _, _>(&headers, |h| {
-            (BlockNumHash((h.number, h.hash())), h.deref().clone().unseal())
-        })?;
-        self.map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))?;
+        self.commit(|tx| {
+            let headers = headers.collect::<Vec<_>>();
 
-        self.transform_append::<tables::HeaderTD, _, _>(&headers, |prev, h| {
-            let prev_td = U256::from_big_endian(&prev.clone().unwrap_or_default());
-            (
-                BlockNumHash((h.number, h.hash())),
-                H256::from_uint(&(prev_td + h.difficulty)).as_bytes().to_vec(),
-            )
-        })?;
+            let mut td = U256::from_big_endian(
+                &tx.cursor::<tables::HeaderTD>()?.last()?.map(|(_, v)| v).unwrap_or_default(),
+            );
 
-        Ok(())
+            for header in headers {
+                let key: BlockNumHash = (header.number, header.hash()).into();
+
+                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
+                tx.put::<tables::Headers>(key, header.clone().unseal())?;
+
+                td += header.difficulty;
+                tx.put::<tables::HeaderTD>(key, H256::from_uint(&td).as_bytes().to_vec())?;
+            }
+
+            Ok(())
+        })
     }
 }
