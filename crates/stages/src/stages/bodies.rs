@@ -232,12 +232,12 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID, stage_test_suite};
-    use assert_matches::assert_matches;
-    use reth_interfaces::{
-        consensus,
-        p2p::bodies::error::DownloadError,
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        PREV_STAGE_ID,
     };
+    use assert_matches::assert_matches;
+    use reth_interfaces::{consensus, p2p::bodies::error::DownloadError};
     use std::collections::HashMap;
     use test_utils::*;
 
@@ -411,12 +411,15 @@ mod tests {
         runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
 
         // Delete a transaction
-        runner.db().commit(|tx| {
-            let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
-            tx_cursor.last()?.expect("Could not read last transaction");
-            tx_cursor.delete_current()?;
-            Ok(())
-        }).expect("Could not delete a transaction");
+        runner
+            .db()
+            .commit(|tx| {
+                let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
+                tx_cursor.last()?.expect("Could not read last transaction");
+                tx_cursor.delete_current()?;
+                Ok(())
+            })
+            .expect("Could not delete a transaction");
 
         // Unwind all of it
         let unwind_to = 1;
@@ -464,9 +467,10 @@ mod tests {
         use crate::{
             stages::bodies::BodyStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, UnwindStageTestRunner, TestRunnerError,
+                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                UnwindStageTestRunner,
             },
-            ExecInput, UnwindInput, ExecOutput,
+            ExecInput, ExecOutput, UnwindInput,
         };
         use assert_matches::assert_matches;
         use reth_eth_wire::BlockBody;
@@ -480,12 +484,12 @@ mod tests {
                 downloader::{BodiesStream, BodyDownloader},
                 error::{BodiesClientError, DownloadError},
             },
-            test_utils::{TestConsensus, generators::random_block_range},
+            test_utils::{generators::random_block_range, TestConsensus},
         };
         use reth_primitives::{
             BigEndianHash, BlockLocked, BlockNumber, Header, SealedHeader, H256, U256,
         };
-        use std::{collections::HashMap, ops::Deref, time::Duration, sync::Arc};
+        use std::{collections::HashMap, ops::Deref, sync::Arc, time::Duration};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
@@ -527,7 +531,10 @@ mod tests {
                 self.batch_size = batch_size;
             }
 
-            pub(crate) fn set_responses(&mut self, responses: HashMap<H256, Result<BlockBody, DownloadError>>) {
+            pub(crate) fn set_responses(
+                &mut self,
+                responses: HashMap<H256, Result<BlockBody, DownloadError>>,
+            ) {
                 self.responses = responses;
             }
         }
@@ -552,10 +559,7 @@ mod tests {
         impl ExecuteStageTestRunner for BodyTestRunner {
             type Seed = Vec<BlockLocked>;
 
-            fn seed_execution(
-                &mut self,
-                input: ExecInput,
-            ) -> Result<Self::Seed, TestRunnerError> {
+            fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
                 let blocks = random_block_range(start..end, GENESIS_HASH);
@@ -579,14 +583,14 @@ mod tests {
         }
 
         impl UnwindStageTestRunner for BodyTestRunner {
-            fn validate_unwind(
-                &self,
-                input: UnwindInput,
-            ) -> Result<(), TestRunnerError> {
-                self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| key.number())?;
+            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+                self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
+                    key.number()
+                })?;
                 if let Some(last_body) = self.last_body() {
                     let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
-                    self.db.check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
+                    self.db
+                        .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
                 }
                 Ok(())
             }
@@ -610,7 +614,10 @@ mod tests {
             }
 
             /// Insert header into tables
-            pub(crate) fn insert_header(&self, header: &SealedHeader) -> Result<(), TestRunnerError> {
+            pub(crate) fn insert_header(
+                &self,
+                header: &SealedHeader,
+            ) -> Result<(), TestRunnerError> {
                 self.insert_headers(std::iter::once(header))?;
                 Ok(())
             }
@@ -657,7 +664,7 @@ mod tests {
                 self.db.query(|tx| {
                     let mut block_body_cursor = tx.cursor::<tables::BlockBodies>()?;
                     let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
-    
+
                     let mut entry = block_body_cursor.first()?;
                     let mut prev_max_tx_id = 0;
                     while let Some((key, body)) = entry {
@@ -666,7 +673,7 @@ mod tests {
                             "We wrote a block body outside of our synced range. Found block with number {}, highest block according to stage is {}",
                             key.number(), highest_block
                         );
-    
+
                         assert!(prev_max_tx_id == body.base_tx_id, "Transaction IDs are malformed.");
                         for num in 0..body.tx_amount {
                             let tx_id = body.base_tx_id + num;
@@ -679,7 +686,7 @@ mod tests {
                         prev_max_tx_id = body.base_tx_id + body.tx_amount;
                         entry = block_body_cursor.next()?;
                     }
-    
+
                     Ok(())
                 })?;
                 Ok(())
@@ -730,7 +737,8 @@ mod tests {
             {
                 Box::pin(futures_util::stream::iter(hashes.into_iter().map(
                     |(block_number, hash)| {
-                        let result = self.responses
+                        let result = self
+                            .responses
                             .get(hash)
                             .expect("Stage tried downloading a block we do not have.")
                             .clone()?;
