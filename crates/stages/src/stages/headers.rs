@@ -281,8 +281,8 @@ mod tests {
                 TestConsensus, TestHeaderDownloader, TestHeadersClient,
             },
         };
-        use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
-        use std::{ops::Deref, sync::Arc};
+        use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
+        use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
@@ -327,7 +327,7 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
                 let head = random_header(start, None);
-                self.insert_header(&head)?;
+                self.db.insert_headers(std::iter::once(&head))?;
 
                 // use previous progress as seed size
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
@@ -425,40 +425,6 @@ mod tests {
         }
 
         impl<D: HeaderDownloader> HeadersTestRunner<D> {
-            /// Insert header into tables
-            pub(crate) fn insert_header(
-                &self,
-                header: &SealedHeader,
-            ) -> Result<(), TestRunnerError> {
-                self.insert_headers(std::iter::once(header))
-            }
-
-            /// Insert headers into tables
-            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), TestRunnerError>
-            where
-                I: Iterator<Item = &'a SealedHeader>,
-            {
-                let headers = headers.collect::<Vec<_>>();
-                self.db
-                    .map_put::<tables::HeaderNumbers, _, _>(&headers, |h| (h.hash(), h.number))?;
-                self.db.map_put::<tables::Headers, _, _>(&headers, |h| {
-                    (BlockNumHash((h.number, h.hash())), h.deref().clone().unseal())
-                })?;
-                self.db.map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| {
-                    (h.number, h.hash())
-                })?;
-
-                self.db.transform_append::<tables::HeaderTD, _, _>(&headers, |prev, h| {
-                    let prev_td = U256::from_big_endian(&prev.clone().unwrap_or_default());
-                    (
-                        BlockNumHash((h.number, h.hash())),
-                        H256::from_uint(&(prev_td + h.difficulty)).as_bytes().to_vec(),
-                    )
-                })?;
-
-                Ok(())
-            }
-
             pub(crate) fn check_no_header_entry_above(
                 &self,
                 block: BlockNumber,

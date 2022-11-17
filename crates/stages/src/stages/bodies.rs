@@ -475,10 +475,7 @@ mod tests {
         use assert_matches::assert_matches;
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
-            db::{
-                models::{BlockNumHash, StoredBlockBody},
-                tables, DbCursorRO, DbTx, DbTxMut,
-            },
+            db::{models::StoredBlockBody, tables, DbCursorRO, DbTx, DbTxMut},
             p2p::bodies::{
                 client::BodiesClient,
                 downloader::{BodiesStream, BodyDownloader},
@@ -486,10 +483,8 @@ mod tests {
             },
             test_utils::{generators::random_block_range, TestConsensus},
         };
-        use reth_primitives::{
-            BigEndianHash, BlockLocked, BlockNumber, Header, SealedHeader, H256, U256,
-        };
-        use std::{collections::HashMap, ops::Deref, sync::Arc, time::Duration};
+        use reth_primitives::{BlockLocked, BlockNumber, Header, SealedHeader, H256};
+        use std::{collections::HashMap, sync::Arc, time::Duration};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
@@ -564,7 +559,7 @@ mod tests {
                 let end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
                 let blocks = random_block_range(start..end, GENESIS_HASH);
                 self.insert_genesis()?;
-                self.insert_headers(blocks.iter().map(|block| &block.header))?;
+                self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
                 Ok(blocks)
             }
@@ -602,7 +597,8 @@ mod tests {
             /// The genesis block always has no transactions and no ommers, and it always has the
             /// same hash.
             pub(crate) fn insert_genesis(&self) -> Result<(), TestRunnerError> {
-                self.insert_header(&SealedHeader::new(Header::default(), GENESIS_HASH))?;
+                let header = SealedHeader::new(Header::default(), GENESIS_HASH);
+                self.db.insert_headers(std::iter::once(&header))?;
                 self.db.commit(|tx| {
                     tx.put::<tables::BlockBodies>(
                         (0, GENESIS_HASH).into(),
@@ -613,42 +609,7 @@ mod tests {
                 Ok(())
             }
 
-            /// Insert header into tables
-            pub(crate) fn insert_header(
-                &self,
-                header: &SealedHeader,
-            ) -> Result<(), TestRunnerError> {
-                self.insert_headers(std::iter::once(header))?;
-                Ok(())
-            }
-
-            /// Insert headers into tables
-            /// TODO: move to common inserter
-            pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), TestRunnerError>
-            where
-                I: Iterator<Item = &'a SealedHeader>,
-            {
-                let headers = headers.collect::<Vec<_>>();
-                self.db
-                    .map_put::<tables::HeaderNumbers, _, _>(&headers, |h| (h.hash(), h.number))?;
-                self.db.map_put::<tables::Headers, _, _>(&headers, |h| {
-                    (BlockNumHash((h.number, h.hash())), h.deref().clone().unseal())
-                })?;
-                self.db.map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| {
-                    (h.number, h.hash())
-                })?;
-
-                self.db.transform_append::<tables::HeaderTD, _, _>(&headers, |prev, h| {
-                    let prev_td = U256::from_big_endian(&prev.clone().unwrap_or_default());
-                    (
-                        BlockNumHash((h.number, h.hash())),
-                        H256::from_uint(&(prev_td + h.difficulty)).as_bytes().to_vec(),
-                    )
-                })?;
-
-                Ok(())
-            }
-
+            /// Retrieve the last body from the database
             pub(crate) fn last_body(&self) -> Option<StoredBlockBody> {
                 self.db
                     .query(|tx| Ok(tx.cursor::<tables::BlockBodies>()?.last()?.map(|e| e.1)))
