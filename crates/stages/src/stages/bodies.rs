@@ -92,7 +92,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.batch_size);
-        if target < starting_block {
+        if target <= previous_block {
             return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
         }
 
