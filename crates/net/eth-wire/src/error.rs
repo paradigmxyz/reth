@@ -3,7 +3,7 @@ use std::io;
 
 use reth_primitives::{Chain, ValidationError, H256};
 
-use crate::capability::SharedCapabilityError;
+use crate::{capability::SharedCapabilityError, DisconnectReason};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
@@ -69,9 +69,8 @@ pub enum P2PStreamError {
     PingBeforeHandshake,
     #[error("too many messages buffered before sending")]
     SendBufferFull,
-    // TODO: remove / reconsider
     #[error("disconnected")]
-    Disconnected,
+    Disconnected(DisconnectReason),
 }
 
 /// Errors when conducting a p2p handshake
