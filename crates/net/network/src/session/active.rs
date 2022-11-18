@@ -29,7 +29,12 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 
 /// The type that advances an established session by listening for incoming messages (from local
-/// node or read from connection) and emitting events back to the [`SessionHandler`].
+/// node or read from connection) and emitting events back to the [`SessionsManager`].
+///
+/// It listens for
+///    - incoming commands from the [`SessionsManager`]
+///    - incoming requests via the request channel
+///    - responses for handled ETH requests received from the remote peer.
 pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: usize,
