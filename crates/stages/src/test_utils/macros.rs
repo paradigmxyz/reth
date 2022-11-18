@@ -54,7 +54,7 @@ macro_rules! stage_test_suite {
         // Run the complete stage execution flow.
         #[tokio::test]
         async fn execute() {
-            let (previous_stage, stage_progress) = (1000, 100);
+            let (previous_stage, stage_progress) = (500, 100);
 
             // Set up the runner
             let mut runner = $runner::default();
@@ -101,7 +101,7 @@ macro_rules! stage_test_suite {
         // Run complete execute and unwind flow.
         #[tokio::test]
         async fn unwind() {
-            let (previous_stage, stage_progress) = (1000, 100);
+            let (previous_stage, stage_progress) = (500, 100);
 
             // Set up the runner
             let mut runner = $runner::default();

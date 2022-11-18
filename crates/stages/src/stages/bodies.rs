@@ -81,6 +81,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
         if previous_stage_progress == 0 {
             warn!("The body stage seems to be running first, no work can be completed.");
+            return Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody {
+                number: 0,
+            }))
         }
 
         // The block we ended at last sync, and the one we are starting on now
@@ -89,7 +92,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.batch_size);
-        if target <= previous_block {
+        if target < starting_block {
             return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
         }
 
@@ -243,18 +246,6 @@ mod tests {
 
     stage_test_suite!(BodyTestRunner);
 
-    /// Check that the execution is short-circuited if the database is empty.
-    // #[tokio::test]
-    // TODO:
-    // async fn empty_db() {
-    //     let runner = BodyTestRunner::new(TestBodyDownloader::default);
-    //     let rx = runner.execute(ExecInput::default());
-    //     assert_matches!(
-    //         rx.await.unwrap(),
-    //         Ok(ExecOutput { stage_progress: 0, reached_tip: true, done: true })
-    //     )
-    // }
-
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]
     async fn partial_body_download() {
@@ -288,7 +279,7 @@ mod tests {
     /// Same as [partial_body_download] except the `batch_size` is not hit.
     #[tokio::test]
     async fn full_body_download() {
-        let (stage_progress, previous_stage) = (1, 21);
+        let (stage_progress, previous_stage) = (1, 20);
 
         // Set up test runner
         let mut runner = BodyTestRunner::default();
@@ -326,6 +317,8 @@ mod tests {
             stage_progress: Some(stage_progress),
         };
         runner.seed_execution(input).expect("failed to seed execution");
+
+        runner.set_batch_size(10);
 
         // Run the stage
         let rx = runner.execute(input);
@@ -384,7 +377,7 @@ mod tests {
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
     #[tokio::test]
     async fn unwind_missing_tx() {
-        let (stage_progress, previous_stage) = (1, 21);
+        let (stage_progress, previous_stage) = (1, 20);
 
         // Set up test runner
         let mut runner = BodyTestRunner::default();
@@ -405,7 +398,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
+            Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress == previous_stage
         );
         let stage_progress = output.unwrap().stage_progress;
         runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
@@ -438,13 +431,13 @@ mod tests {
     /// try again?
     #[tokio::test]
     async fn downloader_timeout() {
-        let (stage_progress, previous_stage) = (1, 3);
+        let (stage_progress, previous_stage) = (1, 2);
 
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress), // TODO: None?
+            stage_progress: Some(stage_progress),
         };
         let blocks = runner.seed_execution(input).expect("failed to seed execution");
 
@@ -516,7 +509,7 @@ mod tests {
                     consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
                     db: StageTestDB::default(),
-                    batch_size: 10,
+                    batch_size: 1000,
                 }
             }
         }
@@ -556,7 +549,8 @@ mod tests {
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
-                let end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
+                let end =
+                    input.previous_stage.as_ref().map(|(_, num)| *num + 1).unwrap_or_default();
                 let blocks = random_block_range(start..end, GENESIS_HASH);
                 self.insert_genesis()?;
                 self.db.insert_headers(blocks.iter().map(|block| &block.header))?;

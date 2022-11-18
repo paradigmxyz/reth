@@ -58,8 +58,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         let last_block_num = input.stage_progress.unwrap_or_default();
         self.update_head::<DB>(tx, last_block_num).await?;
 
+        // TODO: add batch size
         // download the headers
-        // TODO: handle input.max_block
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block_num)?
             .ok_or(DatabaseIntegrityError::CanonicalHash { number: last_block_num })?;
