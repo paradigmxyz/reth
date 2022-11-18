@@ -123,6 +123,34 @@ pub enum PeerRequest {
     GetReceipts { request: GetReceipts, response: oneshot::Sender<RequestResult<Receipts>> },
 }
 
+// === impl PeerRequest ===
+
+impl PeerRequest {
+    /// Returns the [`EthMessage`] for this type
+    pub fn create_request_massage(&self, request_id: u64) -> EthMessage {
+        match self {
+            PeerRequest::GetBlockHeaders { request, .. } => {
+                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
+            }
+            PeerRequest::GetBlockBodies { request, .. } => {
+                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() })
+            }
+            PeerRequest::GetPooledTransactions { request, .. } => {
+                EthMessage::GetPooledTransactions(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                })
+            }
+            PeerRequest::GetNodeData { request, .. } => {
+                EthMessage::GetNodeData(RequestPair { request_id, message: request.clone() })
+            }
+            PeerRequest::GetReceipts { request, .. } => {
+                EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
+            }
+        }
+    }
+}
+
 /// Corresponding variant for [`PeerRequest`].
 #[derive(Debug)]
 pub enum PeerResponse {
@@ -191,12 +219,9 @@ impl PeerResponseResult {
             ($response:ident, $item:ident, $request_id:ident) => {
                 match $response {
                     Ok(res) => {
-                        let request = RequestPair {
-                            request_id: $request_id,
-                            message: $item(res)
-                        };
+                        let request = RequestPair { request_id: $request_id, message: $item(res) };
                         Ok(EthMessage::$item(request))
-                    },
+                    }
                     Err(err) => Err(err),
                 }
             };

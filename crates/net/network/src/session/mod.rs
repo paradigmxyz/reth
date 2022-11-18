@@ -295,7 +295,7 @@ impl SessionManager {
                         request_tx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
-                        buffered_outgoing: Default::default(),
+                        queued_outgoing: Default::default(),
                         received_requests: Default::default(),
                     };
 

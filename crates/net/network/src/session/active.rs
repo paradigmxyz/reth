@@ -1,7 +1,7 @@
 //! Represents an established session.
 
 use crate::{
-    message::{PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
+    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
     session::{
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
@@ -12,9 +12,11 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::Capabilities,
-    error::{EthStreamError, P2PStreamError},
+    error::{EthStreamError, HandshakeError},
+    message::{EthBroadcastMessage, RequestPair},
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
+
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
@@ -25,10 +27,12 @@ use std::{
     task::{ready, Context, Poll},
     time::Instant,
 };
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, oneshot},
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
-use reth_interfaces::p2p::error::RequestResult;
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the [`SessionsManager`].
@@ -39,7 +43,7 @@ use reth_interfaces::p2p::error::RequestResult;
 ///    - responses for handled ETH requests received from the remote peer.
 pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
-    pub(crate) next_id: usize,
+    pub(crate) next_id: u64,
     /// The underlying connection.
     pub(crate) conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     /// Identifier of the node we're connected to.
@@ -61,7 +65,7 @@ pub(crate) struct ActiveSession {
     /// All requests that were sent by the remote peer.
     pub(crate) received_requests: Vec<ReceivedRequest>,
     /// Buffered messages that should be handled and sent to the peer.
-    pub(crate) buffered_outgoing: VecDeque<EthMessage>,
+    pub(crate) queued_outgoing: VecDeque<OutgoingMessage>,
 }
 
 impl ActiveSession {
@@ -70,24 +74,138 @@ impl ActiveSession {
         self.conn.inner().is_disconnecting()
     }
 
-    /// Handle an incoming peer request.
-    fn on_peer_request(&mut self, _req: PeerRequest) {}
+    /// Returns the next request id
+    fn next_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
 
     /// Handle a message read from the connection.
-    fn on_incoming(&mut self, _msg: EthMessage) {}
+    ///
+    /// Returns an error if the message is considered to be in violation of the protocol
+    fn on_incoming(&mut self, msg: EthMessage) -> Option<EthStreamError> {
+        /// A macro that handles an incoming request
+        /// This creates a new channel and tries to send the sender half to the session while
+        /// storing to receiver half internally so the pending response can be polled.
+        macro_rules! on_request {
+            ($req:ident, $resp_item:ident, $req_item:ident) => {
+                let RequestPair { request_id, message: request } = $req;
+                let (tx, response) = oneshot::channel();
+                let received = ReceivedRequest {
+                    request_id,
+                    rx: PeerResponse::$resp_item { response },
+                    received: Instant::now(),
+                };
+                if self
+                    .try_emit_message(PeerMessage::EthRequest(PeerRequest::$req_item {
+                        request,
+                        response: tx,
+                    }))
+                    .is_ok()
+                {
+                    self.received_requests.push(received);
+                }
+            };
+        }
+
+        /// Processes a response received from the peer
+        macro_rules! on_response {
+            ($resp:ident, $item:ident) => {
+                let RequestPair { request_id, message } = $resp;
+                #[allow(clippy::collapsible_match)]
+                if let Some(resp) = self.inflight_requests.remove(&request_id) {
+                    if let PeerRequest::$item { response, .. } = resp {
+                        let _ = response.send(Ok(message));
+                    } else {
+                        // TODO handle bad response
+                    }
+                } else {
+                    // TODO handle unexpected response
+                }
+            };
+        }
+
+        match msg {
+            EthMessage::Status(_) => {
+                return Some(EthStreamError::HandshakeError(HandshakeError::StatusNotInHandshake))
+            }
+            EthMessage::NewBlockHashes(msg) => {
+                self.emit_message(PeerMessage::NewBlockHashes(Arc::new(msg)));
+            }
+            EthMessage::NewBlock(msg) => {
+                let block =
+                    NewBlockMessage { hash: msg.block.header.hash_slow(), block: Arc::new(*msg) };
+                self.emit_message(PeerMessage::NewBlock(block));
+            }
+            EthMessage::Transactions(msg) => {
+                self.emit_message(PeerMessage::Transactions(Arc::new(msg)));
+            }
+            EthMessage::NewPooledTransactionHashes(msg) => {
+                self.emit_message(PeerMessage::PooledTransactions(Arc::new(msg)));
+            }
+            EthMessage::GetBlockHeaders(req) => {
+                on_request!(req, BlockHeaders, GetBlockHeaders);
+            }
+            EthMessage::BlockHeaders(resp) => {
+                on_response!(resp, GetBlockHeaders);
+            }
+            EthMessage::GetBlockBodies(req) => {
+                on_request!(req, BlockBodies, GetBlockBodies);
+            }
+            EthMessage::BlockBodies(resp) => {
+                on_response!(resp, GetBlockBodies);
+            }
+            EthMessage::GetPooledTransactions(req) => {
+                on_request!(req, PooledTransactions, GetPooledTransactions);
+            }
+            EthMessage::PooledTransactions(resp) => {
+                on_response!(resp, GetPooledTransactions);
+            }
+            EthMessage::GetNodeData(req) => {
+                on_request!(req, NodeData, GetNodeData);
+            }
+            EthMessage::NodeData(resp) => {
+                on_response!(resp, GetNodeData);
+            }
+            EthMessage::GetReceipts(req) => {
+                on_request!(req, Receipts, GetReceipts);
+            }
+            EthMessage::Receipts(resp) => {
+                on_response!(resp, GetReceipts);
+            }
+        };
+
+        None
+    }
+
+    /// Handle an incoming peer request.
+    fn on_peer_request(&mut self, req: PeerRequest) {
+        let request_id = self.next_id();
+        let msg = req.create_request_massage(request_id);
+        self.queued_outgoing.push_back(msg.into());
+        self.inflight_requests.insert(request_id, req);
+    }
 
     /// Handle a message received from the internal network
     fn on_peer_message(&mut self, msg: PeerMessage) {
         match msg {
-            PeerMessage::NewBlockHashes(_) => {}
-            PeerMessage::NewBlock(block) => {
-                self.buffered_outgoing.push_back(
-                    EthMessage::NewBlock(Box::new(block))
-                )
+            PeerMessage::NewBlockHashes(msg) => {
+                self.queued_outgoing.push_back(EthBroadcastMessage::NewBlockHashes(msg).into());
             }
-            PeerMessage::Transactions(tx) => {}
-            PeerMessage::PooledTransactions(_) => {}
-            PeerMessage::EthRequest(_) => {}
+            PeerMessage::NewBlock(msg) => {
+                self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
+            }
+            PeerMessage::Transactions(msg) => {
+                self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
+            }
+            PeerMessage::PooledTransactions(msg) => {
+                self.queued_outgoing
+                    .push_back(EthBroadcastMessage::NewPooledTransactionHashes(msg).into());
+            }
+            PeerMessage::EthRequest(req) => {
+                self.on_peer_request(req);
+            }
             PeerMessage::Other(_) => {}
         }
     }
@@ -96,12 +214,26 @@ impl ActiveSession {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult) {
         match resp.try_into_message(id) {
             Ok(msg) => {
-                self.buffered_outgoing.push_back(msg);
+                self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
                 error!(?err, target = "net", "Failed to respond to received request");
             }
         }
+    }
+
+    /// Send a message back to the [`SessionsManager`]
+    fn emit_message(&self, message: PeerMessage) {
+        let _ = self.try_emit_message(message);
+    }
+
+    /// Send a message back to the [`SessionsManager`]
+    fn try_emit_message(
+        &self,
+        message: PeerMessage,
+    ) -> Result<(), mpsc::error::TrySendError<ActiveSessionMessage>> {
+        self.to_session
+            .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
     }
 
     /// Report back that this session has been closed.
@@ -128,7 +260,7 @@ impl Future for ActiveSession {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.get_mut();
+        let this = self.get_mut();
 
         if this.is_disconnecting() {
             // try to close the flush out the remaining Disconnect message
@@ -180,7 +312,7 @@ impl Future for ActiveSession {
                         this.received_requests.push(req);
                     }
                     Poll::Ready(Ok(resp)) => {
-                        this.handle_outgoing_response(req.id, resp);
+                        this.handle_outgoing_response(req.request_id, resp);
                     }
                     Poll::Ready(Err(_)) => {
                         // ignore on error
@@ -188,11 +320,15 @@ impl Future for ActiveSession {
                 }
             }
 
-            // Flush messages
+            // Send messages by advancing the sink and queuing in buffered messages
             while this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.buffered_outgoing.pop_front() {
+                if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
-                    if let Err(_err) = this.conn.start_send_unpin(msg) {
+                    let res = match msg {
+                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                        OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
+                    };
+                    if let Err(_err) = res {
                         return Poll::Ready(())
                     }
                 } else {
@@ -203,15 +339,16 @@ impl Future for ActiveSession {
             loop {
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Pending => break,
-                    Poll::Ready(None) => {
-                        return Poll::Pending
-                    }
+                    Poll::Ready(None) => return Poll::Pending,
                     Poll::Ready(Some(res)) => {
                         progress = true;
                         match res {
                             Ok(msg) => {
                                 // decode and handle message
-                                this.on_incoming(msg);
+                                if let Some(err) = this.on_incoming(msg) {
+                                    this.close_on_error(err);
+                                    return Poll::Ready(())
+                                }
                             }
                             Err(err) => {
                                 this.close_on_error(err);
@@ -232,9 +369,29 @@ impl Future for ActiveSession {
 /// Tracks a request received from the peer
 pub(crate) struct ReceivedRequest {
     /// Protocol Identifier
-    id: u64,
+    request_id: u64,
     /// Receiver half of the channel that's supposed to receive the proper response.
     rx: PeerResponse,
     /// Timestamp when we read this msg from the wire.
     received: Instant,
+}
+
+/// Outgoing messages that can be sent over the wire.
+pub(crate) enum OutgoingMessage {
+    /// A message that is owned.
+    Eth(EthMessage),
+    /// A message that may be shared by multiple sessions.
+    Broadcast(EthBroadcastMessage),
+}
+
+impl From<EthMessage> for OutgoingMessage {
+    fn from(value: EthMessage) -> Self {
+        OutgoingMessage::Eth(value)
+    }
+}
+
+impl From<EthBroadcastMessage> for OutgoingMessage {
+    fn from(value: EthBroadcastMessage) -> Self {
+        OutgoingMessage::Broadcast(value)
+    }
 }
