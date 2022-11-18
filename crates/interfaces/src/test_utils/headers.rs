@@ -11,7 +11,10 @@ use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc, watch};
@@ -150,7 +153,7 @@ pub struct TestConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Flag whether the header validation should purposefully fail
-    fail_validation: Mutex<bool>,
+    fail_validation: AtomicBool, // Mutex<bool>,
 }
 
 impl Default for TestConsensus {
@@ -161,7 +164,7 @@ impl Default for TestConsensus {
                 finalized_block_hash: H256::zero(),
                 safe_block_hash: H256::zero(),
             }),
-            fail_validation: Mutex::new(false),
+            fail_validation: AtomicBool::new(false), //  Mutex::new(false),
         }
     }
 }
@@ -177,14 +180,14 @@ impl TestConsensus {
         self.channel.0.send(state).expect("updating fork choice state failed");
     }
 
-    /// Acquire lock on failed validation flag
-    pub fn fail_validation(&self) -> MutexGuard<'_, bool> {
-        self.fail_validation.lock().expect("failed to acquite consensus mutex")
+    /// Get the failed validation flag
+    pub fn fail_validation(&self) -> bool {
+        self.fail_validation.load(Ordering::SeqCst)
     }
 
     /// Update the validation flag
     pub fn set_fail_validation(&self, val: bool) {
-        *self.fail_validation() = val;
+        self.fail_validation.store(val, Ordering::SeqCst)
     }
 }
 
@@ -199,7 +202,7 @@ impl Consensus for TestConsensus {
         _header: &SealedHeader,
         _parent: &SealedHeader,
     ) -> Result<(), consensus::Error> {
-        if *self.fail_validation() {
+        if self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {
             Ok(())
@@ -207,7 +210,7 @@ impl Consensus for TestConsensus {
     }
 
     fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), consensus::Error> {
-        if *self.fail_validation() {
+        if self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {
             Ok(())
