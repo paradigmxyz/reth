@@ -224,7 +224,7 @@ where
         match action {
             PeerAction::Connect { peer_id, remote_addr } => {
                 self.queued_messages
-                    .push_back(StateAction::Connect { node_id: peer_id, remote_addr });
+                    .push_back(StateAction::Connect { peer_id, remote_addr });
             }
             PeerAction::Disconnect { peer_id, reason } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
@@ -388,7 +388,7 @@ pub enum StateAction {
         hashes: Arc<NewBlockHashes>,
     },
     /// Create a new connection to the given node.
-    Connect { remote_addr: SocketAddr, node_id: PeerId },
+    Connect { remote_addr: SocketAddr, peer_id: PeerId },
     /// Disconnect an existing connection
     Disconnect {
         peer_id: PeerId,

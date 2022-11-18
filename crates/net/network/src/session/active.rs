@@ -36,7 +36,7 @@ pub(crate) struct ActiveSession {
     /// The underlying connection.
     pub(crate) conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     /// Identifier of the node we're connected to.
-    pub(crate) remote_node_id: PeerId,
+    pub(crate) remote_peer_id: PeerId,
     /// All capabilities the peer announced
     pub(crate) remote_capabilities: Arc<Capabilities>,
     /// Internal identifier of this session
@@ -80,6 +80,8 @@ impl Future for ActiveSession {
         if this.is_gracefully_disconnecting {
             // try to close the flush out the remaining Disconnect message
             let _ = ready!(this.conn.poll_close_unpin(cx));
+            // this.to_session.clone().send(
+            // );
             return Poll::Ready(())
         }
 
@@ -98,7 +100,7 @@ impl Future for ActiveSession {
                     Poll::Ready(Some(cmd)) => {
                         progress = true;
                         match cmd {
-                            SessionCommand::Disconnect => {
+                            SessionCommand::Disconnect { reason: _ } => {
                                 // TODO queue in disconnect message
                                 this.is_gracefully_disconnecting = true;
                             }

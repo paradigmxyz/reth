@@ -68,7 +68,7 @@ pub(crate) enum PendingSessionEvent {
         session_id: SessionId,
         remote_addr: SocketAddr,
         /// The remote node's public key
-        node_id: PeerId,
+        peer_id: PeerId,
         capabilities: Arc<Capabilities>,
         status: Status,
         conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
@@ -84,7 +84,7 @@ pub(crate) enum PendingSessionEvent {
     OutgoingConnectionError {
         remote_addr: SocketAddr,
         session_id: SessionId,
-        node_id: PeerId,
+        peer_id: PeerId,
         error: io::Error,
     },
     /// Thrown when authentication via Ecies failed.
@@ -108,18 +108,18 @@ pub(crate) enum SessionCommand {
 #[derive(Debug)]
 pub(crate) enum ActiveSessionMessage {
     /// Session disconnected.
-    Closed { node_id: PeerId, remote_addr: SocketAddr },
+    Closed { peer_id: PeerId, remote_addr: SocketAddr },
     /// A session received a valid message via RLPx.
     ValidMessage {
         /// Identifier of the remote peer.
-        node_id: PeerId,
+        peer_id: PeerId,
         /// Message received from the peer.
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
         /// Identifier of the remote peer.
-        node_id: PeerId,
+        peer_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.

@@ -200,7 +200,7 @@ impl PeerResponseResult {
 #[derive(Debug, Clone)]
 pub struct PeerRequestSender {
     /// id of the remote node.
-    pub(crate) peer: PeerId,
+    pub(crate) peer_id: PeerId,
     /// The Sender half connected to a session.
     pub(crate) to_session_tx: mpsc::Sender<PeerRequest>,
 }

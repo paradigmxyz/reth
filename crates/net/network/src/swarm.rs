@@ -72,19 +72,19 @@ where
     fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
         match event {
             SessionEvent::SessionEstablished {
-                node_id,
+                peer_id,
                 remote_addr,
                 capabilities,
                 status,
                 messages,
             } => match self.state.on_session_activated(
-                node_id,
+                peer_id,
                 capabilities.clone(),
                 status,
                 messages.clone(),
             ) {
                 Ok(_) => Some(SwarmEvent::SessionEstablished {
-                    node_id,
+                    peer_id,
                     remote_addr,
                     capabilities,
                     messages,
@@ -98,24 +98,24 @@ where
                     None
                 }
             },
-            SessionEvent::ValidMessage { node_id, message } => {
-                Some(SwarmEvent::ValidMessage { node_id, message })
+            SessionEvent::ValidMessage { peer_id, message } => {
+                Some(SwarmEvent::ValidMessage { peer_id, message })
             }
-            SessionEvent::InvalidMessage { node_id, capabilities, message } => {
-                Some(SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message })
+            SessionEvent::InvalidMessage { peer_id, capabilities, message } => {
+                Some(SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message })
             }
             SessionEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 Some(SwarmEvent::IncomingPendingSessionClosed { remote_addr, error })
             }
-            SessionEvent::OutgoingPendingSessionClosed { remote_addr, node_id, error } => {
-                Some(SwarmEvent::OutgoingPendingSessionClosed { remote_addr, node_id, error })
+            SessionEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
+                Some(SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error })
             }
-            SessionEvent::Disconnected { node_id, remote_addr } => {
-                self.state.on_session_closed(node_id);
-                Some(SwarmEvent::SessionClosed { node_id, remote_addr })
+            SessionEvent::Disconnected { peer_id, remote_addr } => {
+                self.state.on_session_closed(peer_id);
+                Some(SwarmEvent::SessionClosed { peer_id, remote_addr })
             }
-            SessionEvent::OutgoingConnectionError { remote_addr, node_id, error } => {
-                Some(SwarmEvent::OutgoingConnectionError { node_id, remote_addr, error })
+            SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
+                Some(SwarmEvent::OutgoingConnectionError { peer_id, remote_addr, error })
             }
         }
     }
@@ -146,11 +146,11 @@ where
     /// Hook for actions pulled from the state
     fn on_state_action(&mut self, event: StateAction) -> Option<SwarmEvent> {
         match event {
-            StateAction::Connect { remote_addr, node_id } => {
-                self.sessions.dial_outbound(remote_addr, node_id);
+            StateAction::Connect { remote_addr, peer_id } => {
+                self.sessions.dial_outbound(remote_addr, peer_id);
             }
-            StateAction::Disconnect { peer_id: node_id, reason } => {
-                self.sessions.disconnect(node_id, reason);
+            StateAction::Disconnect { peer_id, reason } => {
+                self.sessions.disconnect(peer_id, reason);
             }
             StateAction::NewBlock { peer_id, block: msg } => {
                 let msg = PeerMessage::NewBlock(msg);
@@ -220,13 +220,13 @@ pub enum SwarmEvent {
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
-        node_id: PeerId,
+        peer_id: PeerId,
         /// Message received from the peer
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidCapabilityMessage {
-        node_id: PeerId,
+        peer_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
@@ -255,13 +255,13 @@ pub enum SwarmEvent {
         remote_addr: SocketAddr,
     },
     SessionEstablished {
-        node_id: PeerId,
+        peer_id: PeerId,
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
     },
     SessionClosed {
-        node_id: PeerId,
+        peer_id: PeerId,
         remote_addr: SocketAddr,
     },
     /// Closed an incoming pending session during authentication.
@@ -272,13 +272,13 @@ pub enum SwarmEvent {
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
-        node_id: PeerId,
+        peer_id: PeerId,
         error: Option<EthStreamError>,
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError {
         remote_addr: SocketAddr,
-        node_id: PeerId,
+        peer_id: PeerId,
         error: io::Error,
     },
 }
