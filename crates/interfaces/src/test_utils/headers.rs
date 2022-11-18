@@ -153,7 +153,7 @@ pub struct TestConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Flag whether the header validation should purposefully fail
-    fail_validation: AtomicBool, // Mutex<bool>,
+    fail_validation: AtomicBool,
 }
 
 impl Default for TestConsensus {
@@ -164,7 +164,7 @@ impl Default for TestConsensus {
                 finalized_block_hash: H256::zero(),
                 safe_block_hash: H256::zero(),
             }),
-            fail_validation: AtomicBool::new(false), //  Mutex::new(false),
+            fail_validation: AtomicBool::new(false),
         }
     }
 }
