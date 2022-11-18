@@ -1,7 +1,23 @@
 use bytes::{Buf, Bytes};
 pub use codecs_derive::*;
+
+/// Trait that implements the `Compact` codec.
+///
+/// When deriving the trait for custom structs, be aware of certain limitations/recommendations:
+/// * Works best with structs that only have native types (eg. u64, H256, U256).
+/// * Fixed array types (H256, Address, Bloom) are not compacted.
+/// * Any `bytes::Bytes` field **should be placed last**.
+/// * Any other type which is not known to the derive module **should be placed last**.
+///
+/// The last two points make it easier to decode the data without saving the length on the
+/// `StructFlags`.
 pub trait Compact {
+    /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
+    /// Takes a buffer which can be read from. Returns the object and `buf` with its internal cursor
+    /// advanced (eg.`.advance(len)`).
+    ///
+    /// `len` can either be the `buf` remaining length, or the length of the compacted type.
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized;
