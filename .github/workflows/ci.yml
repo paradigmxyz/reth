@@ -36,11 +36,9 @@ jobs:
 
       - name: Run fuzz tests
         run: | 
-          alias run_fuzz_tests='cargo test-fuzz --list -p $PACKAGE | head -n -3 | tail -n+9 | cat - <(echo \"--list\"]) | cat - | jq -r ".[]" | while read -r ln; do echo "cargo test-fuzz --no-ui -p $PACKAGE $ln  -- -V $TEST_TIME" && cargo test-fuzz --no-ui  -p "$PACKAGE" $ln  -- -V $TEST_TIME ; done'
-          export TEST_TIME=5
-          PACKAGE="reth-primitives" run_fuzz_tests
-          PACKAGE="reth-db" run_fuzz_tests
-          PACKAGE="reth-interfaces" run_fuzz_tests
+          ./.github/scripts/fuzz.sh reth-primitives
+          ./.github/scripts/fuzz.sh reth-db
+          ./.github/scripts/fuzz.sh reth-interfaces
 
   lint:
     runs-on: ubuntu-latest
