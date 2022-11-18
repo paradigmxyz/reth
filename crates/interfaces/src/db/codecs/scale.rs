@@ -29,18 +29,8 @@ where
     }
 }
 
-/// Implements SCALE both for value and key types.
-macro_rules! impl_scale {
-    ($($name:tt),+) => {
-        $(
-            impl ScaleValue for $name {}
-            impl sealed::Sealed for $name {}
-        )+
-    };
-}
-
-/// Implements SCALE only for value types.
-macro_rules! impl_scale_value {
+/// Implements compression for SCALE type.
+macro_rules! impl_compression_for_scale {
     ($($name:tt),+) => {
         $(
             impl ScaleValue for $name {}
@@ -52,7 +42,6 @@ macro_rules! impl_scale_value {
 impl ScaleValue for Vec<u8> {}
 impl sealed::Sealed for Vec<u8> {}
 
-impl_scale!(U256, H256, H160);
-impl_scale!(TransactionSigned);
-
-impl_scale_value!(u8, u32, u16, u64);
+impl_compression_for_scale!(U256, H256, H160);
+impl_compression_for_scale!(TransactionSigned);
+impl_compression_for_scale!(u8, u32, u16, u64);

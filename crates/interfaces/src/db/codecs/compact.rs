@@ -5,7 +5,8 @@ use crate::db::{
 use reth_codecs::Compact;
 use reth_primitives::*;
 
-macro_rules! impl_compact {
+/// Implements compression for Compact type.
+macro_rules! impl_compression_for_compact {
     ($($name:tt),+) => {
         $(
             impl Compress for $name
@@ -31,5 +32,5 @@ macro_rules! impl_compact {
     };
 }
 
-impl_compact!(Header, Account, Log, Receipt, TxType, StorageEntry, StoredBlockBody);
-impl_compact!(AccountBeforeTx);
+impl_compression_for_compact!(Header, Account, Log, Receipt, TxType, StorageEntry, StoredBlockBody);
+impl_compression_for_compact!(AccountBeforeTx);

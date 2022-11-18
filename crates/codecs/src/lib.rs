@@ -375,7 +375,7 @@ mod tests {
             2 + // TestStructFlags
             1 +
             1 +
-            0 + 0 + 0 +
+            // 0 + 0 + 0 +
             2 + 32 +
             2 + 2 +
             2 +
