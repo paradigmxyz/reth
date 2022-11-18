@@ -31,7 +31,10 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::capability::{Capabilities, CapabilityMessage};
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    DisconnectReason,
+};
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
 use std::{
@@ -237,7 +240,9 @@ where
         // reject message in POS
         if self.handle.mode().is_stake() {
             // connections to peers which send invalid messages should be terminated
-            self.swarm.sessions_mut().disconnect(peer_id, None);
+            self.swarm
+                .sessions_mut()
+                .disconnect(peer_id, Some(DisconnectReason::SubprotocolSpecific));
         } else {
             only_pow(self);
         }
