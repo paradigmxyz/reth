@@ -417,9 +417,9 @@ mod tests {
         // Unwind all of it
         let unwind_to = 1;
         let input = UnwindInput { bad_block: None, stage_progress, unwind_to };
-        let rx = runner.unwind(input);
+        let res = runner.unwind(input).await;
         assert_matches!(
-            rx.await.unwrap(),
+            res,
             Ok(UnwindOutput { stage_progress }) if stage_progress == 1
         );
 

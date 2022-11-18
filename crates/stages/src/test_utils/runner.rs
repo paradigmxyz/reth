@@ -59,15 +59,16 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     }
 }
 
+#[async_trait::async_trait]
 pub(crate) trait UnwindStageTestRunner: StageTestRunner {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
     /// Run [Stage::unwind] and return a receiver for the result.
-    fn unwind(
+    async fn unwind(
         &self,
         input: UnwindInput,
-    ) -> oneshot::Receiver<Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>> {
+    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().inner(), self.stage());
         tokio::spawn(async move {
@@ -76,6 +77,6 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });
-        rx
+        Box::pin(rx).await.unwrap()
     }
 }

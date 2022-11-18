@@ -88,9 +88,9 @@ macro_rules! stage_test_suite {
             let input = crate::stage::UnwindInput::default();
 
             // Run stage unwind
-            let rx = runner.unwind(input);
+            let rx = runner.unwind(input).await;
             assert_matches!(
-                rx.await.unwrap(),
+                rx,
                 Ok(UnwindOutput { stage_progress }) if stage_progress == input.unwind_to
             );
 
@@ -128,11 +128,11 @@ macro_rules! stage_test_suite {
             let unwind_input = crate::stage::UnwindInput {
                 unwind_to: stage_progress, stage_progress, bad_block: None,
             };
-            let rx = runner.unwind(unwind_input);
+            let rx = runner.unwind(unwind_input).await;
 
             // Assert the successful unwind result
             assert_matches!(
-                rx.await.unwrap(),
+                rx,
                 Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_input.unwind_to
             );
 
