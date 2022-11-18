@@ -1,14 +1,14 @@
-use crate::{Header, SealedHeader, Transaction, TransactionSigned, H256};
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use crate::{Header, SealedHeader, TransactionSigned, H256};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use std::ops::Deref;
 
 /// Ethereum full block.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 pub struct Block {
     /// Block header.
     pub header: Header,
     /// Transactions in this block.
-    pub body: Vec<Transaction>,
+    pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header
     pub ommers: Vec<SealedHeader>,
 }
@@ -21,7 +21,7 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 pub struct BlockLocked {
     /// Locked block header.
     pub header: SealedHeader,

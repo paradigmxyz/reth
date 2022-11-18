@@ -629,7 +629,7 @@ impl TransactionSigned {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2728 does not require rlp header
-    fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
+    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
         if let Transaction::Legacy { chain_id, .. } = self.transaction {
             let header = Header { list: true, payload_length: self.payload_len() };
             header.encode(out);

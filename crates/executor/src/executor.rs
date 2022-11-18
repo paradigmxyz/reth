@@ -3,16 +3,13 @@ use crate::{
     Config,
 };
 use hashbrown::hash_map::Entry;
-use reth_interfaces::{
-    executor::Error,
-    provider::StateProvider,
-};
+use reth_interfaces::{executor::Error, provider::StateProvider};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, BlockLocked, Bloom, Log, Receipt, H256, U256,
 };
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ExecutionResult,
-    SpecId, EVM,
+    EVM,
 };
 use std::collections::BTreeMap;
 
@@ -33,17 +30,18 @@ pub struct AccountChangeSet {
     /// Storage containing key -> (OldValue,NewValue). in case that old value is not existing
     /// we can expect to have U256::zero(), same with new value.
     pub storage: BTreeMap<U256, (U256, U256)>,
-    /// Just to make sure that we are taking selfdestruct cleaning we have this field that wipes storage.
-    /// There are instances where storage is changed but account is not touched, so we can't take into account
-    /// that if new account is None that it is selfdestruct.
+    /// Just to make sure that we are taking selfdestruct cleaning we have this field that wipes
+    /// storage. There are instances where storage is changed but account is not touched, so we
+    /// can't take into account that if new account is None that it is selfdestruct.
     pub wipe_storage: bool,
 }
 
-/// Commit chgange to database and return change diff that is used to update state and create history index
+/// Commit chgange to database and return change diff that is used to update state and create
+/// history index
 ///
 /// ChangeDiff consists of:
-///     address->AccountChangeSet (It contains old and new account info,storage wipe flag, and old/new storage)
-///     bytecode_hash->bytecodes mapping
+///     address->AccountChangeSet (It contains old and new account info,storage wipe flag, and
+/// old/new storage)     bytecode_hash->bytecodes mapping
 ///
 /// BTreeMap is used to have sorted values
 pub fn commit_changes<DB: StateProvider>(
@@ -71,7 +69,8 @@ pub fn commit_changes<DB: StateProvider>(
                         Some(Account {
                             nonce: db_account.info.nonce,
                             balance: db_account.info.balance,
-                            bytecode_hash: Some(db_account.info.code_hash), // TODO none if KECCAK_EMPTY
+                            bytecode_hash: Some(db_account.info.code_hash), /* TODO none if
+                                                                             * KECCAK_EMPTY */
                         }),
                         None,
                     ),
@@ -84,7 +83,7 @@ pub fn commit_changes<DB: StateProvider>(
             db_account.account_state = AccountState::NotExisting;
             db_account.info = AccountInfo::default();
 
-            continue;
+            continue
         } else {
             // check if account code is new or old.
             // does it exist inside cached contracts if it doesn't it is new bytecode that
@@ -192,10 +191,10 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     db: &mut SubState<DB>,
 ) -> Result<Vec<TransactionStatePatch>, Error> {
     let transaction_patches = execute(block, config, db)?;
-    
+
     let receipts_iter = transaction_patches.iter().map(|patch| &patch.receipt);
     verify_receipt(block.receipts_root, block.logs_bloom, receipts_iter)?;
-    
+
     Ok(transaction_patches)
 }
 
@@ -208,10 +207,7 @@ pub fn verify_receipt<'a>(
     // Check receipts root.
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts.clone());
     if receipts_root != expected_receipts_root {
-        return Err(Error::ReceiptRootDiff {
-            got: receipts_root,
-            expected: expected_receipts_root,
-        });
+        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }
 
     // Create header log bloom.
@@ -220,7 +216,7 @@ pub fn verify_receipt<'a>(
         return Err(Error::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
-        });
+        })
     }
     Ok(())
 }
@@ -232,12 +228,11 @@ pub fn execute<DB: StateProvider>(
     config: &Config,
     db: &mut SubState<DB>,
 ) -> Result<Vec<TransactionStatePatch>, Error> {
-    //let db = SubState::new(State::new(db));
     let mut evm = EVM::new();
     evm.database(db);
 
     evm.env.cfg.chain_id = config.chain_id;
-    evm.env.cfg.spec_id = SpecId::LATEST; // TODO from config
+    evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(block.number);
     evm.env.cfg.perf_all_precompiles_have_balance = true;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
@@ -254,7 +249,7 @@ pub fn execute<DB: StateProvider>(
             return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
                 transaction_gas_limit: transaction.gas_limit(),
                 block_available_gas,
-            });
+            })
         }
 
         // Fill revm structure.
@@ -265,16 +260,16 @@ pub fn execute<DB: StateProvider>(
 
         // Fatal internal error.
         if exit_reason == revm::Return::FatalExternalError {
-            return Err(Error::ExecutionFatalError);
+            return Err(Error::ExecutionFatalError)
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
         let is_success = matches!(
             exit_reason,
-            revm::Return::Continue
-                | revm::Return::Stop
-                | revm::Return::Return
-                | revm::Return::SelfDestruct
+            revm::Return::Continue |
+                revm::Return::Stop |
+                revm::Return::Return |
+                revm::Return::SelfDestruct
         );
 
         // Add spend gas.
@@ -305,7 +300,7 @@ pub fn execute<DB: StateProvider>(
 
     // Check if gas used matches the value set in header.
     if block.gas_used != cumulative_gas_used {
-        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used });
+        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
     }
 
     Ok(transaction_patch)
