@@ -107,8 +107,15 @@ pub(crate) enum SessionCommand {
 /// [`SessionManager`](crate::session::SessionManager)
 #[derive(Debug)]
 pub(crate) enum ActiveSessionMessage {
-    /// Session disconnected.
-    Closed { peer_id: PeerId, remote_addr: SocketAddr },
+    /// Session was gracefully disconnected.
+    Disconnected { peer_id: PeerId, remote_addr: SocketAddr },
+    /// Session was closed due an error
+    ClosedOnConnectionError {
+        peer_id: PeerId,
+        remote_addr: SocketAddr,
+        /// The error that caused the session to close
+        error: EthStreamError,
+    },
     /// A session received a valid message via RLPx.
     ValidMessage {
         /// Identifier of the remote peer.

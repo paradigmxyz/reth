@@ -112,7 +112,14 @@ where
             }
             SessionEvent::Disconnected { peer_id, remote_addr } => {
                 self.state.on_session_closed(peer_id);
-                Some(SwarmEvent::SessionClosed { peer_id, remote_addr })
+                Some(SwarmEvent::SessionClosed { peer_id, remote_addr, error: None })
+            }
+            SessionEvent::SessionClosedOnConnectionError { peer_id, remote_addr, error } => {
+                self.state.on_session_closed(peer_id);
+
+                // TODO(mattsse): reputation change on error
+
+                Some(SwarmEvent::SessionClosed { peer_id, remote_addr, error: Some(error) })
             }
             SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                 Some(SwarmEvent::OutgoingConnectionError { peer_id, remote_addr, error })
@@ -263,12 +270,11 @@ pub enum SwarmEvent {
     SessionClosed {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-    },
-    /// Closed an incoming pending session during authentication.
-    IncomingPendingSessionClosed {
-        remote_addr: SocketAddr,
+        /// Whether the session was closed due to an error
         error: Option<EthStreamError>,
     },
+    /// Closed an incoming pending session during authentication.
+    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
@@ -276,9 +282,5 @@ pub enum SwarmEvent {
         error: Option<EthStreamError>,
     },
     /// Failed to establish a tcp stream to the given address/node
-    OutgoingConnectionError {
-        remote_addr: SocketAddr,
-        peer_id: PeerId,
-        error: io::Error,
-    },
+    OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
 }

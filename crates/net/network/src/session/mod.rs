@@ -218,13 +218,29 @@ impl SessionManager {
             }
             Poll::Ready(Some(event)) => {
                 return match event {
-                    ActiveSessionMessage::Closed { peer_id, remote_addr } => {
-                        trace!(?peer_id, target = "net::session", "closed active session.");
+                    ActiveSessionMessage::Disconnected { peer_id, remote_addr } => {
+                        trace!(
+                            ?peer_id,
+                            target = "net::session",
+                            "gracefully disconnected active session."
+                        );
                         let _ = self.active_sessions.remove(&peer_id);
                         Poll::Ready(SessionEvent::Disconnected { peer_id, remote_addr })
                     }
+                    ActiveSessionMessage::ClosedOnConnectionError {
+                        peer_id,
+                        remote_addr,
+                        error,
+                    } => {
+                        trace!(?peer_id, ?error, target = "net::session", "closed session.");
+                        let _ = self.active_sessions.remove(&peer_id);
+                        Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
+                            remote_addr,
+                            peer_id,
+                            error,
+                        })
+                    }
                     ActiveSessionMessage::ValidMessage { peer_id, message } => {
-                        // TODO: since all messages are known they should be decoded in the session
                         Poll::Ready(SessionEvent::ValidMessage { peer_id, message })
                     }
                     ActiveSessionMessage::InvalidMessage { peer_id, capabilities, message } => {
@@ -271,6 +287,7 @@ impl SessionManager {
                     let session = ActiveSession {
                         next_id: 0,
                         remote_peer_id: peer_id,
+                        remote_addr,
                         remote_capabilities: Arc::clone(&capabilities),
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
@@ -280,7 +297,6 @@ impl SessionManager {
                         conn,
                         buffered_outgoing: Default::default(),
                         received_requests: Default::default(),
-                        is_gracefully_disconnecting: false,
                     };
 
                     self.spawn(session);
@@ -440,7 +456,16 @@ pub(crate) enum SessionEvent {
     },
     /// Failed to establish a tcp stream
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
-    /// Active session was disconnected.
+    /// Session was closed due to an error
+    SessionClosedOnConnectionError {
+        /// The id of the remote peer.
+        peer_id: PeerId,
+        /// The socket we were connected to.
+        remote_addr: SocketAddr,
+        /// The error that caused the session to close
+        error: EthStreamError,
+    },
+    /// Active session was gracefully disconnected.
     Disconnected { peer_id: PeerId, remote_addr: SocketAddr },
 }
 

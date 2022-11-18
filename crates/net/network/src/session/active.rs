@@ -11,22 +11,24 @@ use fnv::FnvHashMap;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
-    capability::{Capabilities}, EthMessage, EthStream, P2PStream,
+    capability::Capabilities,
+    error::{EthStreamError, P2PStreamError},
+    DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
     future::Future,
+    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
     time::Instant,
 };
-use tokio::{
-    net::TcpStream,
-    sync::{mpsc},
-};
+use tokio::{net::TcpStream, sync::mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::error;
+use reth_interfaces::p2p::error::RequestResult;
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the [`SessionsManager`].
@@ -42,6 +44,8 @@ pub(crate) struct ActiveSession {
     pub(crate) conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
+    /// The address we're connected to.
+    pub(crate) remote_addr: SocketAddr,
     /// All capabilities the peer announced
     pub(crate) remote_capabilities: Arc<Capabilities>,
     /// Internal identifier of this session
@@ -58,11 +62,14 @@ pub(crate) struct ActiveSession {
     pub(crate) received_requests: Vec<ReceivedRequest>,
     /// Buffered messages that should be handled and sent to the peer.
     pub(crate) buffered_outgoing: VecDeque<EthMessage>,
-    /// Pending disconnect message
-    pub(crate) is_gracefully_disconnecting: bool,
 }
 
 impl ActiveSession {
+    /// Returns `true` if the session is currently in the process of disconnecting
+    fn is_disconnecting(&self) -> bool {
+        self.conn.inner().is_disconnecting()
+    }
+
     /// Handle an incoming peer request.
     fn on_peer_request(&mut self, _req: PeerRequest) {}
 
@@ -70,10 +77,51 @@ impl ActiveSession {
     fn on_incoming(&mut self, _msg: EthMessage) {}
 
     /// Handle a message received from the internal network
-    fn on_peer_message(&mut self, _msg: PeerMessage) {}
+    fn on_peer_message(&mut self, msg: PeerMessage) {
+        match msg {
+            PeerMessage::NewBlockHashes(_) => {}
+            PeerMessage::NewBlock(block) => {
+                self.buffered_outgoing.push_back(
+                    EthMessage::NewBlock(Box::new(block))
+                )
+            }
+            PeerMessage::Transactions(tx) => {}
+            PeerMessage::PooledTransactions(_) => {}
+            PeerMessage::EthRequest(_) => {}
+            PeerMessage::Other(_) => {}
+        }
+    }
 
-    /// Handle a Response
-    fn handle_outgoing_response(&mut self, _id: u64, _resp: PeerResponseResult) {}
+    /// Handle a Response to the peer
+    fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult) {
+        match resp.try_into_message(id) {
+            Ok(msg) => {
+                self.buffered_outgoing.push_back(msg);
+            }
+            Err(err) => {
+                error!(?err, target = "net", "Failed to respond to received request");
+            }
+        }
+    }
+
+    /// Report back that this session has been closed.
+    fn disconnect(&self) {
+        // NOTE: we clone here so there's enough capacity to deliver this message
+        let _ = self.to_session.clone().try_send(ActiveSessionMessage::Disconnected {
+            peer_id: self.remote_peer_id,
+            remote_addr: self.remote_addr,
+        });
+    }
+
+    /// Report back that this session has been closed due to an error
+    fn close_on_error(&self, error: EthStreamError) {
+        // NOTE: we clone here so there's enough capacity to deliver this message
+        let _ = self.to_session.clone().try_send(ActiveSessionMessage::ClosedOnConnectionError {
+            peer_id: self.remote_peer_id,
+            remote_addr: self.remote_addr,
+            error,
+        });
+    }
 }
 
 impl Future for ActiveSession {
@@ -82,11 +130,10 @@ impl Future for ActiveSession {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.get_mut();
 
-        if this.is_gracefully_disconnecting {
+        if this.is_disconnecting() {
             // try to close the flush out the remaining Disconnect message
             let _ = ready!(this.conn.poll_close_unpin(cx));
-            // this.to_session.clone().send(
-            // );
+            this.disconnect();
             return Poll::Ready(())
         }
 
@@ -105,9 +152,10 @@ impl Future for ActiveSession {
                     Poll::Ready(Some(cmd)) => {
                         progress = true;
                         match cmd {
-                            SessionCommand::Disconnect { reason: _ } => {
-                                // TODO queue in disconnect message
-                                this.is_gracefully_disconnecting = true;
+                            SessionCommand::Disconnect { reason } => {
+                                let reason =
+                                    reason.unwrap_or(DisconnectReason::DisconnectRequested);
+                                this.conn.inner_mut().start_disconnect(reason);
                             }
                             SessionCommand::Message(msg) => {
                                 this.on_peer_message(msg);
@@ -128,12 +176,15 @@ impl Future for ActiveSession {
                 let mut req = this.received_requests.swap_remove(idx);
                 match req.rx.poll(cx) {
                     Poll::Pending => {
+                        // not ready yet
                         this.received_requests.push(req);
                     }
                     Poll::Ready(Ok(resp)) => {
                         this.handle_outgoing_response(req.id, resp);
                     }
-                    Poll::Ready(Err(_)) => {}
+                    Poll::Ready(Err(_)) => {
+                        // ignore on error
+                    }
                 }
             }
 
@@ -153,8 +204,6 @@ impl Future for ActiveSession {
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
-                        // disconnected
-                        this.is_gracefully_disconnecting = true;
                         return Poll::Pending
                     }
                     Poll::Ready(Some(res)) => {
@@ -164,7 +213,10 @@ impl Future for ActiveSession {
                                 // decode and handle message
                                 this.on_incoming(msg);
                             }
-                            Err(_err) => return Poll::Ready(()),
+                            Err(err) => {
+                                this.close_on_error(err);
+                                return Poll::Ready(())
+                            }
                         }
                     }
                 }

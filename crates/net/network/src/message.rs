@@ -5,9 +5,10 @@
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::CapabilityMessage, BlockBodies, BlockBody, BlockHeaders, GetBlockBodies,
-    GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewBlockHashes,
-    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, Transactions,
+    capability::CapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
+    EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
+    Transactions,
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
@@ -44,7 +45,7 @@ pub enum PeerMessage {
     NewBlock(NewBlockMessage),
     /// Broadcast transactions.
     Transactions(Arc<Transactions>),
-    ///
+    /// Send new pooled transactions
     PooledTransactions(Arc<NewPooledTransactionHashes>),
     /// All `eth` request variants.
     EthRequest(PeerRequest),
@@ -184,6 +185,41 @@ pub enum PeerResponseResult {
 // === impl PeerResponseResult ===
 
 impl PeerResponseResult {
+    /// Converts this response into an [`EthMessage`]
+    pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage> {
+        macro_rules! to_message {
+            ($response:ident, $item:ident, $request_id:ident) => {
+                match $response {
+                    Ok(res) => {
+                        let request = RequestPair {
+                            request_id: $request_id,
+                            message: $item(res)
+                        };
+                        Ok(EthMessage::$item(request))
+                    },
+                    Err(err) => Err(err),
+                }
+            };
+        }
+        match self {
+            PeerResponseResult::BlockHeaders(resp) => {
+                to_message!(resp, BlockHeaders, id)
+            }
+            PeerResponseResult::BlockBodies(resp) => {
+                to_message!(resp, BlockBodies, id)
+            }
+            PeerResponseResult::PooledTransactions(resp) => {
+                to_message!(resp, PooledTransactions, id)
+            }
+            PeerResponseResult::NodeData(resp) => {
+                to_message!(resp, NodeData, id)
+            }
+            PeerResponseResult::Receipts(resp) => {
+                to_message!(resp, Receipts, id)
+            }
+        }
+    }
+
     /// Returns whether this result is an error.
     pub fn is_err(&self) -> bool {
         match self {

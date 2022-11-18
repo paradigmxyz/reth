@@ -362,12 +362,7 @@ where
                 SwarmEvent::OutgoingTcpConnection { remote_addr } => {
                     trace!(?remote_addr, target = "net", "Starting outbound connection.");
                 }
-                SwarmEvent::SessionEstablished {
-                    peer_id,
-                    remote_addr,
-                    capabilities,
-                    messages,
-                } => {
+                SwarmEvent::SessionEstablished { peer_id, remote_addr, capabilities, messages } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                     trace!(
                         ?remote_addr,
@@ -383,12 +378,13 @@ where
                         messages,
                     });
                 }
-                SwarmEvent::SessionClosed { peer_id, remote_addr } => {
+                SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                     trace!(
                         ?remote_addr,
                         ?peer_id,
                         ?total_active,
+                        ?error,
                         target = "net",
                         "Session disconnected"
                     );
