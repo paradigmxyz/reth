@@ -6,11 +6,13 @@ pub use codecs_derive::*;
 /// When deriving the trait for custom structs, be aware of certain limitations/recommendations:
 /// * Works best with structs that only have native types (eg. u64, H256, U256).
 /// * Fixed array types (H256, Address, Bloom) are not compacted.
+/// * Max size of `T` in `Option<T>` or `Vec<T>` shouldn't exceed `0xffff`.
 /// * Any `bytes::Bytes` field **should be placed last**.
 /// * Any other type which is not known to the derive module **should be placed last**.
 ///
 /// The last two points make it easier to decode the data without saving the length on the
-/// `StructFlags`.
+/// `StructFlags`. It will fail compilation if it's not respected. If they're alias to known types,
+/// add their definitions to `get_bit_size()` or `known_types` in `generator.rs`.
 pub trait Compact {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
@@ -57,7 +59,7 @@ where
         for element in self {
             // TODO: elias fano?
             let mut inner = Vec::with_capacity(32);
-            buf.put_u32(element.to_compact(&mut inner) as u32);
+            buf.put_u16(element.to_compact(&mut inner) as u16);
             buf.put_slice(&inner);
         }
         0
@@ -70,7 +72,7 @@ where
             #[allow(unused_assignments)]
             let mut element = T::default();
 
-            let len = buf.get_u32();
+            let len = buf.get_u16();
             (element, buf) = T::from_compact(buf, len as usize);
 
             list.push(element);
@@ -196,6 +198,7 @@ impl Compact for bool {
 mod tests {
     use super::*;
     use ethers_core::types::Address;
+    use modular_bitfield::prelude::*;
 
     #[test]
     fn compact_bytes() {
@@ -295,7 +298,7 @@ mod tests {
         buf.extend([1u8, 2]);
 
         let mut remaining_buf = buf.as_slice();
-        remaining_buf.advance(2 + 4 + 32 + 4 + 32);
+        remaining_buf.advance(2 + 2 + 32 + 2 + 32);
 
         assert_eq!(Vec::<H256>::from_compact(&buf, 0), (list, remaining_buf));
         assert_eq!(remaining_buf, &[1u8, 2]);
@@ -331,5 +334,57 @@ mod tests {
         assert_eq!(0xffffffffffffffffu64.to_compact(&mut buf), 8);
         assert_eq!(&buf, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         assert_eq!(u64::from_compact(&buf, 8), (0xffffffffffffffffu64, vec![].as_slice()));
+    }
+
+    #[use_compact]
+    #[derive(Debug, PartialEq, Clone)]
+    pub struct TestStruct {
+        f_u64: u64,
+        f_u256: U256,
+        f_bool_t: bool,
+        f_bool_f: bool,
+        f_option_none: Option<H256>,
+        f_option_some: Option<H256>,
+        f_option_some_u64: Option<u64>,
+        f_vec_empty: Vec<H160>,
+        f_vec_some: Vec<H160>,
+    }
+
+    impl Default for TestStruct {
+        fn default() -> Self {
+            TestStruct {
+                f_u64: 1u64,                                  // 4 bits | 1 byte
+                f_u256: 1u64.into(),                          // 6 bits | 1 byte
+                f_bool_f: false,                              // 1 bit  | 0 bytes
+                f_bool_t: true,                               // 1 bit  | 0 bytes
+                f_option_none: None,                          // 1 bit  | 0 bytes
+                f_option_some: Some(H256::zero()),            // 1 bit  | 2 + 32 bytes
+                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 2 + 2 bytes
+                f_vec_empty: vec![],                          // 0 bits | 2 bytes
+                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 2 + (2+20)*2 bytes
+            }
+        }
+    }
+
+    #[test]
+    fn compact_test_struct() {
+        let test = TestStruct::default();
+        let mut buf = vec![];
+        assert_eq!(
+            test.to_compact(&mut buf),
+            2 + // TestStructFlags
+            1 +
+            1 +
+            0 + 0 + 0 +
+            2 + 32 +
+            2 + 2 +
+            2 +
+            2 + (2 + 20) * 2
+        );
+
+        assert_eq!(
+            TestStruct::from_compact(&buf, buf.len()),
+            (TestStruct::default(), vec![].as_slice())
+        );
     }
 }

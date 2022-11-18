@@ -217,7 +217,7 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
             lines.push(quote! {
                 if self.#name != #itype::zero() {
                     flags.#set_bool_method(true);
-                    total_len += self.#name.to_compact(&mut buffer);
+                    self.#name.to_compact(&mut buffer);
                 };
             });
         } else {
@@ -229,7 +229,6 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
         if is_flag_type(ftype) {
             lines.push(quote! {
                 flags.#set_len_method(#len as u8);
-                total_len += #len;
             })
         }
     }
@@ -237,7 +236,7 @@ fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
     // Places the flag bits.
     lines.push(quote! {
         let flags = flags.into_bytes();
-        total_len += flags.len();
+        total_len += flags.len() + buffer.len();
         buf.put_slice(&flags);
         buf.put(buffer);
     });

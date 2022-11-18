@@ -3095,6 +3095,9 @@ dependencies = [
  "bytes",
  "codecs-derive",
  "ethers-core",
+ "modular-bitfield",
+ "serde",
+ "test-fuzz",
 ]
 
 [[package]]
