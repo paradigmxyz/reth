@@ -5,8 +5,8 @@ use reth_interfaces::db;
 macro_rules! impl_iai_encoding_benchmark {
     ($name:tt) => {
         fn $name() {
-            db::codecs::fuzz::Header::encode_and_decode(black_box(
-                reth_primitives::Header::default(),
+            db::codecs::fuzz::IntegerList::encode_and_decode(black_box(
+                reth_primitives::IntegerList::default(),
             ));
         }
 

@@ -7,15 +7,32 @@ use crate::{
     },
     impl_fixed_arbitrary,
 };
-use bytes::Bytes;
-use reth_primitives::{BlockHash, BlockNumber, H256};
+use bytes::{Buf, Bytes};
+use modular_bitfield::prelude::*;
+use reth_codecs::{use_compact, Compact};
+use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, H256};
 use serde::{Deserialize, Serialize};
 
 /// Total chain number of transactions. Key for [`CumulativeTxCount`].
 pub type NumTransactions = u64;
 
-/// Number of transactions in the block. Value for [`BlockBodies`].
-pub type NumTxesInBlock = u16;
+/// The storage representation of a block body.
+///
+/// A block body is stored as a pointer to the first transaction in the block (`base_tx_id`), a
+/// count of how many transactions are in the block, and the headers of the block's uncles.
+///
+/// The [TxNumber]s for all the transactions in the block are `base_tx_id..(base_tx_id +
+/// tx_amount)`.
+#[derive(Debug, Default, PartialEq, Clone)]
+#[use_compact]
+pub struct StoredBlockBody {
+    /// The ID of the first transaction in the block.
+    pub base_tx_id: TxNumber,
+    /// The number of transactions in the block.
+    pub tx_amount: u64,
+    /// The block headers of this block's uncles.
+    pub ommers: Vec<Header>,
+}
 
 /// Hash of the block header. Value for [`CanonicalHeaders`]
 pub type HeaderHash = H256;

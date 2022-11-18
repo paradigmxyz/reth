@@ -10,6 +10,20 @@ pub struct NewBlockHashes(
     pub Vec<BlockHashNumber>,
 );
 
+// === impl NewBlockHashes ===
+
+impl NewBlockHashes {
+    /// Returns the latest block in the list of blocks.
+    pub fn latest(&self) -> Option<&BlockHashNumber> {
+        self.0.iter().fold(None, |latest, block| {
+            if let Some(latest) = latest {
+                return if latest.number > block.number { Some(latest) } else { Some(block) }
+            }
+            Some(block)
+        })
+    }
+}
+
 /// A block hash _and_ a block number.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct BlockHashNumber {
@@ -85,5 +99,22 @@ pub struct NewPooledTransactionHashes(
 impl From<Vec<H256>> for NewPooledTransactionHashes {
     fn from(v: Vec<H256>) -> Self {
         NewPooledTransactionHashes(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_return_latest_block() {
+        let mut blocks = NewBlockHashes(vec![BlockHashNumber { hash: H256::random(), number: 0 }]);
+        let latest = blocks.latest().unwrap();
+        assert_eq!(latest.number, 0);
+
+        blocks.0.push(BlockHashNumber { hash: H256::random(), number: 100 });
+        blocks.0.push(BlockHashNumber { hash: H256::random(), number: 2 });
+        let latest = blocks.latest().unwrap();
+        assert_eq!(latest.number, 100);
     }
 }

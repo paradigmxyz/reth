@@ -1,4 +1,7 @@
-use crate::db::{models::accounts::AccountBeforeTx, Compress, Decompress, Error};
+use crate::db::{
+    models::{accounts::AccountBeforeTx, StoredBlockBody},
+    Compress, Decompress, Error,
+};
 use reth_codecs::Compact;
 use reth_primitives::*;
 
@@ -28,5 +31,5 @@ macro_rules! impl_compact {
     };
 }
 
-impl_compact!(Header, Account, Log, Receipt, TxType, StorageEntry);
+impl_compact!(Header, Account, Log, Receipt, TxType, StorageEntry, StoredBlockBody);
 impl_compact!(AccountBeforeTx);

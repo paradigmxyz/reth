@@ -66,7 +66,7 @@ pub fn get_fields(data: &Data) -> FieldList {
 /// Given the field type in a string format, return the amount of bits necessary to save its maximum
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
-    if ftype == "u64" || ftype == "BlockNumber" {
+    if ftype == "u64" || ftype == "BlockNumber" || ftype == "TxNumber" {
         return 4
     } else if ftype == "TxType" {
         return 2

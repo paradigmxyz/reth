@@ -1,3 +1,6 @@
+/// Traits for implementing P2P block body clients.
+pub mod bodies;
+
 /// Traits for implementing P2P Header Clients. Also includes implementations
 /// of a Linear and a Parallel downloader generic over the [`Consensus`] and
 /// [`HeadersClient`].

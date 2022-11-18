@@ -2156,6 +2156,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
+name = "linked_hash_set"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47186c6da4d81ca383c7c47c1bfc80f4b95f4720514d860a5407aaf4233f9588"
+dependencies = [
+ "linked-hash-map",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3065,6 +3074,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bodies-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "futures-util",
+ "once_cell",
+ "rand 0.8.5",
+ "reth-eth-wire",
+ "reth-interfaces",
+ "reth-primitives",
+ "serial_test",
+ "tokio",
+]
+
+[[package]]
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
@@ -3080,16 +3104,11 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "eyre",
- "hash-db",
- "plain_hasher",
  "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
- "rlp",
- "sha3",
  "thiserror",
  "tokio",
- "triehash",
 ]
 
 [[package]]
@@ -3208,6 +3227,7 @@ dependencies = [
  "eyre",
  "hash-db",
  "plain_hasher",
+ "reth-consensus",
  "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
@@ -3249,6 +3269,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-db",
+ "reth-eth-wire",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
@@ -3315,6 +3336,7 @@ dependencies = [
  "either",
  "fnv",
  "futures",
+ "linked_hash_set",
  "parking_lot 0.12.1",
  "pin-project",
  "rand 0.8.5",
@@ -3355,12 +3377,15 @@ dependencies = [
  "bytes",
  "crc",
  "derive_more",
+ "ethbloom",
  "ethers-core",
+ "hash-db",
  "hex",
  "hex-literal",
  "maplit",
  "modular-bitfield",
  "parity-scale-codec",
+ "plain_hasher",
  "reth-codecs",
  "reth-rlp",
  "secp256k1",
@@ -3370,6 +3395,7 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "tiny-keccak",
+ "triehash",
 ]
 
 [[package]]
@@ -3442,9 +3468,12 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
+ "futures-util",
  "metrics",
  "rand 0.8.5",
+ "reth-bodies-downloaders",
  "reth-db",
+ "reth-eth-wire",
  "reth-headers-downloaders",
  "reth-interfaces",
  "reth-primitives",
@@ -3464,7 +3493,7 @@ dependencies = [
  "async-trait",
  "bitflags",
  "fnv",
- "futures",
+ "futures-util",
  "linked-hash-map",
  "parking_lot 0.12.1",
  "paste",
@@ -3472,6 +3501,7 @@ dependencies = [
  "reth-primitives",
  "serde",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 

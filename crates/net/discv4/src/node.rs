@@ -1,4 +1,4 @@
-use crate::{proto::Octets, NodeId};
+use crate::{proto::Octets, PeerId};
 use bytes::{Buf, BufMut};
 use generic_array::GenericArray;
 use reth_primitives::keccak256;
@@ -13,10 +13,10 @@ use url::{Host, Url};
 
 /// The key type for the table.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) struct NodeKey(pub(crate) NodeId);
+pub(crate) struct NodeKey(pub(crate) PeerId);
 
-impl From<NodeId> for NodeKey {
-    fn from(value: NodeId) -> Self {
+impl From<PeerId> for NodeKey {
+    fn from(value: PeerId) -> Self {
         NodeKey(value)
     }
 }
@@ -29,9 +29,9 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
     }
 }
 
-/// Converts a `NodeId` into the required `Key` type for the table
+/// Converts a `PeerId` into the required `Key` type for the table
 #[inline]
-pub(crate) fn kad_key(node: NodeId) -> discv5::Key<NodeKey> {
+pub(crate) fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
     discv5::kbucket::Key::from(NodeKey::from(node))
 }
 
@@ -45,20 +45,20 @@ pub struct NodeRecord {
     /// UDP discovery port.
     pub udp_port: u16,
     /// Public key of the discovery service
-    pub id: NodeId,
+    pub id: PeerId,
 }
 
 impl NodeRecord {
     /// Derive the [`NodeRecord`] from the secret key and addr
     pub fn from_secret_key(addr: SocketAddr, sk: &SecretKey) -> Self {
         let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
-        let id = NodeId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
         Self::new(addr, id)
     }
 
     /// Creates a new record
     #[allow(unused)]
-    pub(crate) fn new(addr: SocketAddr, id: NodeId) -> Self {
+    pub(crate) fn new(addr: SocketAddr, id: PeerId) -> Self {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
     }
 
@@ -112,7 +112,7 @@ impl FromStr for NodeRecord {
 
         let id = url
             .username()
-            .parse::<NodeId>()
+            .parse::<PeerId>()
             .map_err(|e| NodeRecordParseError::InvalidId(e.to_string()))?;
 
         Ok(Self { address, id, tcp_port: port, udp_port: port })
@@ -126,7 +126,7 @@ impl Encodable for NodeRecord {
             octets: Octets,
             udp_port: u16,
             tcp_port: u16,
-            id: NodeId,
+            id: PeerId,
         }
 
         let octets = match self.address {
@@ -185,7 +185,7 @@ mod tests {
                 address: IpAddr::V4(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: NodeId::random(),
+                id: PeerId::random(),
             };
 
             let mut buf = BytesMut::new();
@@ -206,7 +206,7 @@ mod tests {
                 address: IpAddr::V6(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: NodeId::random(),
+                id: PeerId::random(),
             };
 
             let mut buf = BytesMut::new();

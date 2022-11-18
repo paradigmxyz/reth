@@ -192,6 +192,7 @@ impl Compact for bool {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use ethers_core::types::Address;
@@ -199,7 +200,7 @@ mod tests {
     #[test]
     fn compact_bytes() {
         let arr = [1, 2, 3, 4, 5];
-        let mut list = bytes::Bytes::copy_from_slice(&arr);
+        let list = bytes::Bytes::copy_from_slice(&arr);
         let mut buf = vec![];
         assert_eq!(list.clone().to_compact(&mut buf), list.len());
 
@@ -237,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_H256() {
+    fn compact_h256() {
         let mut buf = vec![];
         assert_eq!(H256::zero().to_compact(&mut buf), 32);
         assert_eq!(buf, vec![0; 32]);
@@ -251,7 +252,7 @@ mod tests {
 
     #[test]
     fn compact_bool() {
-        let vtrue = true;
+        let _vtrue = true;
         let mut buf = vec![];
 
         assert_eq!(true.to_compact(&mut buf), 1);
@@ -261,7 +262,7 @@ mod tests {
         assert_eq!(false.to_compact(&mut buf), 0);
         assert_eq!(buf.len(), 0);
 
-        let mut buf = vec![100u8];
+        let buf = vec![100u8];
 
         // Bool expects the real value to come in `len`, and does not advance the cursor.
         assert_eq!(bool::from_compact(&buf, 1), (true, buf.as_slice()));
@@ -274,7 +275,7 @@ mod tests {
         let mut buf = vec![];
 
         assert_eq!(None::<H256>.to_compact(&mut buf), 0);
-        assert_eq!(opt.clone().to_compact(&mut buf), 1);
+        assert_eq!(opt.to_compact(&mut buf), 1);
 
         assert_eq!(Option::<H256>::from_compact(&buf, 1), (opt, vec![].as_slice()));
 
@@ -291,7 +292,7 @@ mod tests {
         assert_eq!(list.clone().to_compact(&mut buf), 0);
 
         // Add some noise data in the end that should be returned by `from_compact`.
-        buf.extend(&[1u8, 2]);
+        buf.extend([1u8, 2]);
 
         let mut remaining_buf = buf.as_slice();
         remaining_buf.advance(2 + 4 + 32 + 4 + 32);
@@ -301,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_U256() {
+    fn compact_u256() {
         let mut buf = vec![];
 
         assert_eq!(U256::zero().to_compact(&mut buf), 0);

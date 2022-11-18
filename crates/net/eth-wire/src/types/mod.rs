@@ -6,8 +6,6 @@ pub use status::Status;
 pub mod version;
 pub use version::EthVersion;
 
-pub mod forkid;
-
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
 

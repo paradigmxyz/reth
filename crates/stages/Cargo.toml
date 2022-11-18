@@ -18,10 +18,14 @@ tracing-futures = "0.2.5"
 tokio = { version = "1.21.2", features = ["sync"] }
 aquamarine = "0.1.12"
 metrics = "0.20.1"
+futures-util = "0.3.25"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-bodies-downloaders = { path = "../net/bodies-downloaders" }
+# TODO(onbjerg): We only need this for [BlockBody]
+reth-eth-wire = { path = "../net/eth-wire" }
 reth-headers-downloaders = { path = "../net/headers-downloaders" }
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tokio-stream = "0.1.10"

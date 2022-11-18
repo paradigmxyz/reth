@@ -1,9 +1,4 @@
-mod access_list;
-mod signature;
-mod tx_type;
-mod util;
-
-use crate::{Address, Bytes, ChainId, TxHash, H256, U256};
+use crate::{Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
@@ -13,12 +8,18 @@ use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPT
 pub use signature::Signature;
 pub use tx_type::TxType;
 
-/// Raw Transaction.
-/// Transaction type is introduced in EIP-2718: https://eips.ethereum.org/EIPS/eip-2718
+mod access_list;
+mod signature;
+mod tx_type;
+mod util;
+
+/// A raw transaction.
+///
+/// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Transaction {
-    /// Legacy transaciton.
+    /// Legacy transaction.
     Legacy {
         /// Added as EIP-155: Simple replay attack protection
         chain_id: Option<ChainId>,
@@ -27,7 +28,11 @@ pub enum Transaction {
         /// A scalar value equal to the number of
         /// Wei to be paid per unit of gas for all computation
         /// costs incurred as a result of the execution of this transaction; formally Tp.
-        gas_price: u64,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        gas_price: u128,
         /// A scalar value equal to the maximum
         /// amount of gas that should be used in executing
         /// this transaction. This is paid up-front, before any
@@ -41,7 +46,11 @@ pub enum Transaction {
         /// be transferred to the message call’s recipient or,
         /// in the case of contract creation, as an endowment
         /// to the newly created account; formally Tv.
-        value: U256,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        value: u128,
         /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
         /// Some). init: An unlimited size byte array specifying the
         /// EVM-code for the account initialisation procedure CREATE,
@@ -49,7 +58,7 @@ pub enum Transaction {
         /// input data of the message call, formally Td.
         input: Bytes,
     },
-    /// Transaction with AccessList. https://eips.ethereum.org/EIPS/eip-2930
+    /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
     Eip2930 {
         /// Added as EIP-155: Simple replay attack protection
         chain_id: ChainId,
@@ -58,7 +67,11 @@ pub enum Transaction {
         /// A scalar value equal to the number of
         /// Wei to be paid per unit of gas for all computation
         /// costs incurred as a result of the execution of this transaction; formally Tp.
-        gas_price: u64,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        gas_price: u128,
         /// A scalar value equal to the maximum
         /// amount of gas that should be used in executing
         /// this transaction. This is paid up-front, before any
@@ -72,7 +85,11 @@ pub enum Transaction {
         /// be transferred to the message call’s recipient or,
         /// in the case of contract creation, as an endowment
         /// to the newly created account; formally Tv.
-        value: U256,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        value: u128,
         /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
         /// Some). init: An unlimited size byte array specifying the
         /// EVM-code for the account initialisation procedure CREATE,
@@ -86,7 +103,7 @@ pub enum Transaction {
         /// accessing outside the list.
         access_list: AccessList,
     },
-    /// Transaction with priority fee. https://eips.ethereum.org/EIPS/eip-1559
+    /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
     Eip1559 {
         /// Added as EIP-155: Simple replay attack protection
         chain_id: u64,
@@ -103,9 +120,17 @@ pub enum Transaction {
         /// this transaction. This is paid up-front, before any
         /// computation is done and may not be increased
         /// later; formally Tg.
-        max_fee_per_gas: u64,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        max_fee_per_gas: u128,
         /// Max Priority fee that transaction is paying
-        max_priority_fee_per_gas: u64,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        max_priority_fee_per_gas: u128,
         /// The 160-bit address of the message call’s recipient or, for a contract creation
         /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
         to: TransactionKind,
@@ -113,7 +138,11 @@ pub enum Transaction {
         /// be transferred to the message call’s recipient or,
         /// in the case of contract creation, as an endowment
         /// to the newly created account; formally Tv.
-        value: U256,
+        ///
+        /// As ethereum circulation is around 120mil eth as of 2022 that is around
+        /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+        /// 340282366920938463463374607431768211455
+        value: u128,
         /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
         /// Some). init: An unlimited size byte array specifying the
         /// EVM-code for the account initialisation procedure CREATE,
@@ -151,14 +180,23 @@ impl Transaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     pub fn kind(&self) -> &TransactionKind {
         match self {
-            Transaction::Legacy { to, .. } => to,
-            Transaction::Eip2930 { to, .. } => to,
+            Transaction::Legacy { to, .. } |
+            Transaction::Eip2930 { to, .. } |
             Transaction::Eip1559 { to, .. } => to,
         }
     }
 
+    /// Get transaction type
+    pub fn tx_type(&self) -> TxType {
+        match self {
+            Transaction::Legacy { .. } => TxType::Legacy,
+            Transaction::Eip2930 { .. } => TxType::EIP2930,
+            Transaction::Eip1559 { .. } => TxType::EIP1559,
+        }
+    }
+
     /// Gets the transaction's value field.
-    pub fn value(&self) -> &U256 {
+    pub fn value(&self) -> &u128 {
         match self {
             Transaction::Legacy { value, .. } => value,
             Transaction::Eip2930 { value, .. } => value,
@@ -175,11 +213,20 @@ impl Transaction {
         }
     }
 
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_limit
-    pub fn max_fee_per_gas(&self) -> u64 {
+    /// Get the gas limit of the transaction.
+    pub fn gas_limit(&self) -> u64 {
         match self {
-            Transaction::Legacy { gas_limit, .. } | Transaction::Eip2930 { gas_limit, .. } => {
-                *gas_limit
+            Transaction::Legacy { gas_limit, .. } |
+            Transaction::Eip2930 { gas_limit, .. } |
+            Transaction::Eip1559 { gas_limit, .. } => *gas_limit,
+        }
+    }
+
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price
+    pub fn max_fee_per_gas(&self) -> u128 {
+        match self {
+            Transaction::Legacy { gas_price, .. } | Transaction::Eip2930 { gas_price, .. } => {
+                *gas_price
             }
             Transaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
@@ -561,6 +608,8 @@ impl TransactionSigned {
     }
 
     /// Recover signer from signature and hash.
+    ///
+    /// Returns `None` if the transaction's signature is invalid.
     pub fn recover_signer(&self) -> Option<Address> {
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -697,10 +746,41 @@ impl TransactionSignedEcRecovered {
     }
 }
 
+/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredTransaction {
+    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+}
+
+// Noop conversion
+impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+        tx
+    }
+}
+
+/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// network
+pub trait IntoRecoveredTransaction {
+    /// Converts to this type into a [`TransactionSignedEcRecovered`].
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
+}
+
+impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use crate::{
         transaction::{signature::Signature, TransactionKind},
         AccessList, Address, Bytes, Transaction, TransactionSigned, H256, U256,
@@ -708,6 +788,7 @@ mod tests {
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     #[test]
     fn test_decode_create() {
@@ -718,7 +799,7 @@ mod tests {
             gas_price: 1,
             gas_limit: 2,
             to: TransactionKind::Create,
-            value: U256::from(3),
+            value: 3,
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         };
@@ -749,7 +830,7 @@ mod tests {
             gas_price: 1,
             gas_limit: 2,
             to: TransactionKind::Call(Address::default()),
-            value: U256::from(3),
+            value: 3,
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         };
@@ -788,7 +869,7 @@ mod tests {
             to: TransactionKind::Call(
                 Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
             ),
-            value: U256::from(1000000000000000u64),
+            value: 1000000000000000,
             input: Bytes::default(),
         };
         let expected_signature = Signature {
@@ -811,7 +892,7 @@ mod tests {
         let expected_request = Transaction::Legacy {
             chain_id: Some(4),
             nonce: 1u64,
-            gas_price: 1000000000u64,
+            gas_price: 1000000000,
             gas_limit: 100000u64,
             to: TransactionKind::Call(Address::from_slice(
                 &hex::decode("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap()[..],
@@ -965,7 +1046,7 @@ mod tests {
             nonce: 0x42,
             gas_limit: 44386,
             to: TransactionKind::Call( hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: 0.into(),
+            value: 0,
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,

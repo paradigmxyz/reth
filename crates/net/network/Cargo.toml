@@ -35,6 +35,7 @@ parking_lot = "0.12"
 async-trait = "0.1"
 bytes = "1.2"
 either = "1.8"
+linked_hash_set = "0.1"
 
 secp256k1 = { version = "0.24", features = [
     "global-context",

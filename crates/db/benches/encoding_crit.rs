@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-/// Benchmarks the encoding and decoding of `Header` using criterion.
+/// Benchmarks the encoding and decoding of `IntegerList` using criterion.
 macro_rules! impl_criterion_encoding_benchmark {
     ($name:tt) => {
         pub fn criterion_benchmark(c: &mut Criterion) {
@@ -8,9 +8,9 @@ macro_rules! impl_criterion_encoding_benchmark {
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
                     let encoded_size =
-                        reth_interfaces::db::codecs::fuzz::Header::encode_and_decode(black_box(
-                            reth_primitives::Header::default(),
-                        ))
+                        reth_interfaces::db::codecs::fuzz::IntegerList::encode_and_decode(
+                            black_box(reth_primitives::IntegerList::default()),
+                        )
                         .0;
 
                     if size == 0 {
