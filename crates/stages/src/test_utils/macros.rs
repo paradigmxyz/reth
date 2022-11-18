@@ -10,7 +10,7 @@ macro_rules! stage_test_suite {
             let input = crate::stage::ExecInput::default();
 
             // Run stage execution
-            let result = runner.execute(input).await.unwrap();
+            let result = runner.execute(input).await;
             assert_matches!(
                 result,
                 Err(crate::error::StageError::DatabaseIntegrity(_))
@@ -34,13 +34,12 @@ macro_rules! stage_test_suite {
             let seed = runner.seed_execution(input).expect("failed to seed");
 
             // Run stage execution
-            let rx = runner.execute(input);
+            let result = runner.execute(input).await;
 
             // Run `after_execution` hook
             runner.after_execution(seed).await.expect("failed to run after execution hook");
 
             // Assert the successful result
-            let result = rx.await.unwrap();
             assert_matches!(
                 result,
                 Ok(ExecOutput { done, reached_tip, stage_progress })
@@ -63,13 +62,12 @@ macro_rules! stage_test_suite {
                 stage_progress: Some(stage_progress),
             };
             let seed = runner.seed_execution(input).expect("failed to seed");
-            let rx = runner.execute(input);
+            let result = runner.execute(input).await;
 
             // Run `after_execution` hook
             runner.after_execution(seed).await.expect("failed to run after execution hook");
 
             // Assert the successful result
-            let result = rx.await.unwrap();
             assert_matches!(
                 result,
                 Ok(ExecOutput { done, reached_tip, stage_progress })
@@ -112,11 +110,10 @@ macro_rules! stage_test_suite {
             let seed = runner.seed_execution(execute_input).expect("failed to seed");
 
             // Run stage execution
-            let rx = runner.execute(execute_input);
+            let result = runner.execute(execute_input).await;
             runner.after_execution(seed).await.expect("failed to run after execution hook");
 
             // Assert the successful execution result
-            let result = rx.await.unwrap();
             assert_matches!(
                 result,
                 Ok(ExecOutput { done, reached_tip, stage_progress })
