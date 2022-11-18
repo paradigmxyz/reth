@@ -92,3 +92,136 @@ pub fn get_field_idents(name: &str) -> (Ident, Ident, Ident) {
     let len = format_ident!("{name}_len");
     (name, set_len_method, len)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse2;
+
+    #[test]
+    fn gen() {
+        let f_struct = quote! {
+            #[derive(Debug, PartialEq, Clone)]
+            pub struct TestStruct {
+                f_u64: u64,
+                f_u256: U256,
+                f_bool_t: bool,
+                f_bool_f: bool,
+                f_option_none: Option<H256>,
+                f_option_some: Option<H256>,
+                f_option_some_u64: Option<u64>,
+                f_vec_empty: Vec<H160>,
+                f_vec_some: Vec<H160>,
+            }
+        };
+
+        // Generate code that will impl the `Compact` trait.
+        let mut output = quote! {};
+        let DeriveInput { ident, data, .. } = parse2(f_struct).unwrap();
+        let fields = get_fields(&data);
+        output.extend(generate_flag_struct(&ident, &fields));
+        output.extend(generate_from_to(&ident, &fields));
+
+        // Expected output in a TokenStream format. Commas matter!
+        let should_output = quote! {
+            #[bitfield]
+            #[derive(Clone, Copy, Debug, Default)]
+            struct TestStructFlags {
+                f_u64_len: B4,
+                f_u256_len: B6,
+                f_bool_t_len: B1,
+                f_bool_f_len: B1,
+                f_option_none_len: B1,
+                f_option_some_len: B1,
+                f_option_some_u64_len: B1,
+                #[skip]
+                unused: B1,
+            }
+            impl TestStructFlags {
+                fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+                    (
+                        TestStructFlags::from_bytes([buf.get_u8(), buf.get_u8(),]),
+                        buf
+                    )
+                }
+            }
+            #[cfg(test)]
+            #[allow(dead_code)]
+            #[test_fuzz::test_fuzz]
+            fn fuzz_test_TestStruct(obj: TestStruct) {
+                let mut buf = vec![];
+                let len = obj.clone().to_compact(&mut buf);
+                let (same_obj, buf) = TestStruct::from_compact(buf.as_ref(), len);
+                assert_eq!(obj, same_obj);
+            }
+            #[test]
+            pub fn fuzz_TestStruct() {
+                fuzz_test_TestStruct(TestStruct::default())
+            }
+            impl Compact for TestStruct {
+                fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                    let mut flags = TestStructFlags::default();
+                    let mut total_len = 0;
+                    let mut buffer = bytes::BytesMut::new();
+                    let f_u64_len = self.f_u64.to_compact(&mut buffer);
+                    flags.set_f_u64_len(f_u64_len as u8);
+                    let f_u256_len = self.f_u256.to_compact(&mut buffer);
+                    flags.set_f_u256_len(f_u256_len as u8);
+                    let f_bool_t_len = self.f_bool_t.to_compact(&mut buffer);
+                    flags.set_f_bool_t_len(f_bool_t_len as u8);
+                    let f_bool_f_len = self.f_bool_f.to_compact(&mut buffer);
+                    flags.set_f_bool_f_len(f_bool_f_len as u8);
+                    let f_option_none_len = self.f_option_none.to_compact(&mut buffer);
+                    flags.set_f_option_none_len(f_option_none_len as u8);
+                    let f_option_some_len = self.f_option_some.to_compact(&mut buffer);
+                    flags.set_f_option_some_len(f_option_some_len as u8);
+                    let f_option_some_u64_len = self.f_option_some_u64.to_compact(&mut buffer);
+                    flags.set_f_option_some_u64_len(f_option_some_u64_len as u8);
+                    let f_vec_empty_len = self.f_vec_empty.to_compact(&mut buffer);
+                    let f_vec_some_len = self.f_vec_some.to_compact(&mut buffer);
+                    let flags = flags.into_bytes();
+                    total_len += flags.len() + buffer.len();
+                    buf.put_slice(&flags);
+                    buf.put(buffer);
+                    total_len
+                }
+                fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+                    let (flags, mut buf) = TestStructFlags::from(buf);
+                    let mut f_u64 = u64::default();
+                    (f_u64, buf) = u64::from_compact(buf, flags.f_u64_len() as usize);
+                    let mut f_u256 = U256::default();
+                    (f_u256, buf) = U256::from_compact(buf, flags.f_u256_len() as usize);
+                    let mut f_bool_t = bool::default();
+                    (f_bool_t, buf) = bool::from_compact(buf, flags.f_bool_t_len() as usize);
+                    let mut f_bool_f = bool::default();
+                    (f_bool_f, buf) = bool::from_compact(buf, flags.f_bool_f_len() as usize);
+                    let mut f_option_none = Option::default();
+                    (f_option_none, buf) = Option::from_compact(buf, flags.f_option_none_len() as usize);
+                    let mut f_option_some = Option::default();
+                    (f_option_some, buf) = Option::from_compact(buf, flags.f_option_some_len() as usize);
+                    let mut f_option_some_u64 = Option::default();
+                    (f_option_some_u64, buf) =
+                        Option::from_compact(buf, flags.f_option_some_u64_len() as usize);
+                    let mut f_vec_empty = Vec::default();
+                    (f_vec_empty, buf) = Vec::from_compact(buf, buf.len());
+                    let mut f_vec_some = Vec::default();
+                    (f_vec_some, buf) = Vec::from_compact(buf, buf.len());
+                    let obj = TestStruct {
+                        f_u64: f_u64,
+                        f_u256: f_u256,
+                        f_bool_t: f_bool_t,
+                        f_bool_f: f_bool_f,
+                        f_option_none: f_option_none,
+                        f_option_some: f_option_some,
+                        f_option_some_u64: f_option_some_u64,
+                        f_vec_empty: f_vec_empty,
+                        f_vec_some: f_vec_some,
+                    };
+                    (obj, buf)
+                }
+            }
+        };
+
+        assert_eq!(output.to_string(), should_output.to_string());
+    }
+}
