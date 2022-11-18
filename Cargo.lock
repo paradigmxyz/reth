@@ -3383,6 +3383,7 @@ dependencies = [
  "ethereum-types",
  "ethnum",
  "hex-literal",
+ "reth-rlp",
  "reth-rlp-derive",
  "smol_str",
 ]
