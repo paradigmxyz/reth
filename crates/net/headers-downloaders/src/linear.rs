@@ -215,7 +215,7 @@ mod tests {
 
     static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
     static CONSENSUS_FAIL: Lazy<Arc<TestConsensus>> = Lazy::new(|| {
-        let mut consensus = TestConsensus::default();
+        let consensus = TestConsensus::default();
         consensus.set_fail_validation(true);
         Arc::new(consensus)
     });

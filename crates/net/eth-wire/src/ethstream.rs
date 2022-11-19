@@ -1,5 +1,6 @@
 use crate::{
     error::{EthStreamError, HandshakeError},
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     types::{EthMessage, ProtocolMessage, Status},
 };
 use bytes::{Bytes, BytesMut};
@@ -142,9 +143,29 @@ impl<S> EthStream<S> {
     }
 }
 
+impl<S, E> EthStream<S>
+where
+    S: Sink<Bytes, Error = E> + Unpin,
+    EthStreamError: From<E>,
+{
+    /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
+    pub fn start_send_broadcast(
+        &mut self,
+        item: EthBroadcastMessage,
+    ) -> Result<(), EthStreamError> {
+        let mut bytes = BytesMut::new();
+        ProtocolBroadcastMessage::from(item).encode(&mut bytes);
+        let bytes = bytes.freeze();
+
+        self.inner.start_send_unpin(bytes)?;
+
+        Ok(())
+    }
+}
+
 impl<S, E> Stream for EthStream<S>
 where
-    S: Stream<Item = Result<bytes::BytesMut, E>> + Unpin,
+    S: Stream<Item = Result<BytesMut, E>> + Unpin,
     EthStreamError: From<E>,
 {
     type Item = Result<EthMessage, EthStreamError>;
