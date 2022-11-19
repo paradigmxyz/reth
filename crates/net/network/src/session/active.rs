@@ -32,7 +32,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
+use tracing::{error, warn};
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the [`SessionsManager`].
@@ -182,7 +182,7 @@ impl ActiveSession {
     /// Handle an incoming peer request.
     fn on_peer_request(&mut self, req: PeerRequest) {
         let request_id = self.next_id();
-        let msg = req.create_request_massage(request_id);
+        let msg = req.create_request_message(request_id);
         self.queued_outgoing.push_back(msg.into());
         self.inflight_requests.insert(request_id, req);
     }
@@ -224,7 +224,13 @@ impl ActiveSession {
 
     /// Send a message back to the [`SessionsManager`]
     fn emit_message(&self, message: PeerMessage) {
-        let _ = self.try_emit_message(message);
+        let _ = self.try_emit_message(message).map_err(|err| {
+            warn!(
+            %err,
+                    target = "net",
+                    "dropping incoming message",
+                );
+        });
     }
 
     /// Send a message back to the [`SessionsManager`]

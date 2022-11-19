@@ -127,7 +127,7 @@ pub enum PeerRequest {
 
 impl PeerRequest {
     /// Returns the [`EthMessage`] for this type
-    pub fn create_request_massage(&self, request_id: u64) -> EthMessage {
+    pub fn create_request_message(&self, request_id: u64) -> EthMessage {
         match self {
             PeerRequest::GetBlockHeaders { request, .. } => {
                 EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
