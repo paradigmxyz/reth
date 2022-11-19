@@ -50,12 +50,14 @@ pub enum BlockImportError {
     Consensus(#[from] reth_interfaces::consensus::Error),
 }
 
-/// An implementation of `BlockImport` that does nothing
+/// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.
+///
+/// Block propagation over devp2p is invalid in POS: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct NoopBlockImport;
+pub struct ProofOfStakeBlockImport;
 
-impl BlockImport for NoopBlockImport {
+impl BlockImport for ProofOfStakeBlockImport {
     fn on_new_block(&mut self, _peer_id: PeerId, _incoming_block: NewBlockMessage) {}
 
     fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockImportOutcome> {

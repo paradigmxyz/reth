@@ -3,7 +3,7 @@ use std::io;
 
 use reth_primitives::{Chain, ValidationError, H256};
 
-use crate::capability::SharedCapabilityError;
+use crate::{capability::SharedCapabilityError, DisconnectReason};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
@@ -59,8 +59,8 @@ pub enum P2PStreamError {
     EmptyProtocolMessage,
     #[error(transparent)]
     PingerError(#[from] PingerError),
-    #[error("ping timed out with {0} retries")]
-    PingTimeout(u8),
+    #[error("ping timed out with")]
+    PingTimeout,
     #[error(transparent)]
     ParseVersionError(#[from] SharedCapabilityError),
     #[error("mismatched protocol version in Hello message. expected: {expected:?}, got: {got:?}")]
@@ -69,9 +69,8 @@ pub enum P2PStreamError {
     PingBeforeHandshake,
     #[error("too many messages buffered before sending")]
     SendBufferFull,
-    // TODO: remove / reconsider
     #[error("disconnected")]
-    Disconnected,
+    Disconnected(DisconnectReason),
 }
 
 /// Errors when conducting a p2p handshake

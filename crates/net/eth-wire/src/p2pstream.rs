@@ -14,7 +14,7 @@ use std::{
     fmt::Display,
     io,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio_stream::Stream;
@@ -157,6 +157,10 @@ pub struct P2PStream<S> {
 
     /// Outgoing messages buffered for sending to the underlying stream.
     outgoing_messages: VecDeque<Bytes>,
+
+    /// Whether this stream is currently in the process of disconnecting by sending a disconnect
+    /// message.
+    disconnecting: bool,
 }
 
 impl<S> P2PStream<S> {
@@ -171,7 +175,38 @@ impl<S> P2PStream<S> {
             pinger: Pinger::new(PING_INTERVAL, PING_TIMEOUT),
             shared_capability: capability,
             outgoing_messages: VecDeque::new(),
+            disconnecting: false,
         }
+    }
+
+    /// Returns `true` if the connection is about to disconnect.
+    pub fn is_disconnecting(&self) -> bool {
+        self.disconnecting
+    }
+
+    /// Starts to gracefully disconnect the connection by sending a Disconnect message and stop
+    /// reading new messages.
+    ///
+    /// Once disconnect process has started, the [`Stream`] will terminate immediately.
+    pub fn start_disconnect(&mut self, reason: DisconnectReason) {
+        // clear any buffered messages and queue in
+        self.outgoing_messages.clear();
+        let mut buf = BytesMut::new();
+        P2PMessage::Disconnect(reason).encode(&mut buf);
+        self.outgoing_messages.push_back(buf.freeze());
+    }
+}
+
+impl<S> P2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Disconnects the connection by sending a disconnect message.
+    ///
+    /// This future resolves once the disconnect message has been sent.
+    pub async fn disconnect(mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
+        self.start_disconnect(reason);
+        self.close().await
     }
 }
 
@@ -186,22 +221,9 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        // try to send any buffered outgoing messages
-        while let Some(message) = this.outgoing_messages.pop_front() {
-            // let pinned_inner = Pin::new(&mut this.inner);
-            match Pin::new(&mut this.inner).poll_ready(cx) {
-                Poll::Ready(Ok(())) => {
-                    if let Err(e) = Pin::new(&mut this.inner).start_send(message) {
-                        return Poll::Ready(Some(Err(P2PStreamError::Io(e))))
-                    }
-                }
-                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(P2PStreamError::Io(e)))),
-                Poll::Pending => {
-                    // we need to buffer the message and try again later
-                    this.outgoing_messages.push_front(message);
-                    break
-                }
-            }
+        if *this.disconnecting {
+            // if disconnecting, stop reading messages
+            return Poll::Ready(None)
         }
 
         // poll the pinger to determine if we should send a ping
@@ -212,38 +234,24 @@ where
                 let mut ping_bytes = BytesMut::new();
                 P2PMessage::Ping.encode(&mut ping_bytes);
 
-                if Pin::new(&mut this.inner).poll_ready(cx).is_ready() {
-                    // send the ping message
-                    Pin::new(&mut this.inner).start_send(ping_bytes.into())?
-                } else {
-                    // check if the buffer is full
-                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                    }
-
-                    // if the sink is not ready, buffer the message
-                    this.outgoing_messages.push_back(ping_bytes.into());
+                // check if the buffer is full
+                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                    return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
                 }
+
+                // if the sink is not ready, buffer the message
+                this.outgoing_messages.push_back(ping_bytes.into());
             }
             _ => {
                 // encode the disconnect message
                 let mut disconnect_bytes = BytesMut::new();
                 P2PMessage::Disconnect(DisconnectReason::PingTimeout).encode(&mut disconnect_bytes);
 
-                if Pin::new(&mut this.inner).poll_ready(cx).is_ready() {
-                    // send the disconnect message
-                    Pin::new(&mut this.inner).start_send(disconnect_bytes.into())?
-                } else {
-                    // check if the buffer is full
-                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                    }
+                // clear any buffered messages so that the next message will be disconnect
+                this.outgoing_messages.clear();
+                this.outgoing_messages.push_back(disconnect_bytes.freeze());
 
-                    // if the sink is not ready, buffer the message
-                    this.outgoing_messages.push_back(disconnect_bytes.into());
-                }
-
-                // since the ping stream has timed out, let's send a None
+                // End the stream after ping related error
                 return Poll::Ready(None)
             }
         }
@@ -264,24 +272,16 @@ where
                 let mut pong_bytes = BytesMut::new();
                 P2PMessage::Pong.encode(&mut pong_bytes);
 
-                if Pin::new(&mut this.inner).poll_ready(cx).is_ready() {
-                    // send the pong message
-                    Pin::new(&mut this.inner).start_send(pong_bytes.into())?
-                } else {
-                    // check if the buffer is full
-                    if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                    }
-
-                    // if the sink is not ready, buffer the message
-                    this.outgoing_messages.push_back(pong_bytes.into());
+                // check if the buffer is full
+                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                    return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
                 }
+                this.outgoing_messages.push_back(pong_bytes.into());
 
                 // continue to the next message if there is one
             } else if id == P2PMessageID::Disconnect as u8 {
                 let reason = DisconnectReason::decode(&mut &bytes[1..])?;
-                // TODO: do something with the reason
-                return Poll::Ready(Some(Err(P2PStreamError::Disconnected)))
+                return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
             } else if id == P2PMessageID::Hello as u8 {
                 // we have received a hello message outside of the handshake, so we will return an
                 // error
@@ -330,12 +330,35 @@ where
 {
     type Error = P2PStreamError;
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_ready(cx).map_err(Into::into)
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut this = self.as_mut();
+
+        match this.inner.poll_ready_unpin(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
+            Poll::Ready(Ok(())) => {
+                let flushed = this.poll_flush(cx);
+                if flushed.is_ready() {
+                    return flushed
+                }
+            }
+        }
+
+        if self.outgoing_messages.len() < MAX_P2P_CAPACITY {
+            // still has capacity
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let this = self.project();
+
+        // ensure we have free capacity
+        if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+            return Err(P2PStreamError::SendBufferFull)
+        }
 
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
 
@@ -348,16 +371,35 @@ where
         // id)
         compressed.truncate(compressed_size + 1);
 
-        this.inner.start_send(compressed.freeze())?;
+        this.outgoing_messages.push_back(compressed.freeze());
+
         Ok(())
     }
 
+    /// Returns Poll::Ready(Ok(())) when no buffered items remain and the sink has been successfully
+    /// closed.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_flush(cx).map_err(Into::into)
+        let mut this = self.project();
+        loop {
+            match ready!(this.inner.as_mut().poll_flush(cx)) {
+                Err(err) => return Poll::Ready(Err(err.into())),
+                Ok(()) => {
+                    if let Some(message) = this.outgoing_messages.pop_front() {
+                        if let Err(err) = this.inner.as_mut().start_send(message) {
+                            return Poll::Ready(Err(err.into()))
+                        }
+                    } else {
+                        return Poll::Ready(Ok(()))
+                    }
+                }
+            }
+        }
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_close(cx).map_err(Into::into)
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_flush(cx))?;
+
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -474,16 +516,6 @@ impl P2PMessage {
 }
 
 impl Encodable for P2PMessage {
-    fn length(&self) -> usize {
-        let payload_len = match self {
-            P2PMessage::Hello(msg) => msg.length(),
-            P2PMessage::Disconnect(msg) => msg.length(),
-            P2PMessage::Ping => 3, // len([0x01, 0x00, 0x80]) = 3
-            P2PMessage::Pong => 3, // len([0x01, 0x00, 0x80]) = 3
-        };
-        payload_len + 1 // (1 for length of p2p message id)
-    }
-
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         out.put_u8(self.message_id() as u8);
         match self {
@@ -500,6 +532,16 @@ impl Encodable for P2PMessage {
                 out.put_u8(0x80);
             }
         }
+    }
+
+    fn length(&self) -> usize {
+        let payload_len = match self {
+            P2PMessage::Hello(msg) => msg.length(),
+            P2PMessage::Disconnect(msg) => msg.length(),
+            P2PMessage::Ping => 3, // len([0x01, 0x00, 0x80]) = 3
+            P2PMessage::Pong => 3, // len([0x01, 0x00, 0x80]) = 3
+        };
+        payload_len + 1 // (1 for length of p2p message id)
     }
 }
 
@@ -743,15 +785,61 @@ impl Decodable for DisconnectReason {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::EthVersion;
     use reth_ecies::util::pk2id;
     use reth_rlp::EMPTY_STRING_CODE;
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
-    use crate::EthVersion;
+    /// Returns a testing `HelloMessage` and new secretkey
+    fn eth_hello() -> (HelloMessage, SecretKey) {
+        let server_key = SecretKey::new(&mut rand::thread_rng());
+        let hello = HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "bitcoind/1.0.0".to_string(),
+            capabilities: vec![EthVersion::Eth67.into()],
+            port: 30303,
+            id: pk2id(&server_key.public_key(SECP256K1)),
+        };
+        (hello, server_key)
+    }
 
-    use super::*;
+    #[tokio::test]
+    async fn test_can_disconnect() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let expected_disconnect = DisconnectReason::UselessPeer;
+
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+
+            let (server_hello, _) = eth_hello();
+
+            let (p2p_stream, _) =
+                UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
+
+            p2p_stream.disconnect(expected_disconnect).await.unwrap();
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = crate::PassthroughCodec::default().framed(outgoing);
+
+        let (client_hello, _) = eth_hello();
+
+        let (mut p2p_stream, _) =
+            UnauthedP2PStream::new(sink).handshake(client_hello).await.unwrap();
+
+        let err = p2p_stream.next().await.unwrap().unwrap_err();
+        match err {
+            P2PStreamError::Disconnected(reason) => assert_eq!(reason, expected_disconnect),
+            _ => panic!("unexpected err"),
+        }
+    }
 
     #[tokio::test]
     async fn test_handshake_passthrough() {
@@ -765,14 +853,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
 
-            let server_key = SecretKey::new(&mut rand::thread_rng());
-            let server_hello = HelloMessage {
-                protocol_version: ProtocolVersion::V5,
-                client_version: "bitcoind/1.0.0".to_string(),
-                capabilities: vec![EthVersion::Eth67.into()],
-                port: 30303,
-                id: pk2id(&server_key.public_key(SECP256K1)),
-            };
+            let (server_hello, _) = eth_hello();
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
             let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
@@ -787,18 +868,10 @@ mod tests {
             );
         });
 
-        let client_key = SecretKey::new(&mut rand::thread_rng());
-
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = crate::PassthroughCodec::default().framed(outgoing);
 
-        let client_hello = HelloMessage {
-            protocol_version: ProtocolVersion::V5,
-            client_version: "bitcoind/1.0.0".to_string(),
-            capabilities: vec![EthVersion::Eth67.into()],
-            port: 30303,
-            id: pk2id(&client_key.public_key(SECP256K1)),
-        };
+        let (client_hello, _) = eth_hello();
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
         let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();

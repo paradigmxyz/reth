@@ -145,7 +145,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(1),
                         nonce: 0x8u64,
-                        gas_price: 0x4a817c808u64,
+                        gas_price: 0x4a817c808,
                         gas_limit: 0x2e248u64,
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
@@ -169,7 +169,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(1),
                         nonce: 0x09u64,
-                        gas_price: 0x4a817c809u64,
+                        gas_price: 0x4a817c809,
                         gas_limit: 0x33450u64,
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
@@ -207,7 +207,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(1),
                         nonce: 0x8u64,
-                        gas_price: 0x4a817c808u64,
+                        gas_price: 0x4a817c808,
                         gas_limit: 0x2e248u64,
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
@@ -231,7 +231,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(1),
                         nonce: 0x09u64,
-                        gas_price: 0x4a817c809u64,
+                        gas_price: 0x4a817c809,
                         gas_limit: 0x33450u64,
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
@@ -272,7 +272,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 15u64,
-                        gas_price: 2200000000u64,
+                        gas_price: 2200000000,
                         gas_limit: 34811u64,
                         to: TransactionKind::Call(
                             hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into(),
@@ -296,8 +296,8 @@ mod test {
                     Transaction::Eip1559 {
                         chain_id: 4,
                         nonce: 26u64,
-                        max_priority_fee_per_gas: 1500000000u64,
-                        max_fee_per_gas: 1500000013u64,
+                        max_priority_fee_per_gas: 1500000000,
+                        max_fee_per_gas: 1500000013,
                         gas_limit: 21000u64,
                         to: TransactionKind::Call(
                             hex!("61815774383099e24810ab832a5b2a5425c154d5").into(),
@@ -322,7 +322,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 3u64,
-                        gas_price: 2000000000u64,
+                        gas_price: 2000000000,
                         gas_limit: 10000000u64,
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
@@ -346,7 +346,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 1u64,
-                        gas_price: 1000000000u64,
+                        gas_price: 1000000000,
                         gas_limit: 100000u64,
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
@@ -370,7 +370,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 2u64,
-                        gas_price: 1000000000u64,
+                        gas_price: 1000000000,
                         gas_limit: 100000u64,
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
@@ -415,7 +415,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 15u64,
-                        gas_price: 2200000000u64,
+                        gas_price: 2200000000,
                         gas_limit: 34811u64,
                         to: TransactionKind::Call(
                             hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into(),
@@ -439,8 +439,8 @@ mod test {
                     Transaction::Eip1559 {
                         chain_id: 4,
                         nonce: 26u64,
-                        max_priority_fee_per_gas: 1500000000u64,
-                        max_fee_per_gas: 1500000013u64,
+                        max_priority_fee_per_gas: 1500000000,
+                        max_fee_per_gas: 1500000013,
                         gas_limit: 21000u64,
                         to: TransactionKind::Call(
                             hex!("61815774383099e24810ab832a5b2a5425c154d5").into(),
@@ -465,7 +465,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 3u64,
-                        gas_price: 2000000000u64,
+                        gas_price: 2000000000,
                         gas_limit: 10000000u64,
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
@@ -489,7 +489,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 1u64,
-                        gas_price: 1000000000u64,
+                        gas_price: 1000000000,
                         gas_limit: 100000u64,
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
@@ -513,7 +513,7 @@ mod test {
                     Transaction::Legacy {
                         chain_id: Some(4),
                         nonce: 2u64,
-                        gas_price: 1000000000u64,
+                        gas_price: 1000000000,
                         gas_limit: 100000u64,
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),

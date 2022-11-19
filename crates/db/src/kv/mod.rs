@@ -61,7 +61,7 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..0x100000),     // TODO: reevaluate
+                    size: Some(0..0x1000000),    // TODO: reevaluate
                     growth_step: Some(0x100000), // TODO: reevaluate
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
@@ -214,7 +214,7 @@ mod tests {
 
         let value = Account {
             nonce: 18446744073709551615,
-            bytecode_hash: H256::random(),
+            bytecode_hash: Some(H256::random()),
             balance: U256::max_value(),
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")

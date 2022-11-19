@@ -1,7 +1,7 @@
 use super::ProviderImpl;
 use crate::{
     db::{tables, Database, DatabaseGAT, DbCursorRO, DbDupCursorRO, DbTx},
-    provider::{Error, StateProvider, StateProviderFactory},
+    provider::{AccountProvider, Error, StateProvider, StateProviderFactory},
     Result,
 };
 use reth_primitives::{
@@ -66,6 +66,14 @@ impl<'a, TX: DbTx<'a>> StateProviderImplHistory<'a, TX> {
     }
 }
 
+impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplHistory<'a, TX> {
+    /// Get basic account information.
+    fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
+        // TODO add when AccountHistory is defined
+        Ok(None)
+    }
+}
+
 impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
@@ -95,12 +103,6 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
         Ok(None)
     }
 
-    /// Get basic account information.
-    fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
-        // TODO add when AccountHistory is defined
-        Ok(None)
-    }
-
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
@@ -127,6 +129,13 @@ impl<'a, TX: DbTx<'a>> StateProviderImplLatest<'a, TX> {
     }
 }
 
+impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplLatest<'a, TX> {
+    /// Get basic account information.
+    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
+        self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
+    }
+}
+
 impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplLatest<'a, TX> {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
@@ -143,11 +152,6 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplLatest<'a, TX> {
             }
         }
         Ok(None)
-    }
-
-    /// Get basic account information.
-    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 
     /// Get account code by its hash

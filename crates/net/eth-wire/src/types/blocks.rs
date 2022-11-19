@@ -344,7 +344,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
-                            gas_price: 0x4a817c808u64,
+                            gas_price: 0x4a817c808,
                             gas_limit: 0x2e248u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
@@ -362,7 +362,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
-                            gas_price: 0x4a817c809u64,
+                            gas_price: 0x4a817c809,
                             gas_limit: 0x33450u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
@@ -425,7 +425,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
-                            gas_price: 0x4a817c808u64,
+                            gas_price: 0x4a817c808,
                             gas_limit: 0x2e248u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
@@ -443,7 +443,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
-                            gas_price: 0x4a817c809u64,
+                            gas_price: 0x4a817c809,
                             gas_limit: 0x33450u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
