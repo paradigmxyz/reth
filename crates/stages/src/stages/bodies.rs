@@ -264,15 +264,16 @@ mod tests {
         runner.set_batch_size(10);
 
         // Run the stage
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that we only synced around `batch_size` blocks even though the number of blocks
         // synced by the previous stage is higher
+        let output = rx.await.unwrap();
         assert_matches!(
-            result,
+            output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress < 200
         );
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Same as [partial_body_download] except the `batch_size` is not hit.
@@ -292,15 +293,16 @@ mod tests {
         runner.set_batch_size(40);
 
         // Run the stage
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
+        let output = rx.await.unwrap();
         assert_matches!(
-            result,
+            output,
             Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
         );
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Same as [full_body_download] except we have made progress before
@@ -319,9 +321,10 @@ mod tests {
         runner.set_batch_size(10);
 
         // Run the stage
-        let first_run = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that we synced at least 10 blocks
+        let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress >= 10
@@ -333,14 +336,15 @@ mod tests {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(first_run_progress),
         };
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that we synced more blocks
+        let output = rx.await.unwrap();
         assert_matches!(
-            result,
+            output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress > first_run_progress
         );
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Checks that the stage asks to unwind if pre-validation of the block fails.
@@ -360,11 +364,11 @@ mod tests {
         runner.consensus.set_fail_validation(true);
 
         // Run the stage
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that the error bubbles up
         assert_matches!(
-            result,
+            rx.await.unwrap(),
             Err(StageError::Validation { error: consensus::Error::BaseFeeMissing, .. })
         );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
@@ -387,15 +391,16 @@ mod tests {
         runner.set_batch_size(40);
 
         // Run the stage
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
+        let output = rx.await.unwrap();
         assert_matches!(
-            result,
+            output,
             Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress == previous_stage
         );
-        let stage_progress = result.unwrap().stage_progress;
+        let stage_progress = output.unwrap().stage_progress;
         runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
 
         // Delete a transaction
@@ -444,10 +449,10 @@ mod tests {
         )]));
 
         // Run the stage
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // Check that the error bubbles up
-        assert_matches!(result, Err(StageError::Internal(_)));
+        assert_matches!(rx.await.unwrap(), Err(StageError::Internal(_)));
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
     }
 

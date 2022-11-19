@@ -206,8 +206,9 @@ mod tests {
         let mut runner = HeadersTestRunner::default();
         let input = ExecInput::default();
         runner.seed_execution(input).expect("failed to seed execution");
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
+        let result = rx.await.unwrap();
         assert_matches!(
             result,
             Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 0 })
@@ -222,8 +223,9 @@ mod tests {
         runner.consensus.set_fail_validation(true);
         let input = ExecInput::default();
         let seed = runner.seed_execution(input).expect("failed to seed execution");
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
         runner.after_execution(seed).await.expect("failed to run after execution hook");
+        let result = rx.await.unwrap();
         assert_matches!(result, Err(StageError::Validation { .. }));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
@@ -238,7 +240,7 @@ mod tests {
             stage_progress: Some(stage_progress),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
-        let result = runner.execute(input).await;
+        let rx = runner.execute(input);
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
@@ -253,6 +255,7 @@ mod tests {
             })
             .await;
 
+        let result = rx.await.unwrap();
         assert_matches!(
             result,
             Ok(ExecOutput { done: true, reached_tip: true, stage_progress }) if stage_progress == tip.number

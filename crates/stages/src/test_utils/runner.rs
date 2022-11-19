@@ -41,7 +41,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     ) -> Result<(), TestRunnerError>;
 
     /// Run [Stage::execute] and return a receiver for the result.
-    async fn execute(&self, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().inner(), self.stage());
         tokio::spawn(async move {
@@ -50,7 +50,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
         });
-        Box::pin(rx).await.unwrap()
+        rx
     }
 
     /// Run a hook after [Stage::execute]. Required for Headers & Bodies stages.
