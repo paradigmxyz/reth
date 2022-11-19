@@ -12,7 +12,7 @@ auto_impl = "1"
 bytes = { version = "1", default-features = false }
 ethnum = { version = "1", default-features = false, optional = true }
 smol_str = { version = "0.1", default-features = false, optional = true }
-ethereum-types = { version = "0.13", features = ["codec"], optional = true }
+ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
 
 [dev-dependencies]

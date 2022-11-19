@@ -20,7 +20,7 @@ reth-codecs = { version = "0.1.0", path = "../codecs" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
-ethbloom = { version = "0.12", features = ["codec"] }
+ethbloom = { version = "0.13", features = ["codec"] }
 
 # crypto
 secp256k1 = { version = "0.24.0", default-features = false, features = [
