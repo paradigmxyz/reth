@@ -16,7 +16,7 @@ ethereum-types = { version = "0.13", features = ["codec"], optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
 
 [dev-dependencies]
-reth-rlp-test = { path = ".", package = "reth-rlp", features = [
+reth-rlp = { path = ".", package = "reth-rlp", features = [
     "derive",
     "std",
     "ethnum",
