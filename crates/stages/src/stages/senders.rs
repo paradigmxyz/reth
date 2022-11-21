@@ -52,12 +52,12 @@ impl<DB: Database> Stage<DB> for SendersStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = db.get_mut();
+
+        // Look up the start index for transaction range
         let last_block_num = input.stage_progress.unwrap_or_default();
         let last_block_hash = tx
             .get::<tables::CanonicalHeaders>(last_block_num)?
             .ok_or(DatabaseIntegrityError::CanonicalHash { number: last_block_num })?;
-
-        //
         let start_tx_index = tx
             .get::<tables::CumulativeTxCount>((last_block_num, last_block_hash).into())?
             .ok_or(DatabaseIntegrityError::CumulativeTxCount {
@@ -65,7 +65,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
                 hash: last_block_hash,
             })?;
 
-        //
+        // Look up the end index for transaction range (exclusive)
         let max_block_num = input.previous_stage_progress();
         let max_block_hash = tx
             .get::<tables::CanonicalHeaders>(max_block_num)?
