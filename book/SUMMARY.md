@@ -1,3 +1,7 @@
 # Summary
 
-- [Introduction](./README.md)
+[Introduction](./README.md)
+
+# Design
+
+- [Goals](./design/goals.md)
