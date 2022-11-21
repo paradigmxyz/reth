@@ -5,7 +5,8 @@ use crate::{
 use hashbrown::hash_map::Entry;
 use reth_interfaces::{executor::Error, provider::StateProvider};
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, BlockLocked, Bloom, Log, Receipt, H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, Log, Receipt, SealedHeader,
+    TransactionSignedEcRecovered, H256, U256,
 };
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ExecutionResult,
@@ -20,6 +21,7 @@ pub struct Executor {
 }
 
 /// Diff change set that is neede for creating history index and updating current world state.
+#[derive(Debug, Clone)]
 pub struct AccountChangeSet {
     /// Old and New account.
     /// If account is deleted (selfdestructed) we would have (Some,None).
@@ -113,8 +115,12 @@ pub fn commit_changes<DB: StateProvider>(
                 }
                 Entry::Occupied(entry) => {
                     let entry = entry.into_mut();
-                    let old_account = Some(entry.info.clone());
-                    let has_change = entry.info != account.info;
+                    let (old_account, has_change) =
+                        if matches!(entry.account_state, AccountState::NotExisting) {
+                            (None, true)
+                        } else {
+                            (Some(entry.info.clone()), entry.info != account.info)
+                        };
                     entry.info = account.info.clone();
                     (old_account, has_change, entry)
                 }
@@ -140,7 +146,7 @@ pub fn commit_changes<DB: StateProvider>(
 
             // insert storage into new db account.
             new_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                storage.insert(key.clone(), (value.original_value(), value.present_value()));
+                storage.insert(key, (value.original_value(), value.present_value()));
                 (key, value.present_value())
             }));
 
@@ -175,6 +181,7 @@ pub fn commit_changes<DB: StateProvider>(
 /// every change to state that this transaction made and its old values
 /// so that history account table can be updated. Receipts and new bytecodes
 /// from created bytecodes.
+#[derive(Debug, Clone)]
 pub struct TransactionStatePatch {
     /// Transaction receipt
     pub receipt: Receipt,
@@ -186,14 +193,15 @@ pub struct TransactionStatePatch {
 
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
-    block: &BlockLocked,
+    header: &SealedHeader,
+    transactions: &[TransactionSignedEcRecovered],
     config: &Config,
     db: &mut SubState<DB>,
 ) -> Result<Vec<TransactionStatePatch>, Error> {
-    let transaction_patches = execute(block, config, db)?;
+    let transaction_patches = execute(header, transactions, config, db)?;
 
     let receipts_iter = transaction_patches.iter().map(|patch| &patch.receipt);
-    verify_receipt(block.receipts_root, block.logs_bloom, receipts_iter)?;
+    verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
 
     Ok(transaction_patches)
 }
@@ -224,7 +232,8 @@ pub fn verify_receipt<'a>(
 /// Verify block. Execute all transaction and compare results.
 /// Return diff is on transaction granularity. We are returning vector of
 pub fn execute<DB: StateProvider>(
-    block: &BlockLocked,
+    header: &SealedHeader,
+    transactions: &[TransactionSignedEcRecovered],
     config: &Config,
     db: &mut SubState<DB>,
 ) -> Result<Vec<TransactionStatePatch>, Error> {
@@ -232,19 +241,19 @@ pub fn execute<DB: StateProvider>(
     evm.database(db);
 
     evm.env.cfg.chain_id = config.chain_id;
-    evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(block.number);
+    evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(header.number);
     evm.env.cfg.perf_all_precompiles_have_balance = true;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
-    revm_wrap::fill_block_env(&mut evm.env.block, block);
+    revm_wrap::fill_block_env(&mut evm.env.block, header);
     let mut cumulative_gas_used = 0;
     // output of verification
-    let mut transaction_patch = Vec::with_capacity(block.body.len());
+    let mut transaction_patch = Vec::with_capacity(transactions.len());
 
-    for transaction in block.body.iter() {
+    for transaction in transactions.iter() {
         // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
         // must be no greater than the block’s gasLimit.
-        let block_available_gas = block.gas_limit - cumulative_gas_used;
+        let block_available_gas = header.gas_limit - cumulative_gas_used;
         if transaction.gas_limit() > block_available_gas {
             return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
                 transaction_gas_limit: transaction.gas_limit(),
@@ -253,7 +262,7 @@ pub fn execute<DB: StateProvider>(
         }
 
         // Fill revm structure.
-        revm_wrap::fill_tx_env(&mut evm.env.tx, transaction.as_ref());
+        revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
 
         // Execute transaction.
         let (ExecutionResult { exit_reason, gas_used, logs, .. }, state) = evm.transact();
@@ -299,9 +308,186 @@ pub fn execute<DB: StateProvider>(
     }
 
     // Check if gas used matches the value set in header.
-    if block.gas_used != cumulative_gas_used {
-        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
+    if header.gas_used != cumulative_gas_used {
+        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
     }
 
+    // TODO add validator block reward. Currently not added.
+    // https://github.com/foundry-rs/reth/issues/237
+
     Ok(transaction_patch)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::collections::HashMap;
+
+    use crate::revm_wrap::State;
+    use reth_interfaces::provider::{AccountProvider, StateProvider};
+    use reth_primitives::{
+        hex_literal::hex, keccak256, Account, Address, BlockLocked, Bytes, StorageKey, H160, H256,
+        U256,
+    };
+    use reth_rlp::Decodable;
+
+    use super::*;
+
+    #[derive(Debug, Default, Clone, Eq, PartialEq)]
+    struct StateProviderTest {
+        accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
+        contracts: HashMap<H256, Bytes>,
+        block_hash: HashMap<U256, H256>,
+    }
+
+    impl StateProviderTest {
+        /// Insert account.
+        fn insert_account(
+            &mut self,
+            address: Address,
+            mut account: Account,
+            bytecode: Option<Bytes>,
+            storage: HashMap<StorageKey, U256>,
+        ) {
+            if let Some(bytecode) = bytecode {
+                let hash = keccak256(&bytecode);
+                account.bytecode_hash = Some(hash);
+                self.contracts.insert(hash, bytecode);
+            }
+            self.accounts.insert(address, (storage, account));
+        }
+    }
+
+    impl AccountProvider for StateProviderTest {
+        fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
+            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| acc.clone()));
+            ret
+        }
+    }
+
+    impl StateProvider for StateProviderTest {
+        fn storage(
+            &self,
+            account: Address,
+            storage_key: reth_primitives::StorageKey,
+        ) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>> {
+            Ok(self
+                .accounts
+                .get(&account)
+                .map(|(storage, _)| storage.get(&storage_key).cloned())
+                .flatten())
+        }
+
+        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {
+            Ok(self.contracts.get(&code_hash).cloned())
+        }
+
+        fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
+            Ok(self.block_hash.get(&number).cloned())
+        }
+    }
+
+    #[test]
+    fn sanity_execution() {
+        // Got rlp block from: src/GeneralStateTestsFiller/stChainId/chainIdGasCostFiller.json
+
+        let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
+        let block = BlockLocked::decode(&mut block_rlp).unwrap();
+
+        let mut db = StateProviderTest::default();
+
+        // pre staet
+        db.insert_account(
+            H160(hex!("1000000000000000000000000000000000000000")),
+            Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None },
+            Some(hex!("5a465a905090036002900360015500").into()),
+            HashMap::new(),
+        );
+
+        let account3_old_info = Account {
+            balance: 0x3635c9adc5dea00000u128.into(),
+            nonce: 0x00,
+            bytecode_hash: Some(H256(hex!(
+                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+            ))),
+        };
+
+        db.insert_account(
+            H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
+            Account { balance: 0x3635c9adc5dea00000u128.into(), nonce: 0x00, bytecode_hash: None },
+            None,
+            HashMap::new(),
+        );
+
+        let mut config = Config::new_ethereum();
+        // make it berlin fork
+        config.spec_upgrades.berlin = 0;
+
+        let mut db = SubState::new(State::new(db));
+        let transactions: Vec<TransactionSignedEcRecovered> =
+            block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
+
+        // execute chain and verify receipts
+        let out =
+            execute_and_verify_receipt(&block.header, &transactions, &config, &mut db).unwrap();
+
+        assert_eq!(out.len(), 1, "Should executed one transaction");
+
+        let patch = out[0].clone();
+        assert_eq!(patch.new_bytecodes.len(), 0, "Should have zero new bytecodes");
+
+        let account1 = H160(hex!("1000000000000000000000000000000000000000"));
+        let _account1_info = Account {
+            balance: 0x00.into(),
+            nonce: 0x00,
+            bytecode_hash: Some(H256(hex!(
+                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+            ))),
+        };
+        let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
+        let account2_info = Account {
+            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(), /* TODO remove
+                                                                                * 2eth block
+                                                                                * reward */
+            nonce: 0x00,
+            bytecode_hash: Some(H256(hex!(
+                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+            ))),
+        };
+        let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let account3_info = Account {
+            balance: 0x3635c9adc5de996b46u128.into(),
+            nonce: 0x01,
+            bytecode_hash: Some(H256(hex!(
+                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+            ))),
+        };
+
+        assert_eq!(
+            patch.state_diff.get(&account1).unwrap().account,
+            (None, None),
+            "No change to account"
+        );
+        assert_eq!(
+            patch.state_diff.get(&account2).unwrap().account,
+            (None, Some(account2_info)),
+            "New acccount"
+        );
+        assert_eq!(
+            patch.state_diff.get(&account3).unwrap().account,
+            (Some(account3_old_info), Some(account3_info)),
+            "Change to account state"
+        );
+
+        assert_eq!(patch.new_bytecodes.len(), 0, "No new bytecodes");
+
+        // check torage
+        let storage = &patch.state_diff.get(&account1).unwrap().storage;
+        assert_eq!(storage.len(), 1, "Only one storage change");
+        assert_eq!(
+            storage.get(&1.into()),
+            Some(&(0.into(), 2.into())),
+            "Storage change from 0 to 2 on slot 1"
+        );
+    }
 }

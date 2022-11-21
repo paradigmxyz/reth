@@ -1,5 +1,4 @@
 use crate::{keccak256, Header, Log, Receipt, TransactionSigned, H256};
-//use ethers_core::utils::rlp::RlpStream;
 use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;

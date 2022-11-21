@@ -729,6 +729,16 @@ pub struct TransactionSignedEcRecovered {
     signer: Address,
 }
 
+impl Encodable for TransactionSignedEcRecovered {
+    fn length(&self) -> usize {
+        self.signed_transaction.length()
+    }
+
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        self.signed_transaction.encode(out)
+    }
+}
+
 impl TransactionSignedEcRecovered {
     /// Signer of transaction recovered from signature
     pub fn signer(&self) -> Address {

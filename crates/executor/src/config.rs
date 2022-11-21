@@ -11,6 +11,13 @@ pub struct Config {
     pub spec_upgrades: SpecUpgrades,
 }
 
+impl Config {
+    /// Create new config for ethereum.
+    pub fn new_ethereum() -> Self {
+        Self { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() }
+    }
+}
+
 /// Spec with there ethereum codenames.
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
