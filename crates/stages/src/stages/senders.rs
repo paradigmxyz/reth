@@ -7,16 +7,19 @@ use rayon::prelude::*;
 use reth_interfaces::db::{
     self, tables, DBContainer, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut,
 };
-use reth_primitives::{Address, TxNumber};
+use reth_primitives::TxNumber;
 use std::fmt::Debug;
 use thiserror::Error;
 
 const SENDERS: StageId = StageId("Senders");
 
-/// TODO: docs
+/// The senders stage iterates over existing transactions,
+/// recovers the transaction signer and stores them
+/// in [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
 #[derive(Debug)]
-struct SendersStage {
-    batch_size: usize,
+pub struct SendersStage {
+    /// The size of the chunk for parallel sender recovery
+    pub batch_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -38,7 +41,11 @@ impl<DB: Database> Stage<DB> for SendersStage {
         SENDERS
     }
 
-    /// Execute the stage.
+    /// Retrieve the range of transactions to iterate over by querying
+    /// [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount],
+    /// collect transactions within that range,
+    /// recover signer for each transaction and store entries in
+    /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
     async fn execute(
         &mut self,
         db: &mut DBContainer<'_, DB>,
@@ -50,17 +57,19 @@ impl<DB: Database> Stage<DB> for SendersStage {
             .get::<tables::CanonicalHeaders>(last_block_num)?
             .ok_or(DatabaseIntegrityError::CanonicalHash { number: last_block_num })?;
 
-        let max_block_num = input.previous_stage_progress();
-        let max_block_hash = tx
-            .get::<tables::CanonicalHeaders>(max_block_num)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number: max_block_num })?;
-
+        //
         let start_tx_index = tx
             .get::<tables::CumulativeTxCount>((last_block_num, last_block_hash).into())?
             .ok_or(DatabaseIntegrityError::CumulativeTxCount {
                 number: last_block_num,
                 hash: last_block_hash,
             })?;
+
+        //
+        let max_block_num = input.previous_stage_progress();
+        let max_block_hash = tx
+            .get::<tables::CanonicalHeaders>(max_block_num)?
+            .ok_or(DatabaseIntegrityError::CanonicalHash { number: max_block_num })?;
         let end_tx_index = tx
             .get::<tables::CumulativeTxCount>((max_block_num, max_block_hash).into())?
             .ok_or(DatabaseIntegrityError::CumulativeTxCount {
@@ -68,14 +77,20 @@ impl<DB: Database> Stage<DB> for SendersStage {
                 hash: last_block_hash,
             })?;
 
+        // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_mut::<tables::TxSenders>()?;
+
+        // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
+        // Walk the transactions from start to end index (exclusive)
         let entries = tx_cursor
             .walk(start_tx_index)?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < end_tx_index).unwrap_or_default());
 
+        // Iterate over transactions in chunks
         for chunk in &entries.chunks(self.batch_size as usize) {
             let transactions = chunk.collect::<Result<Vec<_>, db::Error>>()?;
+            // Recover signers for the chunk in parallel
             let recovered = transactions
                 .into_par_iter()
                 .map(|(id, transaction)| {
@@ -85,6 +100,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
                     Ok((id, signer))
                 })
                 .collect::<Result<Vec<_>, StageError>>()?;
+            // Append the signers to the table
             recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id, sender))?;
         }
 
@@ -193,7 +209,7 @@ mod tests {
             if let Some(output) = output {
                 self.db.query(|tx| {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
-                    let end_block = input.previous_stage_progress();
+                    let end_block = output.stage_progress;
 
                     if start_block > end_block {
                         return Ok(())
@@ -217,10 +233,9 @@ mod tests {
 
                     Ok(())
                 })?;
+            } else {
+                self.check_no_transaction_by_block(input.stage_progress.unwrap_or_default())?;
             }
-            // TODO:
-            //  else {
-            // }
 
             Ok(())
         }
@@ -228,7 +243,13 @@ mod tests {
 
     impl UnwindStageTestRunner for SendersTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            match self.get_block_body_entry(input.unwind_to)? {
+            self.check_no_transaction_by_block(input.unwind_to)
+        }
+    }
+
+    impl SendersTestRunner {
+        fn check_no_transaction_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+            match self.get_block_body_entry(block)? {
                 Some(body) => {
                     let last_index = body.base_tx_id + body.tx_amount;
                     self.db.check_no_entry_above::<tables::TxSenders, _>(last_index, |key| key)?;
@@ -236,185 +257,28 @@ mod tests {
                 None => {
                     assert!(self.db.table_is_empty::<tables::TxSenders>()?);
                 }
-            }
-
+            };
             Ok(())
         }
-    }
 
-    impl SendersTestRunner {
+        /// Get the block body entry at block number. If it doesn't exist,
+        /// fallback to the previous entry.
         fn get_block_body_entry(
             &self,
             block: BlockNumber,
         ) -> Result<Option<StoredBlockBody>, TestRunnerError> {
-            let entry = self.db.query(|tx| {
-                let body = tx
-                    .get::<tables::CanonicalHeaders>(block)?
-                    .map(|hash| tx.get::<tables::BlockBodies>((block, hash).into()));
-                Ok(body.transpose()?.flatten())
+            let entry = self.db.query(|tx| match tx.get::<tables::CanonicalHeaders>(block)? {
+                Some(hash) => {
+                    let mut body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    let entry = match body_cursor.seek_exact((block, hash).into())? {
+                        Some((_, block)) => Some(block),
+                        _ => body_cursor.prev()?.map(|(_, block)| block),
+                    };
+                    Ok(entry)
+                }
+                None => Ok(None),
             })?;
             Ok(entry)
         }
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::test_utils::{StageTestDB, StageTestRunner, PREV_STAGE_ID};
-//     use assert_matches::assert_matches;
-//     use rand::Rng;
-//     use reth_interfaces::test_utils::{gen_random_header, gen_random_tx};
-//     use reth_primitives::H256;
-
-//     #[tokio::test]
-//     async fn execute_no_bodies_no_progress() {
-//         let runner = SendersTestRunner::default();
-//         let stage_progress = gen_random_header(1, None);
-//         let prev_stage_progress = gen_random_header(100, None);
-//         runner
-//             .db()
-//             .map_put::<tables::CanonicalHeaders, _, _>(
-//                 &[&stage_progress, &prev_stage_progress],
-//                 |h| (h.number, h.hash()),
-//             )
-//             .expect("failed to insert");
-
-//         let input = ExecInput {
-//             previous_stage: Some((PREV_STAGE_ID, prev_stage_progress.number)),
-//             stage_progress: None,
-//         };
-//         let rx = runner.execute(input);
-//         assert_matches!(
-//             rx.await.unwrap(),
-//             Ok(ExecOutput { stage_progress, done, reached_tip })
-//                 if done && reached_tip && stage_progress == 0
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn execute() {
-//         let runner = SendersTestRunner::default();
-//         let (stage_progress, prev_stage_progress) = (100, 120);
-//         let start_header = gen_random_header(stage_progress + 1, None);
-//         runner
-//             .db()
-//             .put::<tables::CanonicalHeaders>(start_header.number, start_header.hash())
-//             .expect("failed to insert");
-
-//         let num_of_txs = 2000;
-//         let mut transactions =
-//             (0..num_of_txs).map(|_| gen_random_tx()).enumerate().collect::<Vec<_>>();
-
-//         let mut rng = rand::thread_rng();
-//         let mut end_block = stage_progress; // start at start_header.number - 1
-//         let mut cum_tx_count = 0_u64;
-//         while !transactions.is_empty() {
-//             let block_tx_count = if transactions.len() > 5 {
-//                 rng.gen_range(0..transactions.len() / 2)
-//             } else {
-//                 transactions.len()
-//             };
-//             let block_txs = transactions.drain(..block_tx_count).collect::<Vec<_>>();
-//             runner
-//                 .db()
-//                 .map_put::<tables::Transactions, _, _>(&block_txs, |(idx, tx)| {
-//                     (*idx as u64, tx.clone())
-//                 })
-//                 .expect("failed to insert");
-
-//             end_block += 1;
-//             cum_tx_count += block_txs.len() as u64;
-//             let current_block_key = (end_block, H256::zero()).into();
-//             runner
-//                 .db()
-//                 .put::<tables::BlockBodies>(current_block_key, block_txs.len() as u16)
-//                 .expect("failed to insert");
-//             runner
-//                 .db()
-//                 .put::<tables::CumulativeTxCount>(current_block_key, cum_tx_count)
-//                 .expect("failed to insert");
-//         }
-
-//         let input = ExecInput {
-//             previous_stage: Some((PREV_STAGE_ID, prev_stage_progress)),
-//             stage_progress: Some(stage_progress),
-//         };
-//         let rx = runner.execute(input);
-//         let expected_progress = std::cmp::min(end_block, prev_stage_progress);
-//         assert_matches!(
-//             rx.await.unwrap(),
-//             Ok(ExecOutput { stage_progress, done, reached_tip })
-//                 if done && reached_tip && stage_progress == expected_progress
-//         )
-//     }
-
-//     #[tokio::test]
-//     async fn unwind_empty_db() {
-//         let runner = SendersTestRunner::default();
-//         let rx = runner.unwind(UnwindInput::default());
-//         let result = rx.await.unwrap();
-//         assert!(result.is_err());
-//         let result = result.unwrap_err();
-//         assert_matches!(
-//             result.downcast_ref::<DatabaseIntegrityError>(),
-//             Some(DatabaseIntegrityError::CannonicalHeader { number })
-//                 if *number == 0
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn unwind() {
-//         let runner = SendersTestRunner::default();
-
-//         let unwind_block = 100;
-//         // one transaction per block
-//         let transactions = (0..1000)
-//             .map(|idx| (idx, gen_random_tx().recover_signer().unwrap()))
-//             .collect::<Vec<_>>();
-
-//         runner
-//             .db()
-//             .map_put::<tables::TxSenders, _, _>(&transactions, |(k, v)| (*k, *v))
-//             .expect("failed to insert");
-
-//         // put one transaction at unwind block
-//         let unwind_tx_index = unwind_block + 1;
-//         runner
-//             .db()
-//             .put::<tables::CumulativeTxCount>((unwind_block, H256::zero()).into(),
-// unwind_tx_index)             .expect("failed to insert");
-//         runner
-//             .db()
-//             .put::<tables::CanonicalHeaders>(unwind_block, H256::zero())
-//             .expect("failed to insert");
-
-//         let input = UnwindInput { bad_block: None, stage_progress: 0, unwind_to: unwind_block };
-//         let rx = runner.unwind(input);
-//         assert_matches!(
-//             rx.await.unwrap(),
-//             Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_block
-//         );
-//         runner
-//             .db()
-//             .check_no_entry_above::<tables::TxSenders, _>(unwind_tx_index - 1, |key| key)
-//             .expect("failed to check");
-//     }
-
-//     #[derive(Default)]
-//     struct SendersTestRunner {
-//         db: StageTestDB,
-//     }
-
-//     impl StageTestRunner for SendersTestRunner {
-//         type S = SendersStage;
-
-//         fn db(&self) -> &StageTestDB {
-//             &self.db
-//         }
-
-//         fn stage(&self) -> Self::S {
-//             SendersStage {}
-//         }
-//     }
-// }

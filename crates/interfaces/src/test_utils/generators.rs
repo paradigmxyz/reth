@@ -63,26 +63,12 @@ pub fn random_tx() -> Transaction {
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx() -> TransactionSigned {
-    // TODO:
     let secp = Secp256k1::new();
     let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
     let tx = random_tx();
     let signature =
         sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
     TransactionSigned::from_transaction_and_signature(tx, signature)
-
-    // let tx = random_tx();
-    // let hash = tx.signature_hash();
-    // TransactionSigned {
-    //     transaction: tx,
-    //     hash,
-    //     signature: Signature {
-    //         // TODO
-    //         r: Default::default(),
-    //         s: Default::default(),
-    //         odd_y_parity: false,
-    //     },
-    // }
 }
 
 /// Signs message with the given secret key.
