@@ -419,8 +419,8 @@ mod tests {
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        EthVersion, HelloMessage, ProtocolVersion, Status, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream,
+        EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
+        StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_primitives::{ForkFilter, Hardfork};
     use secp256k1::{SecretKey, SECP256K1};
@@ -601,6 +601,68 @@ mod tests {
         let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
             drop(client_stream);
             tokio::time::sleep(Duration::from_secs(1)).await
+        });
+
+        let (tx, rx) = oneshot::channel();
+
+        tokio::task::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let session = builder.connect_incoming(incoming).await;
+            session.await;
+
+            tx.send(()).unwrap();
+        });
+
+        tokio::task::spawn(fut);
+
+        rx.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_send_many_messages() {
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let num_messages = 10_000;
+
+        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+            for _ in 0..num_messages {
+                client_stream
+                    .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(
+                        vec![],
+                    )))
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let (tx, rx) = oneshot::channel();
+
+        tokio::task::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let session = builder.connect_incoming(incoming).await;
+            session.await;
+
+            tx.send(()).unwrap();
+        });
+
+        tokio::task::spawn(fut);
+
+        rx.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_keep_alive() {
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+            let _ = tokio::time::timeout(Duration::from_secs(60), client_stream.next()).await;
+            client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
 
         let (tx, rx) = oneshot::channel();
