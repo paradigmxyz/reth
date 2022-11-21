@@ -135,3 +135,26 @@ pub(crate) mod unwind {
         Ok(())
     }
 }
+
+// TODO:
+// pub(crate) mod database {
+//     use reth_interfaces::db::{models::BlockNumHash, tables, DbTx};
+//     use reth_primitives::{BlockHash, BlockNumber};
+
+//     use crate::{DatabaseIntegrityError, StageError};
+
+//     pub(crate) trait StageDbTxExt<'tx>: DbTx<'tx> {
+//         // TODO: docs
+//         fn get_hash(&mut self, number: BlockNumber) -> Result<BlockHash, StageError> {
+//             let entry = self
+//                 .get::<tables::CanonicalHeaders>(number)?
+//                 .ok_or(DatabaseIntegrityError::CanonicalHeader { number })?;
+//             Ok(entry)
+//         }
+
+//         // TODO: docs
+//         fn get_num_hash_key(&mut self, number: BlockNumber) -> Result<BlockNumHash, StageError> {
+//             Ok((number, self.get_hash(number)?).into())
+//         }
+//     }
+// }

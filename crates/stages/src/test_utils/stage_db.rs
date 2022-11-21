@@ -57,6 +57,14 @@ impl StageTestDB {
         f(self.container().get())
     }
 
+    /// Check if the table is empty
+    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, db::Error> {
+        self.query(|tx| {
+            let last = tx.cursor::<T>()?.last()?;
+            Ok(last.is_none())
+        })
+    }
+
     /// Map a collection of values and store them in the database.
     /// This function commits the transaction before exiting.
     ///
@@ -110,10 +118,10 @@ impl StageTestDB {
     }
 
     /// Check that there is no table entry above a given
-    /// block by [Table::Key]
+    /// number by [Table::Key]
     pub(crate) fn check_no_entry_above<T, F>(
         &self,
-        block: BlockNumber,
+        num: u64,
         mut selector: F,
     ) -> Result<(), db::Error>
     where
@@ -123,17 +131,17 @@ impl StageTestDB {
         self.query(|tx| {
             let mut cursor = tx.cursor::<T>()?;
             if let Some((key, _)) = cursor.last()? {
-                assert!(selector(key) <= block);
+                assert!(selector(key) <= num);
             }
             Ok(())
         })
     }
 
     /// Check that there is no table entry above a given
-    /// block by [Table::Value]
+    /// number by [Table::Value]
     pub(crate) fn check_no_entry_above_by_value<T, F>(
         &self,
-        block: BlockNumber,
+        num: u64,
         mut selector: F,
     ) -> Result<(), db::Error>
     where
@@ -143,7 +151,7 @@ impl StageTestDB {
         self.query(|tx| {
             let mut cursor = tx.cursor::<T>()?;
             if let Some((_, value)) = cursor.last()? {
-                assert!(selector(value) <= block);
+                assert!(selector(value) <= num);
             }
             Ok(())
         })
