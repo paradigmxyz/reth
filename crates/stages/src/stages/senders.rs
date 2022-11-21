@@ -28,9 +28,9 @@ enum SendersStageError {
     SenderRecovery { tx: TxNumber },
 }
 
-impl Into<StageError> for SendersStageError {
-    fn into(self) -> StageError {
-        StageError::Internal(Box::new(self))
+impl From<SendersStageError> for StageError {
+    fn from(error: SendersStageError) -> Self {
+        StageError::Internal(Box::new(error))
     }
 }
 
@@ -88,15 +88,16 @@ impl<DB: Database> Stage<DB> for SendersStage {
             .take_while(|res| res.as_ref().map(|(k, _)| *k < end_tx_index).unwrap_or_default());
 
         // Iterate over transactions in chunks
-        for chunk in &entries.chunks(self.batch_size as usize) {
+        for chunk in &entries.chunks(self.batch_size) {
             let transactions = chunk.collect::<Result<Vec<_>, db::Error>>()?;
             // Recover signers for the chunk in parallel
             let recovered = transactions
                 .into_par_iter()
                 .map(|(id, transaction)| {
-                    let signer = transaction
-                        .recover_signer()
-                        .ok_or::<StageError>(SendersStageError::SenderRecovery { tx: id }.into())?;
+                    let signer =
+                        transaction.recover_signer().ok_or_else::<StageError, _>(|| {
+                            SendersStageError::SenderRecovery { tx: id }.into()
+                        })?;
                     Ok((id, signer))
                 })
                 .collect::<Result<Vec<_>, StageError>>()?;
