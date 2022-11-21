@@ -4,7 +4,10 @@ use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
 use reth_primitives::{PeerId, H256};
 use std::{
     net::SocketAddr,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 
@@ -38,6 +41,16 @@ impl NetworkHandle {
             network_mode,
         };
         Self { inner: Arc::new(inner) }
+    }
+
+    /// How many peers we're currently connected to.
+    pub fn num_connected_peers(&self) -> usize {
+        self.inner.num_active_peers.load(Ordering::Relaxed)
+    }
+
+    /// Returns the [`PeerId`] used in the network.
+    pub fn peer_id(&self) -> &PeerId {
+        &self.inner.local_peer_id
     }
 
     fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {

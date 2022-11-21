@@ -93,8 +93,6 @@ pub struct NetworkManager<C> {
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
-    /// Local copy of the `PeerId` of the local node.
-    local_peer_id: PeerId,
 }
 
 // === impl NetworkManager ===
@@ -158,13 +156,27 @@ where
             event_listeners: Default::default(),
             to_transactions: None,
             num_active_peers,
-            local_peer_id,
         })
     }
 
     /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
         self.to_transactions = Some(tx);
+    }
+
+    /// Returns the [`SocketAddr`] that listens for incoming connections.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.swarm.listener().local_address()
+    }
+
+    /// How many peers we're currently connected to.
+    pub fn num_connected_peers(&self) -> usize {
+        self.swarm.state().num_connected_peers()
+    }
+
+    /// Returns the [`PeerId`] used in the network.
+    pub fn peer_id(&self) -> &PeerId {
+        &self.handle.peer_id()
     }
 
     /// Returns the [`NetworkHandle`] that can be cloned and shared.

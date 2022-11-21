@@ -80,6 +80,11 @@ where
         }
     }
 
+    /// How many peers we're currently connected to.
+    pub fn num_connected_peers(&self) -> usize {
+        self.connected_peers.len()
+    }
+
     /// Event hook for an activated session for the peer.
     ///
     /// Returns `Ok` if the session is valid, returns an `Err` if the session is not accepted and
