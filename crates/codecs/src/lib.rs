@@ -387,4 +387,39 @@ mod tests {
             (TestStruct::default(), vec![].as_slice())
         );
     }
+
+    #[use_compact]
+    #[derive(Debug, PartialEq, Clone, Default)]
+    pub enum TestEnum {
+        #[default]
+        Var0,
+        Var1(TestStruct),
+        Var2(u64),
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    #[test_fuzz::test_fuzz]
+    fn compact_test_enum_all_variants(var0: TestEnum, var1: TestEnum, var2: TestEnum) {
+        let mut buf = vec![];
+        var0.clone().to_compact(&mut buf);
+        assert_eq!(TestEnum::from_compact(&buf, buf.len()).0, var0);
+
+        let mut buf = vec![];
+        var1.clone().to_compact(&mut buf);
+        assert_eq!(TestEnum::from_compact(&buf, buf.len()).0, var1);
+
+        let mut buf = vec![];
+        var2.clone().to_compact(&mut buf);
+        assert_eq!(TestEnum::from_compact(&buf, buf.len()).0, var2);
+    }
+
+    #[test]
+    fn compact_test_enum() {
+        let var0 = TestEnum::Var0;
+        let var1 = TestEnum::Var1(TestStruct::default());
+        let var2 = TestEnum::Var2(1u64);
+
+        compact_test_enum_all_variants(var0, var1, var2);
+    }
 }

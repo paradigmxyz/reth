@@ -2,101 +2,11 @@
 
 use super::*;
 
-/// Generates the flag fieldset struct that is going to be used to store the length of fields and
-/// their potential presence.
-pub fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
-    let flags = format_ident!("{ident}Flags");
-
-    let mut field_flags = vec![];
-    let mut total_bits = 0;
-
-    // Find out the adequate bit size for the length of each field, if applicable.
-    for (name, ftype, is_compact) in fields {
-        if *is_compact {
-            if is_flag_type(ftype) {
-                let name = format_ident!("{name}_len");
-                let bitsize = get_bit_size(ftype);
-                let bsize = format_ident!("B{bitsize}");
-                total_bits += bitsize;
-
-                field_flags.push(quote! {
-                    #name: #bsize ,
-                });
-            } else {
-                let name = format_ident!("{name}");
-
-                field_flags.push(quote! {
-                    #name: bool ,
-                });
-
-                total_bits += 1;
-            }
-        }
-    }
-
-    if total_bits == 0 {
-        // Placeholder struct for when there are no bitfields to be added.
-        return quote! {
-            #[derive(Debug, Default)]
-            struct #flags {
-            }
-
-            impl #flags {
-                fn from(mut buf: &[u8]) -> (Self, &[u8]) {
-                    (#flags::default(), buf)
-                }
-                fn into_bytes(self) -> [u8; 0] {
-                    []
-                }
-            }
-        }
-    }
-
-    // Total number of bits should be divisible by 8, so we might need to pad the struct with a
-    // skipped field.
-    let remaining = 8 - total_bits % 8;
-    let total_bytes = if remaining != 8 {
-        let bsize = format_ident!("B{remaining}");
-        field_flags.push(quote! {
-            #[skip]
-            unused: #bsize ,
-        });
-        (total_bits + remaining) / 8
-    } else {
-        total_bits / 8
-    };
-
-    // Provides the number of bytes used to represent the flag struct.
-    let readable_bytes = vec![
-        quote! {
-            buf.get_u8(),
-        };
-        total_bytes.into()
-    ];
-
-    // Generate the flag struct.
-    quote! {
-        #[bitfield]
-        #[derive(Clone, Copy, Debug, Default)]
-        struct #flags {
-            #(#field_flags)*
-        }
-
-        impl #flags {
-            fn from(mut buf: &[u8]) -> (Self, &[u8]) {
-                (#flags::from_bytes([
-                    #(#readable_bytes)*
-                ]), buf)
-            }
-        }
-    }
-}
-
 /// Generates code to implement the [`Compact`] trait for a data type.
 pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
-    let to_compact = generate_to_compact(fields);
+    let to_compact = generate_to_compact(fields, ident);
     let from_compact = generate_from_compact(fields, ident);
 
     let fuzz = format_ident!("fuzz_test_{ident}");
@@ -141,96 +51,114 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
 
+    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
+    let mut variant_index = 0u8;
+    let mut enum_lines: Vec<TokenStream2> = vec![];
+
     let known_types = ["H256", "H160", "Address", "Bloom", "Vec"];
+    let mut fields_iterator = fields.iter().enumerate().peekable();
 
     // Sets the TypeFlags with the buffer length
-    for (field_num, (name, ftype, is_compact)) in fields.iter().enumerate() {
-        let (name, _, len) = get_field_idents(name);
-
-        assert!(
-            known_types.contains(&ftype.as_str()) ||
-                is_flag_type(ftype) ||
-                field_num == fields.len() - 1,
-            "{ftype} field should be placed as the last one since it's not known. "
-        );
-
-        if ftype == "bytes::Bytes" {
-            lines.push(quote! {
-                let mut #name = bytes::Bytes::new();
-                (#name, buf) = bytes::Bytes::from_compact(buf, buf.len() as usize);
-            })
-        } else {
-            let ident_type = format_ident!("{ftype}");
-            lines.push(quote! {
-                let mut #name = #ident_type::default();
-            });
-            if !is_flag_type(ftype) {
-                // It's a type that handles its own length requirements. (h256, Custom, ...)
-                lines.push(quote! {
-                    (#name, buf) = #ident_type::from_compact(buf, buf.len());
-                })
-            } else if *is_compact {
-                lines.push(quote! {
-                    (#name, buf) = #ident_type::from_compact(buf, flags.#len() as usize);
-                });
-            } else {
-                todo!()
-            }
-        }
+    // for (field_num, (name, ftype, is_compact, _)) in fields.iter().enumerate() {
+    while let Some((field_num, field)) =
+        // while let Some((field_num, (name, ftype, is_compact, _is_enum_variant))) =
+        fields_iterator.next()
+    {
+        match field {
+            FieldTypes::StructField((name, ftype, is_compact)) => handle_struct_field_from(
+                name,
+                known_types,
+                field_num,
+                fields,
+                ftype,
+                &mut lines,
+                is_compact,
+            ),
+            FieldTypes::EnumVariant(name) => handle_enum_variant_from(
+                name,
+                &mut fields_iterator,
+                &mut enum_lines,
+                &mut variant_index,
+                ident,
+            ),
+            FieldTypes::EnumUnnamedField(_) => unreachable!(),
+        };
     }
 
-    let fields = fields
-        .iter()
-        .map(|field| {
-            let ident = format_ident!("{}", field.0);
-            quote! {
-                #ident: #ident,
-            }
-        })
-        .collect::<Vec<_>>();
+    if !is_enum {
+        let fields = fields
+            .iter()
+            .filter_map(|field| {
+                if let FieldTypes::StructField((name, _, _)) = field {
+                    let ident = format_ident!("{name}");
+                    return Some(quote! {
+                        #ident: #ident,
+                    })
+                }
+                None
+            })
+            .collect::<Vec<_>>();
 
-    // Builds the object instantiation.
-    lines.push(quote! {
-        let obj = #ident {
-            #(#fields)*
-        };
-    });
+        // Builds the object instantiation.
+        lines.push(quote! {
+            let obj = #ident {
+                #(#fields)*
+            };
+        });
+    } else {
+        // Builds the object instantiation.
+        lines.push(quote! {
+            let obj = match flags.variant() {
+                #(#enum_lines)*
+                _ => unreachable!()
+            };
+        });
+    }
+
     lines
 }
 
 /// Generates code to implement the [`Compact`] trait method `from_compact`.
-fn generate_to_compact(fields: &FieldList) -> Vec<TokenStream2> {
+fn generate_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
 
     lines.push(quote! {
         let mut buffer = bytes::BytesMut::new();
     });
 
+    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
+    let mut variant_index = 0u8;
+    let mut enum_lines: Vec<TokenStream2> = vec![];
+
+    let mut fields_iterator = fields.iter().peekable();
+
     // Sets the TypeFlags with the buffer length
-    for (name, ftype, is_compact) in fields {
-        let (name, set_len_method, len) = get_field_idents(name);
-
-        // H256 with #[maybe_zero] attribute for example
-        if *is_compact && !is_flag_type(ftype) {
-            let itype = format_ident!("{ftype}");
-            let set_bool_method = format_ident!("set_{name}");
-            lines.push(quote! {
-                if self.#name != #itype::zero() {
-                    flags.#set_bool_method(true);
-                    self.#name.to_compact(&mut buffer);
-                };
-            });
-        } else {
-            lines.push(quote! {
-                let #len = self.#name.to_compact(&mut buffer);
-            });
+    // while let Some((name, ftype, is_compact, _is_enum_variant)) = fields_iterator.next() {
+    while let Some(field) = fields_iterator.next() {
+        match field {
+            FieldTypes::StructField((name, ftype, is_compact)) => {
+                let (name, set_len_method, len) = get_field_idents(name);
+                handle_struct_field_to(is_compact, ftype, &mut lines, name, len, set_len_method);
+            }
+            //  The following method will advance the
+            // `fields_iterator` by itself and stop right before the next variant.
+            FieldTypes::EnumVariant(name) => handle_enum_variant_to(
+                name,
+                &mut variant_index,
+                &mut fields_iterator,
+                &mut enum_lines,
+                ident,
+            ),
+            FieldTypes::EnumUnnamedField(_) => unreachable!(),
         }
+    }
 
-        if is_flag_type(ftype) {
-            lines.push(quote! {
-                flags.#set_len_method(#len as u8);
-            })
-        }
+    if is_enum {
+        lines.push(quote! {
+            flags.set_variant(match self {
+                #(#enum_lines)*
+            });
+        })
     }
 
     // Places the flag bits.
