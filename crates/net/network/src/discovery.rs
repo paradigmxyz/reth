@@ -72,12 +72,12 @@ impl Discovery {
     }
 
     /// Manually adds an address to the set.
-    pub(crate) fn add_known_address(&mut self, node_id: PeerId, addr: SocketAddr) {
+    pub(crate) fn add_known_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
         self.on_discv4_update(TableUpdate::Added(NodeRecord {
             address: addr.ip(),
             tcp_port: addr.port(),
             udp_port: addr.port(),
-            id: node_id,
+            id: peer_id,
         }))
     }
 

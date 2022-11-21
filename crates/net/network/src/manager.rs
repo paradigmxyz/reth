@@ -94,7 +94,7 @@ pub struct NetworkManager<C> {
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
     /// Local copy of the `PeerId` of the local node.
-    local_node_id: PeerId,
+    local_peer_id: PeerId,
 }
 
 // === impl NetworkManager ===
@@ -130,7 +130,7 @@ where
 
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
-        let local_node_id = discovery.local_id();
+        let local_peer_id = discovery.local_id();
 
         let sessions = SessionManager::new(secret_key, sessions_config);
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
@@ -144,7 +144,7 @@ where
             Arc::clone(&num_active_peers),
             Arc::clone(&listener_address),
             to_manager_tx,
-            local_node_id,
+            local_peer_id,
             peers_handle,
             network_mode,
         );
@@ -158,7 +158,7 @@ where
             event_listeners: Default::default(),
             to_transactions: None,
             num_active_peers,
-            local_node_id,
+            local_peer_id,
         })
     }
 
@@ -177,11 +177,11 @@ where
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &self,
-        node_id: PeerId,
+        peer_id: PeerId,
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(?node_id, target = "net", "received unexpected message");
+        trace!(?peer_id, target = "net", "received unexpected message");
         // TODO: disconnect?
     }
 
@@ -344,11 +344,11 @@ where
         while let Poll::Ready(Some(event)) = this.swarm.poll_next_unpin(cx) {
             // handle event
             match event {
-                SwarmEvent::ValidMessage { node_id, message } => {
-                    this.on_peer_message(node_id, message)
+                SwarmEvent::ValidMessage { peer_id, message } => {
+                    this.on_peer_message(peer_id, message)
                 }
-                SwarmEvent::InvalidCapabilityMessage { node_id, capabilities, message } => {
-                    this.on_invalid_message(node_id, capabilities, message)
+                SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
+                    this.on_invalid_message(peer_id, capabilities, message)
                 }
                 SwarmEvent::TcpListenerClosed { remote_addr } => {
                     trace!(?remote_addr, target = "net", "TCP listener closed.");
@@ -362,12 +362,7 @@ where
                 SwarmEvent::OutgoingTcpConnection { remote_addr } => {
                     trace!(?remote_addr, target = "net", "Starting outbound connection.");
                 }
-                SwarmEvent::SessionEstablished {
-                    node_id: peer_id,
-                    remote_addr,
-                    capabilities,
-                    messages,
-                } => {
+                SwarmEvent::SessionEstablished { peer_id, remote_addr, capabilities, messages } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                     trace!(
                         ?remote_addr,
@@ -383,12 +378,13 @@ where
                         messages,
                     });
                 }
-                SwarmEvent::SessionClosed { node_id: peer_id, remote_addr } => {
+                SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                     trace!(
                         ?remote_addr,
                         ?peer_id,
                         ?total_active,
+                        ?error,
                         target = "net",
                         "Session disconnected"
                     );
