@@ -1,10 +1,12 @@
 use crate::{
     error::{EthStreamError, HandshakeError},
-    types::{forkid::ForkFilter, EthMessage, ProtocolMessage, Status},
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
+    types::{EthMessage, ProtocolMessage, Status},
 };
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
+use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
 use std::{
     pin::Pin,
@@ -117,6 +119,7 @@ where
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
+#[derive(Debug)]
 pub struct EthStream<S> {
     #[pin]
     inner: S,
@@ -128,11 +131,41 @@ impl<S> EthStream<S> {
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
+
+    /// Returns the underlying stream.
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+
+    /// Returns mutable access to the underlying stream.
+    pub fn inner_mut(&mut self) -> &mut S {
+        &mut self.inner
+    }
+}
+
+impl<S, E> EthStream<S>
+where
+    S: Sink<Bytes, Error = E> + Unpin,
+    EthStreamError: From<E>,
+{
+    /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
+    pub fn start_send_broadcast(
+        &mut self,
+        item: EthBroadcastMessage,
+    ) -> Result<(), EthStreamError> {
+        let mut bytes = BytesMut::new();
+        ProtocolBroadcastMessage::from(item).encode(&mut bytes);
+        let bytes = bytes.freeze();
+
+        self.inner.start_send_unpin(bytes)?;
+
+        Ok(())
+    }
 }
 
 impl<S, E> Stream for EthStream<S>
 where
-    S: Stream<Item = Result<bytes::BytesMut, E>> + Unpin,
+    S: Stream<Item = Result<BytesMut, E>> + Unpin,
     EthStreamError: From<E>,
 {
     type Item = Result<EthMessage, EthStreamError>;
@@ -201,22 +234,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::UnauthedEthStream;
     use crate::{
+        capability::Capability,
         p2pstream::{HelloMessage, ProtocolVersion, UnauthedP2PStream},
-        types::{broadcast::BlockHashNumber, forkid::ForkFilter, EthMessage, Status},
+        types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
         EthStream, PassthroughCodec,
     };
+    use ethers_core::types::Chain;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::{stream::ECIESStream, util::pk2id};
+    use reth_primitives::{ForkFilter, H256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
-
-    use crate::{capability::Capability, types::EthVersion};
-    use ethers_core::types::Chain;
-    use reth_primitives::{H256, U256};
-
-    use super::UnauthedEthStream;
 
     #[tokio::test]
     async fn can_handshake() {
@@ -339,7 +370,7 @@ mod tests {
         handle.await.unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ethstream_over_p2p() {
         // create a p2p stream and server, then confirm that the two are authed
         // create tcpstream
@@ -348,8 +379,8 @@ mod tests {
         let server_key = SecretKey::new(&mut rand::thread_rng());
         let test_msg = EthMessage::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: reth_primitives::H256::random(), number: 5 },
-                BlockHashNumber { hash: reth_primitives::H256::random(), number: 6 },
+                BlockHashNumber { hash: H256::random(), number: 5 },
+                BlockHashNumber { hash: H256::random(), number: 6 },
             ]
             .into(),
         );
@@ -413,6 +444,7 @@ mod tests {
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
         let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
+
         let (mut client_stream, _) =
             UnauthedEthStream::new(p2p_stream).handshake(status, fork_filter).await.unwrap();
 

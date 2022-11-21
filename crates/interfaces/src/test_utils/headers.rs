@@ -1,38 +1,41 @@
+//! Testing support for headers related interfaces.
 use crate::{
     consensus::{self, Consensus},
     p2p::headers::{
         client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
-        downloader::{DownloadError, Downloader},
+        downloader::HeaderDownloader,
+        error::DownloadError,
     },
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
-
-use reth_primitives::{
-    AccessList, Bytes, Header, SealedHeader, Signature, Transaction, TransactionSigned, H256, H512,
-    U256,
-};
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512};
 use reth_rpc_types::engine::ForkchoiceState;
-
-use rand::Rng;
-use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-#[derive(Debug)]
 /// A test downloader which just returns the values that have been pushed to it.
-pub struct TestDownloader {
-    result: Result<Vec<SealedHeader>, DownloadError>,
+#[derive(Debug)]
+pub struct TestHeaderDownloader {
+    client: Arc<TestHeadersClient>,
+    consensus: Arc<TestConsensus>,
 }
 
-impl TestDownloader {
+impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(result: Result<Vec<SealedHeader>, DownloadError>) -> Self {
-        Self { result }
+    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>) -> Self {
+        Self { client, consensus }
     }
 }
 
 #[async_trait::async_trait]
-impl Downloader for TestDownloader {
+impl HeaderDownloader for TestHeaderDownloader {
     type Consensus = TestConsensus;
     type Client = TestHeadersClient;
 
@@ -41,11 +44,11 @@ impl Downloader for TestDownloader {
     }
 
     fn consensus(&self) -> &Self::Consensus {
-        unimplemented!()
+        &self.consensus
     }
 
     fn client(&self) -> &Self::Client {
-        unimplemented!()
+        &self.client
     }
 
     async fn download(
@@ -53,12 +56,32 @@ impl Downloader for TestDownloader {
         _: &SealedHeader,
         _: &ForkchoiceState,
     ) -> Result<Vec<SealedHeader>, DownloadError> {
-        self.result.clone()
+        // call consensus stub first. fails if the flag is set
+        let empty = SealedHeader::default();
+        self.consensus
+            .validate_header(&empty, &empty)
+            .map_err(|error| DownloadError::HeaderValidation { hash: empty.hash(), error })?;
+
+        let stream = self.client.stream_headers().await;
+        let stream = stream.timeout(Duration::from_secs(1));
+
+        match Box::pin(stream).try_next().await {
+            Ok(Some(res)) => {
+                let mut headers = res.headers.iter().map(|h| h.clone().seal()).collect::<Vec<_>>();
+                if !headers.is_empty() {
+                    headers.sort_unstable_by_key(|h| h.number);
+                    headers.remove(0); // remove head from response
+                    headers.reverse();
+                }
+                Ok(headers)
+            }
+            _ => Err(DownloadError::Timeout { request_id: 0 }),
+        }
     }
 }
 
-#[derive(Debug)]
 /// A test client for fetching headers
+#[derive(Debug)]
 pub struct TestHeadersClient {
     req_tx: mpsc::Sender<(u64, HeadersRequest)>,
     req_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, HeadersRequest)>>>,
@@ -98,6 +121,12 @@ impl TestHeadersClient {
     pub fn send_header_response(&self, id: u64, headers: Vec<Header>) {
         self.res_tx.send((id, headers).into()).expect("failed to send header response");
     }
+
+    /// Helper for pushing responses to the client
+    pub async fn send_header_response_delayed(&self, id: u64, headers: Vec<Header>, secs: u64) {
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        self.send_header_response(id, headers);
+    }
 }
 
 #[async_trait::async_trait]
@@ -111,17 +140,20 @@ impl HeadersClient for TestHeadersClient {
     }
 
     async fn stream_headers(&self) -> HeadersStream {
+        if !self.res_rx.is_empty() {
+            println!("WARNING: broadcast receiver already contains messages.")
+        }
         Box::pin(BroadcastStream::new(self.res_rx.resubscribe()).filter_map(|e| e.ok()))
     }
 }
 
-/// Consensus client impl for testing
+/// Consensus engine implementation for testing
 #[derive(Debug)]
 pub struct TestConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Flag whether the header validation should purposefully fail
-    fail_validation: bool,
+    fail_validation: AtomicBool,
 }
 
 impl Default for TestConsensus {
@@ -132,25 +164,30 @@ impl Default for TestConsensus {
                 finalized_block_hash: H256::zero(),
                 safe_block_hash: H256::zero(),
             }),
-            fail_validation: false,
+            fail_validation: AtomicBool::new(false),
         }
     }
 }
 
 impl TestConsensus {
-    /// Update the forkchoice state
+    /// Update the fork choice state
     pub fn update_tip(&self, tip: H256) {
         let state = ForkchoiceState {
             head_block_hash: tip,
             finalized_block_hash: H256::zero(),
             safe_block_hash: H256::zero(),
         };
-        self.channel.0.send(state).expect("updating forkchoice state failed");
+        self.channel.0.send(state).expect("updating fork choice state failed");
+    }
+
+    /// Get the failed validation flag
+    pub fn fail_validation(&self) -> bool {
+        self.fail_validation.load(Ordering::SeqCst)
     }
 
     /// Update the validation flag
-    pub fn set_fail_validation(&mut self, val: bool) {
-        self.fail_validation = val;
+    pub fn set_fail_validation(&self, val: bool) {
+        self.fail_validation.store(val, Ordering::SeqCst)
     }
 }
 
@@ -165,7 +202,15 @@ impl Consensus for TestConsensus {
         _header: &SealedHeader,
         _parent: &SealedHeader,
     ) -> Result<(), consensus::Error> {
-        if self.fail_validation {
+        if self.fail_validation() {
+            Err(consensus::Error::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), consensus::Error> {
+        if self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {
             Ok(())
@@ -173,70 +218,45 @@ impl Consensus for TestConsensus {
     }
 }
 
-/// Generate a range of random header. The parent hash of the first header
-/// in the result will be equal to head
-pub fn gen_random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<SealedHeader> {
-    let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
-    for idx in rng {
-        headers.push(gen_random_header(
-            idx,
-            Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
-        ));
-    }
-    headers
-}
+// TODO: move
+// /// Generate a random transaction
+// pub fn gen_random_tx() -> TransactionSigned {
+//     let mut rng = rand::thread_rng();
 
-/// Generate a random header
-pub fn gen_random_header(number: u64, parent: Option<H256>) -> SealedHeader {
-    let mut rng = rand::thread_rng();
-    let header = reth_primitives::Header {
-        number,
-        nonce: rng.gen(),
-        difficulty: U256::from(rng.gen::<u32>()),
-        parent_hash: parent.unwrap_or_default(),
-        ..Default::default()
-    };
-    header.seal()
-}
+//     let secp = Secp256k1::new();
+//     let key_pair = KeyPair::new(&secp, &mut rng);
 
-/// Generate a random transaction
-pub fn gen_random_tx() -> TransactionSigned {
-    let mut rng = rand::thread_rng();
+//     let tx = Transaction::Eip1559 {
+//         chain_id: 1,
+//         nonce: rng.gen(),
+//         gas_limit: rng.gen(),
+//         max_fee_per_gas: rng.gen(),
+//         max_priority_fee_per_gas: rng.gen(),
+//         to: reth_primitives::TransactionKind::Call(rng.gen()),
+//         value: U256::from(rng.gen::<u64>()),
+//         input: Bytes::default(),
+//         access_list: AccessList::default(),
+//     };
 
-    let secp = Secp256k1::new();
-    let key_pair = KeyPair::new(&secp, &mut rng);
-
-    let tx = Transaction::Eip1559 {
-        chain_id: 1,
-        nonce: rng.gen(),
-        gas_limit: rng.gen(),
-        max_fee_per_gas: rng.gen(),
-        max_priority_fee_per_gas: rng.gen(),
-        to: reth_primitives::TransactionKind::Call(rng.gen()),
-        value: U256::from(rng.gen::<u64>()),
-        input: Bytes::default(),
-        access_list: AccessList::default(),
-    };
-
-    let signature =
-        sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
-    TransactionSigned::from_transaction_and_signature(tx, signature)
-}
+//     let signature =
+//         sign_message(H256::from_slice(&key_pair.secret_bytes()[..]),
+// tx.signature_hash()).unwrap();     TransactionSigned::from_transaction_and_signature(tx,
+// signature) }
 
 /// Signs message with the given secret key.
 /// Returns the corresponding signature.
-pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1::Error> {
-    let secp = Secp256k1::new();
-    let sec = SecretKey::from_slice(secret.as_ref())?;
-    let s = secp.sign_ecdsa_recoverable(&SecpMessage::from_slice(&message[..])?, &sec);
-    let (rec_id, data) = s.serialize_compact();
+// pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1::Error> {
+//     let secp = Secp256k1::new();
+//     let sec = SecretKey::from_slice(secret.as_ref())?;
+//     let s = secp.sign_ecdsa_recoverable(&SecpMessage::from_slice(&message[..])?, &sec);
+//     let (rec_id, data) = s.serialize_compact();
 
-    Ok(Signature {
-        r: U256::from_big_endian(&data[..32]),
-        s: U256::from_big_endian(&data[32..64]),
-        odd_y_parity: rec_id.to_i32() != 0,
-    })
-}
+//     Ok(Signature {
+//         r: U256::from_big_endian(&data[..32]),
+//         s: U256::from_big_endian(&data[32..64]),
+//         odd_y_parity: rec_id.to_i32() != 0,
+//     })
+// }
 
 #[cfg(test)]
 mod test {

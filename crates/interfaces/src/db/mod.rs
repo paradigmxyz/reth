@@ -74,9 +74,9 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
-    type Cursor<T: Table>: DbCursorRO<'a, T>;
+    type Cursor<T: Table>: DbCursorRO<'a, T> + Send + Sync;
     /// DupCursor GAT
-    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T>;
+    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T> + Send + Sync;
 }
 
 /// Implements the GAT method from:
@@ -85,12 +85,14 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DbTxMutGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
-    type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T>;
+    type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T> + Send + Sync;
     /// DupCursor GAT
     type DupCursorMut<T: DupSort>: DbDupCursorRW<'a, T>
         + DbCursorRW<'a, T>
         + DbDupCursorRO<'a, T>
-        + DbCursorRO<'a, T>;
+        + DbCursorRO<'a, T>
+        + Send
+        + Sync;
 }
 
 /// Read only transaction
@@ -190,7 +192,9 @@ pub trait DbCursorRW<'tx, T: Table> {
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 
-    /// Append value to next cursor item
+    /// Append value to next cursor item.
+    ///
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 
     /// Delete current value that cursor points to
@@ -201,7 +205,10 @@ pub trait DbCursorRW<'tx, T: Table> {
 pub trait DbDupCursorRW<'tx, T: DupSort> {
     /// Append value to next cursor item
     fn delete_current_duplicates(&mut self) -> Result<(), Error>;
-    /// Append duplicate value
+
+    /// Append duplicate value.
+    ///
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 }
 

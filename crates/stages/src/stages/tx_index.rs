@@ -37,13 +37,13 @@ impl<DB: Database> Stage<DB> for TxIndex {
         let last_block = input.stage_progress.unwrap_or_default();
         let last_hash = tx
             .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: last_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: last_block })?;
 
         // The start block for this iteration
         let start_block = last_block + 1;
         let start_hash = tx
             .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or(DatabaseIntegrityError::CannonicalHeader { number: start_block })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: start_block })?;
 
         // The maximum block that this stage should insert to
         let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
@@ -65,8 +65,8 @@ impl<DB: Database> Stage<DB> for TxIndex {
 
         // Aggregate and insert cumulative transaction count for each block number
         for entry in entries {
-            let (key, tx_count) = entry?;
-            count += tx_count as u64;
+            let (key, body) = entry?;
+            count += body.tx_amount;
             cursor.append(key, count)?;
         }
 
@@ -87,139 +87,18 @@ impl<DB: Database> Stage<DB> for TxIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::test_utils::{StageTestDB, StageTestRunner, PREV_STAGE_ID};
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner,
+    };
     use assert_matches::assert_matches;
-    use reth_interfaces::{db::models::BlockNumHash, test_utils::gen_random_header_range};
+    use reth_interfaces::{
+        db::models::{BlockNumHash, StoredBlockBody},
+        test_utils::generators::random_header_range,
+    };
     use reth_primitives::H256;
 
-    #[tokio::test]
-    async fn execute_empty_db() {
-        let runner = TxIndexTestRunner::default();
-        let rx = runner.execute(ExecInput::default());
-        assert_matches!(
-            rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CannonicalHeader { .. }))
-        );
-    }
-
-    #[tokio::test]
-    async fn execute_no_prev_tx_count() {
-        let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
-        runner
-            .db()
-            .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
-            .expect("failed to insert");
-
-        let (head, tail) = (headers.first().unwrap(), headers.last().unwrap());
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, tail.number)),
-            stage_progress: Some(head.number),
-        };
-        let rx = runner.execute(input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CumulativeTxCount { .. }))
-        );
-    }
-
-    #[tokio::test]
-    async fn execute() {
-        let runner = TxIndexTestRunner::default();
-        let (start, pivot, end) = (0, 100, 200);
-        let headers = gen_random_header_range(start..end, H256::zero());
-        runner
-            .db()
-            .map_put::<tables::CanonicalHeaders, _, _>(&headers, |h| (h.number, h.hash()))
-            .expect("failed to insert");
-        runner
-            .db()
-            .transform_append::<tables::CumulativeTxCount, _, _>(&headers[..=pivot], |prev, h| {
-                (
-                    BlockNumHash((h.number, h.hash())),
-                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                )
-            })
-            .expect("failed to insert");
-
-        let (pivot, tail) = (headers.get(pivot).unwrap(), headers.last().unwrap());
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, tail.number)),
-            stage_progress: Some(pivot.number),
-        };
-        let rx = runner.execute(input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress, done, reached_tip })
-                if done && reached_tip && stage_progress == tail.number
-        );
-    }
-
-    #[tokio::test]
-    async fn unwind_empty_db() {
-        let runner = TxIndexTestRunner::default();
-        let rx = runner.unwind(UnwindInput::default());
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == 0
-        );
-    }
-
-    #[tokio::test]
-    async fn unwind_no_input() {
-        let runner = TxIndexTestRunner::default();
-        let headers = gen_random_header_range(0..10, H256::zero());
-        runner
-            .db()
-            .transform_append::<tables::CumulativeTxCount, _, _>(&headers, |prev, h| {
-                (
-                    BlockNumHash((h.number, h.hash())),
-                    prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                )
-            })
-            .expect("failed to insert");
-
-        let rx = runner.unwind(UnwindInput::default());
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == 0
-        );
-        runner
-            .db()
-            .check_no_entry_above::<tables::CumulativeTxCount, _>(0, |h| h.number())
-            .expect("failed to check tx count");
-    }
-
-    #[tokio::test]
-    async fn unwind_with_db_gaps() {
-        let runner = TxIndexTestRunner::default();
-        let first_range = gen_random_header_range(0..20, H256::zero());
-        let second_range = gen_random_header_range(50..100, H256::zero());
-        runner
-            .db()
-            .transform_append::<tables::CumulativeTxCount, _, _>(
-                &first_range.iter().chain(second_range.iter()).collect::<Vec<_>>(),
-                |prev, h| {
-                    (
-                        BlockNumHash((h.number, h.hash())),
-                        prev.unwrap_or_default() + (rand::random::<u8>() as u64),
-                    )
-                },
-            )
-            .expect("failed to insert");
-
-        let unwind_to = 10;
-        let input = UnwindInput { unwind_to, ..Default::default() };
-        let rx = runner.unwind(input);
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_to
-        );
-        runner
-            .db()
-            .check_no_entry_above::<tables::CumulativeTxCount, _>(unwind_to, |h| h.number())
-            .expect("failed to check tx count");
-    }
+    stage_test_suite!(TxIndexTestRunner);
 
     #[derive(Default)]
     pub(crate) struct TxIndexTestRunner {
@@ -235,6 +114,84 @@ mod tests {
 
         fn stage(&self) -> Self::S {
             TxIndex {}
+        }
+    }
+
+    impl ExecuteStageTestRunner for TxIndexTestRunner {
+        type Seed = ();
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let pivot = input.stage_progress.unwrap_or_default();
+            let start = pivot.saturating_sub(100);
+            let mut end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
+            end += 2; // generate 2 additional headers to account for start header lookup
+            let headers = random_header_range(start..end, H256::zero());
+
+            let headers =
+                headers.into_iter().map(|h| (h, rand::random::<u8>())).collect::<Vec<_>>();
+
+            self.db.map_put::<tables::CanonicalHeaders, _, _>(&headers, |(h, _)| {
+                (h.number, h.hash())
+            })?;
+            self.db.map_put::<tables::BlockBodies, _, _>(&headers, |(h, count)| {
+                (
+                    BlockNumHash((h.number, h.hash())),
+                    StoredBlockBody { base_tx_id: 0, tx_amount: *count as u64, ommers: vec![] },
+                )
+            })?;
+
+            let slice_up_to =
+                std::cmp::min(pivot.saturating_sub(start) as usize, headers.len() - 1);
+            self.db.transform_append::<tables::CumulativeTxCount, _, _>(
+                &headers[..=slice_up_to],
+                |prev, (h, count)| {
+                    (BlockNumHash((h.number, h.hash())), prev.unwrap_or_default() + (*count as u64))
+                },
+            )?;
+
+            Ok(())
+        }
+
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+            _output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            self.db.query(|tx| {
+                let (start, end) = (
+                    input.stage_progress.unwrap_or_default(),
+                    input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default(),
+                );
+                if start >= end {
+                    return Ok(())
+                }
+
+                let start_hash =
+                    tx.get::<tables::CanonicalHeaders>(start)?.expect("no canonical found");
+                let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
+                let mut tx_count_walker = tx_count_cursor.walk((start, start_hash).into())?;
+                let mut count = tx_count_walker.next().unwrap()?.1;
+                let mut last_num = start;
+                while let Some(entry) = tx_count_walker.next() {
+                    let (key, db_count) = entry?;
+                    count += tx.get::<tables::BlockBodies>(key)?.unwrap().tx_amount as u64;
+                    assert_eq!(db_count, count);
+                    last_num = key.number();
+                }
+                assert_eq!(last_num, end);
+
+                Ok(())
+            })?;
+            Ok(())
+        }
+    }
+
+    impl UnwindStageTestRunner for TxIndexTestRunner {
+        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            self.db.check_no_entry_above::<tables::CumulativeTxCount, _>(input.unwind_to, |h| {
+                h.number()
+            })?;
+            Ok(())
         }
     }
 }

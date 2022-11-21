@@ -341,8 +341,8 @@ impl<DB: Database> QueuedStage<DB> {
                 Err(err) => {
                     state.events_sender.send(PipelineEvent::Error { stage_id }).await?;
 
-                    return if let StageError::Validation { block } = err {
-                        debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error.");
+                    return if let StageError::Validation { block, error } = err {
+                        debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error: {error}");
 
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the
@@ -362,13 +362,13 @@ impl<DB: Database> QueuedStage<DB> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::{StageId, UnwindOutput};
     use reth_db::{
         kv::{test_utils, Env, EnvKind},
         mdbx::{self, WriteMap},
     };
+    use reth_interfaces::consensus;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
@@ -520,7 +520,10 @@ mod tests {
                 )
                 .push(
                     TestStage::new(StageId("B"))
-                        .add_exec(Err(StageError::Validation { block: 5 }))
+                        .add_exec(Err(StageError::Validation {
+                            block: 5,
+                            error: consensus::Error::BaseFeeMissing,
+                        }))
                         .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
                         .add_exec(Ok(ExecOutput {
                             stage_progress: 10,

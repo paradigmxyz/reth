@@ -1,59 +1,8 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
-use reth_primitives::{Header, TransactionSigned, H256};
-use reth_rlp::{
-    Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
-    RlpEncodableWrapper,
-};
-
 use super::RawBlockBody;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Either a block hash _or_ a block number
-pub enum BlockHashOrNumber {
-    /// A block hash
-    Hash(H256),
-    /// A block number
-    Number(u64),
-}
-
-/// Allows for RLP encoding of either a block hash or block number
-impl Encodable for BlockHashOrNumber {
-    fn length(&self) -> usize {
-        match self {
-            Self::Hash(block_hash) => block_hash.length(),
-            Self::Number(block_number) => block_number.length(),
-        }
-    }
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        match self {
-            Self::Hash(block_hash) => block_hash.encode(out),
-            Self::Number(block_number) => block_number.encode(out),
-        }
-    }
-}
-
-/// Allows for RLP decoding of a block hash or block number
-impl Decodable for BlockHashOrNumber {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let header: u8 = *buf.first().ok_or(DecodeError::InputTooShort)?;
-        // if the byte string is exactly 32 bytes, decode it into a Hash
-        // 0xa0 = 0x80 (start of string) + 0x20 (32, length of string)
-        if header == 0xa0 {
-            // strip the first byte, parsing the rest of the string.
-            // If the rest of the string fails to decode into 32 bytes, we'll bubble up the
-            // decoding error.
-            let hash = H256::decode(buf)?;
-            Ok(Self::Hash(hash))
-        } else {
-            // a block number when encoded as bytes ranges from 0 to any number of bytes - we're
-            // going to accept numbers which fit in less than 64 bytes.
-            // Any data larger than this which is not caught by the Hash decoding should error and
-            // is considered an invalid block number.
-            Ok(Self::Number(u64::decode(buf)?))
-        }
-    }
-}
+use reth_primitives::{BlockHashOrNumber, Header, TransactionSigned, H256};
+use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -108,6 +57,7 @@ impl From<Vec<H256>> for GetBlockBodies {
     }
 }
 
+// TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct BlockBody {
@@ -151,11 +101,11 @@ mod test {
     };
     use hex_literal::hex;
     use reth_primitives::{
-        Header, Signature, Transaction, TransactionKind, TransactionSigned, U256,
+        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned, U256,
     };
     use reth_rlp::{Decodable, Encodable};
 
-    use super::{BlockBody, BlockHashOrNumber};
+    use super::BlockBody;
 
     #[test]
     fn decode_hash() {
@@ -394,7 +344,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
-                            gas_price: 0x4a817c808u64,
+                            gas_price: 0x4a817c808,
                             gas_limit: 0x2e248u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
@@ -412,7 +362,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
-                            gas_price: 0x4a817c809u64,
+                            gas_price: 0x4a817c809,
                             gas_limit: 0x33450u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
@@ -475,7 +425,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
-                            gas_price: 0x4a817c808u64,
+                            gas_price: 0x4a817c808,
                             gas_limit: 0x2e248u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
@@ -493,7 +443,7 @@ mod test {
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
-                            gas_price: 0x4a817c809u64,
+                            gas_price: 0x4a817c809,
                             gas_limit: 0x33450u64,
                             to:
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),

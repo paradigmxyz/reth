@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, BlockID};
-use futures::{channel::mpsc::Receiver, future::Shared};
-use reth_primitives::{Address, TxHash, H256, U256};
+use reth_primitives::{Address, FromRecoveredTransaction, TxHash, H256, U256};
 use std::{fmt, sync::Arc};
+use tokio::sync::mpsc::Receiver;
 
 /// General purpose abstraction fo a transaction-pool.
 ///
@@ -22,6 +22,16 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
     fn on_new_block(&self, event: OnNewBlockEvent);
+
+    /// Imports an _external_ transaction.
+    ///
+    /// This is intended to be used by the network to insert incoming transactions received over the
+    /// p2p network.
+    ///
+    /// Consumer: P2P
+    async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
+        self.add_transaction(TransactionOrigin::External, transaction).await
+    }
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
@@ -51,6 +61,13 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
+    /// Returns hashes of all transactions in the pool.
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions(&self) -> Vec<TxHash>;
+
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
     /// Consumer: Block production
@@ -67,6 +84,13 @@ pub trait TransactionPool: Send + Sync + 'static {
         &self,
         tx_hashes: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Retains only those hashes that are unknown to the pool.
+    /// In other words, removes all transactions from the given set that are currently present in
+    /// the pool.
+    ///
+    /// Consumer: P2P
+    fn retain_unknown(&self, hashes: &mut Vec<TxHash>);
 
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {
@@ -166,7 +190,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction: fmt::Debug + Send + Sync + 'static {
+pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 

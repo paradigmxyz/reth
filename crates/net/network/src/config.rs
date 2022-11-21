@@ -1,7 +1,10 @@
-use crate::{peers::PeersConfig, session::SessionsConfig};
+use crate::{
+    import::{BlockImport, ProofOfStakeBlockImport},
+    peers::PeersConfig,
+    session::SessionsConfig,
+};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_eth_wire::forkid::ForkId;
-use reth_primitives::Chain;
+use reth_primitives::{Chain, ForkId, H256};
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -29,6 +32,12 @@ pub struct NetworkConfig<C> {
     pub fork_id: Option<ForkId>,
     /// The id of the network
     pub chain: Chain,
+    /// Genesis hash of the network
+    pub genesis_hash: H256,
+    /// The block importer type.
+    pub block_import: Box<dyn BlockImport>,
+    /// The default mode of the network.
+    pub network_mode: NetworkMode,
 }
 
 // === impl NetworkConfig ===
@@ -58,6 +67,7 @@ impl<C> NetworkConfig<C> {
 }
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
+#[allow(missing_docs)]
 pub struct NetworkConfigBuilder<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
@@ -73,10 +83,17 @@ pub struct NetworkConfigBuilder<C> {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-
+    /// A fork identifier as defined by EIP-2124.
+    /// Serves as the chain compatibility identifier.
     fork_id: Option<ForkId>,
-
+    /// The network's chain id
     chain: Chain,
+    /// Network genesis hash
+    genesis_hash: H256,
+    /// The block importer type.
+    block_import: Box<dyn BlockImport>,
+    /// The default mode of the network.
+    network_mode: NetworkMode,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -94,7 +111,22 @@ impl<C> NetworkConfigBuilder<C> {
             sessions_config: None,
             fork_id: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
+            genesis_hash: Default::default(),
+            block_import: Box::<ProofOfStakeBlockImport>::default(),
+            network_mode: Default::default(),
         }
+    }
+
+    /// Sets the genesis hash for the network.
+    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
+        self.genesis_hash = genesis_hash;
+        self
+    }
+
+    /// Sets the [`BlockImport`] type to configure.
+    pub fn block_import<T: BlockImport + 'static>(mut self, block_import: T) -> Self {
+        self.block_import = Box::new(block_import);
+        self
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -109,6 +141,9 @@ impl<C> NetworkConfigBuilder<C> {
             sessions_config,
             fork_id,
             chain,
+            genesis_hash,
+            block_import,
+            network_mode,
         } = self;
         NetworkConfig {
             client,
@@ -124,6 +159,32 @@ impl<C> NetworkConfigBuilder<C> {
             sessions_config: sessions_config.unwrap_or_default(),
             fork_id,
             chain,
+            genesis_hash,
+            block_import,
+            network_mode,
         }
+    }
+}
+
+/// Describes the mode of the network wrt. POS or POW.
+///
+/// This affects block propagation in the `eth` sub-protocol [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+///
+/// In POS `NewBlockHashes` and `NewBlock` messages become invalid.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+pub enum NetworkMode {
+    /// Network is in proof-of-work mode.
+    Work,
+    /// Network is in proof-of-stake mode
+    #[default]
+    Stake,
+}
+
+// === impl NetworkMode ===
+
+impl NetworkMode {
+    /// Returns true if network has entered proof-of-stake
+    pub fn is_stake(&self) -> bool {
+        matches!(self, NetworkMode::Stake)
     }
 }

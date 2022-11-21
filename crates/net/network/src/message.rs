@@ -5,41 +5,33 @@
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions,
-    GetReceipts, NewBlock, NewBlockHashes, NodeData, PooledTransactions, Receipts, Transactions,
+    capability::CapabilityMessage, BlockBodies, BlockBody, BlockHeaders, GetBlockBodies,
+    GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewBlockHashes,
+    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, Transactions,
 };
-use std::task::{ready, Context, Poll};
+use reth_interfaces::p2p::error::RequestResult;
+use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
+use std::{
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
 
-use crate::NodeId;
-use reth_eth_wire::capability::CapabilityMessage;
-use tokio::sync::{mpsc, oneshot};
-
-/// Result alias for result of a request.
-pub type RequestResult<T> = Result<T, RequestError>;
-
-/// Error variants that can happen when sending requests to a session.
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum RequestError {
-    #[error("Closed channel.")]
-    ChannelClosed,
-    #[error("Not connected to the node.")]
-    NotConnected,
-    #[error("Capability Message is not supported by remote peer.")]
-    UnsupportedCapability,
-    #[error("Network error: {0}")]
-    Io(String),
+/// Internal form of a `NewBlock` message
+#[derive(Debug, Clone)]
+pub struct NewBlockMessage {
+    /// Hash of the block
+    pub hash: H256,
+    /// Raw received message
+    pub block: Arc<NewBlock>,
 }
 
-impl<T> From<mpsc::error::SendError<T>> for RequestError {
-    fn from(_: mpsc::error::SendError<T>) -> Self {
-        RequestError::ChannelClosed
-    }
-}
+// === impl NewBlockMessage ===
 
-impl From<oneshot::error::RecvError> for RequestError {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        RequestError::ChannelClosed
+impl NewBlockMessage {
+    /// Returns the block number of the block
+    pub fn number(&self) -> u64 {
+        self.block.block.header.number
     }
 }
 
@@ -47,15 +39,26 @@ impl From<oneshot::error::RecvError> for RequestError {
 #[derive(Debug)]
 pub enum PeerMessage {
     /// Announce new block hashes
-    NewBlockHashes(NewBlockHashes),
+    NewBlockHashes(Arc<NewBlockHashes>),
     /// Broadcast new block.
-    NewBlock(Box<NewBlock>),
+    NewBlock(NewBlockMessage),
     /// Broadcast transactions.
-    Transactions(Transactions),
+    Transactions(Arc<Transactions>),
+    ///
+    PooledTransactions(Arc<NewPooledTransactionHashes>),
     /// All `eth` request variants.
     EthRequest(PeerRequest),
     /// Other than eth namespace message
     Other(CapabilityMessage),
+}
+
+/// Request Variants that only target block related data.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+#[allow(clippy::enum_variant_names)]
+pub enum BlockRequest {
+    GetBlockHeaders(GetBlockHeaders),
+    GetBlockBodies(GetBlockBodies),
 }
 
 /// All Request variants of an [`EthMessage`]
@@ -99,8 +102,8 @@ pub enum PeerRequest {
     ///
     /// The response should be sent through the channel.
     GetBlockBodies {
-        request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        request: GetBlockBodies,
+        response: oneshot::Sender<RequestResult<BlockBodies>>,
     },
     /// Request pooled transactions from the peer.
     ///
@@ -133,12 +136,15 @@ pub enum PeerResponse {
 
 impl PeerResponse {
     /// Polls the type to completion.
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestResult<EthResponse>> {
+    pub(crate) fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<PeerResponseResult, oneshot::error::RecvError>> {
         macro_rules! poll_request {
             ($response:ident, $item:ident, $cx:ident) => {
                 match ready!($response.poll_unpin($cx)) {
-                    Ok(res) => res.map(EthResponse::$item),
-                    Err(err) => Err(err.into()),
+                    Ok(res) => Ok(PeerResponseResult::$item(res.map(|item| item.0))),
+                    Err(err) => Err(err),
                 }
             };
         }
@@ -164,11 +170,46 @@ impl PeerResponse {
     }
 }
 
+/// All response variants for [`PeerResponse`]
+#[derive(Debug)]
+#[allow(missing_docs)]
+pub enum PeerResponseResult {
+    BlockHeaders(RequestResult<Vec<Header>>),
+    BlockBodies(RequestResult<Vec<BlockBody>>),
+    PooledTransactions(RequestResult<Vec<TransactionSigned>>),
+    NodeData(RequestResult<Vec<bytes::Bytes>>),
+    Receipts(RequestResult<Vec<Vec<Receipt>>>),
+}
+
+// === impl PeerResponseResult ===
+
+impl PeerResponseResult {
+    /// Returns whether this result is an error.
+    pub fn is_err(&self) -> bool {
+        match self {
+            PeerResponseResult::BlockHeaders(res) => res.is_err(),
+            PeerResponseResult::BlockBodies(res) => res.is_err(),
+            PeerResponseResult::PooledTransactions(res) => res.is_err(),
+            PeerResponseResult::NodeData(res) => res.is_err(),
+            PeerResponseResult::Receipts(res) => res.is_err(),
+        }
+    }
+}
+
 /// A Cloneable connection for sending _requests_ directly to the session of a peer.
 #[derive(Debug, Clone)]
 pub struct PeerRequestSender {
     /// id of the remote node.
-    pub(crate) peer: NodeId,
+    pub(crate) peer: PeerId,
     /// The Sender half connected to a session.
     pub(crate) to_session_tx: mpsc::Sender<PeerRequest>,
+}
+
+// === impl PeerRequestSender ===
+
+impl PeerRequestSender {
+    /// Attempts to immediately send a message on this Sender
+    pub fn try_send(&self, req: PeerRequest) -> Result<(), TrySendError<PeerRequest>> {
+        self.to_session_tx.try_send(req)
+    }
 }

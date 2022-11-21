@@ -1,22 +1,18 @@
 use crate::Result;
 use reth_primitives::{
-    rpc::BlockId, Account, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, H256,
-    U256,
+    Account, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, H256, U256,
 };
 
-/// Provides access to storage data
-pub trait StorageProvider: Send + Sync {
-    /// Returns the value from a storage position at a given address and `BlockId`
-    fn storage_at(&self, address: Address, index: U256, at: BlockId) -> Result<Option<H256>>;
+/// Account provider
+pub trait AccountProvider: Send + Sync {
+    /// Get basic account information.
+    fn basic_account(&self, address: Address) -> Result<Option<Account>>;
 }
 
 /// Function needed for executor.
-pub trait StateProvider: Send + Sync {
+pub trait StateProvider: AccountProvider + Send + Sync {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
-
-    /// Get basic account information.
-    fn basic_account(&self, address: Address) -> Result<Option<Account>>;
 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>;
