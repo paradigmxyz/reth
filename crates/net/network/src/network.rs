@@ -25,7 +25,7 @@ impl NetworkHandle {
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
         to_manager_tx: UnboundedSender<NetworkHandleMessage>,
-        local_node_id: PeerId,
+        local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
     ) -> Self {
@@ -33,7 +33,7 @@ impl NetworkHandle {
             num_active_peers,
             to_manager_tx,
             listener_address,
-            local_node_id,
+            local_peer_id,
             peers,
             network_mode,
         };
@@ -75,7 +75,7 @@ struct NetworkInner {
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
-    local_node_id: PeerId,
+    local_peer_id: PeerId,
     /// Access to the all the nodes
     peers: PeersHandle,
     /// The mode of the network
