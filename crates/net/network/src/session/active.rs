@@ -216,7 +216,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                error!(?err, target = "net", "Failed to respond to received request");
+                error!(target : "net", ?err, "Failed to respond to received request");
             }
         }
     }
@@ -225,8 +225,8 @@ impl ActiveSession {
     fn emit_message(&self, message: PeerMessage) {
         let _ = self.try_emit_message(message).map_err(|err| {
             warn!(
+                    target : "net",
             %err,
-                    target = "net",
                     "dropping incoming message",
                 );
         });
