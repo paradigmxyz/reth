@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 /// Various events that describe status changes of a transaction.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TransactionEvent {
-    /// Transaction has been added to the ready queue.
-    Ready,
     /// Transaction has been added to the pending pool.
     Pending,
     /// Transaction has been added to the queued pool.
