@@ -210,6 +210,23 @@ pub struct SealedHeader {
     hash: BlockHash,
 }
 
+impl Encodable for SealedHeader {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.header.encode(out);
+    }
+}
+
+impl Decodable for SealedHeader {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+        let header = Header::decode(buf)?;
+        // TODO make this more performant, we are not encoding again for a hash.
+        // But i dont know how much of buf is the header or if takeing rlp::Header will
+        // going to consume those buf bytes.
+        let hash = header.hash_slow();
+        Ok(SealedHeader { header, hash })
+    }
+}
+
 impl AsRef<Header> for SealedHeader {
     fn as_ref(&self) -> &Header {
         &self.header
