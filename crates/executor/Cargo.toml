@@ -13,7 +13,7 @@ reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../common/rlp" }
 reth-consensus = { path = "../consensus" }
 
-revm = "2.1"
+revm = "2.3"
 
 # common
 async-trait = "0.1.57"
