@@ -3216,6 +3216,7 @@ dependencies = [
  "auto_impl",
  "eyre",
  "hash-db",
+ "hashbrown 0.12.3",
  "plain_hasher",
  "reth-consensus",
  "reth-interfaces",
@@ -3502,9 +3503,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87344ffd3eec06b568e1fc69c225e4cbd8d68d8d9051b6d2652d596947efa1ce"
+checksum = "d3d296f0199135e573ba817ed0024d0d4eafa7add1c9a8dd08488c3515598156"
 dependencies = [
  "arrayref",
  "auto_impl",

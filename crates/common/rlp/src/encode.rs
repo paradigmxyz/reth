@@ -337,6 +337,21 @@ where
     }
 }
 
+pub fn encode_iter<'a, K>(i: impl Iterator<Item = &'a K> + Clone, out: &mut dyn BufMut)
+where
+    K: Encodable + 'a,
+{
+    let mut h = Header { list: true, payload_length: 0 };
+    for x in i.clone() {
+        h.payload_length += x.length();
+    }
+
+    h.encode(out);
+    for x in i {
+        x.encode(out);
+    }
+}
+
 pub fn encode_fixed_size<E: MaxEncodedLen<LEN>, const LEN: usize>(v: &E) -> ArrayVec<u8, LEN> {
     let mut out = ArrayVec::from([0_u8; LEN]);
 
@@ -377,6 +392,12 @@ mod tests {
         assert_eq!(out1, out2);
 
         out1
+    }
+
+    fn encoded_iter<'a, T: Encodable + 'a>(iter: impl Iterator<Item = &'a T> + Clone) -> BytesMut {
+        let mut out = BytesMut::new();
+        encode_iter(iter, &mut out);
+        out
     }
 
     #[test]
@@ -532,6 +553,15 @@ mod tests {
     fn rlp_list() {
         assert_eq!(encoded_list::<u64>(&[]), &hex!("c0")[..]);
         assert_eq!(encoded_list(&[0xFFCCB5_u64, 0xFFC0B5_u64]), &hex!("c883ffccb583ffc0b5")[..]);
+    }
+
+    #[test]
+    fn rlp_iter() {
+        assert_eq!(encoded_iter::<u64>([].iter()), &hex!("c0")[..]);
+        assert_eq!(
+            encoded_iter([0xFFCCB5_u64, 0xFFC0B5_u64].iter()),
+            &hex!("c883ffccb583ffc0b5")[..]
+        );
     }
 
     #[cfg(feature = "smol_str")]
