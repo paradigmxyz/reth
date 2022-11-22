@@ -1,5 +1,6 @@
 use bytes::{Buf, Bytes};
 pub use codecs_derive::*;
+use ethers_core::types::{Bloom, H160, H256, U256};
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -20,6 +21,8 @@ pub trait Compact {
     /// advanced (eg.`.advance(len)`).
     ///
     /// `len` can either be the `buf` remaining length, or the length of the compacted type.
+    ///
+    /// It will panic, if `len` is smaller than `buf.len()`.
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized;
@@ -44,8 +47,6 @@ impl Compact for u64 {
         (0, buf)
     }
 }
-
-use ethers_core::types::{Bloom, H160, H256, U256};
 
 impl<T> Compact for Vec<T>
 where

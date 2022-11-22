@@ -50,67 +50,38 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 /// Generates code to implement the [`Compact`] trait method `to_compact`.
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
-
-    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
-    let mut variant_index = 0u8;
-    let mut enum_lines: Vec<TokenStream2> = vec![];
-
     let known_types = ["H256", "H160", "Address", "Bloom", "Vec"];
-    let mut fields_iterator = fields.iter().enumerate().peekable();
 
-    // Sets the TypeFlags with the buffer length
-    // for (field_num, (name, ftype, is_compact, _)) in fields.iter().enumerate() {
-    while let Some((field_num, field)) =
-        // while let Some((field_num, (name, ftype, is_compact, _is_enum_variant))) =
-        fields_iterator.next()
-    {
-        match field {
-            FieldTypes::StructField((name, ftype, is_compact)) => handle_struct_field_from(
-                name,
-                known_types,
-                field_num,
-                fields,
-                ftype,
-                &mut lines,
-                is_compact,
-            ),
-            FieldTypes::EnumVariant(name) => handle_enum_variant_from(
-                name,
-                &mut fields_iterator,
-                &mut enum_lines,
-                &mut variant_index,
-                ident,
-            ),
-            FieldTypes::EnumUnnamedField(_) => unreachable!(),
-        };
-    }
+    // let mut handle = FieldListHandler::new(fields);
+    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
-    if !is_enum {
-        let fields = fields
-            .iter()
-            .filter_map(|field| {
-                if let FieldTypes::StructField((name, _, _)) = field {
-                    let ident = format_ident!("{name}");
-                    return Some(quote! {
-                        #ident: #ident,
-                    })
-                }
-                None
-            })
-            .collect::<Vec<_>>();
+    if is_enum {
+        let enum_lines = EnumHandler::new(fields).generate_from(ident);
 
-        // Builds the object instantiation.
-        lines.push(quote! {
-            let obj = #ident {
-                #(#fields)*
-            };
-        });
-    } else {
         // Builds the object instantiation.
         lines.push(quote! {
             let obj = match flags.variant() {
                 #(#enum_lines)*
                 _ => unreachable!()
+            };
+        });
+    } else {
+        lines.append(&mut StructHandler::new(fields).generate_from(known_types.as_slice()));
+
+        let fields = fields.iter().filter_map(|field| {
+            if let FieldTypes::StructField((name, _, _)) = field {
+                let ident = format_ident!("{name}");
+                return Some(quote! {
+                    #ident: #ident,
+                })
+            }
+            None
+        });
+
+        // Builds the object instantiation.
+        lines.push(quote! {
+            let obj = #ident {
+                #(#fields)*
             };
         });
     }
@@ -120,45 +91,22 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
 
 /// Generates code to implement the [`Compact`] trait method `from_compact`.
 fn generate_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
-    let mut lines = vec![];
-
-    lines.push(quote! {
+    let mut lines = vec![quote! {
         let mut buffer = bytes::BytesMut::new();
-    });
+    }];
 
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
-    let mut variant_index = 0u8;
-    let mut enum_lines: Vec<TokenStream2> = vec![];
-
-    let mut fields_iterator = fields.iter().peekable();
-
-    // Sets the TypeFlags with the buffer length
-    // while let Some((name, ftype, is_compact, _is_enum_variant)) = fields_iterator.next() {
-    while let Some(field) = fields_iterator.next() {
-        match field {
-            FieldTypes::StructField((name, ftype, is_compact)) => {
-                let (name, set_len_method, len) = get_field_idents(name);
-                handle_struct_field_to(is_compact, ftype, &mut lines, name, len, set_len_method);
-            }
-            //  The following method will advance the
-            // `fields_iterator` by itself and stop right before the next variant.
-            FieldTypes::EnumVariant(name) => handle_enum_variant_to(
-                name,
-                &mut variant_index,
-                &mut fields_iterator,
-                &mut enum_lines,
-                ident,
-            ),
-            FieldTypes::EnumUnnamedField(_) => unreachable!(),
-        }
-    }
 
     if is_enum {
+        let enum_lines = EnumHandler::new(fields).generate_to(ident);
+
         lines.push(quote! {
             flags.set_variant(match self {
                 #(#enum_lines)*
             });
         })
+    } else {
+        lines.append(&mut StructHandler::new(fields).generate_to());
     }
 
     // Places the flag bits.
