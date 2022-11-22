@@ -21,6 +21,19 @@ pub enum EthStreamError {
     MessageTooBig(usize),
 }
 
+// === impl EthStreamError ===
+
+impl EthStreamError {
+    /// Returns the [`DisconnectReason`] if the error is a disconnect message
+    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
+        if let EthStreamError::P2PStreamError(err) = self {
+            err.as_disconnected()
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
 pub enum HandshakeError {
@@ -71,6 +84,19 @@ pub enum P2PStreamError {
     SendBufferFull,
     #[error("disconnected")]
     Disconnected(DisconnectReason),
+}
+
+// === impl P2PStreamError ===
+
+impl P2PStreamError {
+    /// Returns the [`DisconnectReason`] if it is the `Disconnected` variant.
+    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
+        if let P2PStreamError::Disconnected(reason) = self {
+            Some(*reason)
+        } else {
+            None
+        }
+    }
 }
 
 /// Errors when conducting a p2p handshake
