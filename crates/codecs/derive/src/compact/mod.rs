@@ -7,6 +7,15 @@ use syn::{parse_macro_input, Data, DeriveInput};
 mod generator;
 use generator::*;
 
+mod enums;
+use enums::*;
+
+mod flags;
+use flags::*;
+
+mod structs;
+use structs::*;
+
 // Helper Alias type
 type IsCompact = bool;
 // Helper Alias type
@@ -14,7 +23,16 @@ type FieldName = String;
 // Helper Alias type
 type FieldType = String;
 // Helper Alias type
-type FieldList = Vec<(FieldName, FieldType, IsCompact)>;
+type StructFieldDescriptor = (FieldName, FieldType, IsCompact);
+// Helper Alias type
+type FieldList = Vec<FieldTypes>;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum FieldTypes {
+    StructField(StructFieldDescriptor),
+    EnumVariant(String),
+    EnumUnnamedField(FieldType),
+}
 
 /// Derives the [`Compact`] trait and its from/to implementations.
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -22,7 +40,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let DeriveInput { ident, data, .. } = parse_macro_input!(input);
     let fields = get_fields(&data);
-
     output.extend(generate_flag_struct(&ident, &fields));
     output.extend(generate_from_to(&ident, &fields));
     output.into()
@@ -30,43 +47,84 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
 /// Given a list of fields on a struct, extract their fields and types.
 pub fn get_fields(data: &Data) -> FieldList {
-    let mut named_fields = vec![];
-    if let syn::Data::Struct(data) = data {
-        if let syn::Fields::Named(ref fields) = data.fields {
-            for field in &fields.named {
-                if let syn::Type::Path(ref path) = field.ty {
-                    let segments = &path.path.segments;
-                    if !segments.is_empty() {
-                        let mut ftype = String::new();
-                        for (index, segment) in segments.iter().enumerate() {
-                            ftype.push_str(&segment.ident.to_string());
-                            if index < segments.len() - 1 {
-                                ftype.push_str("::");
-                            }
-                        }
-                        let should_compact = is_flag_type(&ftype) ||
-                            field.attrs.iter().any(|attr| {
-                                attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
-                            });
+    let mut fields = vec![];
 
-                        named_fields.push((
-                            field.ident.as_ref().expect("qed").to_string(),
-                            ftype,
-                            should_compact,
-                        ));
+    match data {
+        Data::Struct(data) => match data.fields {
+            syn::Fields::Named(ref data_fields) => {
+                for field in &data_fields.named {
+                    load_field(field, &mut fields, false);
+                }
+                assert_eq!(fields.len(), data_fields.named.len());
+            }
+            syn::Fields::Unnamed(ref data_fields) => {
+                assert!(
+                    data_fields.unnamed.len() == 1,
+                    "Compact only allows one unnamed field. Consider making it a struct."
+                );
+                load_field(&data_fields.unnamed[0], &mut fields, false);
+            }
+            syn::Fields::Unit => todo!(),
+        },
+        Data::Enum(data) => {
+            for variant in &data.variants {
+                fields.push(FieldTypes::EnumVariant(variant.ident.to_string()));
+
+                match &variant.fields {
+                    syn::Fields::Named(_) => {
+                        panic!("Not allowed to have Enum Variants with multiple named fields. Make it a struct instead.")
                     }
+                    syn::Fields::Unnamed(data_fields) => {
+                        assert!(
+                            data_fields.unnamed.len() == 1,
+                            "Compact only allows one unnamed field. Consider making it a struct."
+                        );
+                        load_field(&data_fields.unnamed[0], &mut fields, true);
+                    }
+                    syn::Fields::Unit => (),
                 }
             }
-            assert_eq!(named_fields.len(), fields.named.len());
+        }
+        Data::Union(_) => todo!(),
+    }
+
+    fields
+}
+
+fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
+    if let syn::Type::Path(ref path) = field.ty {
+        let segments = &path.path.segments;
+        if !segments.is_empty() {
+            let mut ftype = String::new();
+            for (index, segment) in segments.iter().enumerate() {
+                ftype.push_str(&segment.ident.to_string());
+                if index < segments.len() - 1 {
+                    ftype.push_str("::");
+                }
+            }
+
+            if is_enum {
+                fields.push(FieldTypes::EnumUnnamedField(ftype.to_string()));
+            } else {
+                let should_compact = is_flag_type(&ftype) ||
+                    field.attrs.iter().any(|attr| {
+                        attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
+                    });
+
+                fields.push(FieldTypes::StructField((
+                    field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default(),
+                    ftype,
+                    should_compact,
+                )));
+            }
         }
     }
-    named_fields
 }
 
 /// Given the field type in a string format, return the amount of bits necessary to save its maximum
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
-    if ftype == "u64" || ftype == "BlockNumber" || ftype == "TxNumber" {
+    if ftype == "u64" || ftype == "BlockNumber" || ftype == "TxNumber" || ftype == "ChainId" {
         return 4
     } else if ftype == "TxType" {
         return 2
@@ -82,15 +140,6 @@ pub fn get_bit_size(ftype: &str) -> u8 {
 /// StructFlags.
 pub fn is_flag_type(ftype: &str) -> bool {
     get_bit_size(ftype) > 0
-}
-
-/// Given the field name in a string format, returns various [`Ident`] necessary to generate code
-/// with [`quote`].
-pub fn get_field_idents(name: &str) -> (Ident, Ident, Ident) {
-    let name = format_ident!("{name}");
-    let set_len_method = format_ident!("set_{name}_len");
-    let len = format_ident!("{name}_len");
-    (name, set_len_method, len)
 }
 
 #[cfg(test)]

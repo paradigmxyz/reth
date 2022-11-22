@@ -22,9 +22,9 @@ impl Compact for TxType {
         }
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         (
-            match len {
+            match identifier {
                 0 => TxType::Legacy,
                 1 => TxType::EIP2930,
                 _ => TxType::EIP1559,
