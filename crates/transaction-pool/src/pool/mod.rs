@@ -35,7 +35,9 @@
 //! In essence the transaction pool is made of three separate sub-pools:
 //!
 //!  - Pending Pool: Contains all transactions that are valid on the current state and satisfy
-//! (3. a)(1): _No_ nonce gaps
+//! (3. a)(1): _No_ nonce gaps. A _pending_ transaction is considered _ready_ when it has the lowest
+//! nonce of all transactions from the same sender. Once a _ready_ transaction with nonce `n` has
+//! been executed, the next highest transaction from the same sender `n + 1` becomes ready.
 //!
 //!  - Queued Pool: Contains all transactions that are currently blocked by missing
 //! transactions: (3. a)(2): _With_ nonce gaps or due to lack of funds.
@@ -57,8 +59,8 @@
 //!
 //! ## Terminology
 //!
-//!  - _Pending_: pending transactions are transactions that fall under (2.). Those transactions are
-//!    _currently_ ready to be executed and are stored in the pending sub-pool
+//!  - _Pending_: pending transactions are transactions that fall under (2.). These transactions can
+//!    currently be executed and are stored in the pending sub-pool
 //!  - _Queued_: queued transactions are transactions that fall under category (3.). Those
 //!    transactions are _currently_ waiting for state changes that eventually move them into
 //!    category (2.) and become pending.
@@ -304,7 +306,7 @@ where
         let mut listener = self.event_listener.write();
 
         mined.iter().for_each(|tx| listener.mined(tx, block_hash));
-        promoted.iter().for_each(|tx| listener.ready(tx, None));
+        promoted.iter().for_each(|tx| listener.pending(tx, None));
         discarded.iter().for_each(|tx| listener.discarded(tx));
     }
 
@@ -316,8 +318,8 @@ where
             AddedTransaction::Pending(tx) => {
                 let AddedPendingTransaction { transaction, promoted, discarded, .. } = tx;
 
-                listener.ready(transaction.hash(), None);
-                promoted.iter().for_each(|tx| listener.ready(tx, None));
+                listener.pending(transaction.hash(), None);
+                promoted.iter().for_each(|tx| listener.pending(tx, None));
                 discarded.iter().for_each(|tx| listener.discarded(tx));
             }
             AddedTransaction::Parked { transaction, .. } => {
@@ -327,11 +329,11 @@ where
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
-    pub(crate) fn ready_transactions(&self) -> BestTransactions<T> {
+    pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
     }
 
-    /// Removes all transactions transactions that are missing in the pool.
+    /// Removes all transactions that are missing in the pool.
     pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
         let pool = self.pool.read();
         hashes.retain(|tx| !pool.contains(tx))

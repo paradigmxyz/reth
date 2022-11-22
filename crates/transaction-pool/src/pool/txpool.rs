@@ -188,7 +188,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// The `Pending` pool contains all transactions that have no nonce gaps, and can be afforded by
     /// the sender. It only contains transactions that are ready to be included in the pending
-    /// block.
+    /// block. In the pending pool are all transactions that could be listed currently, but not
+    /// necessarily independently. However, this pool never contains transactions with nonce gaps. A
+    /// transaction is considered `ready` when it has the lowest nonce of all transactions from the
+    /// same sender. Which is equals to the chain nonce of the sender in the pending pool.
     ///
     /// The `BaseFee` pool contains transaction that currently can't satisfy the dynamic fee
     /// requirement. With EIP-1559, transactions can become executable or not without any changes to

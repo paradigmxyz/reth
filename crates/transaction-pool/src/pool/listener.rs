@@ -32,9 +32,9 @@ impl PoolEventListener {
         }
     }
 
-    /// Notify listeners about a transaction that was added to the ready queue.
-    pub(crate) fn ready(&mut self, tx: &TxHash, replaced: Option<&TxHash>) {
-        self.notify_with(tx, |notifier| notifier.ready());
+    /// Notify listeners about a transaction that was added to the pending queue.
+    pub(crate) fn pending(&mut self, tx: &TxHash, replaced: Option<&TxHash>) {
+        self.notify_with(tx, |notifier| notifier.pending());
 
         if let Some(replaced) = replaced {
             // notify listeners that this transaction was replaced
@@ -77,8 +77,8 @@ impl PoolEventNotifier {
         self.senders.is_empty() || self.is_done
     }
 
-    /// Transaction became ready.
-    fn ready(&mut self) {
+    /// Transaction was moved to the pending queue.
+    fn pending(&mut self) {
         self.notify(TransactionEvent::Pending)
     }
 
