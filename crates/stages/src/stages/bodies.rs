@@ -475,7 +475,7 @@ mod tests {
             test_utils::{generators::random_block_range, TestConsensus},
         };
         use reth_primitives::{BlockLocked, BlockNumber, Header, SealedHeader, H256};
-        use std::{collections::HashMap, sync::Arc, time::Duration};
+        use std::{collections::HashMap, sync::Arc};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
@@ -673,10 +673,6 @@ mod tests {
 
         impl BodyDownloader for TestBodyDownloader {
             type Client = NoopClient;
-
-            fn timeout(&self) -> Duration {
-                unreachable!()
-            }
 
             fn client(&self) -> &Self::Client {
                 unreachable!()

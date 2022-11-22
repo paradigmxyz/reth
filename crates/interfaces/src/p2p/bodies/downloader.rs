@@ -2,7 +2,7 @@ use super::client::BodiesClient;
 use crate::p2p::bodies::error::DownloadError;
 use reth_eth_wire::BlockBody;
 use reth_primitives::{BlockNumber, H256};
-use std::{pin::Pin, time::Duration};
+use std::pin::Pin;
 use tokio_stream::Stream;
 
 /// A downloader capable of fetching block bodies from header hashes.
@@ -12,9 +12,6 @@ use tokio_stream::Stream;
 pub trait BodyDownloader: Sync + Send {
     /// The [BodiesClient] used to fetch the block bodies
     type Client: BodiesClient;
-
-    /// The request timeout duration
-    fn timeout(&self) -> Duration;
 
     /// The block bodies client
     fn client(&self) -> &Self::Client;

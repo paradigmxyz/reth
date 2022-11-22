@@ -181,6 +181,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
+name = "backon"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cd1a59bc091e593ee9ed62df4e4a07115e00a0e0a52fd7e0e04540773939b80"
+dependencies = [
+ "futures",
+ "pin-project",
+ "rand 0.8.5",
+ "tokio",
+]
+
+[[package]]
 name = "bare-metal"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3057,13 +3069,14 @@ name = "reth-bodies-downloaders"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "async-trait",
+ "backon",
  "futures-util",
  "once_cell",
  "rand 0.8.5",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
- "serial_test",
  "tokio",
 ]
 
