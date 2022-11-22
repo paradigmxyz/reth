@@ -1,0 +1,12 @@
+[package]
+name = "reth-tracing"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/foundry-rs/reth"
+readme = "README.md"
+description = "tracing helpers"
+
+[dependencies]
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
