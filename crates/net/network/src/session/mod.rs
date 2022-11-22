@@ -478,7 +478,7 @@ pub struct ExceedsSessionLimit(usize);
 /// Starts the authentication process for a connection initiated by a remote peer.
 ///
 /// This will wait for the _incoming_ handshake request and answer it.
-async fn start_pending_incoming_session(
+pub(crate) async fn start_pending_incoming_session(
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: TcpStream,

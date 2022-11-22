@@ -141,6 +141,11 @@ impl<S> EthStream<S> {
     pub fn inner_mut(&mut self) -> &mut S {
         &mut self.inner
     }
+
+    /// Consumes this type and returns the wrapped stream.
+    pub fn into_inner(self) -> S {
+        self.inner
+    }
 }
 
 impl<S, E> EthStream<S>
