@@ -21,9 +21,10 @@ members = [
     "crates/net/bodies-downloaders",
     "crates/primitives",
     "crates/stages",
+    "crates/tracing",
     "crates/transaction-pool",
     "crates/db",
     "crates/libmdbx-rs",
-    "crates/libmdbx-rs/mdbx-sys"
+    "crates/libmdbx-rs/mdbx-sys",
 ]
 default-members = ["bin/reth"]
