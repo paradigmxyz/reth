@@ -1,9 +1,11 @@
 use super::{H256, U256};
-use reth_codecs::main_codec;
+use bytes::Buf;
+use modular_bitfield::prelude::*;
+use reth_codecs::{use_compact, Compact};
 
 /// Account storage entry.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-#[main_codec]
+#[use_compact]
 pub struct StorageEntry {
     /// Storage key.
     pub key: H256,

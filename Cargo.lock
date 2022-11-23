@@ -2281,6 +2281,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "modular-bitfield"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a53d79ba8304ac1c4f9eb3b9d281f21f7be9d4626f72ce7df4ad8fbde4f38a74"
+dependencies = [
+ "modular-bitfield-impl",
+ "static_assertions",
+]
+
+[[package]]
+name = "modular-bitfield-impl"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a7d5f7076603ebc68de2dc6a650ec331a062a13abaa346975be747bbfa4b789"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "more-asserts"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3084,7 +3105,12 @@ dependencies = [
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "codecs-derive",
+ "ethers-core",
+ "modular-bitfield",
+ "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -3254,6 +3280,7 @@ dependencies = [
  "bytes",
  "futures",
  "heapless",
+ "modular-bitfield",
  "parity-scale-codec",
  "postcard",
  "rand 0.8.5",
@@ -3373,6 +3400,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "maplit",
+ "modular-bitfield",
  "parity-scale-codec",
  "plain_hasher",
  "reth-codecs",
@@ -3381,6 +3409,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sucds",
+ "test-fuzz",
  "thiserror",
  "tiny-keccak",
  "triehash",
