@@ -1,3 +1,4 @@
+use crate::peers::{reputation::BANNED_REPUTATION, ReputationChange};
 use futures::StreamExt;
 use reth_eth_wire::DisconnectReason;
 use reth_primitives::PeerId;
@@ -12,12 +13,6 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-/// The reputation value below which new connection from/to peers are rejected.
-pub const BANNED_REPUTATION: i32 = 0;
-
-/// The reputation change to apply to a node that dropped the connection.
-const REMOTE_DISCONNECT_REPUTATION_CHANGE: i32 = -100;
 
 /// A communication channel to the [`PeersManager`] to apply changes to the peer set.
 pub struct PeersHandle {
@@ -101,7 +96,7 @@ impl PeersManager {
         if let Some(mut peer) = self.peers.get_mut(&peer) {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
-            peer.reputation -= reputation_change.0;
+            peer.reputation -= reputation_change.as_i32();
         }
     }
 
@@ -307,24 +302,6 @@ impl PeerConnectionState {
     #[inline]
     fn is_unconnected(&self) -> bool {
         matches!(self, PeerConnectionState::Idle)
-    }
-}
-
-/// Represents a change in a peer's reputation.
-#[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct ReputationChange(i32);
-
-// === impl ReputationChange ===
-
-impl ReputationChange {
-    /// Apply no reputation change.
-    pub(crate) const fn none() -> Self {
-        Self(0)
-    }
-
-    /// Reputation change for a peer that dropped the connection.
-    pub(crate) const fn dropped() -> Self {
-        Self(REMOTE_DISCONNECT_REPUTATION_CHANGE)
     }
 }
 
