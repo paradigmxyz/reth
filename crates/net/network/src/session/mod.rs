@@ -220,8 +220,8 @@ impl SessionManager {
                 return match event {
                     ActiveSessionMessage::Disconnected { peer_id, remote_addr } => {
                         trace!(
+                            target : "net::session",
                             ?peer_id,
-                            target = "net::session",
                             "gracefully disconnected active session."
                         );
                         let _ = self.active_sessions.remove(&peer_id);
@@ -232,7 +232,7 @@ impl SessionManager {
                         remote_addr,
                         error,
                     } => {
-                        trace!(?peer_id, ?error, target = "net::session", "closed session.");
+                        trace!(target : "net::session",  ?peer_id, ?error,"closed session.");
                         let _ = self.active_sessions.remove(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
@@ -260,9 +260,9 @@ impl SessionManager {
             match event {
                 PendingSessionEvent::SuccessfulHandshake { remote_addr, session_id } => {
                     trace!(
+                        target : "net::session",
                         ?session_id,
                         ?remote_addr,
-                        target = "net::session",
                         "successful handshake"
                     );
                 }
@@ -321,9 +321,9 @@ impl SessionManager {
                 }
                 PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
                     trace!(
+                        target : "net::session",
                         ?session_id,
                         ?remote_addr,
-                        target = "net::session",
                         "disconnected pending session"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
@@ -350,11 +350,11 @@ impl SessionManager {
                     error,
                 } => {
                     trace!(
+                        target : "net::session",
                         ?error,
                         ?session_id,
                         ?remote_addr,
                         ?peer_id,
-                        target = "net::session",
                         "connection refused"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
@@ -366,10 +366,10 @@ impl SessionManager {
                 PendingSessionEvent::EciesAuthError { remote_addr, session_id, error } => {
                     let _ = self.pending_sessions.remove(&session_id);
                     warn!(
+                        target : "net::session",
                         ?error,
                         ?session_id,
                         ?remote_addr,
-                        target = "net::session",
                         "ecies auth failed"
                     );
                     let _ = self.pending_sessions.remove(&session_id);

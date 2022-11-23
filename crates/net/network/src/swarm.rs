@@ -53,11 +53,20 @@ where
         Self { incoming, sessions, state }
     }
 
+    /// Access to the state.
+    pub(crate) fn state(&self) -> &NetworkState<C> {
+        &self.state
+    }
+
     /// Mutable access to the state.
     pub(crate) fn state_mut(&mut self) -> &mut NetworkState<C> {
         &mut self.state
     }
 
+    /// Access to the [`ConnectionListener`].
+    pub(crate) fn listener(&self) -> &ConnectionListener {
+        &self.incoming
+    }
     /// Mutable access to the [`SessionManager`].
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions

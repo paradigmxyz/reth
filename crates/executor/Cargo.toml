@@ -14,6 +14,8 @@ reth-rlp = { path = "../common/rlp" }
 reth-consensus = { path = "../consensus" }
 
 revm = "2.3"
+# remove from reth and reexport from revm
+hashbrown = "0.13"
 
 # common
 async-trait = "0.1.57"

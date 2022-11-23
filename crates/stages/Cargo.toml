@@ -19,6 +19,8 @@ tokio = { version = "1.21.2", features = ["sync"] }
 aquamarine = "0.1.12"
 metrics = "0.20.1"
 futures-util = "0.3.25"
+itertools = "0.10.5"
+rayon = "1.6.0"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }

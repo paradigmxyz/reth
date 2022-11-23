@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: start_block })?;
 
         // The maximum block that this stage should insert to
-        let max_block = input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
+        let max_block = input.previous_stage_progress();
 
         // Get the cursor over the table
         let mut cursor = tx.cursor_mut::<tables::CumulativeTxCount>()?;
@@ -91,7 +91,6 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
         UnwindStageTestRunner,
     };
-    use assert_matches::assert_matches;
     use reth_interfaces::{
         db::models::{BlockNumHash, StoredBlockBody},
         test_utils::generators::random_header_range,
@@ -123,7 +122,7 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let pivot = input.stage_progress.unwrap_or_default();
             let start = pivot.saturating_sub(100);
-            let mut end = input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default();
+            let mut end = input.previous_stage_progress();
             end += 2; // generate 2 additional headers to account for start header lookup
             let headers = random_header_range(start..end, H256::zero());
 
@@ -157,11 +156,10 @@ mod tests {
             input: ExecInput,
             _output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
+            // TODO: validate that base_tx_index of next block equals the cum count at current
             self.db.query(|tx| {
-                let (start, end) = (
-                    input.stage_progress.unwrap_or_default(),
-                    input.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default(),
-                );
+                let (start, end) =
+                    (input.stage_progress.unwrap_or_default(), input.previous_stage_progress());
                 if start >= end {
                     return Ok(())
                 }
