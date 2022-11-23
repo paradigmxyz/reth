@@ -2,6 +2,13 @@ use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
+mod compact;
+
+#[proc_macro_derive(Compact, attributes(maybe_zero))]
+pub fn derive(input: TokenStream) -> TokenStream {
+    compact::derive(input)
+}
+
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
@@ -14,6 +21,9 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
 
     #[cfg(feature = "no_codec")]
     return no_codec(args, input);
+    
+    #[cfg(feature = "compact")]
+    return use_compact(args, input);
 
     // no features
     no_codec(args, input)
@@ -54,6 +64,17 @@ pub fn use_postcard(_args: TokenStream, input: TokenStream) -> TokenStream {
 
     quote! {
         #[derive(serde::Serialize, serde::Deserialize)]
+        #ast
+    }
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    quote! {
+        #[derive(Compact, serde::Serialize, serde::Deserialize)]
         #ast
     }
     .into()

@@ -8,7 +8,7 @@ use sucds::{EliasFano, Searial};
 
 /// Uses EliasFano to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IntegerList(pub EliasFano);
 
 impl Deref for IntegerList {

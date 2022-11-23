@@ -10,7 +10,7 @@ readme = "../README.md"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0"
+proc-macro2 = "1.0.47"
 quote = "1.0"
 syn = { version = "1.0", features = ["full"] }
 
@@ -20,6 +20,7 @@ parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 
 [features]
 default = ["scale"]
+compact = []
 scale = []
 postcard = []
 no_codec = []

@@ -2,14 +2,15 @@ use crate::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockHash, BlockNumber, Bloom, H160, H256, U256,
 };
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
-use reth_codecs::main_codec;
+use modular_bitfield::prelude::*;
+use reth_codecs::{use_compact, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::ops::Deref;
 
 /// Block header
-#[main_codec]
+#[use_compact]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
@@ -48,9 +49,6 @@ pub struct Header {
     /// A scalar value equal to the reasonable output of Unix’s time() at this block’s inception;
     /// formally Hs.
     pub timestamp: u64,
-    /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
-    /// fewer; formally Hx.
-    pub extra_data: bytes::Bytes,
     /// A 256-bit hash which, combined with the
     /// nonce, proves that a sufficient amount of computation has been carried out on this block;
     /// formally Hm.
@@ -65,6 +63,9 @@ pub struct Header {
     /// above the gas target, and decreasing when blocks are below the gas target. The base fee per
     /// gas is burned.
     pub base_fee_per_gas: Option<u64>,
+    /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
+    /// fewer; formally Hx.
+    pub extra_data: bytes::Bytes,
 }
 
 impl Default for Header {
@@ -262,13 +263,13 @@ impl SealedHeader {
 
 #[cfg(test)]
 mod tests {
-    use crate::Address;
-
     use super::{Decodable, Encodable, Header, H256};
+    use crate::Address;
     use ethers_core::{
         types::Bytes,
         utils::hex::{self, FromHex},
     };
+
     use std::str::FromStr;
 
     #[test]
