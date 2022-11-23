@@ -12,6 +12,13 @@ pub struct ExecInput {
     pub stage_progress: Option<BlockNumber>,
 }
 
+impl ExecInput {
+    /// Return the progress of the previous stage or default.
+    pub fn previous_stage_progress(&self) -> BlockNumber {
+        self.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default()
+    }
+}
+
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
