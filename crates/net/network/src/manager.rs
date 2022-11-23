@@ -93,8 +93,6 @@ pub struct NetworkManager<C> {
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
-    /// Local copy of the `PeerId` of the local node.
-    local_peer_id: PeerId,
 }
 
 // === impl NetworkManager ===
@@ -158,13 +156,27 @@ where
             event_listeners: Default::default(),
             to_transactions: None,
             num_active_peers,
-            local_peer_id,
         })
     }
 
     /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
         self.to_transactions = Some(tx);
+    }
+
+    /// Returns the [`SocketAddr`] that listens for incoming connections.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.swarm.listener().local_address()
+    }
+
+    /// How many peers we're currently connected to.
+    pub fn num_connected_peers(&self) -> usize {
+        self.swarm.state().num_connected_peers()
+    }
+
+    /// Returns the [`PeerId`] used in the network.
+    pub fn peer_id(&self) -> &PeerId {
+        self.handle.peer_id()
     }
 
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
@@ -181,7 +193,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(?peer_id, target = "net", "received unexpected message");
+        trace!(target : "net", ?peer_id,  "received unexpected message");
         // TODO: disconnect?
     }
 
@@ -292,7 +304,7 @@ where
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
-                    error!(target = "net", "Block propagation is not supported in POS - [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)");
+                    error!(target : "net", "Block propagation is not supported in POS - [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)");
                     return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
@@ -308,6 +320,12 @@ where
                 .swarm
                 .sessions_mut()
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
+            NetworkHandleMessage::AddPeerAddress(peer, addr) => {
+                self.swarm.state_mut().add_peer_address(peer, addr);
+            }
+            NetworkHandleMessage::DisconnectPeer(peer_id) => {
+                self.swarm.sessions_mut().disconnect(peer_id, None);
+            }
         }
     }
 }
@@ -351,24 +369,24 @@ where
                     this.on_invalid_message(peer_id, capabilities, message)
                 }
                 SwarmEvent::TcpListenerClosed { remote_addr } => {
-                    trace!(?remote_addr, target = "net", "TCP listener closed.");
+                    trace!(target : "net", ?remote_addr, "TCP listener closed.");
                 }
                 SwarmEvent::TcpListenerError(err) => {
-                    trace!(?err, target = "net", "TCP connection error.");
+                    trace!(target : "net", ?err, "TCP connection error.");
                 }
                 SwarmEvent::IncomingTcpConnection { remote_addr, .. } => {
-                    trace!(?remote_addr, target = "net", "Incoming connection");
+                    trace!(target : "net",?remote_addr, "Incoming connection");
                 }
                 SwarmEvent::OutgoingTcpConnection { remote_addr } => {
-                    trace!(?remote_addr, target = "net", "Starting outbound connection.");
+                    trace!(target : "net", ?remote_addr,"Starting outbound connection.");
                 }
                 SwarmEvent::SessionEstablished { peer_id, remote_addr, capabilities, messages } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                     trace!(
+                        target : "net",
                         ?remote_addr,
                         ?peer_id,
                         ?total_active,
-                        target = "net",
                         "Session established"
                     );
 
@@ -381,11 +399,11 @@ where
                 SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                     trace!(
+                        target : "net",
                         ?remote_addr,
                         ?peer_id,
                         ?total_active,
                         ?error,
-                        target = "net",
                         "Session disconnected"
                     );
 
@@ -408,11 +426,17 @@ where
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     /// Closed the peer session.
-    SessionClosed { peer_id: PeerId },
+    SessionClosed {
+        /// The identifier of the peer to which a session was closed.
+        peer_id: PeerId,
+    },
     /// Established a new session with the given peer.
     SessionEstablished {
+        /// The identifier of the peer to which a session was established.
         peer_id: PeerId,
+        /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
+        /// A request channel to the session task.
         messages: PeerRequestSender,
     },
 }
@@ -434,7 +458,7 @@ impl NetworkEventListeners {
         self.listeners.retain(|listener| {
             let open = listener.send(event.clone()).is_ok();
             if !open {
-                trace!(target = "net", "event listener channel closed",);
+                trace!(target : "net", "event listener channel closed",);
             }
             open
         });

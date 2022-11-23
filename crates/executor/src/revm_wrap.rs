@@ -1,5 +1,8 @@
 use reth_interfaces::{provider::StateProvider, Error};
-use reth_primitives::{BlockLocked, Transaction, TransactionKind, H160, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{
+    Header, Transaction, TransactionKind, TransactionSignedEcRecovered, H160, H256, KECCAK_EMPTY,
+    U256,
+};
 use revm::{
     db::{CacheDB, DatabaseRef},
     BlockEnv, TransactTo, TxEnv,
@@ -9,7 +12,7 @@ use revm::{
 pub type SubState<DB> = CacheDB<State<DB>>;
 
 /// Wrapper around ExeuctorDb that implements revm database trait
-pub struct State<DB: StateProvider>(DB);
+pub struct State<DB: StateProvider>(pub DB);
 
 impl<DB: StateProvider> State<DB> {
     /// Create new State with generic ExecutorDb.
@@ -63,18 +66,19 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
 }
 
 /// Fill block environment from Block.
-pub fn fill_block_env(block_env: &mut BlockEnv, block: &BlockLocked) {
-    block_env.number = block.header.number.into();
-    block_env.coinbase = block.header.beneficiary;
-    block_env.timestamp = block.header.timestamp.into();
-    block_env.difficulty = block.header.difficulty;
-    block_env.basefee = block.header.base_fee_per_gas.unwrap_or_default().into();
-    block_env.gas_limit = block.header.gas_limit.into();
+pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header) {
+    block_env.number = header.number.into();
+    block_env.coinbase = header.beneficiary;
+    block_env.timestamp = header.timestamp.into();
+    block_env.difficulty = header.difficulty;
+    block_env.basefee = header.base_fee_per_gas.unwrap_or_default().into();
+    block_env.gas_limit = header.gas_limit.into();
 }
 
 /// Fill transaction environment from Transaction.
-pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &Transaction) {
-    match transaction {
+pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
+    tx_env.caller = transaction.signer();
+    match transaction.as_ref().as_ref() {
         Transaction::Legacy { nonce, chain_id, gas_price, gas_limit, to, value, input } => {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*gas_price).into();

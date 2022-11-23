@@ -66,6 +66,7 @@ macro_rules! impl_fuzzer_key {
 
 /// Fuzzer generates a random instance of the object and proceeds to compress and decompress it. It
 /// then makes sure that it matches the original object.
+#[allow(unused)]
 macro_rules! impl_fuzzer_value {
     ($($name:tt),+) => {
         $(
@@ -84,8 +85,6 @@ macro_rules! impl_fuzzer_value_with_input {
         )+
     };
 }
-
-impl_fuzzer_value!(Header, Account);
 
 impl_fuzzer_key!(BlockNumHash, TxNumberAddress);
 impl_fuzzer_value_with_input!((IntegerList, IntegerListInput));

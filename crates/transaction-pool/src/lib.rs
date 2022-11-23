@@ -59,7 +59,7 @@
 //!
 //! The `TransactionPool` trait exposes all externally used functionality of the pool, such as
 //! inserting, querying specific transactions by hash or retrieving the best transactions.
-//! Additionally, it allows to register event listeners for new ready transactions or state changes.
+//! In addition, it enables the registration of event listeners that are notified of state changes.
 //! Events are communicated via channels.
 //!
 //! ### Architecture
@@ -217,7 +217,7 @@ where
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        Box::new(self.pool.ready_transactions())
+        Box::new(self.pool.best_transactions())
     }
 
     fn remove_invalid(

@@ -34,6 +34,13 @@ jobs:
           command: nextest
           args: run --locked --workspace --all-features
 
+      - name: Run fuzz tests
+        run: | 
+          ./.github/scripts/fuzz.sh reth-primitives
+          ./.github/scripts/fuzz.sh reth-db
+          ./.github/scripts/fuzz.sh reth-interfaces
+          ./.github/scripts/fuzz.sh reth-codecs
+
   lint:
     runs-on: ubuntu-latest
     steps:

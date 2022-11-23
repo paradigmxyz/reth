@@ -181,6 +181,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
+name = "backon"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cd1a59bc091e593ee9ed62df4e4a07115e00a0e0a52fd7e0e04540773939b80"
+dependencies = [
+ "futures",
+ "pin-project",
+ "rand 0.8.5",
+ "tokio",
+]
+
+[[package]]
 name = "bare-metal"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2269,6 +2281,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "modular-bitfield"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a53d79ba8304ac1c4f9eb3b9d281f21f7be9d4626f72ce7df4ad8fbde4f38a74"
+dependencies = [
+ "modular-bitfield-impl",
+ "static_assertions",
+]
+
+[[package]]
+name = "modular-bitfield-impl"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a7d5f7076603ebc68de2dc6a650ec331a062a13abaa346975be747bbfa4b789"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "more-asserts"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3056,13 +3089,14 @@ name = "reth-bodies-downloaders"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "async-trait",
+ "backon",
  "futures-util",
  "once_cell",
  "rand 0.8.5",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
- "serial_test",
  "tokio",
 ]
 
@@ -3070,7 +3104,12 @@ dependencies = [
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "codecs-derive",
+ "ethers-core",
+ "modular-bitfield",
+ "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -3202,6 +3241,7 @@ dependencies = [
  "auto_impl",
  "eyre",
  "hash-db",
+ "hashbrown 0.12.3",
  "plain_hasher",
  "reth-consensus",
  "reth-interfaces",
@@ -3240,6 +3280,7 @@ dependencies = [
  "futures",
  "heapless",
  "hex-literal",
+ "modular-bitfield",
  "parity-scale-codec",
  "postcard",
  "rand 0.8.5",
@@ -3360,6 +3401,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "maplit",
+ "modular-bitfield",
  "parity-scale-codec",
  "plain_hasher",
  "reth-codecs",
@@ -3368,6 +3410,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sucds",
+ "test-fuzz",
  "thiserror",
  "tiny-keccak",
  "triehash",
@@ -3463,6 +3506,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-tracing"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "reth-transaction-pool"
 version = "0.1.0"
 dependencies = [
@@ -3484,9 +3535,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87344ffd3eec06b568e1fc69c225e4cbd8d68d8d9051b6d2652d596947efa1ce"
+checksum = "d3d296f0199135e573ba817ed0024d0d4eafa7add1c9a8dd08488c3515598156"
 dependencies = [
  "arrayref",
  "auto_impl",
