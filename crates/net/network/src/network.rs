@@ -1,4 +1,9 @@
-use crate::{config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle};
+use crate::{
+    config::NetworkMode,
+    manager::NetworkEvent,
+    message::PeerRequest,
+    peers::{PeersHandle, ReputationChangeKind},
+};
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
 use reth_primitives::{PeerId, H256};
@@ -88,7 +93,12 @@ impl NetworkHandle {
     /// Sends a message to the [`NetworkManager`] to disconnect an existing connection to the given
     /// peer.
     pub fn disconnect_peer(&self, peer: PeerId) {
-        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::DisconnectPeer(peer));
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer))
+    }
+
+    /// Send a reputation change for the given peer.
+    pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
     }
 
     /// Sends a [`PeerRequest`] to the given peer's session.
@@ -134,4 +144,6 @@ pub(crate) enum NetworkHandleMessage {
         /// The request to send to the peer's sessions.
         request: PeerRequest,
     },
+    /// Apply a reputation change to the given peer.
+    ReputationChange(PeerId, ReputationChangeKind),
 }

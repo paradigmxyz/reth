@@ -1,4 +1,4 @@
-use crate::peers::{reputation::BANNED_REPUTATION, ReputationChange};
+use crate::peers::{reputation::BANNED_REPUTATION, ReputationChangeKind, ReputationChangeWeights};
 use futures::StreamExt;
 use reth_eth_wire::DisconnectReason;
 use reth_primitives::PeerId;
@@ -20,6 +20,15 @@ pub struct PeersHandle {
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
 }
 
+// === impl PeersHandle ===
+
+impl PeersHandle {
+    /// Send a reputation change for the given peer
+    pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        let _ = self.manager_tx.send(PeerCommand::ReputationChange(peer_id, kind));
+    }
+}
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -37,6 +46,8 @@ pub(crate) struct PeersManager {
     queued_actions: VecDeque<PeerAction>,
     /// Interval for triggering connections if there are free slots.
     refill_slots_interval: Interval,
+    /// How to weigh reputation changes
+    reputation_weights: ReputationChangeWeights,
     /// Tracks current slot stats.
     connection_info: ConnectionInfo,
 }
@@ -44,13 +55,14 @@ pub(crate) struct PeersManager {
 impl PeersManager {
     /// Create a new instance with the given config
     pub(crate) fn new(config: PeersConfig) -> Self {
-        let PeersConfig { refill_slots_interval, connection_info } = config;
+        let PeersConfig { refill_slots_interval, connection_info, reputation_weights } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         Self {
             peers: Default::default(),
             manager_tx,
             handle_rx: UnboundedReceiverStream::new(handle_rx),
             queued_actions: Default::default(),
+            reputation_weights,
             refill_slots_interval: tokio::time::interval_at(
                 Instant::now() + refill_slots_interval,
                 refill_slots_interval,
@@ -89,11 +101,41 @@ impl PeersManager {
         self.connection_info.inc_in();
     }
 
-    /// Called when a session to a peer was disconnected.
-    ///
-    /// Accepts an additional [`ReputationChange`] value to apply to the peer.
-    pub(crate) fn on_disconnected(&mut self, peer: PeerId, reputation_change: ReputationChange) {
-        if let Some(mut peer) = self.peers.get_mut(&peer) {
+    /// Apply the corresponding reputation change to the given peer
+    pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
+        let reputation_change = self.reputation_weights.change(rep);
+        let should_disconnect = if let Some(mut peer) = self.peers.get_mut(peer_id) {
+            peer.reputation -= reputation_change.as_i32();
+            let should_disconnect = peer.state.is_connected() && peer.is_banned();
+
+            if should_disconnect {
+                peer.state.disconnect();
+            }
+
+            should_disconnect
+        } else {
+            false
+        };
+
+        if should_disconnect {
+            // start the disconnect process
+            self.queued_actions
+                .push_back(PeerAction::Disconnect { peer_id: *peer_id, reason: None })
+        }
+    }
+
+    /// Gracefully disconnected
+    pub(crate) fn on_disconnected(&mut self, peer_id: &PeerId) {
+        if let Some(mut peer) = self.peers.get_mut(peer_id) {
+            self.connection_info.decr_state(peer.state);
+            peer.state = PeerConnectionState::Idle;
+        }
+    }
+
+    /// Called when a session to a peer was forcefully disconnected.
+    pub(crate) fn on_connection_dropped(&mut self, peer_id: &PeerId) {
+        let reputation_change = self.reputation_weights.change(ReputationChangeKind::Dropped);
+        if let Some(mut peer) = self.peers.get_mut(peer_id) {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
             peer.reputation -= reputation_change.as_i32();
@@ -185,10 +227,13 @@ impl PeersManager {
 
             while let Poll::Ready(Some(cmd)) = self.handle_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PeerCommand::Add { peer_id, addr } => {
+                    PeerCommand::Add(peer_id, addr) => {
                         self.add_discovered_node(peer_id, addr);
                     }
                     PeerCommand::Remove(peer) => self.remove_discovered_node(peer),
+                    PeerCommand::ReputationChange(peer_id, rep) => {
+                        self.apply_reputation_change(&peer_id, rep)
+                    }
                 }
             }
 
@@ -227,8 +272,8 @@ impl ConnectionInfo {
     fn decr_state(&mut self, state: PeerConnectionState) {
         match state {
             PeerConnectionState::Idle => {}
-            PeerConnectionState::In => self.decr_in(),
-            PeerConnectionState::Out => self.decr_out(),
+            PeerConnectionState::DisconnectingIn | PeerConnectionState::In => self.decr_in(),
+            PeerConnectionState::DisconnectingOut | PeerConnectionState::Out => self.decr_out(),
         }
     }
 
@@ -283,6 +328,10 @@ enum PeerConnectionState {
     /// Not connected currently.
     #[default]
     Idle,
+    /// Disconnect of an incoming connection in progress
+    DisconnectingIn,
+    /// Disconnect of an outgoing connection in progress
+    DisconnectingOut,
     /// Connected via incoming connection.
     In,
     /// Connected via outgoing connection.
@@ -292,6 +341,16 @@ enum PeerConnectionState {
 // === impl PeerConnectionState ===
 
 impl PeerConnectionState {
+    /// Sets the disconnect state
+    #[inline]
+    fn disconnect(&mut self) {
+        match self {
+            PeerConnectionState::In => *self = PeerConnectionState::DisconnectingIn,
+            PeerConnectionState::Out => *self = PeerConnectionState::DisconnectingOut,
+            _ => {}
+        }
+    }
+
     /// Returns whether we're currently connected with this peer
     #[inline]
     fn is_connected(&self) -> bool {
@@ -308,16 +367,13 @@ impl PeerConnectionState {
 /// Commands the [`PeersManager`] listens for.
 pub(crate) enum PeerCommand {
     /// Command for manually add
-    Add {
-        /// Identifier of the peer.
-        peer_id: PeerId,
-        /// The address of the peer
-        addr: SocketAddr,
-    },
+    Add(PeerId, SocketAddr),
     /// Remove a peer from the set
     ///
-    /// If currently connected this will disconnect the sessin
+    /// If currently connected this will disconnect the session
     Remove(PeerId),
+    /// Apply a reputation change to the given peer.
+    ReputationChange(PeerId, ReputationChangeKind),
 }
 
 /// Actions the peer manager can trigger.
@@ -347,6 +403,8 @@ pub struct PeersConfig {
     pub refill_slots_interval: Duration,
     /// Restrictions on connections
     pub connection_info: ConnectionInfo,
+    /// How to weigh reputation changes
+    pub reputation_weights: ReputationChangeWeights,
 }
 
 impl Default for PeersConfig {
@@ -359,6 +417,7 @@ impl Default for PeersConfig {
                 max_outbound: 70,
                 max_inbound: 30,
             },
+            reputation_weights: Default::default(),
         }
     }
 }
