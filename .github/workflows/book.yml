@@ -28,9 +28,8 @@ jobs:
       - name: Run tests
         run: mdbook test
 
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    needs: [test]
     steps:
       - uses: actions/checkout@v3
         with:
@@ -42,17 +41,28 @@ jobs:
           curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.14/mdbook-v0.4.14-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook
           echo `pwd`/mdbook >> $GITHUB_PATH
 
-      - name: Deploy GitHub Pages
-        run: |
-          mdbook build
-          git worktree add gh-pages
-          git config user.name "CI Deployer"
-          git config user.email ""
-          cd gh-pages
-          # Delete the ref to avoid keeping history.
-          git update-ref -d refs/heads/gh-pages
-          rm -rf *
-          mv ../target/book/* .
-          git add .
-          git commit -m "chore: deploy $GITHUB_SHA to gh-pages"
-          git push --force --set-upstream origin gh-pages
+      - name: Build
+        run: mdbook build
+
+      - name: Save pages artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: target/book
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, build]
+
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1
