@@ -32,6 +32,6 @@ mod swarm;
 mod transactions;
 
 pub use config::NetworkConfig;
-pub use manager::NetworkManager;
+pub use manager::{NetworkEvent, NetworkManager};
 pub use network::NetworkHandle;
 pub use peers::PeersConfig;
