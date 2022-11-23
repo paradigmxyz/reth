@@ -124,7 +124,7 @@ impl Discv4 {
     ) -> io::Result<Self> {
         let (discv4, service) = Self::bind(local_address, local_enr, secret_key, config).await?;
 
-        let _ = service.spawn();
+        service.spawn();
 
         Ok(discv4)
     }
