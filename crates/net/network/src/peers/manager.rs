@@ -105,7 +105,7 @@ impl PeersManager {
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         let reputation_change = self.reputation_weights.change(rep);
         let should_disconnect = if let Some(mut peer) = self.peers.get_mut(peer_id) {
-            peer.reputation -= reputation_change.as_i32();
+            peer.reputation = peer.reputation.saturating_sub(reputation_change.as_i32());
             let should_disconnect = peer.state.is_connected() && peer.is_banned();
 
             if should_disconnect {
@@ -138,7 +138,7 @@ impl PeersManager {
         if let Some(mut peer) = self.peers.get_mut(peer_id) {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
-            peer.reputation -= reputation_change.as_i32();
+            peer.reputation = peer.reputation.saturating_sub(reputation_change.as_i32());
         }
     }
 
