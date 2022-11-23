@@ -77,8 +77,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     ) -> Result<ExecOutput, StageError> {
         let tx = db.get_mut();
 
-        let previous_stage_progress =
-            input.previous_stage.as_ref().map(|(_, block)| *block).unwrap_or_default();
+        let previous_stage_progress = input.previous_stage_progress();
         if previous_stage_progress == 0 {
             warn!("The body stage seems to be running first, no work can be completed.");
             return Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody {
@@ -547,8 +546,7 @@ mod tests {
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
-                let end =
-                    input.previous_stage.as_ref().map(|(_, num)| *num + 1).unwrap_or_default();
+                let end = input.previous_stage_progress() + 1;
                 let blocks = random_block_range(start..end, GENESIS_HASH);
                 self.insert_genesis()?;
                 self.db.insert_headers(blocks.iter().map(|block| &block.header))?;

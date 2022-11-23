@@ -11,7 +11,7 @@ macro_rules! stage_test_suite {
 
             // Run stage execution
             let result = runner.execute(input).await.unwrap();
-            assert_matches!(
+            assert_matches::assert_matches!(
                 result,
                 Err(crate::error::StageError::DatabaseIntegrity(_))
             );
@@ -41,7 +41,7 @@ macro_rules! stage_test_suite {
 
             // Assert the successful result
             let result = rx.await.unwrap();
-            assert_matches!(
+            assert_matches::assert_matches!(
                 result,
                 Ok(ExecOutput { done, reached_tip, stage_progress })
                     if done && reached_tip && stage_progress == stage_progress
@@ -70,7 +70,7 @@ macro_rules! stage_test_suite {
 
             // Assert the successful result
             let result = rx.await.unwrap();
-            assert_matches!(
+            assert_matches::assert_matches!(
                 result,
                 Ok(ExecOutput { done, reached_tip, stage_progress })
                     if done && reached_tip && stage_progress == previous_stage
@@ -89,7 +89,7 @@ macro_rules! stage_test_suite {
 
             // Run stage unwind
             let rx = runner.unwind(input).await;
-            assert_matches!(
+            assert_matches::assert_matches!(
                 rx,
                 Ok(UnwindOutput { stage_progress }) if stage_progress == input.unwind_to
             );
@@ -117,7 +117,7 @@ macro_rules! stage_test_suite {
 
             // Assert the successful execution result
             let result = rx.await.unwrap();
-            assert_matches!(
+            assert_matches::assert_matches!(
                 result,
                 Ok(ExecOutput { done, reached_tip, stage_progress })
                     if done && reached_tip && stage_progress == previous_stage
@@ -131,7 +131,7 @@ macro_rules! stage_test_suite {
             let rx = runner.unwind(unwind_input).await;
 
             // Assert the successful unwind result
-            assert_matches!(
+            assert_matches::assert_matches!(
                 rx,
                 Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_input.unwind_to
             );
