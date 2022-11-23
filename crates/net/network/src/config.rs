@@ -129,6 +129,18 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
+    /// Sets the socket address the network will listen on
+    pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
+        self.listener_addr = Some(listener_addr);
+        self
+    }
+
+    /// Sets the socket address the discovery network will listen on
+    pub fn discovery_addr(mut self, discovery_addr: SocketAddr) -> Self {
+        self.discovery_addr = Some(discovery_addr);
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     pub fn build(self) -> NetworkConfig<C> {
         let Self {

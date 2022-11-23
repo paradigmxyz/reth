@@ -4,9 +4,13 @@ use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
 use reth_primitives::{PeerId, H256};
 use std::{
     net::SocketAddr,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
@@ -40,15 +44,30 @@ impl NetworkHandle {
         Self { inner: Arc::new(inner) }
     }
 
+    /// How many peers we're currently connected to.
+    pub fn num_connected_peers(&self) -> usize {
+        self.inner.num_active_peers.load(Ordering::Relaxed)
+    }
+
+    /// Returns the [`SocketAddr`] that listens for incoming connections.
+    pub fn local_addr(&self) -> SocketAddr {
+        *self.inner.listener_address.lock()
+    }
+
+    /// Returns the [`PeerId`] used in the network.
+    pub fn peer_id(&self) -> &PeerId {
+        &self.inner.local_peer_id
+    }
+
     fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {
         &self.inner.to_manager_tx
     }
 
     /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> mpsc::UnboundedReceiver<NetworkEvent> {
+    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
-        rx
+        UnboundedReceiverStream::new(rx)
     }
 
     /// Returns the mode of the network, either pow, or pos
@@ -61,8 +80,19 @@ impl NetworkHandle {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
+    /// Sends a message to the [`NetworkManager`] to add a peer to the known set
+    pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
+        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::AddPeerAddress(peer, addr));
+    }
+
+    /// Sends a message to the [`NetworkManager`] to disconnect an existing connection to the given
+    /// peer.
+    pub fn disconnect_peer(&self, peer: PeerId) {
+        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::DisconnectPeer(peer));
+    }
+
     /// Sends a [`PeerRequest`] to the given peer's session.
-    pub fn send_request(&mut self, peer_id: PeerId, request: PeerRequest) {
+    pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
     }
 }
@@ -85,6 +115,10 @@ struct NetworkInner {
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[allow(missing_docs)]
 pub(crate) enum NetworkHandleMessage {
+    /// Adds an address for a peer.
+    AddPeerAddress(PeerId, SocketAddr),
+    /// Disconnect a connection to a peer if it exists.
+    DisconnectPeer(PeerId),
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.

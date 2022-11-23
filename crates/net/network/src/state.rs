@@ -80,6 +80,11 @@ where
         }
     }
 
+    /// How many peers we're currently connected to.
+    pub fn num_connected_peers(&self) -> usize {
+        self.connected_peers.len()
+    }
+
     /// Event hook for an activated session for the peer.
     ///
     /// Returns `Ok` if the session is valid, returns an `Err` if the session is not accepted and
@@ -92,7 +97,7 @@ where
         request_tx: PeerRequestSender,
     ) -> Result<(), AddSessionError> {
         // TODO add capacity check
-        debug_assert!(self.connected_peers.contains_key(&peer), "Already connected; not possible");
+        debug_assert!(!self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
         let block_number =
@@ -210,6 +215,11 @@ where
         }
     }
 
+    /// Adds a peer and its address to the peerset.
+    pub(crate) fn add_peer_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
+        self.peers_manager.add_discovered_node(peer_id, addr)
+    }
+
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
@@ -318,8 +328,8 @@ where
                     match response.poll(cx) {
                         Poll::Ready(Err(_)) => {
                             trace!(
+                                target : "net",
                                 ?id,
-                                target = "net",
                                 "Request canceled, response channel closed."
                             );
                             disconnect_sessions.push(*id);

@@ -110,7 +110,7 @@ where
         Self {
             pool,
             network,
-            network_events: UnboundedReceiverStream::new(network_events),
+            network_events,
             inflight_requests: Default::default(),
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
