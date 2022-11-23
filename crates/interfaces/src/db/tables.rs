@@ -102,6 +102,10 @@ macro_rules! dupsort {
 //  TABLE DEFINITIONS
 //
 
+
+
+
+
 table!(
     /// Stores the header hashes belonging to the canonical chain.
     CanonicalHeaders => BlockNumber => HeaderHash);

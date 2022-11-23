@@ -1,6 +1,6 @@
-use crate::pipeline::PipelineEvent;
+use crate::{pipeline::PipelineEvent, stages::tx_index::TxIndex};
 use reth_interfaces::{consensus, db::Error as DbError};
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{BlockNumber, H256, TxNumber};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -66,6 +66,12 @@ pub enum DatabaseIntegrityError {
         /// The block number key
         number: BlockNumber,
     },
+    #[error("Gap in transaction table")]
+    TransactionsGap {
+        missing: TxNumber,
+    },
+    #[error("Got to the end of transaction table")]
+    EndOfTransactionTable,
 }
 
 /// A pipeline execution error.

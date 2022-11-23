@@ -6,3 +6,5 @@ pub mod headers;
 pub mod senders;
 /// The cumulative transaction index stage.
 pub mod tx_index;
+/// The execution stage that generates state diff.
+pub mod execution;
