@@ -1,8 +1,9 @@
 use crate::{
-    util::unwind::unwind_table_by_num_hash, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    util::{db::StageDB, unwind::unwind_table_by_num_hash},
+    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
-use reth_interfaces::db::{tables, DBContainer, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut};
+use reth_interfaces::db::{tables, Database, DbCursorRO, DbCursorRW, DbTxMut};
 use std::fmt::Debug;
 
 const TX_INDEX: StageId = StageId("TxIndex");
@@ -28,36 +29,30 @@ impl<DB: Database> Stage<DB> for TxIndex {
     /// Execute the stage
     async fn execute(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let tx = db.get_mut();
-
         // The progress of this stage during last iteration
-        let last_block = input.stage_progress.unwrap_or_default();
-        let last_hash = tx
-            .get::<tables::CanonicalHeaders>(last_block)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: last_block })?;
+        let last_block = db.get_block_numhash(input.stage_progress.unwrap_or_default())?;
 
         // The start block for this iteration
-        let start_block = last_block + 1;
-        let start_hash = tx
-            .get::<tables::CanonicalHeaders>(start_block)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: start_block })?;
+        let start_block = db.get_block_numhash(last_block.number() + 1)?;
 
         // The maximum block that this stage should insert to
         let max_block = input.previous_stage_progress();
 
         // Get the cursor over the table
-        let mut cursor = tx.cursor_mut::<tables::CumulativeTxCount>()?;
+        let mut cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
         // Find the last count that was inserted during previous iteration
-        let (_, mut count) = cursor.seek_exact((last_block, last_hash).into())?.ok_or(
-            DatabaseIntegrityError::CumulativeTxCount { number: last_block, hash: last_hash },
-        )?;
+        let (_, mut count) =
+            cursor.seek_exact(last_block)?.ok_or(DatabaseIntegrityError::CumulativeTxCount {
+                number: last_block.number(),
+                hash: last_block.hash(),
+            })?;
 
         // Get the cursor over block bodies
-        let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let walker = body_cursor.walk((start_block, start_hash).into())?;
+        let mut body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let walker = body_cursor.walk(start_block)?;
 
         // Walk the block body entries up to maximum block (including)
         let entries = walker
@@ -76,10 +71,10 @@ impl<DB: Database> Stage<DB> for TxIndex {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        unwind_table_by_num_hash::<DB, tables::CumulativeTxCount>(db.get_mut(), input.unwind_to)?;
+        unwind_table_by_num_hash::<DB, tables::CumulativeTxCount>(db, input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -92,7 +87,10 @@ mod tests {
         UnwindStageTestRunner,
     };
     use reth_interfaces::{
-        db::models::{BlockNumHash, StoredBlockBody},
+        db::{
+            models::{BlockNumHash, StoredBlockBody},
+            DbTx,
+        },
         test_utils::generators::random_header_range,
     };
     use reth_primitives::H256;

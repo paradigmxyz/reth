@@ -1,15 +1,16 @@
 use reth_db::{kv::Env, mdbx::WriteMap};
-use reth_interfaces::db::{self, DBContainer};
 use std::borrow::Borrow;
 use tokio::sync::oneshot;
 
 use super::StageTestDB;
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::db::StageDB, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
     #[error("Database error occured.")]
-    Database(#[from] db::Error),
+    Database(#[from] reth_interfaces::db::Error),
     #[error("Internal runner error occured.")]
     Internal(#[from] Box<dyn std::error::Error>),
 }
@@ -45,7 +46,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().inner(), self.stage());
         tokio::spawn(async move {
-            let mut db = DBContainer::new(db.borrow()).expect("failed to create db container");
+            let mut db = StageDB::new(db.borrow()).expect("failed to create db container");
             let result = stage.execute(&mut db, input).await;
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
@@ -72,7 +73,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().inner(), self.stage());
         tokio::spawn(async move {
-            let mut db = DBContainer::new(db.borrow()).expect("failed to create db container");
+            let mut db = StageDB::new(db.borrow()).expect("failed to create db container");
             let result = stage.unwind(&mut db, input).await;
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");

@@ -135,3 +135,83 @@ pub(crate) mod unwind {
         Ok(())
     }
 }
+
+pub(crate) mod db {
+    use std::{
+        fmt::Debug,
+        ops::{Deref, DerefMut},
+    };
+
+    use reth_interfaces::db::{
+        models::{BlockNumHash, NumTransactions},
+        tables, DBContainer, Database, DatabaseGAT, DbTx, Error,
+    };
+    use reth_primitives::{BlockHash, BlockNumber};
+
+    use crate::{DatabaseIntegrityError, StageError};
+
+    /// TODO: doc
+    pub struct StageDB<'a, DB: Database>(DBContainer<'a, DB>);
+
+    impl<'a, DB: Database> Debug for StageDB<'a, DB> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("StageDB").finish()
+        }
+    }
+
+    impl<'a, DB: Database> Deref for StageDB<'a, DB> {
+        type Target = <DB as DatabaseGAT<'a>>::TXMut;
+
+        fn deref(&self) -> &Self::Target {
+            self.0.get()
+        }
+    }
+
+    impl<'a, DB: Database> DerefMut for StageDB<'a, DB> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            self.0.get_mut()
+        }
+    }
+
+    impl<'a, DB: Database> StageDB<'a, DB> {
+        /// Create new instance
+        pub(crate) fn new(db: &'a DB) -> Result<Self, Error> {
+            Ok(Self(DBContainer::new(db)?))
+        }
+
+        pub(crate) fn commit(&mut self) -> Result<bool, Error> {
+            self.0.commit()
+        }
+
+        /// Query [tables::CanonicalHeaders] table for block hash by block number
+        pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
+            let hash = self
+                .get::<tables::CanonicalHeaders>(number)?
+                .ok_or(DatabaseIntegrityError::CanonicalHash { number })?;
+            Ok(hash)
+        }
+
+        /// Query for block hash by block number and return it as [BlockNumHash] key
+        pub(crate) fn get_block_numhash(
+            &self,
+            number: BlockNumber,
+        ) -> Result<BlockNumHash, StageError> {
+            Ok((number, self.get_block_hash(number)?).into())
+        }
+
+        /// Query [tables::CumulativeTxCount] table for total transaction
+        /// count block by [BlockNumHash] key
+        pub(crate) fn get_tx_count(
+            &self,
+            key: BlockNumHash,
+        ) -> Result<NumTransactions, StageError> {
+            let count = self.get::<tables::CumulativeTxCount>(key)?.ok_or(
+                DatabaseIntegrityError::CumulativeTxCount {
+                    number: key.number(),
+                    hash: key.hash(),
+                },
+            )?;
+            Ok(count)
+        }
+    }
+}
