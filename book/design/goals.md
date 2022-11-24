@@ -20,8 +20,6 @@ This is a win for everyone:
 - Costs are lowered for all operators, whether in terms of storage costs, or being able to serve more requests from the same node.
 - Searchers are able to run more simulations.
 
-Etc...
-
 ### What are the performance bottlenecks that need to be addressed?
 
 **Optimizing state access**
