@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockLocked, Header, SealedHeader, H256};
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     sync::{
@@ -105,7 +105,7 @@ impl TestHeadersClient {
 
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
+    fn update_status(&self, _height: u64, _hash: H256, _td: U256) {}
 
     async fn get_headers(&self, request: HeadersRequest) -> RequestResult<BlockHeaders> {
         let mut lock = self.responses.lock().await;

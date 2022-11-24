@@ -3,7 +3,7 @@
 use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
-    fetch::{BlockResponseOutcome, StateFetcher},
+    fetch::{BlockResponseOutcome, FetchAction, StateFetcher, StatusUpdate},
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
@@ -325,6 +325,18 @@ where
                 self.on_discovery_event(discovery);
             }
 
+            while let Poll::Ready(action) = self.state_fetcher.poll(cx) {
+                match action {
+                    FetchAction::BlockRequest { peer_id, request } => {
+                        self.handle_block_request(peer_id, request)
+                    }
+                    FetchAction::StatusUpdate(status) => {
+                        // we want to return this directly
+                        return Poll::Ready(StateAction::StatusUpdate(status))
+                    }
+                }
+            }
+
             let mut disconnect_sessions = Vec::new();
             let mut received_responses = Vec::new();
             // poll all connected peers for responses
@@ -387,7 +399,9 @@ pub struct ConnectedPeer {
 }
 
 /// Message variants triggered by the [`State`]
-pub enum StateAction {
+pub(crate) enum StateAction {
+    /// Received a node status update.
+    StatusUpdate(StatusUpdate),
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
         /// Target of the message
