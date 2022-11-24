@@ -190,9 +190,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner,
-    };
+    use crate::test_utils::{stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner};
     use assert_matches::assert_matches;
     use test_runner::HeadersTestRunner;
 
@@ -258,8 +256,8 @@ mod tests {
     //     let result = rx.await.unwrap();
     //     assert_matches!(
     //         result,
-    //         Ok(ExecOutput { done: true, reached_tip: true, stage_progress }) if stage_progress == tip.number
-    //     );
+    //         Ok(ExecOutput { done: true, reached_tip: true, stage_progress }) if stage_progress ==
+    // tip.number     );
     //     assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     // }
 
