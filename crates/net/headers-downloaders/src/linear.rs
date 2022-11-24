@@ -353,9 +353,6 @@ mod tests {
 
     static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
 
-    static CLIENT: Lazy<Arc<TestHeadersClient>> =
-        Lazy::new(|| Arc::new(TestHeadersClient::default()));
-
     fn child_header(parent: &SealedHeader) -> SealedHeader {
         let mut child = parent.as_ref().clone();
         child.number += 1;
@@ -395,8 +392,7 @@ mod tests {
             ])
             .await;
 
-        let mut fork = ForkchoiceState::default();
-        fork.head_block_hash = p0.hash_slow();
+        let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
 
         let result = downloader.download(p0, fork).await;
         let headers = result.unwrap();
@@ -424,8 +420,7 @@ mod tests {
             ])
             .await;
 
-        let mut fork = ForkchoiceState::default();
-        fork.head_block_hash = p0.hash_slow();
+        let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
 
         let result = downloader.download(p3, fork).await;
         let headers = result.unwrap();
