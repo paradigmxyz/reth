@@ -1,4 +1,4 @@
-use crate::consensus;
+use crate::{consensus, p2p::error::RequestError};
 use reth_primitives::{rpc::BlockNumber, H256};
 use thiserror::Error;
 
@@ -33,6 +33,9 @@ pub enum DownloadError {
         /// The parent hash being evaluated
         parent_hash: H256,
     },
+    /// Error while executing the request.
+    #[error(transparent)]
+    RequestError(#[from] RequestError),
 }
 
 impl DownloadError {
