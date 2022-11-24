@@ -1,7 +1,6 @@
 use crate::{
-    error::*,
-    util::{db::StageDB, opt::MaybeSender},
-    ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    db::StageDB, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
+    StageId, UnwindInput,
 };
 use reth_interfaces::db::{Database, DbTx};
 use reth_primitives::BlockNumber;

@@ -1,4 +1,4 @@
-use crate::{error::StageError, id::StageId, util::db::StageDB};
+use crate::{db::StageDB, error::StageError, id::StageId};
 use async_trait::async_trait;
 use reth_interfaces::db::Database;
 use reth_primitives::BlockNumber;

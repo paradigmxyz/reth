@@ -1,12 +1,11 @@
 use crate::{
-    util::{db::StageDB, unwind::unwind_table_by_num},
-    ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::StageDB, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use itertools::Itertools;
 use rayon::prelude::*;
 use reth_interfaces::db::{self, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut};
 use reth_primitives::TxNumber;
-use std::{fmt::Debug, ops::DerefMut};
+use std::fmt::Debug;
 use thiserror::Error;
 
 const SENDERS: StageId = StageId("Senders");
@@ -98,7 +97,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         if let Some(unwind_hash) = db.get::<tables::CanonicalHeaders>(input.unwind_to)? {
             // Look up the cumulative tx count at unwind block
             let latest_tx = db.get_tx_count((input.unwind_to, unwind_hash).into())?;
-            unwind_table_by_num::<DB, tables::TxSenders>(db.deref_mut(), latest_tx - 1)?;
+            db.unwind_table_by_num::<tables::TxSenders>(latest_tx - 1)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })

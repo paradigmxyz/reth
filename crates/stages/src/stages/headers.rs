@@ -1,10 +1,6 @@
 use crate::{
-    util::{
-        db::StageDB,
-        unwind::{unwind_table_by_num, unwind_table_by_num_hash, unwind_table_by_walker},
-    },
-    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
@@ -108,14 +104,12 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: handle bad block
-        unwind_table_by_walker::<DB, tables::CanonicalHeaders, tables::HeaderNumbers>(
-            db,
+        db.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;
-
-        unwind_table_by_num::<DB, tables::CanonicalHeaders>(db, input.unwind_to)?;
-        unwind_table_by_num_hash::<DB, tables::Headers>(db, input.unwind_to)?;
-        unwind_table_by_num_hash::<DB, tables::HeaderTD>(db, input.unwind_to)?;
+        db.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        db.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
+        db.unwind_table_by_num_hash::<tables::HeaderTD>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    util::db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use futures_util::TryStreamExt;

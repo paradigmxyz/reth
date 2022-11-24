@@ -3,9 +3,7 @@ use std::borrow::Borrow;
 use tokio::sync::oneshot;
 
 use super::StageTestDB;
-use crate::{
-    util::db::StageDB, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
-};
+use crate::{db::StageDB, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {

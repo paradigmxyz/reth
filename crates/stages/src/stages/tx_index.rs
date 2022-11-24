@@ -1,7 +1,6 @@
 use crate::{
-    util::{db::StageDB, unwind::unwind_table_by_num_hash},
-    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_interfaces::db::{tables, Database, DbCursorRO, DbCursorRW, DbTxMut};
 use std::fmt::Debug;
@@ -74,7 +73,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
         db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        unwind_table_by_num_hash::<DB, tables::CumulativeTxCount>(db, input.unwind_to)?;
+        db.unwind_table_by_num_hash::<tables::CumulativeTxCount>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
