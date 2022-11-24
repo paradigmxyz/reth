@@ -42,7 +42,7 @@ async fn test_establish_connections() {
 
     let net = handle.terminate().await;
 
-    net.for_each(|peer| {
-        assert!(peer.num_peers() >= 1);
-    });
+    assert_eq!(net.peers()[0].num_peers(), 2);
+    assert_eq!(net.peers()[1].num_peers(), 1);
+    assert_eq!(net.peers()[2].num_peers(), 1);
 }

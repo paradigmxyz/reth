@@ -5,6 +5,7 @@ use crate::{
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     network::NetworkHandleMessage,
+    peers::ReputationChangeKind,
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
@@ -230,13 +231,14 @@ where
 
     /// Starts the import process for the given transactions.
     fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<TransactionSigned>) {
+        let mut has_bad_transactions = false;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             for tx in transactions {
                 // recover transaction
                 let tx = if let Some(tx) = tx.into_ecrecovered() {
                     tx
                 } else {
-                    // TODO: report peer?
+                    has_bad_transactions = true;
                     continue
                 };
 
@@ -263,17 +265,25 @@ where
                 }
             }
         }
-    }
 
-    fn on_good_import(&mut self, hash: TxHash) {
-        if let Some(_peers) = self.transactions_by_peers.remove(&hash) {
-            // TODO report good peer?
+        if has_bad_transactions {
+            self.report_bad_message(peer_id);
         }
     }
 
+    fn report_bad_message(&self, peer_id: PeerId) {
+        self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+    }
+
+    fn on_good_import(&mut self, hash: TxHash) {
+        self.transactions_by_peers.remove(&hash);
+    }
+
     fn on_bad_import(&mut self, hash: TxHash) {
-        if let Some(_peers) = self.transactions_by_peers.remove(&hash) {
-            // TODO report bad peer?
+        if let Some(peers) = self.transactions_by_peers.remove(&hash) {
+            for peer_id in peers {
+                self.report_bad_message(peer_id);
+            }
         }
     }
 }
@@ -329,10 +339,10 @@ where
                     this.import_transactions(req.peer_id, txs.0);
                 }
                 Poll::Ready(Ok(Err(_))) => {
-                    // TODO report bad peer
+                    this.report_bad_message(req.peer_id);
                 }
                 Poll::Ready(Err(_)) => {
-                    // TODO report bad peer
+                    this.report_bad_message(req.peer_id);
                 }
             }
         }
