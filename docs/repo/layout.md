@@ -41,7 +41,7 @@ These crates are related to networking (p2p and RPC), as well as networking prot
 - [`net/rpc`](../../crates/net/rpc): Implementation of all ETH JSON RPC traits defined in `rpc-api`.
 - [`net/rpc-types`](../../crates/net/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
 
-#### Misc
+#### Downloaders
 
 - [`net/bodies-downloaders`](../../crates/net/bodies-downloaders): Block body downloading strategies.
 - [`net/headers-downloaders`](../../crates/net/headers-downloaders): Header downloading strategies.
