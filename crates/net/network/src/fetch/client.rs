@@ -1,20 +1,16 @@
 //! A client implementation that can interact with the network and download data.
 
 use crate::fetch::DownloadRequest;
-use reth_eth_wire::BlockBody;
-use reth_interfaces::p2p::{
-    bodies::{client::BodiesClient, error::BodiesClientError},
-    error::RequestResult,
-    headers::client::HeadersRequest,
-};
-use reth_primitives::{Header, H256};
+
+use reth_interfaces::p2p::{error::RequestResult, headers::client::HeadersRequest};
+use reth_primitives::Header;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Front-end API for fetching data from the network.
 #[derive(Debug)]
 pub struct FetchClient {
     /// Sender half of the request channel.
-    request_tx: UnboundedSender<DownloadRequest>,
+    pub(crate) request_tx: UnboundedSender<DownloadRequest>,
 }
 
 impl FetchClient {

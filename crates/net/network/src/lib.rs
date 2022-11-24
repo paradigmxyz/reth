@@ -32,7 +32,7 @@ mod swarm;
 mod transactions;
 
 pub use config::NetworkConfig;
-pub use fetch::client::FetchClient;
+pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use network::NetworkHandle;
 pub use peers::PeersConfig;

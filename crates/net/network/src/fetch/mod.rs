@@ -291,7 +291,7 @@ struct Request<Req, Resp> {
 }
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
-enum DownloadRequest {
+pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
