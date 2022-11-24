@@ -3385,6 +3385,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
+ "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
  "thiserror",
