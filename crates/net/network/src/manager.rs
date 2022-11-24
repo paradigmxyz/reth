@@ -23,7 +23,7 @@ use crate::{
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::PeersManager,
+    peers::{PeersManager, ReputationChangeKind},
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
@@ -188,13 +188,16 @@ where
 
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
-        &self,
+        &mut self,
         peer_id: PeerId,
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
         trace!(target : "net", ?peer_id,  "received unexpected message");
-        // TODO: disconnect?
+        self.swarm
+            .state_mut()
+            .peers_mut()
+            .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
     }
 
     /// Sends an event to the [`TransactionsManager`] if configured
@@ -235,7 +238,10 @@ where
                 }
             },
             Err(_err) => {
-                // TODO report peer for bad block
+                self.swarm
+                    .state_mut()
+                    .peers_mut()
+                    .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
             }
         }
     }
@@ -326,6 +332,9 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id) => {
                 self.swarm.sessions_mut().disconnect(peer_id, None);
             }
+            NetworkHandleMessage::ReputationChange(peer_id, kind) => {
+                self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
+            }
         }
     }
 }
@@ -380,7 +389,13 @@ where
                 SwarmEvent::OutgoingTcpConnection { remote_addr } => {
                     trace!(target : "net", ?remote_addr,"Starting outbound connection.");
                 }
-                SwarmEvent::SessionEstablished { peer_id, remote_addr, capabilities, messages } => {
+                SwarmEvent::SessionEstablished {
+                    peer_id,
+                    remote_addr,
+                    capabilities,
+                    messages,
+                    direction,
+                } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                     trace!(
                         target : "net",
@@ -389,6 +404,10 @@ where
                         ?total_active,
                         "Session established"
                     );
+
+                    if direction.is_incoming() {
+                        this.swarm.state_mut().peers_mut().on_active_session(peer_id, remote_addr);
+                    }
 
                     this.event_listeners.send(NetworkEvent::SessionEstablished {
                         peer_id,
@@ -407,11 +426,35 @@ where
                         "Session disconnected"
                     );
 
+                    if error.is_some() {
+                        // If the connection was closed due to an error, we report the peer
+                        this.swarm.state_mut().peers_mut().on_connection_dropped(&peer_id);
+                    } else {
+                        // Gracefully disconnected
+                        this.swarm.state_mut().peers_mut().on_disconnected(&peer_id);
+                    }
+
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id });
                 }
                 SwarmEvent::IncomingPendingSessionClosed { .. } => {}
-                SwarmEvent::OutgoingPendingSessionClosed { .. } => {}
-                SwarmEvent::OutgoingConnectionError { .. } => {}
+                SwarmEvent::OutgoingPendingSessionClosed { peer_id, .. } => {
+                    this.swarm
+                        .state_mut()
+                        .peers_mut()
+                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                }
+                SwarmEvent::OutgoingConnectionError { peer_id, .. } => {
+                    this.swarm
+                        .state_mut()
+                        .peers_mut()
+                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                }
+                SwarmEvent::BadMessage { peer_id } => {
+                    this.swarm
+                        .state_mut()
+                        .peers_mut()
+                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                }
             }
         }
 

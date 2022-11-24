@@ -17,6 +17,8 @@ pub enum RequestError {
     UnsupportedCapability,
     #[error("Request timed out while awaiting response.")]
     Timeout,
+    #[error("Received bad response.")]
+    BadResponse,
 }
 
 impl<T> From<mpsc::error::SendError<T>> for RequestError {
