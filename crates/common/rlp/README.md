@@ -1,3 +1,3 @@
-# RLP encoder decoder crate
+## RLP encoder/decoder
 
-forked from erlier Apache licenced fastrlp crate, before it changed licence to GPL 
+Forked from an earlier Apache licenced version of the `fastrlp` crate, before it changed licence to GPL. 

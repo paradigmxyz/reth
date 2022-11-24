@@ -16,6 +16,9 @@ use std::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+mod client;
+pub use client::FetchClient;
+
 /// Manages data fetching operations.
 ///
 /// This type is hooked into the staged sync pipeline and delegates download request to available
@@ -31,7 +34,7 @@ pub struct StateFetcher {
     queued_requests: VecDeque<DownloadRequest>,
     /// Receiver for new incoming download requests
     download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
-    /// Sender for download requests, used to detach a [`HeadersDownloader`]
+    /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest>,
 }
 
@@ -215,9 +218,9 @@ impl StateFetcher {
         None
     }
 
-    /// Returns a new [`HeadersDownloader`] that can send requests to this type
-    pub(crate) fn headers_downloader(&self) -> HeadersDownloader {
-        HeadersDownloader { request_tx: self.download_requests_tx.clone() }
+    /// Returns a new [`FetchClient`] that can send requests to this type.
+    pub(crate) fn client(&self) -> FetchClient {
+        FetchClient { request_tx: self.download_requests_tx.clone() }
     }
 }
 
@@ -232,24 +235,6 @@ impl Default for StateFetcher {
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
         }
-    }
-}
-
-/// Front-end API for downloading headers.
-#[derive(Debug)]
-pub struct HeadersDownloader {
-    /// Sender half of the request channel.
-    request_tx: UnboundedSender<DownloadRequest>,
-}
-
-// === impl HeadersDownloader ===
-
-impl HeadersDownloader {
-    /// Sends a `GetBlockHeaders` request to an available peer.
-    pub async fn get_block_headers(&self, request: HeadersRequest) -> RequestResult<Vec<Header>> {
-        let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response })?;
-        rx.await?
     }
 }
 
@@ -305,8 +290,8 @@ struct Request<Req, Resp> {
     started: Instant,
 }
 
-/// Requests that can be sent to the Syncer from a [`HeadersDownloader`]
-enum DownloadRequest {
+/// Requests that can be sent to the Syncer from a [`FetchClient`]
+pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
