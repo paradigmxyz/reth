@@ -112,7 +112,7 @@ impl SessionCounter {
     }
 
     pub(crate) fn inc_pending_outbound(&mut self) {
-        self.pending_inbound += 1;
+        self.pending_outbound += 1;
     }
 
     pub(crate) fn dec_pending(&mut self, direction: &Direction) {
