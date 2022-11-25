@@ -28,25 +28,33 @@ pub trait Compact {
         Self: Sized;
 }
 
-impl Compact for u64 {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        let leading = self.leading_zeros() as usize / 8;
-        buf.put_slice(&self.to_be_bytes()[leading..]);
-        8 - leading
-    }
+macro_rules! impl_uint_compact {
+    ($(($name:tt, $size:tt)),+) => {
+        $(
+            impl Compact for $name {
+                fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                    let leading = self.leading_zeros() as usize / 8;
+                    buf.put_slice(&self.to_be_bytes()[leading..]);
+                    $size - leading
+                }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        if len > 0 {
-            let mut arr = [0; 8];
-            arr[8 - len..].copy_from_slice(&buf[..len]);
+                fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+                    if len > 0 {
+                        let mut arr = [0; $size];
+                        arr[$size - len..].copy_from_slice(&buf[..len]);
 
-            buf.advance(len);
+                        buf.advance(len);
 
-            return (u64::from_be_bytes(arr), buf)
-        }
-        (0, buf)
-    }
+                        return ($name::from_be_bytes(arr), buf)
+                    }
+                    (0, buf)
+                }
+            }
+        )+
+    };
 }
+
+impl_uint_compact!((u64, 8), (u128, 16));
 
 impl<T> Compact for Vec<T>
 where

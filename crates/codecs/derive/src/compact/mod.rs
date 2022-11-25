@@ -126,11 +126,13 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
 pub fn get_bit_size(ftype: &str) -> u8 {
     if ftype == "u64" || ftype == "BlockNumber" || ftype == "TxNumber" || ftype == "ChainId" {
         return 4
+    } else if ftype == "u128" {
+        return 5
     } else if ftype == "TxType" {
         return 2
     } else if ftype == "bool" || ftype == "Option" {
         return 1
-    } else if ftype == "U256" {
+    } else if ftype == "U256" || ftype == "TxHash" {
         return 6
     }
     0

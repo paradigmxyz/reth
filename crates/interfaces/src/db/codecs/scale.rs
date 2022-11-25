@@ -43,5 +43,4 @@ impl ScaleValue for Vec<u8> {}
 impl sealed::Sealed for Vec<u8> {}
 
 impl_compression_for_scale!(U256, H256, H160);
-impl_compression_for_scale!(TransactionSigned);
 impl_compression_for_scale!(u8, u32, u16, u64);

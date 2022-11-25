@@ -33,4 +33,4 @@ macro_rules! impl_compression_for_compact {
 }
 
 impl_compression_for_compact!(Header, Account, Log, Receipt, TxType, StorageEntry, StoredBlockBody);
-impl_compression_for_compact!(AccountBeforeTx);
+impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);

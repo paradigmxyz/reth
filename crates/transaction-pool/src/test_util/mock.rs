@@ -12,8 +12,8 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    Address, FromRecoveredTransaction, Transaction, TransactionSignedEcRecovered, TxHash, H256,
-    U256,
+    Address, FromRecoveredTransaction, Transaction, TransactionSignedEcRecovered, TxEip1559,
+    TxHash, TxLegacy, H256, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -342,17 +342,23 @@ impl FromRecoveredTransaction for MockTransaction {
         let transaction = tx.into_signed();
         let hash = transaction.hash;
         match transaction.transaction {
-            Transaction::Legacy { chain_id, nonce, gas_price, gas_limit, to, value, input } => {
-                MockTransaction::Legacy {
-                    hash,
-                    sender,
-                    nonce,
-                    gas_price: gas_price.into(),
-                    gas_limit,
-                    value: value.into(),
-                }
-            }
-            Transaction::Eip1559 {
+            Transaction::Legacy(TxLegacy {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+            }) => MockTransaction::Legacy {
+                hash,
+                sender,
+                nonce,
+                gas_price: gas_price.into(),
+                gas_limit,
+                value: value.into(),
+            },
+            Transaction::Eip1559(TxEip1559 {
                 chain_id,
                 nonce,
                 gas_limit,
@@ -362,7 +368,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 value,
                 input,
                 access_list,
-            } => MockTransaction::Eip1559 {
+            }) => MockTransaction::Eip1559 {
                 hash,
                 sender,
                 nonce,

@@ -50,7 +50,8 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 /// Generates code to implement the [`Compact`] trait method `to_compact`.
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
-    let known_types = ["H256", "H160", "Address", "Bloom", "Vec"];
+    let mut known_types = vec!["H256", "H160", "Address", "Bloom", "Vec"];
+    known_types.append(&mut vec!["TransactionKind", "AccessList", "Signature"]);
 
     // let mut handle = FieldListHandler::new(fields);
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));

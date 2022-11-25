@@ -45,7 +45,8 @@ pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
-    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxType,
+    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
+    TxEip2930, TxLegacy, TxType,
 };
 
 /// A block hash.

@@ -1,7 +1,7 @@
 use reth_interfaces::{provider::StateProvider, Error};
 use reth_primitives::{
-    Header, Transaction, TransactionKind, TransactionSignedEcRecovered, H160, H256, KECCAK_EMPTY,
-    U256,
+    Header, Transaction, TransactionKind, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TxLegacy, H160, H256, KECCAK_EMPTY, U256,
 };
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -79,7 +79,15 @@ pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header) {
 pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
     tx_env.caller = transaction.signer();
     match transaction.as_ref().as_ref() {
-        Transaction::Legacy { nonce, chain_id, gas_price, gas_limit, to, value, input } => {
+        Transaction::Legacy(TxLegacy {
+            nonce,
+            chain_id,
+            gas_price,
+            gas_limit,
+            to,
+            value,
+            input,
+        }) => {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*gas_price).into();
             tx_env.gas_priority_fee = None;
@@ -92,7 +100,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
         }
-        Transaction::Eip2930 {
+        Transaction::Eip2930(TxEip2930 {
             nonce,
             chain_id,
             gas_price,
@@ -101,7 +109,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             value,
             input,
             access_list,
-        } => {
+        }) => {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*gas_price).into();
             tx_env.gas_priority_fee = None;
@@ -124,7 +132,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
                 })
                 .collect();
         }
-        Transaction::Eip1559 {
+        Transaction::Eip1559(TxEip1559 {
             nonce,
             chain_id,
             gas_limit,
@@ -134,7 +142,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             value,
             input,
             access_list,
-        } => {
+        }) => {
             tx_env.gas_limit = *gas_limit;
             tx_env.gas_price = (*max_fee_per_gas).into();
             tx_env.gas_priority_fee = Some((*max_priority_fee_per_gas).into());
