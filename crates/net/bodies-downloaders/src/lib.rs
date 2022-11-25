@@ -9,3 +9,6 @@
 
 /// A naive concurrent downloader.
 pub mod concurrent;
+
+#[cfg(test)]
+mod test_utils;

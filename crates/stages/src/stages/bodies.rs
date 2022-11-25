@@ -466,10 +466,13 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             db::{models::StoredBlockBody, tables, DbCursorRO, DbTx, DbTxMut},
-            p2p::bodies::{
-                client::BodiesClient,
-                downloader::{BodiesStream, BodyDownloader},
-                error::{BodiesClientError, DownloadError},
+            p2p::{
+                bodies::{
+                    client::BodiesClient,
+                    downloader::{BodiesStream, BodyDownloader},
+                    error::{BodiesClientError, DownloadError},
+                },
+                error::RequestResult,
             },
             test_utils::{generators::random_block_range, TestConsensus},
         };
@@ -651,7 +654,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
-            async fn get_block_body(&self, _: H256) -> Result<BlockBody, BodiesClientError> {
+            async fn get_block_body(&self, _: Vec<H256>) -> RequestResult<Vec<BlockBody>> {
                 panic!("Noop client should not be called")
             }
         }

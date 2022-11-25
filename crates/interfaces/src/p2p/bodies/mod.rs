@@ -3,6 +3,3 @@ pub mod client;
 
 /// Block body downloaders.
 pub mod downloader;
-
-/// Error types.
-pub mod error;
