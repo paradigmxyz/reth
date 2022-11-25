@@ -105,6 +105,11 @@ impl NetworkHandle {
     pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
     }
+
+    /// Send full transactions to the peer
+    pub fn send_transactions(&self, peer_id: PeerId, msg: Arc<Transactions>) {
+        self.send_message(NetworkHandleMessage::SendTransaction { peer_id, msg })
+    }
 }
 
 struct NetworkInner {

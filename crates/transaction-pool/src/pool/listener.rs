@@ -1,6 +1,6 @@
 //! Listeners for the transaction-pool
 
-use crate::pool::events::TransactionEvent;
+use crate::{pool::events::TransactionEvent, traits::PropagateKind};
 use reth_primitives::{rpc::TxHash, H256};
 use std::{collections::HashMap, hash};
 use tokio::sync::mpsc::UnboundedSender;
@@ -45,6 +45,11 @@ impl PoolEventListener {
     /// Notify listeners about a transaction that was added to the queued pool.
     pub(crate) fn queued(&mut self, tx: &TxHash) {
         self.notify_with(tx, |notifier| notifier.queued());
+    }
+
+    /// Notify listeners about a transaction that was propagated.
+    pub(crate) fn propagated(&mut self, tx: &TxHash, peers: Vec<PropagateKind>) {
+        self.notify_with(tx, |notifier| notifier.propagated(peers));
     }
 
     /// Notify listeners about a transaction that was discarded.
@@ -97,6 +102,11 @@ impl PoolEventNotifier {
     fn mined(&mut self, block_hash: H256) {
         self.notify(TransactionEvent::Mined(block_hash));
         self.is_done = true;
+    }
+
+    /// Transaction was propagated.
+    fn propagated(&mut self, peers: Vec<PropagateKind>) {
+        self.notify(TransactionEvent::Propagated(peers));
     }
 
     /// Transaction was replaced with the given transaction
