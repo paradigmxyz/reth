@@ -134,7 +134,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             .get::<tables::CanonicalHeaders>(height)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: height })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
-        self.client.update_status(height, hash, H256::from_slice(&td));
+        self.client.update_status(height, hash, U256::from_little_endian(&td));
         Ok(())
     }
 
