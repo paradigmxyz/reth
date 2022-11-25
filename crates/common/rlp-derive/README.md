@@ -1,3 +1,3 @@
-# RLP derive crate
+## RLP derive crate
 
-forked from erlier Apache licenced fastrlp-derive crate, before it changed licence to GPL.
+Forked from an earlier Apache licenced version of the `fastrlp-derive` crate, before it changed licence to GPL. 

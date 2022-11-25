@@ -46,6 +46,7 @@ secp256k1 = { version = "0.24", features = [
 [dev-dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-tracing = { path = "../../tracing" }
 
 rand = "0.8"
 
