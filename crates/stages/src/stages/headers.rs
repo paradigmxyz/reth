@@ -255,7 +255,7 @@ mod tests {
         use crate::{
             stages::headers::HeaderStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -276,7 +276,7 @@ mod tests {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
-            db: StageTestDB,
+            db: TestStageDB,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -287,7 +287,7 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader: Arc::new(TestHeaderDownloader::new(client, consensus)),
-                    db: StageTestDB::default(),
+                    db: TestStageDB::default(),
                 }
             }
         }
@@ -295,7 +295,7 @@ mod tests {
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
 
-            fn db(&self) -> &StageTestDB {
+            fn db(&self) -> &TestStageDB {
                 &self.db
             }
 
@@ -408,7 +408,7 @@ mod tests {
                 let downloader = Arc::new(
                     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
                 );
-                Self { client, consensus, downloader, db: StageTestDB::default() }
+                Self { client, consensus, downloader, db: TestStageDB::default() }
             }
         }
 

@@ -58,8 +58,8 @@ pub struct UnwindOutput {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
-/// Stages receive [`StageDB`] - a wrapper around [`DBContainer`] which manages the
-/// lifecycle of a transaction, such as when to commit / reopen a new one etc.
+/// Stages receive [`StageDB`] which manages the lifecycle of a transaction,
+/// such as when to commit / reopen a new one etc.
 #[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.

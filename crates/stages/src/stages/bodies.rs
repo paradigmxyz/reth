@@ -454,7 +454,7 @@ mod tests {
         use crate::{
             stages::bodies::BodyStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -493,7 +493,7 @@ mod tests {
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
             responses: HashMap<H256, Result<BlockBody, DownloadError>>,
-            db: StageTestDB,
+            db: TestStageDB,
             batch_size: u64,
         }
 
@@ -502,7 +502,7 @@ mod tests {
                 Self {
                     consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
-                    db: StageTestDB::default(),
+                    db: TestStageDB::default(),
                     batch_size: 1000,
                 }
             }
@@ -524,7 +524,7 @@ mod tests {
         impl StageTestRunner for BodyTestRunner {
             type S = BodyStage<TestBodyDownloader, TestConsensus>;
 
-            fn db(&self) -> &StageTestDB {
+            fn db(&self) -> &TestStageDB {
                 &self.db
             }
 

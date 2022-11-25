@@ -3,10 +3,12 @@ use reth_db::{
     mdbx::{WriteMap, RW},
 };
 use reth_interfaces::db::{
-    self, models::BlockNumHash, tables, DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
+    self, models::BlockNumHash, tables, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
 };
 use reth_primitives::{BigEndianHash, BlockNumber, SealedHeader, H256, U256};
 use std::{borrow::Borrow, sync::Arc};
+
+use crate::db::StageDB;
 
 /// The [StageTestDB] is used as an internal
 /// database for testing stage implementation.
@@ -15,21 +17,21 @@ use std::{borrow::Borrow, sync::Arc};
 /// let db = StageTestDB::default();
 /// stage.execute(&mut db.container(), input);
 /// ```
-pub(crate) struct StageTestDB {
+pub(crate) struct TestStageDB {
     db: Arc<Env<WriteMap>>,
 }
 
-impl Default for StageTestDB {
+impl Default for TestStageDB {
     /// Create a new instance of [StageTestDB]
     fn default() -> Self {
         Self { db: create_test_db::<WriteMap>(EnvKind::RW) }
     }
 }
 
-impl StageTestDB {
-    /// Return a database wrapped in [DBContainer].
-    fn container(&self) -> DBContainer<'_, Env<WriteMap>> {
-        DBContainer::new(self.db.borrow()).expect("failed to create db container")
+impl TestStageDB {
+    /// Return a database wrapped in [StageDB].
+    fn db(&self) -> StageDB<'_, Env<WriteMap>> {
+        StageDB::new(self.db.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
@@ -42,9 +44,8 @@ impl StageTestDB {
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), db::Error>,
     {
-        let mut db = self.container();
-        let tx = db.get_mut();
-        f(tx)?;
+        let mut db = self.db();
+        f(&mut db)?;
         db.commit()?;
         Ok(())
     }
@@ -54,7 +55,7 @@ impl StageTestDB {
     where
         F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, db::Error>,
     {
-        f(self.container().get())
+        f(&self.db())
     }
 
     /// Check if the table is empty

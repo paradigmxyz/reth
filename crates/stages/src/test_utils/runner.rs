@@ -2,7 +2,7 @@ use reth_db::{kv::Env, mdbx::WriteMap};
 use std::borrow::Borrow;
 use tokio::sync::oneshot;
 
-use super::StageTestDB;
+use super::TestStageDB;
 use crate::{db::StageDB, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 
 #[derive(thiserror::Error, Debug)]
@@ -19,7 +19,7 @@ pub(crate) trait StageTestRunner {
     type S: Stage<Env<WriteMap>> + 'static;
 
     /// Return a reference to the database.
-    fn db(&self) -> &StageTestDB;
+    fn db(&self) -> &TestStageDB;
 
     /// Return an instance of a Stage.
     fn stage(&self) -> Self::S;

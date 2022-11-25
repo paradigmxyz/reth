@@ -82,7 +82,7 @@ impl<DB: Database> Stage<DB> for TxIndex {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
         UnwindStageTestRunner,
     };
     use reth_interfaces::{
@@ -98,13 +98,13 @@ mod tests {
 
     #[derive(Default)]
     pub(crate) struct TxIndexTestRunner {
-        db: StageTestDB,
+        db: TestStageDB,
     }
 
     impl StageTestRunner for TxIndexTestRunner {
         type S = TxIndex;
 
-        fn db(&self) -> &StageTestDB {
+        fn db(&self) -> &TestStageDB {
             &self.db
         }
 

@@ -5,16 +5,22 @@ use std::{
 
 use reth_interfaces::db::{
     models::{BlockNumHash, NumTransactions},
-    tables, DBContainer, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error,
-    Table,
+    tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table,
 };
 use reth_primitives::{BlockHash, BlockNumber};
 
 use crate::{DatabaseIntegrityError, StageError};
 
-/// A wrapper around [DBContainer] with utility methods
-/// for querying and storing data during staged sync.
-pub struct StageDB<'a, DB: Database>(DBContainer<'a, DB>);
+/// A container for any DB transaction that will open a new inner transaction when the current
+/// one is committed.
+// NOTE: This container is needed since `Transaction::commit` takes `mut self`, so methods in
+// the pipeline that just take a reference will not be able to commit their transaction and let
+// the pipeline continue. Is there a better way to do this?
+pub struct StageDB<'this, DB: Database> {
+    /// A handle to the DB.
+    pub(crate) db: &'this DB,
+    tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
+}
 
 impl<'a, DB: Database> Debug for StageDB<'a, DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -25,26 +31,62 @@ impl<'a, DB: Database> Debug for StageDB<'a, DB> {
 impl<'a, DB: Database> Deref for StageDB<'a, DB> {
     type Target = <DB as DatabaseGAT<'a>>::TXMut;
 
+    /// Dereference as the inner transaction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an inner transaction does not exist. This should never be the case unless
+    /// [StageDB::close] was called without following up with a call to [StageDB::open].
     fn deref(&self) -> &Self::Target {
-        self.0.get()
+        self.tx.as_ref().expect("Tried getting a reference to a non-existent transaction")
     }
 }
 
 impl<'a, DB: Database> DerefMut for StageDB<'a, DB> {
+    /// Dereference as a mutable reference to the inner transaction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an inner transaction does not exist. This should never be the case unless
+    /// [StageDB::close] was called without following up with a call to [StageDB::open].
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.get_mut()
+        self.tx.as_mut().expect("Tried getting a mutable reference to a non-existent transaction")
     }
 }
 
-impl<'a, DB: Database> StageDB<'a, DB> {
-    /// Create new instance
-    pub(crate) fn new(db: &'a DB) -> Result<Self, Error> {
-        Ok(Self(DBContainer::new(db)?))
+impl<'this, DB> StageDB<'this, DB>
+where
+    DB: Database,
+{
+    /// Create a new container with the given database handle.
+    ///
+    /// A new inner transaction will be opened.
+    pub fn new(db: &'this DB) -> Result<Self, Error> {
+        Ok(Self { db, tx: Some(db.tx_mut()?) })
     }
 
-    /// Commit the underlying transaction
-    pub(crate) fn commit(&mut self) -> Result<bool, Error> {
-        self.0.commit()
+    /// Commit the current inner transaction and open a new one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an inner transaction does not exist. This should never be the case unless
+    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    pub fn commit(&mut self) -> Result<bool, Error> {
+        let success =
+            self.tx.take().expect("Tried committing a non-existent transaction").commit()?;
+        self.tx = Some(self.db.tx_mut()?);
+        Ok(success)
+    }
+
+    /// Open a new inner transaction.
+    pub fn open(&mut self) -> Result<(), Error> {
+        self.tx = Some(self.db.tx_mut()?);
+        Ok(())
+    }
+
+    /// Close the current inner transaction.
+    pub fn close(&mut self) {
+        self.tx.take();
     }
 
     /// Query [tables::CanonicalHeaders] table for block hash by block number
@@ -128,5 +170,37 @@ impl<'a, DB: Database> StageDB<'a, DB> {
             self.delete::<T2>(value, None)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+// This ensures that we can use the GATs in the downstream staged exec pipeline.
+mod tests {
+    use super::*;
+    use reth_interfaces::db::mock::DatabaseMock;
+
+    #[async_trait::async_trait]
+    trait Stage<DB: Database> {
+        async fn run(&mut self, db: &mut StageDB<'_, DB>) -> ();
+    }
+
+    struct MyStage<'a, DB>(&'a DB);
+
+    #[async_trait::async_trait]
+    impl<'a, DB: Database> Stage<DB> for MyStage<'a, DB> {
+        async fn run(&mut self, db: &mut StageDB<'_, DB>) -> () {
+            let _tx = db.commit().unwrap();
+        }
+    }
+
+    #[test]
+    #[should_panic] // no tokio runtime configured
+    fn can_spawn() {
+        let db = DatabaseMock::default();
+        tokio::spawn(async move {
+            let mut container = StageDB::new(&db).unwrap();
+            let mut stage = MyStage(&db);
+            let _ = stage.run(&mut container);
+        });
     }
 }
