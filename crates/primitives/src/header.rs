@@ -203,12 +203,20 @@ impl Decodable for Header {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
     /// Locked Header fields.
     header: Header,
     /// Locked Header hash.
     hash: BlockHash,
+}
+
+impl Default for SealedHeader {
+    fn default() -> Self {
+        let header = Header::default();
+        let hash = header.hash_slow();
+        Self { header, hash }
+    }
 }
 
 impl Encodable for SealedHeader {

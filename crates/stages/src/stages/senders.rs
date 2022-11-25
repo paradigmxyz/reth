@@ -218,9 +218,9 @@ mod tests {
 
                     let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
                     let mut body_cursor = tx.cursor::<tables::BlockBodies>()?;
-                    let mut body_walker = body_cursor.walk((start_block, start_hash).into())?;
+                    let body_walker = body_cursor.walk((start_block, start_hash).into())?;
 
-                    while let Some(entry) = body_walker.next() {
+                    for entry in body_walker {
                         let (_, body) = entry?;
                         for tx_id in body.base_tx_id..body.base_tx_id + body.tx_amount {
                             let transaction = tx
