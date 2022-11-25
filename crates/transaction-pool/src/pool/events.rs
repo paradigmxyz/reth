@@ -1,3 +1,4 @@
+use crate::traits::PropagateKind;
 use reth_primitives::{TxHash, H256};
 use serde::{Deserialize, Serialize};
 
@@ -18,4 +19,6 @@ pub enum TransactionEvent {
     Discarded,
     /// Transaction became invalid indefinitely.
     Invalid,
+    /// Transaction was propagated to peers.
+    Propagated(Vec<PropagateKind>),
 }

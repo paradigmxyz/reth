@@ -69,7 +69,9 @@ use crate::{
     error::{PoolError, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
-    traits::{NewTransactionEvent, PoolStatus, PoolTransaction, TransactionOrigin},
+    traits::{
+        NewTransactionEvent, PoolStatus, PoolTransaction, PropagatedTransactions, TransactionOrigin,
+    },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator, U256,
 };
@@ -355,6 +357,13 @@ where
         txs: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pool.read().get_all(txs).collect()
+    }
+
+    /// Notify about propagated transactions.
+    pub(crate) fn on_propagated(&self, txs: PropagatedTransactions) {
+        let mut listener = self.event_listener.write();
+
+        txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers))
     }
 
     /// Number of transactions in the entire pool
