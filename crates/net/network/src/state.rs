@@ -100,8 +100,7 @@ where
         capabilities: Arc<Capabilities>,
         status: Status,
         request_tx: PeerRequestSender,
-    ) -> Result<(), AddSessionError> {
-        // TODO add capacity check
+    ) {
         debug_assert!(!self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
@@ -119,8 +118,6 @@ where
                 blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
             },
         );
-
-        Ok(())
     }
 
     /// Event hook for a disconnected session for the peer.
@@ -422,14 +419,5 @@ pub(crate) enum StateAction {
         peer_id: PeerId,
         /// Why the disconnect was initiated
         reason: Option<DisconnectReason>,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AddSessionError {
-    #[error("No capacity for new sessions")]
-    AtCapacity {
-        /// The peer of the session
-        peer: PeerId,
     },
 }

@@ -39,7 +39,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{instrument, trace, warn};
 
 mod active;
+mod config;
 mod handle;
+use crate::session::config::SessionCounter;
+pub use config::SessionsConfig;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -50,6 +53,8 @@ pub struct SessionId(usize);
 pub(crate) struct SessionManager {
     /// Tracks the identifier for the next session.
     next_id: usize,
+    /// Keeps track of all sessions
+    counter: SessionCounter,
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The node id of node
@@ -108,6 +113,7 @@ impl SessionManager {
 
         Self {
             next_id: 0,
+            counter: SessionCounter::new(config.limits),
             secret_key,
             peer_id,
             status,
@@ -155,7 +161,8 @@ impl SessionManager {
         stream: TcpStream,
         remote_addr: SocketAddr,
     ) -> Result<SessionId, ExceedsSessionLimit> {
-        // TODO(mattsse): enforce limits
+        self.counter.ensure_pending_inbound()?;
+
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
@@ -171,8 +178,9 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle = PendingSessionHandle { disconnect_tx };
+        let handle = PendingSessionHandle { disconnect_tx, direction: Direction::Incoming };
         self.pending_sessions.insert(session_id, handle);
+        self.counter.inc_pending_inbound();
         Ok(session_id)
     }
 
@@ -193,8 +201,10 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle = PendingSessionHandle { disconnect_tx };
+        let handle =
+            PendingSessionHandle { disconnect_tx, direction: Direction::Outgoing(remote_peer_id) };
         self.pending_sessions.insert(session_id, handle);
+        self.counter.inc_pending_outbound();
     }
 
     /// Initiates a shutdown of the channel.
@@ -212,6 +222,20 @@ impl SessionManager {
         if let Some(session) = self.active_sessions.get_mut(peer_id) {
             let _ = session.commands_to_session.try_send(SessionCommand::Message(msg));
         }
+    }
+
+    /// Removes the [`PendingSessionHandle`] if it exists.
+    fn remove_pending_session(&mut self, id: &SessionId) -> Option<PendingSessionHandle> {
+        let session = self.pending_sessions.remove(id)?;
+        self.counter.dec_pending(&session.direction);
+        Some(session)
+    }
+
+    /// Removes the [`PendingSessionHandle`] if it exists.
+    fn remove_active_session(&mut self, id: &PeerId) -> Option<ActiveSessionHandle> {
+        let session = self.active_sessions.remove(id)?;
+        self.counter.dec_active(&session.direction);
+        Some(session)
     }
 
     /// This polls all the session handles and returns [`SessionEvent`].
@@ -232,7 +256,7 @@ impl SessionManager {
                             ?peer_id,
                             "gracefully disconnected active session."
                         );
-                        let _ = self.active_sessions.remove(&peer_id);
+                        self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::Disconnected { peer_id, remote_addr })
                     }
                     ActiveSessionMessage::ClosedOnConnectionError {
@@ -241,7 +265,7 @@ impl SessionManager {
                         error,
                     } => {
                         trace!(target : "net::session",  ?peer_id, ?error,"closed session.");
-                        let _ = self.active_sessions.remove(&peer_id);
+                        self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
                             peer_id,
@@ -287,7 +311,7 @@ impl SessionManager {
                     direction,
                 } => {
                     // move from pending to established.
-                    let _ = self.pending_sessions.remove(&session_id);
+                    self.remove_pending_session(&session_id);
 
                     let (commands_to_session, commands_rx) =
                         mpsc::channel(self.session_command_buffer);
@@ -314,6 +338,7 @@ impl SessionManager {
                     self.spawn(session);
 
                     let handle = ActiveSessionHandle {
+                        direction,
                         session_id,
                         remote_id: peer_id,
                         established: Instant::now(),
@@ -322,6 +347,7 @@ impl SessionManager {
                     };
 
                     self.active_sessions.insert(peer_id, handle);
+                    self.counter.inc_active(&direction);
 
                     return Poll::Ready(SessionEvent::SessionEstablished {
                         peer_id,
@@ -339,7 +365,7 @@ impl SessionManager {
                         ?remote_addr,
                         "disconnected pending session"
                     );
-                    let _ = self.pending_sessions.remove(&session_id);
+                    self.remove_pending_session(&session_id);
                     return match direction {
                         Direction::Incoming => {
                             Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
@@ -370,7 +396,7 @@ impl SessionManager {
                         ?peer_id,
                         "connection refused"
                     );
-                    let _ = self.pending_sessions.remove(&session_id);
+                    self.remove_pending_session(&session_id);
                     return Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                         remote_addr,
                         peer_id,
@@ -383,7 +409,7 @@ impl SessionManager {
                     error,
                     direction,
                 } => {
-                    let _ = self.pending_sessions.remove(&session_id);
+                    self.remove_pending_session(&session_id);
                     warn!(
                         target : "net::session",
                         ?error,
@@ -391,7 +417,7 @@ impl SessionManager {
                         ?remote_addr,
                         "ecies auth failed"
                     );
-                    let _ = self.pending_sessions.remove(&session_id);
+                    self.remove_pending_session(&session_id);
                     return match direction {
                         Direction::Incoming => {
                             Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
@@ -412,41 +438,6 @@ impl SessionManager {
         }
 
         Poll::Pending
-    }
-}
-
-/// Configuration options when creating a [`SessionsManager`].
-pub struct SessionsConfig {
-    /// Size of the session command buffer (per session task).
-    pub session_command_buffer: usize,
-    /// Size of the session event channel buffer.
-    pub session_event_buffer: usize,
-}
-
-impl Default for SessionsConfig {
-    fn default() -> Self {
-        SessionsConfig {
-            // This should be sufficient to slots for handling commands sent to the session task,
-            // since the manager is the sender.
-            session_command_buffer: 10,
-            // This should be greater since the manager is the receiver. The total size will be
-            // `buffer + num sessions`. Each session can therefor fit at least 1 message in the
-            // channel. The buffer size is additional capacity. The channel is always drained on
-            // `poll`.
-            session_event_buffer: 64,
-        }
-    }
-}
-
-impl SessionsConfig {
-    /// Sets the buffer size for the bounded communication channel between the manager and its
-    /// sessions for events emitted by the sessions.
-    ///
-    /// It is expected, that the background session task will stall if they outpace the manager. The
-    /// buffer size provides backpressure on the network I/O.
-    pub fn with_session_event_buffer(mut self, n: usize) -> Self {
-        self.session_event_buffer = n;
-        self
     }
 }
 
@@ -509,7 +500,7 @@ pub(crate) enum SessionEvent {
 /// accepted.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Session limit reached {0}")]
-pub struct ExceedsSessionLimit(usize);
+pub struct ExceedsSessionLimit(pub(crate) u32);
 
 /// Starts the authentication process for a connection initiated by a remote peer.
 ///
@@ -598,6 +589,7 @@ impl Direction {
     }
 }
 
+/// Authenticates a session
 async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
