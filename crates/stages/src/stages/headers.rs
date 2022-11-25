@@ -131,7 +131,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             .get::<tables::CanonicalHeaders>(height)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: height })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
-        self.client.update_status(height, hash, H256::from_slice(&td));
+        self.client.update_status(height, hash, H256::from_slice(&td).into_uint());
         Ok(())
     }
 
@@ -187,7 +187,9 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner};
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID,
+    };
     use assert_matches::assert_matches;
     use reth_interfaces::p2p::error::RequestError;
     use test_runner::HeadersTestRunner;
