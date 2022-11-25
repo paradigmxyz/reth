@@ -51,6 +51,11 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
     let mut known_types = vec!["H256", "H160", "Address", "Bloom", "Vec"];
+
+    // Only types without `bytes::Bytes` should be added here. It's currently manually added, since
+    // it's hard to figure out with derive_macro which types have bytes::Bytes fields.
+    //
+    // This removes the requirement of the field to be placed last in the struct.
     known_types.append(&mut vec!["TransactionKind", "AccessList", "Signature"]);
 
     // let mut handle = FieldListHandler::new(fields);
