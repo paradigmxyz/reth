@@ -1,36 +1,43 @@
 //! Testing support for headers related interfaces.
 use crate::{
     consensus::{self, Consensus},
-    p2p::headers::{
-        client::{HeadersClient, HeadersRequest, HeadersResponse, HeadersStream},
-        downloader::HeaderDownloader,
-        error::DownloadError,
+    p2p::{
+        error::{RequestError, RequestResult},
+        headers::{
+            client::{HeadersClient, HeadersRequest},
+            downloader::{HeaderBatchDownload, HeaderDownloader},
+            error::DownloadError,
+        },
+        traits::BatchDownload,
     },
 };
-use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512};
+use futures::{Future, FutureExt, Stream};
+use reth_eth_wire::BlockHeaders;
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
-    collections::HashSet,
+    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    task::{ready, Context, Poll},
     time::Duration,
 };
-use tokio::sync::{broadcast, mpsc, watch};
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio::sync::{watch, Mutex};
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
 pub struct TestHeaderDownloader {
     client: Arc<TestHeadersClient>,
     consensus: Arc<TestConsensus>,
+    limit: u64,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>) -> Self {
-        Self { client, consensus }
+    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>, limit: u64) -> Self {
+        Self { client, consensus, limit }
     }
 }
 
@@ -51,99 +58,104 @@ impl HeaderDownloader for TestHeaderDownloader {
         &self.client
     }
 
-    async fn download(
+    fn download(
         &self,
-        _: &SealedHeader,
-        _: &ForkchoiceState,
-    ) -> Result<Vec<SealedHeader>, DownloadError> {
-        // call consensus stub first. fails if the flag is set
+        _head: SealedHeader,
+        _forkchoice: ForkchoiceState,
+    ) -> HeaderBatchDownload<'_> {
+        Box::pin(TestDownload {
+            client: Arc::clone(&self.client),
+            consensus: Arc::clone(&self.consensus),
+            limit: self.limit,
+        })
+    }
+}
+
+struct TestDownload {
+    client: Arc<TestHeadersClient>,
+    consensus: Arc<TestConsensus>,
+    limit: u64,
+}
+
+impl Future for TestDownload {
+    type Output = Result<Vec<SealedHeader>, DownloadError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let empty = SealedHeader::default();
-        self.consensus
-            .validate_header(&empty, &empty)
-            .map_err(|error| DownloadError::HeaderValidation { hash: empty.hash(), error })?;
-
-        let stream = self.client.stream_headers().await;
-        let stream = stream.timeout(Duration::from_secs(1));
-
-        match Box::pin(stream).try_next().await {
-            Ok(Some(res)) => {
-                let mut headers = res.headers.iter().map(|h| h.clone().seal()).collect::<Vec<_>>();
-                if !headers.is_empty() {
-                    headers.sort_unstable_by_key(|h| h.number);
-                    headers.remove(0); // remove head from response
-                    headers.reverse();
-                }
-                Ok(headers)
-            }
-            _ => Err(DownloadError::Timeout { request_id: 0 }),
+        if let Err(error) = self.consensus.validate_header(&empty, &empty) {
+            return Poll::Ready(Err(DownloadError::HeaderValidation { hash: empty.hash(), error }))
         }
+
+        let request = HeadersRequest {
+            limit: self.limit,
+            reverse: true,
+            start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
+        };
+        match ready!(self.client.get_headers(request).poll_unpin(cx)) {
+            Ok(resp) => {
+                let mut headers = resp.0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                headers.sort_unstable_by_key(|h| h.number);
+                Poll::Ready(Ok(headers))
+            }
+            Err(err) => Poll::Ready(Err(match err {
+                RequestError::Timeout => DownloadError::Timeout,
+                _ => DownloadError::RequestError(err),
+            })),
+        }
+    }
+}
+
+impl Stream for TestDownload {
+    type Item = Result<SealedHeader, DownloadError>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        todo!()
+    }
+}
+
+impl BatchDownload for TestDownload {
+    type Ok = SealedHeader;
+    type Error = DownloadError;
+
+    fn into_stream_unordered(self) -> Box<dyn Stream<Item = Result<Self::Ok, Self::Error>>> {
+        Box::new(self)
     }
 }
 
 /// A test client for fetching headers
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TestHeadersClient {
-    req_tx: mpsc::Sender<(u64, HeadersRequest)>,
-    req_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, HeadersRequest)>>>,
-    res_tx: broadcast::Sender<HeadersResponse>,
-    res_rx: broadcast::Receiver<HeadersResponse>,
-}
-
-impl Default for TestHeadersClient {
-    /// Construct a new test header downloader.
-    fn default() -> Self {
-        let (req_tx, req_rx) = mpsc::channel(1);
-        let (res_tx, res_rx) = broadcast::channel(1);
-        Self { req_tx, req_rx: Arc::new(tokio::sync::Mutex::new(req_rx)), res_tx, res_rx }
-    }
+    responses: Arc<Mutex<Vec<Header>>>,
+    error: Arc<Mutex<Option<RequestError>>>,
 }
 
 impl TestHeadersClient {
-    /// Helper for interacting with the environment on each request, allowing the client
-    /// to also reply to messages.
-    pub async fn on_header_request<T, F>(&self, mut count: usize, mut f: F) -> Vec<T>
-    where
-        F: FnMut(u64, HeadersRequest) -> T,
-    {
-        let mut rx = self.req_rx.lock().await;
-        let mut results = vec![];
-        while let Some((id, req)) = rx.recv().await {
-            results.push(f(id, req));
-            count -= 1;
-            if count == 0 {
-                break
-            }
-        }
-        results
+    /// Adds headers to the set.
+    pub async fn extend(&self, headers: impl IntoIterator<Item = Header>) {
+        let mut lock = self.responses.lock().await;
+        lock.extend(headers);
     }
 
-    /// Helper for pushing responses to the client
-    pub fn send_header_response(&self, id: u64, headers: Vec<Header>) {
-        self.res_tx.send((id, headers).into()).expect("failed to send header response");
-    }
-
-    /// Helper for pushing responses to the client
-    pub async fn send_header_response_delayed(&self, id: u64, headers: Vec<Header>, secs: u64) {
-        tokio::time::sleep(Duration::from_secs(secs)).await;
-        self.send_header_response(id, headers);
+    /// Set repsonse error
+    pub async fn set_error(&self, err: RequestError) {
+        let mut lock = self.error.lock().await;
+        lock.replace(err);
     }
 }
 
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    // noop
-    async fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
+    fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
 
-    async fn send_header_request(&self, id: u64, request: HeadersRequest) -> HashSet<H512> {
-        self.req_tx.send((id, request)).await.expect("failed to send request");
-        HashSet::default()
-    }
-
-    async fn stream_headers(&self) -> HeadersStream {
-        if !self.res_rx.is_empty() {
-            println!("WARNING: broadcast receiver already contains messages.")
+    async fn get_headers(&self, request: HeadersRequest) -> RequestResult<BlockHeaders> {
+        if let Some(err) = &mut *self.error.lock().await {
+            return Err(err.clone())
         }
-        Box::pin(BroadcastStream::new(self.res_rx.resubscribe()).filter_map(|e| e.ok()))
+
+        let mut lock = self.responses.lock().await;
+        let len = lock.len().min(request.limit as usize);
+        let resp = lock.drain(..len).collect();
+        return Ok(BlockHeaders(resp))
     }
 }
 

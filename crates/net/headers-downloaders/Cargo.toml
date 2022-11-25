@@ -8,10 +8,14 @@ readme = "README.md"
 description = "Implementations of various header downloader"
 
 [dependencies]
-async-trait = "0.1.58"
+# reth
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-rpc-types = { path = "../rpc-types" }
+
+# async
+async-trait = "0.1.58"
+futures = "0.3"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

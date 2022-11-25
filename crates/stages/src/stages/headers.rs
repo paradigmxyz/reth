@@ -73,15 +73,15 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
-        let headers = match self.downloader.download(&head, &forkchoice).await {
+        let headers = match self.downloader.download(head, forkchoice).await {
             Ok(res) => {
                 // TODO: validate the result order?
                 // at least check if it attaches (first == tip && last == last_hash)
                 res
             }
             Err(e) => match e {
-                DownloadError::Timeout { request_id } => {
-                    warn!("no response for header request {request_id}");
+                DownloadError::Timeout => {
+                    warn!("no response for header request");
                     return Ok(ExecOutput {
                         stage_progress: last_block_num,
                         reached_tip: false,
@@ -92,10 +92,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                     warn!("Validation error for header {hash}: {error}");
                     return Err(StageError::Validation { block: last_block_num, error })
                 }
-                // TODO: this error is never propagated, clean up
-                // DownloadError::MismatchedHeaders { .. } => {
-                //     return Err(StageError::Validation { block: last_block_num })
-                // }
+                // TODO: handle unreachable
                 _ => unreachable!(),
             },
         };
@@ -134,7 +131,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             .get::<tables::CanonicalHeaders>(height)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: height })?;
         let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
-        self.client.update_status(height, hash, H256::from_slice(&td)).await;
+        self.client.update_status(height, hash, H256::from_slice(&td));
         Ok(())
     }
 
@@ -163,7 +160,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let mut latest = None;
         // Since the headers were returned in descending order,
         // iterate them in the reverse order
-        for header in headers.into_iter().rev() {
+        for header in headers.into_iter() {
             if header.number == 0 {
                 continue
             }
@@ -194,6 +191,7 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
+    use reth_interfaces::p2p::error::RequestError;
     use test_runner::HeadersTestRunner;
 
     stage_test_suite!(HeadersTestRunner);
@@ -203,15 +201,20 @@ mod tests {
     #[tokio::test]
     // Validate that the execution does not fail on timeout
     async fn execute_timeout() {
+        let (previous_stage, stage_progress) = (500, 100);
         let mut runner = HeadersTestRunner::default();
-        let input = ExecInput::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
         runner.seed_execution(input).expect("failed to seed execution");
+        runner.client.set_error(RequestError::Timeout).await;
         let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 0 })
+            Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 100 })
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
@@ -242,23 +245,17 @@ mod tests {
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
 
+        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
         runner.consensus.update_tip(tip.hash());
 
-        let download_result = headers.clone();
-        runner
-            .client
-            .on_header_request(1, |id, _| {
-                let response = download_result.iter().map(|h| h.clone().unseal()).collect();
-                runner.client.send_header_response(id, response)
-            })
-            .await;
-
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done: true, reached_tip: true, stage_progress }) if stage_progress == tip.number
+            Ok(ExecOutput { done: true, reached_tip: true, stage_progress })
+                if stage_progress == tip.number
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
@@ -298,7 +295,7 @@ mod tests {
                 Self {
                     client: client.clone(),
                     consensus: consensus.clone(),
-                    downloader: Arc::new(TestHeaderDownloader::new(client, consensus)),
+                    downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
                     db: StageTestDB::default(),
                 }
             }
@@ -339,23 +336,6 @@ mod tests {
                 let mut headers = random_header_range(start + 1..end, head.hash());
                 headers.insert(0, head);
                 Ok(headers)
-            }
-
-            async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
-                let tip = if !headers.is_empty() {
-                    headers.last().unwrap().hash()
-                } else {
-                    H256::from_low_u64_be(rand::random())
-                };
-                self.consensus.update_tip(tip);
-                self.client
-                    .send_header_response_delayed(
-                        0,
-                        headers.into_iter().map(|h| h.unseal()).collect(),
-                        1,
-                    )
-                    .await;
-                Ok(())
             }
 
             /// Validate stored headers
@@ -405,6 +385,17 @@ mod tests {
                 };
                 Ok(())
             }
+
+            async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
+                self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
+                let tip = if !headers.is_empty() {
+                    headers.last().unwrap().hash()
+                } else {
+                    H256::from_low_u64_be(rand::random())
+                };
+                self.consensus.update_tip(tip);
+                Ok(())
+            }
         }
 
         impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
@@ -414,6 +405,7 @@ mod tests {
         }
 
         impl HeadersTestRunner<LinearDownloader<TestConsensus, TestHeadersClient>> {
+            #[allow(unused)]
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
                 let consensus = Arc::new(TestConsensus::default());
