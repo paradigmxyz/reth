@@ -117,6 +117,12 @@ impl<C> NetworkConfigBuilder<C> {
         }
     }
 
+    /// Sets a custom config for how sessions are handled.
+    pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
+        self.sessions_config = Some(config);
+        self
+    }
+
     /// Sets the genesis hash for the network.
     pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
         self.genesis_hash = genesis_hash;
