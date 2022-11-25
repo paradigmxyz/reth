@@ -13,8 +13,5 @@ pub mod headers;
 /// interacting with the network implementation
 pub mod error;
 
-use futures::Stream;
-use std::pin::Pin;
-
-/// The stream of responses from the connected peers, generic over the response type.
-pub type MessageStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+/// Commonly used traits when implementing clients.
+pub mod traits;
