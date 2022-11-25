@@ -72,6 +72,7 @@ pub(crate) enum PendingSessionEvent {
         capabilities: Arc<Capabilities>,
         status: Status,
         conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
+        direction: Direction,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
@@ -88,7 +89,12 @@ pub(crate) enum PendingSessionEvent {
         error: io::Error,
     },
     /// Thrown when authentication via Ecies failed.
-    EciesAuthError { remote_addr: SocketAddr, session_id: SessionId, error: ECIESError },
+    EciesAuthError {
+        remote_addr: SocketAddr,
+        session_id: SessionId,
+        error: ECIESError,
+        direction: Direction,
+    },
 }
 
 /// Commands that can be sent to the spawned session.
@@ -131,5 +137,10 @@ pub(crate) enum ActiveSessionMessage {
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
         message: CapabilityMessage,
+    },
+    /// Received a bad message from the peer.
+    BadMessage {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
     },
 }

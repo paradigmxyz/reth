@@ -1,7 +1,8 @@
 use crate::{
+    fetch::StatusUpdate,
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
-    session::{SessionEvent, SessionId, SessionManager},
+    session::{Direction, SessionEvent, SessionId, SessionManager},
     state::{AddSessionError, NetworkState, StateAction},
 };
 use futures::Stream;
@@ -29,7 +30,7 @@ use tracing::warn;
 /// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 #[must_use = "Swarm does nothing unless polled"]
-pub struct Swarm<C> {
+pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
@@ -86,6 +87,7 @@ where
                 capabilities,
                 status,
                 messages,
+                direction,
             } => match self.state.on_session_activated(
                 peer_id,
                 capabilities.clone(),
@@ -97,13 +99,15 @@ where
                     remote_addr,
                     capabilities,
                     messages,
+                    direction,
                 }),
                 Err(err) => {
                     match err {
                         AddSessionError::AtCapacity { peer } => {
-                            self.sessions.disconnect(peer, Some(DisconnectReason::TooManyPeers))
+                            self.sessions.disconnect(peer, Some(DisconnectReason::TooManyPeers));
                         }
                     };
+                    self.state.peers_mut().on_disconnected(&peer_id);
                     None
                 }
             },
@@ -125,14 +129,12 @@ where
             }
             SessionEvent::SessionClosedOnConnectionError { peer_id, remote_addr, error } => {
                 self.state.on_session_closed(peer_id);
-
-                // TODO(mattsse): reputation change on error
-
                 Some(SwarmEvent::SessionClosed { peer_id, remote_addr, error: Some(error) })
             }
             SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                 Some(SwarmEvent::OutgoingConnectionError { peer_id, remote_addr, error })
             }
+            SessionEvent::BadMessage { peer_id } => Some(SwarmEvent::BadMessage { peer_id }),
         }
     }
 
@@ -176,6 +178,7 @@ where
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
             }
+            StateAction::StatusUpdate(status) => return Some(SwarmEvent::StatusUpdate(status)),
         }
         None
     }
@@ -232,7 +235,9 @@ where
 
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
-pub enum SwarmEvent {
+pub(crate) enum SwarmEvent {
+    /// Received a node status update.
+    StatusUpdate(StatusUpdate),
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
@@ -247,6 +252,11 @@ pub enum SwarmEvent {
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
         message: CapabilityMessage,
+    },
+    /// Received a bad message from the peer.
+    BadMessage {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
     },
     /// The underlying tcp listener closed.
     TcpListenerClosed {
@@ -275,6 +285,7 @@ pub enum SwarmEvent {
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
+        direction: Direction,
     },
     SessionClosed {
         peer_id: PeerId,

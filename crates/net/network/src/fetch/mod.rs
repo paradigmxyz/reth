@@ -7,7 +7,7 @@ use reth_interfaces::p2p::{
     error::{RequestError, RequestResult},
     headers::client::HeadersRequest,
 };
-use reth_primitives::{Header, PeerId, H256};
+use reth_primitives::{Header, PeerId, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
@@ -15,6 +15,9 @@ use std::{
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+mod client;
+pub use client::FetchClient;
 
 /// Manages data fetching operations.
 ///
@@ -31,8 +34,12 @@ pub struct StateFetcher {
     queued_requests: VecDeque<DownloadRequest>,
     /// Receiver for new incoming download requests
     download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
-    /// Sender for download requests, used to detach a [`HeadersDownloader`]
+    /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest>,
+    /// Receiver for new incoming [`StatusUpdate`] requests.
+    status_rx: UnboundedReceiverStream<StatusUpdate>,
+    /// Sender for updating the status, used to detach a [`FetchClient`]
+    status_tx: UnboundedSender<StatusUpdate>,
 }
 
 // === impl StateSyncer ===
@@ -115,6 +122,10 @@ impl StateFetcher {
         // drain buffered actions first
         if let Some(action) = self.poll_action() {
             return Poll::Ready(action)
+        }
+
+        if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
+            return Poll::Ready(FetchAction::StatusUpdate(status))
         }
 
         loop {
@@ -215,15 +226,19 @@ impl StateFetcher {
         None
     }
 
-    /// Returns a new [`HeadersDownloader`] that can send requests to this type
-    pub(crate) fn headers_downloader(&self) -> HeadersDownloader {
-        HeadersDownloader { request_tx: self.download_requests_tx.clone() }
+    /// Returns a new [`FetchClient`] that can send requests to this type.
+    pub(crate) fn client(&self) -> FetchClient {
+        FetchClient {
+            request_tx: self.download_requests_tx.clone(),
+            status_tx: self.status_tx.clone(),
+        }
     }
 }
 
 impl Default for StateFetcher {
     fn default() -> Self {
         let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
+        let (status_tx, status_rx) = mpsc::unbounded_channel();
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
@@ -231,25 +246,9 @@ impl Default for StateFetcher {
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+            status_rx: UnboundedReceiverStream::new(status_rx),
+            status_tx,
         }
-    }
-}
-
-/// Front-end API for downloading headers.
-#[derive(Debug)]
-pub struct HeadersDownloader {
-    /// Sender half of the request channel.
-    request_tx: UnboundedSender<DownloadRequest>,
-}
-
-// === impl HeadersDownloader ===
-
-impl HeadersDownloader {
-    /// Sends a `GetBlockHeaders` request to an available peer.
-    pub async fn get_block_headers(&self, request: HeadersRequest) -> RequestResult<Vec<Header>> {
-        let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response })?;
-        rx.await?
     }
 }
 
@@ -305,8 +304,16 @@ struct Request<Req, Resp> {
     started: Instant,
 }
 
-/// Requests that can be sent to the Syncer from a [`HeadersDownloader`]
-enum DownloadRequest {
+/// A message to update the status.
+#[derive(Debug, Clone)]
+pub(crate) struct StatusUpdate {
+    pub(crate) height: u64,
+    pub(crate) hash: H256,
+    pub(crate) total_difficulty: U256,
+}
+
+/// Requests that can be sent to the Syncer from a [`FetchClient`]
+pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
@@ -337,6 +344,8 @@ pub(crate) enum FetchAction {
         /// The request to send
         request: BlockRequest,
     },
+    /// Propagate a received status update for the node
+    StatusUpdate(StatusUpdate),
 }
 
 /// Outcome of a processed response.

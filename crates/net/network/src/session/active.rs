@@ -110,17 +110,18 @@ impl ActiveSession {
 
         /// Processes a response received from the peer
         macro_rules! on_response {
-            ($resp:ident, $item:ident) => {
+            ($this:ident, $resp:ident, $item:ident) => {
                 let RequestPair { request_id, message } = $resp;
                 #[allow(clippy::collapsible_match)]
                 if let Some(resp) = self.inflight_requests.remove(&request_id) {
                     if let PeerRequest::$item { response, .. } = resp {
                         let _ = response.send(Ok(message));
                     } else {
-                        // TODO handle bad response
+                        resp.send_bad_response();
+                        $this.on_bad_message();
                     }
                 } else {
-                    // TODO handle unexpected response
+                    $this.on_bad_message()
                 }
             };
         }
@@ -147,31 +148,31 @@ impl ActiveSession {
                 on_request!(req, BlockHeaders, GetBlockHeaders);
             }
             EthMessage::BlockHeaders(resp) => {
-                on_response!(resp, GetBlockHeaders);
+                on_response!(self, resp, GetBlockHeaders);
             }
             EthMessage::GetBlockBodies(req) => {
                 on_request!(req, BlockBodies, GetBlockBodies);
             }
             EthMessage::BlockBodies(resp) => {
-                on_response!(resp, GetBlockBodies);
+                on_response!(self, resp, GetBlockBodies);
             }
             EthMessage::GetPooledTransactions(req) => {
                 on_request!(req, PooledTransactions, GetPooledTransactions);
             }
             EthMessage::PooledTransactions(resp) => {
-                on_response!(resp, GetPooledTransactions);
+                on_response!(self, resp, GetPooledTransactions);
             }
             EthMessage::GetNodeData(req) => {
                 on_request!(req, NodeData, GetNodeData);
             }
             EthMessage::NodeData(resp) => {
-                on_response!(resp, GetNodeData);
+                on_response!(self, resp, GetNodeData);
             }
             EthMessage::GetReceipts(req) => {
                 on_request!(req, Receipts, GetReceipts);
             }
             EthMessage::Receipts(resp) => {
-                on_response!(resp, GetReceipts);
+                on_response!(self, resp, GetReceipts);
             }
         };
 
@@ -239,6 +240,13 @@ impl ActiveSession {
     ) -> Result<(), mpsc::error::TrySendError<ActiveSessionMessage>> {
         self.to_session
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
+    }
+
+    /// Notify the manager that the peer sent a bad message
+    fn on_bad_message(&self) {
+        let _ = self
+            .to_session
+            .try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
     }
 
     /// Report back that this session has been closed.
@@ -514,8 +522,8 @@ mod tests {
                     remote_addr,
                     peer_id,
                     capabilities,
-                    status: _,
                     conn,
+                    ..
                 } => {
                     let (_to_session_tx, messages_rx) = mpsc::channel(10);
                     let (commands_to_session, commands_rx) = mpsc::channel(10);

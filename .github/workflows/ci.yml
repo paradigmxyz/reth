@@ -34,6 +34,26 @@ jobs:
           command: nextest
           args: run --locked --workspace --all-features
 
+      - name: Install fuzzer
+        run: cargo install cargo-test-fuzz afl
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install fuzzer
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-test-fuzz afl
+
       - name: Run fuzz tests
         run: | 
           ./.github/scripts/fuzz.sh reth-primitives

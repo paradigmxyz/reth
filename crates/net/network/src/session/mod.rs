@@ -1,6 +1,7 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
 use crate::{
+    fetch::StatusUpdate,
     message::PeerMessage,
     session::{
         active::ActiveSession,
@@ -138,7 +139,14 @@ impl SessionManager {
         self.spawned_tasks.spawn(async move { f.await });
     }
 
-    /// A incoming TCP connection was received. This starts the authentication process to turn this
+    /// Invoked on a received status update
+    pub(crate) fn on_status_update(&mut self, status: StatusUpdate) {
+        self.status.blockhash = status.hash;
+        self.status.total_difficulty = status.total_difficulty;
+        self.fork_filter.set_head(status.height);
+    }
+
+    /// An incoming TCP connection was received. This starts the authentication process to turn this
     /// stream into an active peer session.
     ///
     /// Returns an error if the configured limit has been reached.
@@ -246,6 +254,9 @@ impl SessionManager {
                     ActiveSessionMessage::InvalidMessage { peer_id, capabilities, message } => {
                         Poll::Ready(SessionEvent::InvalidMessage { peer_id, message, capabilities })
                     }
+                    ActiveSessionMessage::BadMessage { peer_id } => {
+                        Poll::Ready(SessionEvent::BadMessage { peer_id })
+                    }
                 }
             }
         }
@@ -273,6 +284,7 @@ impl SessionManager {
                     capabilities,
                     conn,
                     status,
+                    direction,
                 } => {
                     // move from pending to established.
                     let _ = self.pending_sessions.remove(&session_id);
@@ -317,6 +329,7 @@ impl SessionManager {
                         capabilities,
                         status,
                         messages,
+                        direction,
                     })
                 }
                 PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -358,12 +371,18 @@ impl SessionManager {
                         "connection refused"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
-                    return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                    return Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                         remote_addr,
+                        peer_id,
                         error: None,
                     })
                 }
-                PendingSessionEvent::EciesAuthError { remote_addr, session_id, error } => {
+                PendingSessionEvent::EciesAuthError {
+                    remote_addr,
+                    session_id,
+                    error,
+                    direction,
+                } => {
                     let _ = self.pending_sessions.remove(&session_id);
                     warn!(
                         target : "net::session",
@@ -373,10 +392,21 @@ impl SessionManager {
                         "ecies auth failed"
                     );
                     let _ = self.pending_sessions.remove(&session_id);
-                    return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
-                        remote_addr,
-                        error: None,
-                    })
+                    return match direction {
+                        Direction::Incoming => {
+                            Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                                remote_addr,
+                                error: None,
+                            })
+                        }
+                        Direction::Outgoing(peer_id) => {
+                            Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
+                                remote_addr,
+                                peer_id,
+                                error: None,
+                            })
+                        }
+                    }
                 }
             }
         }
@@ -431,6 +461,7 @@ pub(crate) enum SessionEvent {
         capabilities: Arc<Capabilities>,
         status: Status,
         messages: PeerRequestSender,
+        direction: Direction,
     },
     /// A session received a valid message via RLPx.
     ValidMessage {
@@ -445,6 +476,11 @@ pub(crate) enum SessionEvent {
         capabilities: Arc<Capabilities>,
         /// Message received from the peer.
         message: CapabilityMessage,
+    },
+    /// Received a bad message from the peer.
+    BadMessage {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
     },
     /// Closed an incoming pending session during authentication.
     IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
@@ -555,6 +591,13 @@ pub(crate) enum Direction {
     Outgoing(PeerId),
 }
 
+impl Direction {
+    /// Returns `true` if this an incoming connection.
+    pub(crate) fn is_incoming(&self) -> bool {
+        matches!(self, Direction::Incoming)
+    }
+}
+
 async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
@@ -572,7 +615,12 @@ async fn authenticate(
             Ok(stream) => stream,
             Err(error) => {
                 let _ = events
-                    .send(PendingSessionEvent::EciesAuthError { remote_addr, session_id, error })
+                    .send(PendingSessionEvent::EciesAuthError {
+                        remote_addr,
+                        session_id,
+                        error,
+                        direction,
+                    })
                     .await;
                 return
             }
@@ -586,6 +634,7 @@ async fn authenticate(
                             remote_addr,
                             session_id,
                             error,
+                            direction,
                         })
                         .await;
                     return
@@ -669,5 +718,6 @@ async fn authenticate_stream(
         capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
         status: their_status,
         conn: eth_stream,
+        direction,
     }
 }
