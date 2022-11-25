@@ -3280,6 +3280,7 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "async-trait",
+ "futures",
  "once_cell",
  "rand 0.8.5",
  "reth-interfaces",
