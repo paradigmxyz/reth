@@ -51,7 +51,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let last_block_num = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(&db, last_block_num).await?;
+        self.update_head::<DB>(db, last_block_num).await?;
 
         // TODO: add batch size
         // download the headers
@@ -92,8 +92,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                 _ => unreachable!(),
             },
         };
-        let stage_progress =
-            self.write_headers::<DB>(&db, headers).await?.unwrap_or(last_block_num);
+        let stage_progress = self.write_headers::<DB>(db, headers).await?.unwrap_or(last_block_num);
         Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
     }
 
