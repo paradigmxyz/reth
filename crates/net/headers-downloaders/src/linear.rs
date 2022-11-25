@@ -5,11 +5,10 @@ use reth_interfaces::{
         error::{RequestError, RequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{
-                validate_header_download, BatchDownload, HeaderBatchDownload, HeaderDownloader,
-            },
+            downloader::{validate_header_download, HeaderBatchDownload, HeaderDownloader},
             error::DownloadError,
         },
+        traits::BatchDownload,
     },
 };
 use reth_primitives::{SealedHeader, H256};
@@ -79,7 +78,7 @@ impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
             consensus: Arc::clone(&self.consensus),
             client: Arc::clone(&self.client),
             batch_size: self.batch_size,
-            request_timeout: Default::default(),
+            request_timeout: self.request_timeout,
             request_retries: self.request_retries,
         }
     }
@@ -154,16 +153,16 @@ where
 
     /// Tries to fuse the future with a new request
     ///
-    /// Returns `true` if the request exhausted all retries
-    fn try_fuse_request_fut(&self, fut: &mut HeadersRequestFuture) -> bool {
+    /// Returns an `Err` if the request exhausted all retries
+    fn try_fuse_request_fut(&self, fut: &mut HeadersRequestFuture) -> Result<(), ()> {
         if !fut.inc_err() {
-            return true
+            return Err(())
         }
         let req = self.headers_request();
         fut.request = req.clone();
         let client = Arc::clone(&self.client);
         fut.fut = Box::pin(async move { client.get_headers(req).await });
-        false
+        Ok(())
     }
 
     /// Validate whether the header is valid in relation to it's parent
@@ -186,79 +185,79 @@ where
         let this = self.get_mut();
 
         'outer: loop {
-            if this.request.is_none() {
-                // queue in another request
-                let client = Arc::clone(&this.client);
-                let req = this.headers_request();
-                let fut = HeadersRequestFuture {
-                    request: req.clone(),
-                    fut: Box::pin(async move { client.get_headers(req).await }),
-                    retries: 0,
-                    max_retries: this.request_retries,
-                };
-                this.request = Some(fut);
-            }
+            let mut fut = match this.request.take() {
+                Some(fut) => fut,
+                None => {
+                    // queue in the first request
+                    let client = Arc::clone(&this.client);
+                    let req = this.headers_request();
+                    HeadersRequestFuture {
+                        request: req.clone(),
+                        fut: Box::pin(async move { client.get_headers(req).await }),
+                        retries: 0,
+                        max_retries: this.request_retries,
+                    }
+                }
+            };
 
-            if let Some(mut fut) = this.request.take() {
-                match ready!(fut.poll_unpin(cx)) {
-                    Ok(resp) => {
-                        let mut headers = resp.0;
-                        headers.sort_unstable_by_key(|h| h.number);
+            match ready!(fut.poll_unpin(cx)) {
+                Ok(resp) => {
+                    let mut headers = resp.0;
+                    headers.sort_unstable_by_key(|h| h.number);
 
-                        if headers.is_empty() {
-                            if this.try_fuse_request_fut(&mut fut) {
-                                return Poll::Ready(Err(RequestError::BadResponse.into()))
-                            } else {
-                                this.request = Some(fut);
-                                continue
-                            }
+                    if headers.is_empty() {
+                        if this.try_fuse_request_fut(&mut fut).is_err() {
+                            return Poll::Ready(Err(RequestError::BadResponse.into()))
+                        } else {
+                            this.request = Some(fut);
+                            continue
+                        }
+                    }
+
+                    // Iterate headers in reverse
+                    for parent in headers.into_iter().rev() {
+                        let parent = parent.seal();
+
+                        if this.head.hash() == parent.hash() {
+                            // We've reached the target
+                            let headers =
+                                std::mem::take(&mut this.buffered).into_iter().rev().collect();
+                            return Poll::Ready(Ok(headers))
                         }
 
-                        // Iterate headers in reverse
-                        for parent in headers.into_iter().rev() {
-                            let parent = parent.seal();
-
-                            if this.head.hash() == parent.hash() {
-                                // We've reached the target
-                                let headers =
-                                    std::mem::take(&mut this.buffered).into_iter().rev().collect();
-                                return Poll::Ready(Ok(headers))
-                            }
-
-                            if let Some(header) = this.buffered.last() {
-                                match this.validate(header, &parent) {
-                                    Ok(_) => {
-                                        // record new parent
-                                        this.buffered.push(parent);
-                                    }
-                                    Err(err) => {
-                                        if this.try_fuse_request_fut(&mut fut) {
-                                            return Poll::Ready(Err(err))
-                                        }
-                                        this.request = Some(fut);
-                                        continue 'outer
-                                    }
+                        if let Some(header) = this.buffered.last() {
+                            match this.validate(header, &parent) {
+                                Ok(_) => {
+                                    // record new parent
+                                    this.buffered.push(parent);
                                 }
-                            } else {
-                                // The buffer is empty and the first header does not match the tip,
-                                // discard
-                                if parent.hash() != this.forkchoice.head_block_hash {
-                                    if this.try_fuse_request_fut(&mut fut) {
-                                        return Poll::Ready(Err(RequestError::BadResponse.into()))
+                                Err(err) => {
+                                    if this.try_fuse_request_fut(&mut fut).is_err() {
+                                        return Poll::Ready(Err(err))
                                     }
                                     this.request = Some(fut);
                                     continue 'outer
                                 }
-                                this.buffered.push(parent);
                             }
+                        } else {
+                            // The buffer is empty and the first header does not match the tip,
+                            // discard
+                            if parent.hash() != this.forkchoice.head_block_hash {
+                                if this.try_fuse_request_fut(&mut fut).is_err() {
+                                    return Poll::Ready(Err(RequestError::BadResponse.into()))
+                                }
+                                this.request = Some(fut);
+                                continue 'outer
+                            }
+                            this.buffered.push(parent);
                         }
                     }
-                    Err(err) => {
-                        if this.try_fuse_request_fut(&mut fut) {
-                            return Poll::Ready(Err(DownloadError::RequestError(err)))
-                        }
-                        this.request = Some(fut);
+                }
+                Err(err) => {
+                    if this.try_fuse_request_fut(&mut fut).is_err() {
+                        return Poll::Ready(Err(DownloadError::RequestError(err)))
                     }
+                    this.request = Some(fut);
                 }
             }
         }
