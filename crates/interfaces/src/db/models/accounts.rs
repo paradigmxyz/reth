@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
 #[use_compact]
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     address: Address,

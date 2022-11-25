@@ -11,6 +11,7 @@ description = "Staged syncing primitives used in reth."
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-db = { path = "../db" }
+reth-executor = { path = "../executor" }
 async-trait = "0.1.57"
 thiserror = "1.0.37"
 tracing = "0.1.36"

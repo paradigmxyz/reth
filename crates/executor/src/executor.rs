@@ -5,8 +5,8 @@ use crate::{
 use hashbrown::hash_map::Entry;
 use reth_interfaces::{executor::Error, provider::StateProvider};
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Bloom, Log, Receipt, SealedHeader,
-    TransactionSignedEcRecovered, H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, Header, Log, Receipt, TransactionSignedEcRecovered,
+    H256, U256,
 };
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ExecutionResult,
@@ -193,7 +193,7 @@ pub struct TransactionStatePatch {
 
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
-    header: &SealedHeader,
+    header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
     db: &mut SubState<DB>,
@@ -232,7 +232,7 @@ pub fn verify_receipt<'a>(
 /// Verify block. Execute all transaction and compare results.
 /// Return diff is on transaction granularity. We are returning vector of
 pub fn execute<DB: StateProvider>(
-    header: &SealedHeader,
+    header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
     db: &mut SubState<DB>,

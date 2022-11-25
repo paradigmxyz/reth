@@ -50,17 +50,18 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
     }
 }
 
-/// State provider with given hash
+/// State provider for given transaction number
 pub struct StateProviderImplHistory<'a, TX: DbTx<'a>> {
-    /// Transaction
+    /// database transaction
     db: TX,
-    /// Transaction number is main indexer of account and storage changes
+    /// ref
     transaction_number: TxNumber,
+
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, TX: DbTx<'a>> StateProviderImplHistory<'a, TX> {
-    /// Create new StateProvider from history transaction number
+    /// Create new state provider
     pub fn new(db: TX, transaction_number: TxNumber) -> Self {
         Self { db, transaction_number, _phantom: PhantomData {} }
     }
@@ -68,13 +69,51 @@ impl<'a, TX: DbTx<'a>> StateProviderImplHistory<'a, TX> {
 
 impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplHistory<'a, TX> {
     /// Get basic account information.
+    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
+        StateProviderImplRefHistory::new(&self.db, self.transaction_number).basic_account(address)
+    }
+}
+
+impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
+    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
+        StateProviderImplRefHistory::new(&self.db, self.transaction_number)
+            .storage(account, storage_key)
+    }
+
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
+        StateProviderImplRefHistory::new(&self.db, self.transaction_number)
+            .bytecode_by_hash(code_hash)
+    }
+
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        StateProviderImplRefHistory::new(&self.db, self.transaction_number).block_hash(number)
+    }
+}
+/// State provider with given hash
+pub struct StateProviderImplRefHistory<'a, 'b, TX: DbTx<'a>> {
+    /// Transaction
+    db: &'b TX,
+    /// Transaction number is main indexer of account and storage changes
+    transaction_number: TxNumber,
+    _phantom: PhantomData<&'a TX>,
+}
+
+impl<'a, 'b, TX: DbTx<'a>> StateProviderImplRefHistory<'a, 'b, TX> {
+    /// Create new StateProvider from history transaction number
+    pub fn new(db: &'b TX, transaction_number: TxNumber) -> Self {
+        Self { db, transaction_number, _phantom: PhantomData {} }
+    }
+}
+
+impl<'a, 'b, TX: DbTx<'a>> AccountProvider for StateProviderImplRefHistory<'a, 'b, TX> {
+    /// Get basic account information.
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         // TODO add when AccountHistory is defined
         Ok(None)
     }
 }
 
-impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
+impl<'a, 'b, TX: DbTx<'a>> StateProvider for StateProviderImplRefHistory<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         // TODO when StorageHistory is defined
@@ -114,29 +153,65 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
     }
 }
 
-/// State Provider over latest state
+/// State provider for latests state
 pub struct StateProviderImplLatest<'a, TX: DbTx<'a>> {
     /// database transaction
     db: TX,
-    /// Phantom data over lifetime
-    phantom: PhantomData<&'a TX>,
+
+    _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, TX: DbTx<'a>> StateProviderImplLatest<'a, TX> {
     /// Create new state provider
     pub fn new(db: TX) -> Self {
-        Self { db, phantom: PhantomData {} }
+        Self { db, _phantom: PhantomData {} }
     }
 }
 
 impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplLatest<'a, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
+        StateProviderImplRefLatest::new(&self.db).basic_account(address)
     }
 }
 
 impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplLatest<'a, TX> {
+    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
+        StateProviderImplRefLatest::new(&self.db).storage(account, storage_key)
+    }
+
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
+        StateProviderImplRefLatest::new(&self.db).bytecode_by_hash(code_hash)
+    }
+
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        StateProviderImplRefLatest::new(&self.db).block_hash(number)
+    }
+}
+
+/// State Provider over latest state that takes tx reference
+pub struct StateProviderImplRefLatest<'a, 'b, TX: DbTx<'a>> {
+    /// database transaction
+    db: &'b TX,
+    /// Phantom data over lifetime
+    phantom: PhantomData<&'a TX>,
+}
+
+impl<'a, 'b, TX: DbTx<'a>> StateProviderImplRefLatest<'a, 'b, TX> {
+    /// Create new state provider
+    pub fn new(db: &'b TX) -> Self {
+        Self { db, phantom: PhantomData {} }
+    }
+}
+
+impl<'a, 'b, TX: DbTx<'a>> AccountProvider for StateProviderImplRefLatest<'a, 'b, TX> {
+    /// Get basic account information.
+    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
+        self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
+    }
+}
+
+impl<'a, 'b, TX: DbTx<'a>> StateProvider for StateProviderImplRefLatest<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         let mut cursor = self.db.cursor_dup::<tables::PlainStorageState>()?;

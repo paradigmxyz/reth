@@ -1,6 +1,6 @@
-use crate::{pipeline::PipelineEvent, stages::tx_index::TxIndex};
+use crate::pipeline::PipelineEvent;
 use reth_interfaces::{consensus, db::Error as DbError};
-use reth_primitives::{BlockNumber, H256, TxNumber};
+use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -30,6 +30,7 @@ pub enum StageError {
 /// A database integrity error.
 /// The sender stage error
 #[derive(Error, Debug)]
+#[allow(missing_docs)]
 pub enum DatabaseIntegrityError {
     // TODO(onbjerg): What's the difference between this and the one below?
     /// The canonical hash for a block is missing from the database.
@@ -67,11 +68,13 @@ pub enum DatabaseIntegrityError {
         number: BlockNumber,
     },
     #[error("Gap in transaction table")]
-    TransactionsGap {
-        missing: TxNumber,
-    },
+    TransactionsGap { missing: TxNumber },
+    #[error("Gap in transaction table")]
+    TransactionsSignerGap { missing: TxNumber },
     #[error("Got to the end of transaction table")]
     EndOfTransactionTable,
+    #[error("Got to the end of transaction table")]
+    EndOfTransactionSenderTable,
 }
 
 /// A pipeline execution error.

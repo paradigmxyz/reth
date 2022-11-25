@@ -5,7 +5,10 @@ mod block;
 mod storage;
 use std::sync::Arc;
 
-pub use storage::{StateProviderImplHistory, StateProviderImplLatest};
+pub use storage::{
+    StateProviderImplHistory, StateProviderImplLatest, StateProviderImplRefHistory,
+    StateProviderImplRefLatest,
+};
 
 use crate::db::Database;
 

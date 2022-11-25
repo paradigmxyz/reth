@@ -102,10 +102,6 @@ macro_rules! dupsort {
 //  TABLE DEFINITIONS
 //
 
-
-
-
-
 table!(
     /// Stores the header hashes belonging to the canonical chain.
     CanonicalHeaders => BlockNumber => HeaderHash);
@@ -219,7 +215,8 @@ dupsort!(
 
 table!(
     /// Stores the transaction sender for each transaction.
-    TxSenders => TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
+    /// It is needed to speed up execution stage and allows fetching signer without doing transaction signed recovery
+    TxSenders => TxNumber => Address);
 
 table!(
     /// Configuration values.

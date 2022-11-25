@@ -3514,6 +3514,7 @@ dependencies = [
  "reth-bodies-downloaders",
  "reth-db",
  "reth-eth-wire",
+ "reth-executor",
  "reth-headers-downloaders",
  "reth-interfaces",
  "reth-primitives",

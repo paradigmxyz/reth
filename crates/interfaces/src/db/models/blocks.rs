@@ -23,7 +23,7 @@ pub type NumTransactions = u64;
 ///
 /// The [TxNumber]s for all the transactions in the block are `base_tx_id..(base_tx_id +
 /// tx_amount)`.
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[use_compact]
 pub struct StoredBlockBody {
     /// The ID of the first transaction in the block.
