@@ -118,7 +118,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     ) -> Result<(), StageError> {
         let block_key = db.get_block_numhash(height)?;
         let td: Vec<u8> = db.get::<tables::HeaderTD>(block_key)?.unwrap(); // TODO:
-        self.client.update_status(height, block_key.hash(), H256::from_slice(&td));
+        self.client.update_status(height, block_key.hash(), H256::from_slice(&td).into_uint());
         Ok(())
     }
 
