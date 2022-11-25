@@ -1,11 +1,12 @@
 use crate::{
-    error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput,
+    db::StageDB, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
+    StageId, UnwindInput,
 };
-use reth_interfaces::db::{DBContainer, Database, DbTx};
+use reth_interfaces::db::{Database, DbTx};
 use reth_primitives::BlockNumber;
 use std::{
     fmt::{Debug, Formatter},
+    ops::Deref,
     sync::Arc,
 };
 use tokio::sync::mpsc::Sender;
@@ -221,14 +222,14 @@ impl<DB: Database> Pipeline<DB> {
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut db = DBContainer::new(db)?;
+        let mut db = StageDB::new(db)?;
 
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = stage_id.get_progress(db.get())?.unwrap_or_default();
+            let mut stage_progress = stage_id.get_progress(db.deref())?.unwrap_or_default();
             if stage_progress < to {
                 debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                 self.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
@@ -244,7 +245,7 @@ impl<DB: Database> Pipeline<DB> {
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
-                        stage_id.save_progress(db.get(), stage_progress)?;
+                        stage_id.save_progress(db.deref(), stage_progress)?;
 
                         self.events_sender
                             .send(PipelineEvent::Unwound { stage_id, result: unwind_output })
@@ -293,9 +294,9 @@ impl<DB: Database> QueuedStage<DB> {
         }
 
         loop {
-            let mut db = DBContainer::new(db)?;
+            let mut db = StageDB::new(db)?;
 
-            let prev_progress = stage_id.get_progress(db.get())?;
+            let prev_progress = stage_id.get_progress(db.deref())?;
 
             let stage_reached_max_block = prev_progress
                 .zip(state.max_block)
@@ -321,7 +322,7 @@ impl<DB: Database> QueuedStage<DB> {
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
                     debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
-                    stage_id.save_progress(db.get(), stage_progress)?;
+                    stage_id.save_progress(db.deref(), stage_progress)?;
 
                     state
                         .events_sender
@@ -762,7 +763,7 @@ mod tests {
 
             async fn execute(
                 &mut self,
-                _: &mut DBContainer<'_, DB>,
+                _: &mut StageDB<'_, DB>,
                 _input: ExecInput,
             ) -> Result<ExecOutput, StageError> {
                 self.exec_outputs
@@ -772,7 +773,7 @@ mod tests {
 
             async fn unwind(
                 &mut self,
-                _: &mut DBContainer<'_, DB>,
+                _: &mut StageDB<'_, DB>,
                 _input: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
                 self.unwind_outputs

@@ -1,13 +1,13 @@
 use crate::{
-    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use futures_util::TryStreamExt;
 use reth_interfaces::{
     consensus::Consensus,
     db::{
-        models::StoredBlockBody, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
-        DbCursorRW, DbTx, DbTxMut,
+        models::StoredBlockBody, tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx,
+        DbTxMut,
     },
     p2p::bodies::downloader::BodyDownloader,
 };
@@ -72,11 +72,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let tx = db.get_mut();
-
         let previous_stage_progress = input.previous_stage_progress();
         if previous_stage_progress == 0 {
             warn!("The body stage seems to be running first, no work can be completed.");
@@ -95,18 +93,18 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
         }
 
-        let bodies_to_download = self.bodies_to_download::<DB>(tx, starting_block, target)?;
+        let bodies_to_download = self.bodies_to_download::<DB>(db, starting_block, target)?;
 
         // Cursors used to write bodies and transactions
-        let mut bodies_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
+        let mut bodies_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
         let mut base_tx_id = bodies_cursor
             .last()?
             .map(|(_, body)| body.base_tx_id + body.tx_amount)
             .ok_or(DatabaseIntegrityError::BlockBody { number: starting_block })?;
 
         // Cursor used to look up headers for block pre-validation
-        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+        let mut header_cursor = db.cursor::<tables::Headers>()?;
 
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
@@ -167,12 +165,11 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let tx = db.get_mut();
-        let mut block_body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let mut transaction_cursor = tx.cursor_mut::<tables::Transactions>()?;
+        let mut block_body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
 
         let mut entry = block_body_cursor.last()?;
         while let Some((key, body)) = entry {
@@ -457,7 +454,7 @@ mod tests {
         use crate::{
             stages::bodies::BodyStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -496,7 +493,7 @@ mod tests {
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
             responses: HashMap<H256, Result<BlockBody, DownloadError>>,
-            db: StageTestDB,
+            db: TestStageDB,
             batch_size: u64,
         }
 
@@ -505,7 +502,7 @@ mod tests {
                 Self {
                     consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
-                    db: StageTestDB::default(),
+                    db: TestStageDB::default(),
                     batch_size: 1000,
                 }
             }
@@ -527,7 +524,7 @@ mod tests {
         impl StageTestRunner for BodyTestRunner {
             type S = BodyStage<TestBodyDownloader, TestConsensus>;
 
-            fn db(&self) -> &StageTestDB {
+            fn db(&self) -> &TestStageDB {
                 &self.db
             }
 
