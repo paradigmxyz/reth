@@ -153,16 +153,16 @@ where
 
     /// Tries to fuse the future with a new request
     ///
-    /// Returns `true` if the request exhausted all retries
-    fn try_fuse_request_fut(&self, fut: &mut HeadersRequestFuture) -> bool {
+    /// Returns an `Err` if the request exhausted all retries
+    fn try_fuse_request_fut(&self, fut: &mut HeadersRequestFuture) -> Result<(), ()> {
         if !fut.inc_err() {
-            return true
+            return Err(())
         }
         let req = self.headers_request();
         fut.request = req.clone();
         let client = Arc::clone(&self.client);
         fut.fut = Box::pin(async move { client.get_headers(req).await });
-        false
+        Ok(())
     }
 
     /// Validate whether the header is valid in relation to it's parent
@@ -206,7 +206,7 @@ where
                     headers.sort_unstable_by_key(|h| h.number);
 
                     if headers.is_empty() {
-                        if this.try_fuse_request_fut(&mut fut) {
+                        if this.try_fuse_request_fut(&mut fut).is_err() {
                             return Poll::Ready(Err(RequestError::BadResponse.into()))
                         } else {
                             this.request = Some(fut);
@@ -232,7 +232,7 @@ where
                                     this.buffered.push(parent);
                                 }
                                 Err(err) => {
-                                    if this.try_fuse_request_fut(&mut fut) {
+                                    if this.try_fuse_request_fut(&mut fut).is_err() {
                                         return Poll::Ready(Err(err))
                                     }
                                     this.request = Some(fut);
@@ -243,7 +243,7 @@ where
                             // The buffer is empty and the first header does not match the tip,
                             // discard
                             if parent.hash() != this.forkchoice.head_block_hash {
-                                if this.try_fuse_request_fut(&mut fut) {
+                                if this.try_fuse_request_fut(&mut fut).is_err() {
                                     return Poll::Ready(Err(RequestError::BadResponse.into()))
                                 }
                                 this.request = Some(fut);
@@ -254,7 +254,7 @@ where
                     }
                 }
                 Err(err) => {
-                    if this.try_fuse_request_fut(&mut fut) {
+                    if this.try_fuse_request_fut(&mut fut).is_err() {
                         return Poll::Ready(Err(DownloadError::RequestError(err)))
                     }
                     this.request = Some(fut);
