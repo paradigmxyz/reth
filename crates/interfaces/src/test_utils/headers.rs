@@ -13,7 +13,7 @@ use crate::{
 };
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockLocked, Header, SealedHeader, H256};
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     pin::Pin,
@@ -120,6 +120,34 @@ impl BatchDownload for TestDownload {
     fn into_stream_unordered(self) -> Box<dyn Stream<Item = Result<Self::Ok, Self::Error>>> {
         Box::new(self)
     }
+
+    // async fn download(
+    //     &self,
+    //     _: &SealedHeader,
+    //     _: &ForkchoiceState,
+    // ) -> Result<Vec<SealedHeader>, DownloadError> {
+    //     // call consensus stub first. fails if the flag is set
+    //     let empty = SealedHeader::default();
+    //     self.consensus
+    //         .validate_header(&empty, &empty)
+    //         .map_err(|error| DownloadError::HeaderValidation { hash: empty.hash(), error })?;
+    //
+    //     let stream = self.client.stream_headers().await;
+    //     let stream = stream.timeout(Duration::from_secs(1));
+    //
+    //     match Box::pin(stream).try_next().await {
+    //         Ok(Some(res)) => {
+    //             let mut headers = res.headers.iter().map(|h|
+    // h.clone().seal()).collect::<Vec<_>>();             if !headers.is_empty() {
+    //                 headers.sort_unstable_by_key(|h| h.number);
+    //                 headers.remove(0); // remove head from response
+    //                 headers.reverse();
+    //             }
+    //             Ok(headers)
+    //         }
+    //         _ => Err(DownloadError::Timeout { request_id: 0 }),
+    //     }
+    // }
 }
 
 /// A test client for fetching headers
@@ -145,7 +173,7 @@ impl TestHeadersClient {
 
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
+    fn update_status(&self, _height: u64, _hash: H256, _td: U256) {}
 
     async fn get_headers(&self, request: HeadersRequest) -> RequestResult<BlockHeaders> {
         if let Some(err) = &mut *self.error.lock().await {
