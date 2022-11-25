@@ -455,6 +455,9 @@ where
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
                 }
+                SwarmEvent::StatusUpdate(status) => {
+                    this.swarm.sessions_mut().on_status_update(status.clone())
+                }
             }
         }
 

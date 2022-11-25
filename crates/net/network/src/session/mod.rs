@@ -1,6 +1,7 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
 use crate::{
+    fetch::StatusUpdate,
     message::PeerMessage,
     session::{
         active::ActiveSession,
@@ -138,7 +139,14 @@ impl SessionManager {
         self.spawned_tasks.spawn(async move { f.await });
     }
 
-    /// A incoming TCP connection was received. This starts the authentication process to turn this
+    /// Invoked on a received status update
+    pub(crate) fn on_status_update(&mut self, status: StatusUpdate) {
+        self.status.blockhash = status.hash;
+        self.status.total_difficulty = status.total_difficulty;
+        self.fork_filter.set_head(status.height);
+    }
+
+    /// An incoming TCP connection was received. This starts the authentication process to turn this
     /// stream into an active peer session.
     ///
     /// Returns an error if the configured limit has been reached.
