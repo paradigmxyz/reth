@@ -14,6 +14,7 @@ mod signature;
 mod tx_type;
 mod util;
 
+/// Legacy transaction.
 #[use_compact]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxLegacy {
@@ -55,6 +56,7 @@ pub struct TxLegacy {
     pub input: Bytes,
 }
 
+/// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
 #[use_compact]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip2930 {
@@ -102,6 +104,7 @@ pub struct TxEip2930 {
     pub input: Bytes,
 }
 
+/// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
 #[use_compact]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip1559 {

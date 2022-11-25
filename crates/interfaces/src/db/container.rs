@@ -94,7 +94,7 @@ mod tests {
         tokio::spawn(async move {
             let mut container = DBContainer::new(&db).unwrap();
             let mut stage = MyStage(&db);
-            let _ = stage.run(&mut container);
+            stage.run(&mut container).await;
         });
     }
 }

@@ -170,9 +170,9 @@ mod tests {
                 let mut tx_count_walker = tx_count_cursor.walk((start, start_hash).into())?;
                 let mut count = tx_count_walker.next().unwrap()?.1;
                 let mut last_num = start;
-                while let Some(entry) = tx_count_walker.next() {
+                for entry in tx_count_walker {
                     let (key, db_count) = entry?;
-                    count += tx.get::<tables::BlockBodies>(key)?.unwrap().tx_amount as u64;
+                    count += tx.get::<tables::BlockBodies>(key)?.unwrap().tx_amount;
                     assert_eq!(db_count, count);
                     last_num = key.number();
                 }
