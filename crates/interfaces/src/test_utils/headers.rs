@@ -2,7 +2,7 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        error::RequestResult,
+        error::{RequestError, RequestResult},
         headers::{
             client::{HeadersClient, HeadersRequest},
             downloader::{BatchDownload, HeaderBatchDownload, HeaderDownloader},
@@ -96,7 +96,10 @@ impl Future for TestDownload {
                 headers.sort_unstable_by_key(|h| h.number);
                 Poll::Ready(Ok(headers))
             }
-            Err(_) => Poll::Pending,
+            Err(err) => Poll::Ready(Err(match err {
+                RequestError::Timeout => DownloadError::Timeout,
+                _ => DownloadError::RequestError(err),
+            })),
         }
     }
 }
@@ -122,6 +125,7 @@ impl BatchDownload for TestDownload {
 #[derive(Debug, Default)]
 pub struct TestHeadersClient {
     responses: Arc<Mutex<Vec<Header>>>,
+    error: Arc<Mutex<Option<RequestError>>>,
 }
 
 impl TestHeadersClient {
@@ -130,6 +134,12 @@ impl TestHeadersClient {
         let mut lock = self.responses.lock().await;
         lock.extend(headers);
     }
+
+    /// Set repsonse error
+    pub async fn set_error(&self, err: RequestError) {
+        let mut lock = self.error.lock().await;
+        lock.replace(err);
+    }
 }
 
 #[async_trait::async_trait]
@@ -137,6 +147,10 @@ impl HeadersClient for TestHeadersClient {
     fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
 
     async fn get_headers(&self, request: HeadersRequest) -> RequestResult<BlockHeaders> {
+        if let Some(err) = &mut *self.error.lock().await {
+            return Err(err.clone())
+        }
+
         let mut lock = self.responses.lock().await;
         let len = lock.len().min(request.limit as usize);
         let resp = lock.drain(..len).collect();

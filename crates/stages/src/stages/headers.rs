@@ -80,8 +80,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                 res
             }
             Err(e) => match e {
-                DownloadError::Timeout { request_id } => {
-                    warn!("no response for header request {request_id}");
+                DownloadError::Timeout => {
+                    warn!("no response for header request");
                     return Ok(ExecOutput {
                         stage_progress: last_block_num,
                         reached_tip: false,
@@ -92,10 +92,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                     warn!("Validation error for header {hash}: {error}");
                     return Err(StageError::Validation { block: last_block_num, error })
                 }
-                // TODO: this error is never propagated, clean up
-                // DownloadError::MismatchedHeaders { .. } => {
-                //     return Err(StageError::Validation { block: last_block_num })
-                // }
+                // TODO: handle unreachable
                 _ => unreachable!(),
             },
         };
@@ -194,27 +191,33 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
+    use reth_interfaces::p2p::error::RequestError;
     use test_runner::HeadersTestRunner;
 
     stage_test_suite!(HeadersTestRunner);
 
-    // /// Check that the execution errors on empty database or
-    // /// prev progress missing from the database.
-    // #[tokio::test]
-    // // Validate that the execution does not fail on timeout
-    // async fn execute_timeout() {
-    //     let mut runner = HeadersTestRunner::default();
-    //     let input = ExecInput::default();
-    //     runner.seed_execution(input).expect("failed to seed execution");
-    //     let rx = runner.execute(input);
-    //     runner.consensus.update_tip(H256::from_low_u64_be(1));
-    //     let result = rx.await.unwrap();
-    //     assert_matches!(
-    //         result,
-    //         Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 0 })
-    //     );
-    //     assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
-    // }
+    /// Check that the execution errors on empty database or
+    /// prev progress missing from the database.
+    #[tokio::test]
+    // Validate that the execution does not fail on timeout
+    async fn execute_timeout() {
+        let (previous_stage, stage_progress) = (500, 100);
+        let mut runner = HeadersTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        runner.seed_execution(input).expect("failed to seed execution");
+        runner.client.set_error(RequestError::Timeout).await;
+        let rx = runner.execute(input);
+        runner.consensus.update_tip(H256::from_low_u64_be(1));
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 100 })
+        );
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+    }
 
     /// Check that validation error is propagated during the execution.
     #[tokio::test]
