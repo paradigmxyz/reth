@@ -10,7 +10,7 @@ use reth_eth_wire::{
     NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
     Transactions,
 };
-use reth_interfaces::p2p::error::RequestResult;
+use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
 use std::{
     sync::Arc,
@@ -126,6 +126,22 @@ pub enum PeerRequest {
 // === impl PeerRequest ===
 
 impl PeerRequest {
+    /// Invoked if we received a response which does not match the request
+    pub(crate) fn send_bad_response(self) {
+        self.send_err_response(RequestError::BadResponse)
+    }
+
+    /// Send an error back to the receiver.
+    pub(crate) fn send_err_response(self, err: RequestError) {
+        let _ = match self {
+            PeerRequest::GetBlockHeaders { response, .. } => response.send(Err(err)).ok(),
+            PeerRequest::GetBlockBodies { response, .. } => response.send(Err(err)).ok(),
+            PeerRequest::GetPooledTransactions { response, .. } => response.send(Err(err)).ok(),
+            PeerRequest::GetNodeData { response, .. } => response.send(Err(err)).ok(),
+            PeerRequest::GetReceipts { response, .. } => response.send(Err(err)).ok(),
+        };
+    }
+
     /// Returns the [`EthMessage`] for this type
     pub fn create_request_message(&self, request_id: u64) -> EthMessage {
         match self {

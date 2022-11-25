@@ -80,6 +80,11 @@ where
         }
     }
 
+    /// Returns mutable access to the [`PeersManager`]
+    pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
+        &mut self.peers_manager
+    }
+
     /// How many peers we're currently connected to.
     pub fn num_connected_peers(&self) -> usize {
         self.connected_peers.len()
