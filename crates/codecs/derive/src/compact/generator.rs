@@ -66,24 +66,31 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
             };
         });
     } else {
-        lines.append(&mut StructHandler::new(fields).generate_from(known_types.as_slice()));
-
-        let fields = fields.iter().filter_map(|field| {
-            if let FieldTypes::StructField((name, _, _)) = field {
-                let ident = format_ident!("{name}");
-                return Some(quote! {
-                    #ident: #ident,
-                })
-            }
-            None
-        });
+        let mut struct_handler = StructHandler::new(fields);
+        lines.append(&mut struct_handler.generate_from(known_types.as_slice()));
 
         // Builds the object instantiation.
-        lines.push(quote! {
-            let obj = #ident {
-                #(#fields)*
-            };
-        });
+        if struct_handler.is_wrapper {
+            lines.push(quote! {
+                let obj = #ident(placeholder);
+            });
+        } else {
+            let fields = fields.iter().filter_map(|field| {
+                if let FieldTypes::StructField((name, _, _)) = field {
+                    let ident = format_ident!("{name}");
+                    return Some(quote! {
+                        #ident: #ident,
+                    })
+                }
+                None
+            });
+
+            lines.push(quote! {
+                let obj = #ident {
+                    #(#fields)*
+                };
+            });
+        }
     }
 
     lines
