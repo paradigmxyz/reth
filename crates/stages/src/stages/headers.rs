@@ -1,14 +1,10 @@
 use crate::{
-    util::unwind::{unwind_table_by_num, unwind_table_by_num_hash, unwind_table_by_walker},
-    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    db::{
-        models::blocks::BlockNumHash, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
-        DbCursorRW, DbTx, DbTxMut,
-    },
+    db::{models::blocks::BlockNumHash, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut},
     p2p::headers::{client::HeadersClient, downloader::HeaderDownloader, error::DownloadError},
 };
 use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
@@ -51,20 +47,17 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
     /// starting from the tip
     async fn execute(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let tx = db.get_mut();
         let last_block_num = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(tx, last_block_num).await?;
+        self.update_head::<DB>(db, last_block_num).await?;
 
         // TODO: add batch size
         // download the headers
-        let last_hash = tx
-            .get::<tables::CanonicalHeaders>(last_block_num)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number: last_block_num })?;
+        let last_hash = db.get_block_hash(last_block_num)?;
         let last_header =
-            tx.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or({
+            db.get::<tables::Headers>((last_block_num, last_hash).into())?.ok_or({
                 DatabaseIntegrityError::Header { number: last_block_num, hash: last_hash }
             })?;
         let head = SealedHeader::new(last_header, last_hash);
@@ -96,27 +89,23 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                 _ => unreachable!(),
             },
         };
-        let stage_progress = self.write_headers::<DB>(tx, headers).await?.unwrap_or(last_block_num);
+        let stage_progress = self.write_headers::<DB>(db, headers).await?.unwrap_or(last_block_num);
         Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: handle bad block
-        let tx = db.get_mut();
-
-        unwind_table_by_walker::<DB, tables::CanonicalHeaders, tables::HeaderNumbers>(
-            tx,
+        db.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;
-
-        unwind_table_by_num::<DB, tables::CanonicalHeaders>(tx, input.unwind_to)?;
-        unwind_table_by_num_hash::<DB, tables::Headers>(tx, input.unwind_to)?;
-        unwind_table_by_num_hash::<DB, tables::HeaderTD>(tx, input.unwind_to)?;
+        db.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        db.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
+        db.unwind_table_by_num_hash::<tables::HeaderTD>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -124,14 +113,12 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
 impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     async fn update_head<DB: Database>(
         &self,
-        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        db: &StageDB<'_, DB>,
         height: BlockNumber,
     ) -> Result<(), StageError> {
-        let hash = tx
-            .get::<tables::CanonicalHeaders>(height)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: height })?;
-        let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
-        self.client.update_status(height, hash, H256::from_slice(&td).into_uint());
+        let block_key = db.get_block_numhash(height)?;
+        let td: Vec<u8> = db.get::<tables::HeaderTD>(block_key)?.unwrap(); // TODO:
+        self.client.update_status(height, block_key.hash(), H256::from_slice(&td).into_uint());
         Ok(())
     }
 
@@ -149,12 +136,12 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     /// Write downloaded headers to the database
     async fn write_headers<DB: Database>(
         &self,
-        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        db: &StageDB<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
-        let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
+        let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
+        let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
+        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
         let mut td = U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap());
 
         let mut latest = None;
@@ -174,7 +161,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 
             // TODO: investigate default write flags
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
-            tx.put::<tables::HeaderNumbers>(block_hash, header.number)?;
+            db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
             cursor_header.append(key, header)?;
             cursor_canonical.append(key.number(), key.hash())?;
             cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
@@ -264,7 +251,7 @@ mod tests {
         use crate::{
             stages::headers::HeaderStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -285,7 +272,7 @@ mod tests {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
-            db: StageTestDB,
+            db: TestStageDB,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -296,7 +283,7 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
-                    db: StageTestDB::default(),
+                    db: TestStageDB::default(),
                 }
             }
         }
@@ -304,7 +291,7 @@ mod tests {
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
 
-            fn db(&self) -> &StageTestDB {
+            fn db(&self) -> &TestStageDB {
                 &self.db
             }
 
@@ -412,7 +399,7 @@ mod tests {
                 let downloader = Arc::new(
                     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
                 );
-                Self { client, consensus, downloader, db: StageTestDB::default() }
+                Self { client, consensus, downloader, db: TestStageDB::default() }
             }
         }
 

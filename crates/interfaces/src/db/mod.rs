@@ -1,5 +1,4 @@
 pub mod codecs;
-mod container;
 mod error;
 pub mod mock;
 pub mod models;
@@ -8,7 +7,6 @@ pub mod tables;
 
 use std::marker::PhantomData;
 
-pub use container::DBContainer;
 pub use error::Error;
 pub use table::*;
 

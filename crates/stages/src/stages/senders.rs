@@ -1,12 +1,9 @@
 use crate::{
-    util::unwind::unwind_table_by_num, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    db::StageDB, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use itertools::Itertools;
 use rayon::prelude::*;
-use reth_interfaces::db::{
-    self, tables, DBContainer, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut,
-};
+use reth_interfaces::db::{self, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut};
 use reth_primitives::TxNumber;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -48,40 +45,22 @@ impl<DB: Database> Stage<DB> for SendersStage {
     /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let tx = db.get_mut();
-
         // Look up the start index for transaction range
-        let last_block_num = input.stage_progress.unwrap_or_default();
-        let last_block_hash = tx
-            .get::<tables::CanonicalHeaders>(last_block_num)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number: last_block_num })?;
-        let start_tx_index = tx
-            .get::<tables::CumulativeTxCount>((last_block_num, last_block_hash).into())?
-            .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                number: last_block_num,
-                hash: last_block_hash,
-            })?;
+        let last_block = db.get_block_numhash(input.stage_progress.unwrap_or_default())?;
+        let start_tx_index = db.get_tx_count(last_block)?;
 
         // Look up the end index for transaction range (exclusive)
-        let max_block_num = input.previous_stage_progress();
-        let max_block_hash = tx
-            .get::<tables::CanonicalHeaders>(max_block_num)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number: max_block_num })?;
-        let end_tx_index = tx
-            .get::<tables::CumulativeTxCount>((max_block_num, max_block_hash).into())?
-            .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                number: last_block_num,
-                hash: last_block_hash,
-            })?;
+        let max_block = db.get_block_numhash(input.previous_stage_progress())?;
+        let end_tx_index = db.get_tx_count(max_block)?;
 
         // Acquire the cursor for inserting elements
-        let mut senders_cursor = tx.cursor_mut::<tables::TxSenders>()?;
+        let mut senders_cursor = db.cursor_mut::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
+        let mut tx_cursor = db.cursor::<tables::Transactions>()?;
         // Walk the transactions from start to end index (exclusive)
         let entries = tx_cursor
             .walk(start_tx_index)?
@@ -105,28 +84,20 @@ impl<DB: Database> Stage<DB> for SendersStage {
             recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id, sender))?;
         }
 
-        Ok(ExecOutput { stage_progress: max_block_num, done: true, reached_tip: true })
+        Ok(ExecOutput { stage_progress: max_block.number(), done: true, reached_tip: true })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let tx = db.get_mut();
-
         // Look up the hash of the unwind block
-        if let Some(unwind_hash) = tx.get::<tables::CanonicalHeaders>(input.unwind_to)? {
+        if let Some(unwind_hash) = db.get::<tables::CanonicalHeaders>(input.unwind_to)? {
             // Look up the cumulative tx count at unwind block
-            let latest_tx = tx
-                .get::<tables::CumulativeTxCount>((input.unwind_to, unwind_hash).into())?
-                .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                    number: input.unwind_to,
-                    hash: unwind_hash,
-                })?;
-
-            unwind_table_by_num::<DB, tables::TxSenders>(tx, latest_tx - 1)?;
+            let latest_tx = db.get_tx_count((input.unwind_to, unwind_hash).into())?;
+            db.unwind_table_by_num::<tables::TxSenders>(latest_tx - 1)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -142,7 +113,7 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
         UnwindStageTestRunner,
     };
 
@@ -150,13 +121,13 @@ mod tests {
 
     #[derive(Default)]
     struct SendersTestRunner {
-        db: StageTestDB,
+        db: TestStageDB,
     }
 
     impl StageTestRunner for SendersTestRunner {
         type S = SendersStage;
 
-        fn db(&self) -> &StageTestDB {
+        fn db(&self) -> &TestStageDB {
             &self.db
         }
 
