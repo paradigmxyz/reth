@@ -42,7 +42,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     /// Run [Stage::execute] and return a receiver for the result.
     fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
         let (tx, rx) = oneshot::channel();
-        let (db, mut stage) = (self.db().inner(), self.stage());
+        let (db, mut stage) = (self.db().inner_raw(), self.stage());
         tokio::spawn(async move {
             let mut db = StageDB::new(db.borrow()).expect("failed to create db container");
             let result = stage.execute(&mut db, input).await;
@@ -69,7 +69,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = oneshot::channel();
-        let (db, mut stage) = (self.db().inner(), self.stage());
+        let (db, mut stage) = (self.db().inner_raw(), self.stage());
         tokio::spawn(async move {
             let mut db = StageDB::new(db.borrow()).expect("failed to create db container");
             let result = stage.unwind(&mut db, input).await;

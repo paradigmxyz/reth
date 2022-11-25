@@ -30,12 +30,12 @@ impl Default for TestStageDB {
 
 impl TestStageDB {
     /// Return a database wrapped in [StageDB].
-    fn db(&self) -> StageDB<'_, Env<WriteMap>> {
+    fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
         StageDB::new(self.db.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub(crate) fn inner(&self) -> Arc<Env<WriteMap>> {
+    pub(crate) fn inner_raw(&self) -> Arc<Env<WriteMap>> {
         self.db.clone()
     }
 
@@ -44,7 +44,7 @@ impl TestStageDB {
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), db::Error>,
     {
-        let mut db = self.db();
+        let mut db = self.inner();
         f(&mut db)?;
         db.commit()?;
         Ok(())
@@ -55,7 +55,7 @@ impl TestStageDB {
     where
         F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, db::Error>,
     {
-        f(&self.db())
+        f(&self.inner())
     }
 
     /// Check if the table is empty
