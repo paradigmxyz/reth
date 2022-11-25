@@ -5,18 +5,22 @@ use crate::{
         error::RequestResult,
         headers::{
             client::{HeadersClient, HeadersRequest},
-            downloader::{HeaderBatchDownload, HeaderDownloader},
+            downloader::{BatchDownload, HeaderBatchDownload, HeaderDownloader},
+            error::DownloadError,
         },
     },
 };
+use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockLocked, Header, SealedHeader, H256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
+    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio::sync::{watch, Mutex};
@@ -26,12 +30,13 @@ use tokio::sync::{watch, Mutex};
 pub struct TestHeaderDownloader {
     client: Arc<TestHeadersClient>,
     consensus: Arc<TestConsensus>,
+    limit: u64,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>) -> Self {
-        Self { client, consensus }
+    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>, limit: u64) -> Self {
+        Self { client, consensus, limit }
     }
 }
 
@@ -57,36 +62,60 @@ impl HeaderDownloader for TestHeaderDownloader {
         _head: SealedHeader,
         _forkchoice: ForkchoiceState,
     ) -> HeaderBatchDownload<'_> {
+        Box::pin(TestDownload {
+            client: Arc::clone(&self.client),
+            consensus: Arc::clone(&self.consensus),
+            limit: self.limit,
+        })
+    }
+}
+
+struct TestDownload {
+    client: Arc<TestHeadersClient>,
+    consensus: Arc<TestConsensus>,
+    limit: u64,
+}
+
+impl Future for TestDownload {
+    type Output = Result<Vec<SealedHeader>, DownloadError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let empty = SealedHeader::default();
+        if let Err(error) = self.consensus.validate_header(&empty, &empty) {
+            return Poll::Ready(Err(DownloadError::HeaderValidation { hash: empty.hash(), error }))
+        }
+
+        let request = HeadersRequest {
+            limit: self.limit,
+            reverse: true,
+            start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
+        };
+        match ready!(self.client.get_headers(request).poll_unpin(cx)) {
+            Ok(resp) => {
+                let mut headers = resp.0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                headers.sort_unstable_by_key(|h| h.number);
+                Poll::Ready(Ok(headers))
+            }
+            Err(_) => Poll::Pending,
+        }
+    }
+}
+
+impl Stream for TestDownload {
+    type Item = Result<SealedHeader, DownloadError>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         todo!()
     }
+}
 
-    // async fn download(
-    //     &self,
-    //     _: &SealedHeader,
-    //     _: &ForkchoiceState,
-    // ) -> Result<Vec<SealedHeader>, DownloadError> {
-    //     // call consensus stub first. fails if the flag is set
-    //     let empty = SealedHeader::default();
-    //     self.consensus
-    //         .validate_header(&empty, &empty)
-    //         .map_err(|error| DownloadError::HeaderValidation { hash: empty.hash(), error })?;
-    //
-    //     let stream = self.client.stream_headers().await;
-    //     let stream = stream.timeout(Duration::from_secs(1));
-    //
-    //     match Box::pin(stream).try_next().await {
-    //         Ok(Some(res)) => {
-    //             let mut headers = res.headers.iter().map(|h|
-    // h.clone().seal()).collect::<Vec<_>>();             if !headers.is_empty() {
-    //                 headers.sort_unstable_by_key(|h| h.number);
-    //                 headers.remove(0); // remove head from response
-    //                 headers.reverse();
-    //             }
-    //             Ok(headers)
-    //         }
-    //         _ => Err(DownloadError::Timeout { request_id: 0 }),
-    //     }
-    // }
+impl BatchDownload for TestDownload {
+    type Ok = SealedHeader;
+    type Error = DownloadError;
+
+    fn into_stream_unordered(self) -> Box<dyn Stream<Item = Result<Self::Ok, Self::Error>>> {
+        Box::new(self)
+    }
 }
 
 /// A test client for fetching headers
