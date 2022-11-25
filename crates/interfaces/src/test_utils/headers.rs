@@ -5,9 +5,10 @@ use crate::{
         error::{RequestError, RequestResult},
         headers::{
             client::{HeadersClient, HeadersRequest},
-            downloader::{BatchDownload, HeaderBatchDownload, HeaderDownloader},
+            downloader::{HeaderBatchDownload, HeaderDownloader},
             error::DownloadError,
         },
+        traits::BatchDownload,
     },
 };
 use futures::{Future, FutureExt, Stream};
