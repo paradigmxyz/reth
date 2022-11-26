@@ -353,34 +353,14 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // drain incoming events
-        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
-            this.on_network_tx_event(event);
-        }
-
+        // drain network/peer related events
         while let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
             this.on_network_event(event);
         }
 
-        // Advance all imports
-        while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            match import_res {
-                Ok(hash) => {
-                    this.on_good_import(hash);
-                }
-                Err(err) => {
-                    this.on_bad_import(*err.hash());
-                }
-            }
-        }
-
-        // handle new transactions
-        let mut new_txs = Vec::new();
-        while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
-            new_txs.push(hash);
-        }
-        if !new_txs.is_empty() {
-            this.on_new_transactions(new_txs);
+        // drain incoming transaction events
+        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
+            this.on_network_tx_event(event);
         }
 
         // Advance all requests.
@@ -402,6 +382,29 @@ where
                 }
             }
         }
+
+        // Advance all imports
+        while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
+            match import_res {
+                Ok(hash) => {
+                    this.on_good_import(hash);
+                }
+                Err(err) => {
+                    this.on_bad_import(*err.hash());
+                }
+            }
+        }
+
+        // handle and propagate new transactions
+        let mut new_txs = Vec::new();
+        while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+            new_txs.push(hash);
+        }
+        if !new_txs.is_empty() {
+            this.on_new_transactions(new_txs);
+        }
+
+        // all channels are fully drained and import futures pending
 
         Poll::Pending
     }
