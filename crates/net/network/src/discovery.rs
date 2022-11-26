@@ -25,11 +25,11 @@ pub struct Discovery {
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
     discv4: Discv4,
-    /// All updates from the discv4 service.
+    /// All KAD table updates from the discv4 service.
     discv4_updates: ReceiverStream<TableUpdate>,
     /// The initial config for the discv4 service
     dsicv4_config: Discv4Config,
-    /// Buffered events until polled.
+    /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
     /// The handle to the spawned discv4 service
     _discv4_service: JoinHandle<()>,
@@ -72,7 +72,9 @@ impl Discovery {
     }
 
     /// Manually adds an address to the set.
-    pub(crate) fn add_known_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
+    ///
+    /// This has the same effect as adding node discovered via network gossip.
+    pub(crate) fn add_node_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
         self.on_discv4_update(TableUpdate::Added(NodeRecord {
             address: addr.ip(),
             tcp_port: addr.port(),
@@ -82,7 +84,7 @@ impl Discovery {
     }
 
     /// Returns all nodes we know exist in the network.
-    pub fn known_nodes(&mut self) -> &HashMap<PeerId, SocketAddr> {
+    pub fn nodes(&mut self) -> &HashMap<PeerId, SocketAddr> {
         &self.discovered_nodes
     }
 
@@ -117,6 +119,7 @@ impl Discovery {
                 return Poll::Ready(event)
             }
 
+            // drain the update stream
             while let Poll::Ready(Some(update)) = self.discv4_updates.poll_next_unpin(cx) {
                 self.on_discv4_update(update)
             }
@@ -125,7 +128,6 @@ impl Discovery {
                 return Poll::Pending
             }
         }
-        // drain the update stream
     }
 }
 
