@@ -74,7 +74,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
             }
             Err(e) => match e {
                 DownloadError::Timeout => {
-                    warn!("no response for header request");
+                    warn!("No response for header request");
                     return Ok(ExecOutput {
                         stage_progress: last_block_num,
                         reached_tip: false,
@@ -85,8 +85,10 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                     warn!("Validation error for header {hash}: {error}");
                     return Err(StageError::Validation { block: last_block_num, error })
                 }
-                // TODO: handle unreachable
-                _ => unreachable!(),
+                error => {
+                    warn!("Unexpected error occurred: {error}");
+                    return Err(StageError::Internal(Box::new(error)))
+                }
             },
         };
         let stage_progress = self.write_headers::<DB>(db, headers).await?.unwrap_or(last_block_num);
@@ -159,7 +161,6 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 
             td += header.difficulty;
 
-            // TODO: investigate default write flags
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
             db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
             cursor_header.append(key, header)?;
@@ -212,11 +213,34 @@ mod tests {
         let mut runner = HeadersTestRunner::default();
         runner.consensus.set_fail_validation(true);
         let input = ExecInput::default();
-        let seed = runner.seed_execution(input).expect("failed to seed execution");
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
-        runner.after_execution(seed).await.expect("failed to run after execution hook");
+        runner.after_execution(headers).await.expect("failed to run after execution hook");
         let result = rx.await.unwrap();
         assert_matches!(result, Err(StageError::Validation { .. }));
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+    }
+
+    /// Check that unexpected download errors are caught
+    #[tokio::test]
+    async fn executed_request_error() {
+        let mut runner = HeadersTestRunner::default();
+        let (stage_progress, previous_stage) = (1000, 1200);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        runner.client.set_error(RequestError::BadResponse).await;
+
+        // Update tip
+        let tip = headers.last().unwrap();
+        runner.consensus.update_tip(tip.hash());
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Err(StageError::Internal(_)));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
