@@ -418,12 +418,18 @@ pub fn set_capability_offsets(
     // map of capability name to version
     let mut shared_capabilities = HashMap::new();
 
-    // sorted list of capability names
-    // TODO: the Ord implementation for strings says the following:
-    // > Strings are ordered lexicographically by their byte values. This orders Unicode code
-    // points based on their positions in the code charts. This is not necessarily the same as
-    // “alphabetical” order.
-    // We need to implement a case-sensitive alphabetical sort
+    // The `Ord` implementation for capability names should be equivalent to geth (and every other
+    // client), since geth uses golang's default string comparison, which orders strings
+    // lexicographically.
+    // https://golang.org/pkg/strings/#Compare
+    //
+    // This is important because the capability name is used to determine the message id offset, so
+    // if the sorting is not identical, offsets for connected peers could be inconsistent.
+    // This would cause the peers to send messages with the wrong message id, which is usually a
+    // protocol violation.
+    //
+    // The `Ord` implementation for `SmolStr` (used here) currently delegates to rust's `Ord`
+    // implementation for `str`, which also orders strings lexicographically.
     let mut shared_capability_names = BTreeSet::new();
 
     // find highest shared version of each shared capability
