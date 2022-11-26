@@ -326,35 +326,3 @@ mod tests {
         let _ = provider.latest();
     }
 }
-
-#[cfg(test)]
-// This ensures that we can use the GATs in the downstream staged exec pipeline.
-mod gat_tests {
-    use super::*;
-    use reth_interfaces::db::{mock::DatabaseMock, DBContainer};
-
-    #[async_trait::async_trait]
-    trait Stage<DB: Database> {
-        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> ();
-    }
-
-    struct MyStage<'a, DB>(&'a DB);
-
-    #[async_trait::async_trait]
-    impl<'c, DB: Database> Stage<DB> for MyStage<'c, DB> {
-        async fn run(&mut self, db: &mut DBContainer<'_, DB>) -> () {
-            let _tx = db.commit().unwrap();
-        }
-    }
-
-    #[test]
-    #[should_panic] // no tokio runtime configured
-    fn can_spawn() {
-        let db = DatabaseMock::default();
-        tokio::spawn(async move {
-            let mut container = DBContainer::new(&db).unwrap();
-            let mut stage = MyStage(&db);
-            stage.run(&mut container).await;
-        });
-    }
-}

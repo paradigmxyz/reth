@@ -24,6 +24,8 @@ use tokio::{
 pub(crate) struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
     pub(crate) disconnect_tx: oneshot::Sender<()>,
+    /// The direction of the session
+    pub(crate) direction: Direction,
 }
 
 /// An established session with a remote peer.
@@ -32,6 +34,8 @@ pub(crate) struct PendingSessionHandle {
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
 pub(crate) struct ActiveSessionHandle {
+    /// The direction of the session
+    pub(crate) direction: Direction,
     /// The assigned id for this session
     pub(crate) session_id: SessionId,
     /// The identifier of the remote peer
