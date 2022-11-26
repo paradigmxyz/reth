@@ -11,7 +11,7 @@ use reth_interfaces::{
     },
     p2p::headers::{client::HeadersClient, downloader::HeaderDownloader, error::DownloadError},
 };
-use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
+use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -133,8 +133,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let hash = tx
             .get::<tables::CanonicalHeaders>(height)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: height })?;
-        let td: Vec<u8> = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap(); // TODO:
-        self.client.update_status(height, hash, H256::from_slice(&td)).await;
+        let td: U256 = tx.get::<tables::HeaderTD>((height, hash).into())?.unwrap().into();
+        self.client.update_status(height, hash, td).await;
         Ok(())
     }
 
@@ -158,7 +158,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
         let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
         let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
-        let mut td = U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap());
+        let mut td: U256 = cursor_td.last()?.map(|(_, v)| v).unwrap().into();
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -180,7 +180,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             tx.put::<tables::HeaderNumbers>(block_hash, header.number)?;
             cursor_header.append(key, header)?;
             cursor_canonical.append(key.number(), key.hash())?;
-            cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
+            cursor_td.append(key, td.into())?;
         }
 
         Ok(latest)
@@ -391,10 +391,9 @@ mod tests {
                                     )?;
                                     let td = tx.get::<tables::HeaderTD>(key)?.unwrap();
                                     assert_eq!(
-                                        parent_td.map(
-                                            |td| U256::from_big_endian(&td) + header.difficulty
-                                        ),
-                                        Some(U256::from_big_endian(&td))
+                                        parent_td
+                                            .map(|td| Into::<U256>::into(td) + header.difficulty),
+                                        Some(Into::<U256>::into(td))
                                     );
                                 }
                             }

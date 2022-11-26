@@ -1,6 +1,6 @@
 use crate::p2p::MessageStream;
 
-use reth_primitives::{Header, H256, H512};
+use reth_primitives::{Header, H256, H512, U256};
 
 use async_trait::async_trait;
 use reth_primitives::BlockHashOrNumber;
@@ -47,7 +47,7 @@ pub trait HeadersClient: Send + Sync + Debug {
     /// Update the node's Status message.
     ///
     /// The updated Status message will be used during any new eth/65 handshakes.
-    async fn update_status(&self, height: u64, hash: H256, td: H256);
+    async fn update_status(&self, height: u64, hash: H256, td: U256);
 
     /// Sends the header request to the p2p network.
     // TODO: What does this return?

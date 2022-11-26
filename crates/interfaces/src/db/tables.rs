@@ -1,6 +1,7 @@
 //! Declaration of all Database tables.
 
 use crate::db::{
+    codecs::CompactU256,
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
         blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockBody},
@@ -230,6 +231,8 @@ table!(
 
 /// List with transaction numbers.
 pub type TxNumberList = IntegerList;
+/// Temporary placeholder type for DB.
+pub type RlpTotalDifficulty = CompactU256;
 /// Encoded stage id.
 pub type StageId = Vec<u8>;
 
@@ -243,8 +246,6 @@ pub type ConfigKey = Vec<u8>;
 pub type ConfigValue = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type BlockNumHashTxNumber = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type RlpTotalDifficulty = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type AddressStorageKey = Vec<u8>;
 /// Temporary placeholder type for DB.

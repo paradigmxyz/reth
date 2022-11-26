@@ -5,7 +5,7 @@ use reth_db::{
 use reth_interfaces::db::{
     self, models::BlockNumHash, tables, DBContainer, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
 };
-use reth_primitives::{BigEndianHash, BlockNumber, SealedHeader, H256, U256};
+use reth_primitives::{BlockNumber, SealedHeader, U256};
 use std::{borrow::Borrow, sync::Arc};
 
 /// The [StageTestDB] is used as an internal
@@ -166,9 +166,8 @@ impl StageTestDB {
         self.commit(|tx| {
             let headers = headers.collect::<Vec<_>>();
 
-            let mut td = U256::from_big_endian(
-                &tx.cursor::<tables::HeaderTD>()?.last()?.map(|(_, v)| v).unwrap_or_default(),
-            );
+            let mut td: U256 =
+                tx.cursor::<tables::HeaderTD>()?.last()?.map(|(_, v)| v).unwrap_or_default().into();
 
             for header in headers {
                 let key: BlockNumHash = (header.number, header.hash()).into();
@@ -178,7 +177,7 @@ impl StageTestDB {
                 tx.put::<tables::Headers>(key, header.clone().unseal())?;
 
                 td += header.difficulty;
-                tx.put::<tables::HeaderTD>(key, H256::from_uint(&td).as_bytes().to_vec())?;
+                tx.put::<tables::HeaderTD>(key, td.into())?;
             }
 
             Ok(())

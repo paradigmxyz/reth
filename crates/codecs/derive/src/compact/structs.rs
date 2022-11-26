@@ -48,13 +48,19 @@ impl<'a> StructHandler<'a> {
     fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
         let (name, ftype, is_compact) = field_descriptor;
 
+        // Should only happen on wrapper structs like `Struct(pub Field)`
         if name.is_empty() {
-            // Should only happen on wrapper structs like `Struct(pub Field)`
             self.is_wrapper = true;
 
             self.lines.push(quote! {
-                self.0.to_compact(&mut buffer);
+                let _len = self.0.to_compact(&mut buffer);
             });
+
+            if is_flag_type(ftype) {
+                self.lines.push(quote! {
+                    flags.set_placeholder_len(_len as u8);
+                })
+            }
 
             return
         }

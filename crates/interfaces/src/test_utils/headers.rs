@@ -7,7 +7,7 @@ use crate::{
         error::DownloadError,
     },
 };
-use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512};
+use reth_primitives::{BlockLocked, Header, SealedHeader, H256, H512, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     collections::HashSet,
@@ -132,7 +132,7 @@ impl TestHeadersClient {
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
     // noop
-    async fn update_status(&self, _height: u64, _hash: H256, _td: H256) {}
+    async fn update_status(&self, _height: u64, _hash: H256, _td: U256) {}
 
     async fn send_header_request(&self, id: u64, request: HeadersRequest) -> HashSet<H512> {
         self.req_tx.send((id, request)).await.expect("failed to send request");
