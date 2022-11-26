@@ -43,6 +43,7 @@ impl_compression_for_compact!(CompactU256);
 macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {
         $(
+            /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
             #[use_compact]
             #[derive(Debug, Clone, PartialEq, Eq, Default)]
             pub struct $wrapper(pub $name);

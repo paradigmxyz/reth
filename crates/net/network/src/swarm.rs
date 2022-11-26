@@ -1,14 +1,14 @@
 use crate::{
+    fetch::StatusUpdate,
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
     session::{Direction, SessionEvent, SessionId, SessionManager},
-    state::{AddSessionError, NetworkState, StateAction},
+    state::{NetworkState, StateAction},
 };
 use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    DisconnectReason,
 };
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
@@ -87,29 +87,21 @@ where
                 status,
                 messages,
                 direction,
-            } => match self.state.on_session_activated(
-                peer_id,
-                capabilities.clone(),
-                status,
-                messages.clone(),
-            ) {
-                Ok(_) => Some(SwarmEvent::SessionEstablished {
+            } => {
+                self.state.on_session_activated(
+                    peer_id,
+                    capabilities.clone(),
+                    status,
+                    messages.clone(),
+                );
+                Some(SwarmEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     capabilities,
                     messages,
                     direction,
-                }),
-                Err(err) => {
-                    match err {
-                        AddSessionError::AtCapacity { peer } => {
-                            self.sessions.disconnect(peer, Some(DisconnectReason::TooManyPeers));
-                        }
-                    };
-                    self.state.peers_mut().on_disconnected(&peer_id);
-                    None
-                }
-            },
+                })
+            }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
             }
@@ -177,6 +169,7 @@ where
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
             }
+            StateAction::StatusUpdate(status) => return Some(SwarmEvent::StatusUpdate(status)),
         }
         None
     }
@@ -234,6 +227,8 @@ where
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
 pub(crate) enum SwarmEvent {
+    /// Received a node status update.
+    StatusUpdate(StatusUpdate),
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
