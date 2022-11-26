@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// A communication channel to the [`PeersManager`] to apply changes to the peer set.
+/// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 pub struct PeersHandle {
     /// Sender half of command channel back to the [`PeersManager`]
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
@@ -23,9 +23,23 @@ pub struct PeersHandle {
 // === impl PeersHandle ===
 
 impl PeersHandle {
-    /// Send a reputation change for the given peer
+    fn send(&self, cmd: PeerCommand) {
+        let _ = self.manager_tx.send(cmd);
+    }
+
+    /// Adds a peer to the set.
+    pub fn add_peer(&self, peer_id: PeerId, addr: SocketAddr) {
+        self.send(PeerCommand::Add(peer_id, addr));
+    }
+
+    /// Removes a peer from the set.
+    pub fn remove_peer(&self, peer_id: PeerId) {
+        self.send(PeerCommand::Remove(peer_id));
+    }
+
+    /// Send a reputation change for the given peer.
     pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
-        let _ = self.manager_tx.send(PeerCommand::ReputationChange(peer_id, kind));
+        self.send(PeerCommand::ReputationChange(peer_id, kind));
     }
 }
 
@@ -173,18 +187,17 @@ impl PeersManager {
     ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
-        self.peers
-            .iter_mut()
-            .filter(|(_, peer)| peer.state.is_unconnected())
-            .fold(None::<(&PeerId, &mut Peer)>, |mut best_peer, candidate| {
-                if let Some(best_peer) = best_peer.take() {
-                    if best_peer.1.reputation >= candidate.1.reputation {
-                        return Some(best_peer)
-                    }
-                }
-                Some(candidate)
-            })
-            .map(|(id, peer)| (*id, peer))
+        let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| peer.state.is_unconnected());
+
+        // keep track of the best peer, if there's one
+        let mut best_peer = unconnected.next()?;
+
+        for maybe_better in unconnected {
+            if maybe_better.1.reputation > best_peer.1.reputation {
+                best_peer = maybe_better;
+            }
+        }
+        Some((*best_peer.0, best_peer.1))
     }
 
     /// If there's capacity for new outbound connections, this will queue new
