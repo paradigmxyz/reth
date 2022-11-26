@@ -21,6 +21,15 @@ pub enum RequestError {
     BadResponse,
 }
 
+// === impl RequestError ===
+
+impl RequestError {
+    /// Indicates whether this error is retryable or fatal.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, RequestError::Timeout | RequestError::ConnectionDropped)
+    }
+}
+
 impl<T> From<mpsc::error::SendError<T>> for RequestError {
     fn from(_: mpsc::error::SendError<T>) -> Self {
         RequestError::ChannelClosed
