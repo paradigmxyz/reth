@@ -8,7 +8,7 @@ use reth_eth_wire::{
     capability::CapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
     EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    Transactions,
+    SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
@@ -36,17 +36,20 @@ impl NewBlockMessage {
     }
 }
 
-/// Represents all messages that can be sent to a peer session
+/// All Bi-directional eth-message variants that can be sent to a session or received from a
+/// session.
 #[derive(Debug)]
 pub enum PeerMessage {
     /// Announce new block hashes
-    NewBlockHashes(Arc<NewBlockHashes>),
+    NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
     NewBlock(NewBlockMessage),
-    /// Broadcast transactions.
-    Transactions(Arc<Transactions>),
+    /// Received transactions _from_ the peer
+    ReceivedTransaction(Transactions),
+    /// Broadcast transactions _from_ local _to_ a peer.
+    SendTransactions(SharedTransactions),
     /// Send new pooled transactions
-    PooledTransactions(Arc<NewPooledTransactionHashes>),
+    PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest),
     /// Other than eth namespace message

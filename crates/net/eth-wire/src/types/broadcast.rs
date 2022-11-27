@@ -1,6 +1,7 @@
 //! Types for broadcasting new data.
 use reth_primitives::{Header, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use std::sync::Arc;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
@@ -85,6 +86,16 @@ impl From<Transactions> for Vec<TransactionSigned> {
         txs.0
     }
 }
+
+/// Same as [`Transactions`] but this is intended as egress message send from local to _many_ peers.
+///
+/// The list of transactions is constructed on per-peers basis, but the underlying transaction
+/// objects are shared.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+pub struct SharedTransactions(
+    /// New transactions for the peer to include in its mempool.
+    pub Vec<Arc<TransactionSigned>>,
+);
 
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
