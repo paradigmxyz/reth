@@ -1,6 +1,10 @@
 //! Configuration types for [`SessionsManager`]
 
 use crate::session::{Direction, ExceedsSessionLimit};
+use std::time::Duration;
+
+/// Default request timeout.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(500u64);
 
 /// Configuration options when creating a [`SessionsManager`].
 pub struct SessionsConfig {
@@ -10,8 +14,10 @@ pub struct SessionsConfig {
     pub session_event_buffer: usize,
     /// Limits to enforce.
     ///
-    /// By default, no limits will be enforced
+    /// By default, no limits will be enforced.
     pub limits: SessionLimits,
+    /// The maximum time we wait for a response from a peer.
+    pub request_timeout: Duration,
 }
 
 impl Default for SessionsConfig {
@@ -26,6 +32,7 @@ impl Default for SessionsConfig {
             // `poll`.
             session_event_buffer: 64,
             limits: Default::default(),
+            request_timeout: REQUEST_TIMEOUT,
         }
     }
 }

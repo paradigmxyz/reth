@@ -28,7 +28,7 @@ use std::{
     net::SocketAddr,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::{
     net::TcpStream,
@@ -55,6 +55,8 @@ pub(crate) struct SessionManager {
     next_id: usize,
     /// Keeps track of all sessions
     counter: SessionCounter,
+    /// The maximum time we wait for a response from a peer.
+    request_timeout: Duration,
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The node id of node
@@ -114,6 +116,7 @@ impl SessionManager {
         Self {
             next_id: 0,
             counter: SessionCounter::new(config.limits),
+            request_timeout: config.request_timeout,
             secret_key,
             peer_id,
             status,
@@ -333,6 +336,8 @@ impl SessionManager {
                         conn,
                         queued_outgoing: Default::default(),
                         received_requests: Default::default(),
+                        timeout_interval: tokio::time::interval(self.request_timeout),
+                        request_timeout: self.request_timeout,
                     };
 
                     self.spawn(session);
