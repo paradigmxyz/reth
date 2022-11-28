@@ -34,6 +34,13 @@ pub struct StoredBlockBody {
     pub ommers: Vec<Header>,
 }
 
+impl StoredBlockBody {
+    /// Return next block tx id.
+    pub fn next_block_tx_id(&self) -> TxNumber {
+        self.base_tx_id + self.tx_amount
+    }
+}
+
 /// Hash of the block header. Value for [`CanonicalHeaders`]
 pub type HeaderHash = H256;
 

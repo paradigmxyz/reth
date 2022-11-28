@@ -10,6 +10,7 @@ use reth_executor::{
 };
 use reth_interfaces::{
     db::{models::BlockNumHash, tables, DBContainer, Database, DbCursorRO, DbTx, DbTxMut},
+    executor::Error as ExecutorError,
     provider::db::StateProviderImplRefLatest,
 };
 use reth_primitives::{StorageEntry, TransactionSignedEcRecovered, H256};
@@ -52,14 +53,14 @@ const TX_INDEX: StageId = StageId("Execution");
 /// [tables::AccountHistory] remove change set and apply old values to [tables::PlainAccountState]
 /// [tables::StorageHistory] remove change set and apply old values to [tables::PlainStorageState]
 #[derive(Debug)]
-pub struct Execution;
+pub struct ExecutionStage;
 
 /// SPecify batch sizes of block in execution
 /// TODO make this as config
 const BATCH_SIZE: u64 = 1000;
 
 #[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for Execution {
+impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         TX_INDEX
@@ -97,6 +98,7 @@ impl<DB: Database> Stage<DB> for Execution {
                 break
             }
         }
+        println!("num of blocks: {}", canonical_batch.len());
 
         // get headers from canonical numbers
         let mut headers_batch = Vec::with_capacity(canonical_batch.len());
@@ -129,7 +131,9 @@ impl<DB: Database> Stage<DB> for Execution {
             let mut tx_walker = tx.walk(start_tx_index)?;
             let mut transactions = Vec::with_capacity(body.tx_amount as usize);
             // get next N transactions.
+            println!("start {start_tx_index} end {end_tx_index}");
             for index in start_tx_index..end_tx_index {
+                println!("index tx:{index}");
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
@@ -175,7 +179,7 @@ impl<DB: Database> Stage<DB> for Execution {
                     &config,
                     &mut state_provider,
                 )
-                .map_err(|_| DatabaseIntegrityError::EndOfTransactionTable)?,
+                .map_err(|error| StageError::ExecutionError { block: header.number, error })?,
             );
         }
 
@@ -214,8 +218,8 @@ impl<DB: Database> Stage<DB> for Execution {
             }
             // insert bytecode
             for (hash, bytecode) in result.new_bytecodes.into_iter() {
-                // make different types of bytecode. Checked and maybe even analyzed (needs to be packed).
-                // Currently save only raw bytes.
+                // make different types of bytecode. Checked and maybe even analyzed (needs to be
+                // packed). Currently save only raw bytes.
                 db_tx
                     .put::<tables::Bytecodes>(hash, bytecode.bytes()[..bytecode.len()].to_vec())?;
             }
@@ -242,5 +246,178 @@ impl<DB: Database> Stage<DB> for Execution {
 
 #[cfg(test)]
 mod tests {
-    // TODO sanity test
+    use super::*;
+    use reth_db::{
+        kv::{test_utils::create_test_db, EnvKind},
+        mdbx::WriteMap,
+    };
+    use reth_interfaces::provider::insert_canonical_block;
+    use reth_primitives::{hex_literal::hex, BlockLocked};
+    use reth_rlp::Decodable;
+
+    #[tokio::test]
+    async fn senity_execution_of_block() {
+        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let mut db = DBContainer::new(state_db.as_ref()).unwrap();
+        let input = ExecInput {
+            previous_stage: None,
+            /// The progress of this stage the last time it was executed.
+            stage_progress: None,
+        };
+        let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = BlockLocked::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
+        let block = BlockLocked::decode(&mut block_rlp).unwrap();
+        insert_canonical_block(db.get_mut(), &genesis).unwrap();
+        insert_canonical_block(db.get_mut(), &block).unwrap();
+        db.commit().unwrap();
+
+        let _o = ExecutionStage.execute(&mut db, input).await.unwrap();
+        /* PRE STATE:
+
+           "0x1000000000000000000000000000000000000000" : {
+               "balance" : "0x00",
+               "code" : "0x5a465a905090036002900360015500",
+               "nonce" : "0x00",
+               "storage" : {
+               }
+           },
+           "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
+               "balance" : "0x3635c9adc5dea00000",
+               "code" : "0x",
+               "nonce" : "0x00",
+               "storage" : {
+               }
+           }
+
+           POST STATE:
+
+            "0x1000000000000000000000000000000000000000" : {
+               "balance" : "0x00",
+               "code" : "0x5a465a905090036002900360015500",
+               "nonce" : "0x00",
+               "storage" : {
+                   "0x01" : "0x02"
+               }
+           },
+           "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba" : {
+               "balance" : "0x1bc16d674ece94ba",
+               "code" : "0x",
+               "nonce" : "0x00",
+               "storage" : {
+               }
+           },
+           "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
+               "balance" : "0x3635c9adc5de996b46",
+               "code" : "0x",
+               "nonce" : "0x01",
+               "storage" : {
+               }
+           }
+        */
+
+        /*
+        "blocks" : [
+            {
+                "blockHeader" : {
+                    "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "coinbase" : "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+                    "difficulty" : "0x020000",
+                    "extraData" : "0x00",
+                    "gasLimit" : "0x02540be400",
+                    "gasUsed" : "0xa879",
+                    "hash" : "0xb76eaf58836e69d39d21dc15f02bedd20fc67e71b9b6a632cdfcb6506f599eb5",
+                    "mixHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "nonce" : "0x0000000000000000",
+                    "number" : "0x01",
+                    "parentHash" : "0x75c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82f",
+                    "receiptTrie" : "0x3f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbab",
+                    "stateRoot" : "0x98f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0",
+                    "timestamp" : "0x03e8",
+                    "transactionsTrie" : "0x8151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcb",
+                    "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
+                },
+                "rlp" : "0xf90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0",
+                "transactions" : [
+                    {
+                        "data" : "0x",
+                        "gasLimit" : "0x05f5e100",
+                        "gasPrice" : "0x0a",
+                        "nonce" : "0x00",
+                        "r" : "0x7e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37",
+                        "s" : "0x5f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509b",
+                        "sender" : "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                        "to" : "0x1000000000000000000000000000000000000000",
+                        "v" : "0x1b",
+                        "value" : "0x00"
+                    }
+                ],
+                "uncleHeaders" : [
+                ]
+            }
+        ],
+        "genesisBlockHeader" : {
+            "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "coinbase" : "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "difficulty" : "0x020000",
+            "extraData" : "0x00",
+            "gasLimit" : "0x02540be400",
+            "gasUsed" : "0x00",
+            "hash" : "0x75c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82f",
+            "mixHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce" : "0x0000000000000000",
+            "number" : "0x00",
+            "parentHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "receiptTrie" : "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "stateRoot" : "0x45571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32ed",
+            "timestamp" : "0x00",
+            "transactionsTrie" : "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
+        },
+        "genesisRLP" : "0xf901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0",
+        "lastblockhash" : "0xb76eaf58836e69d39d21dc15f02bedd20fc67e71b9b6a632cdfcb6506f599eb5",
+        "network" : "Berlin",
+        "postState" : {
+            "0x1000000000000000000000000000000000000000" : {
+                "balance" : "0x00",
+                "code" : "0x5a465a905090036002900360015500",
+                "nonce" : "0x00",
+                "storage" : {
+                    "0x01" : "0x02"
+                }
+            },
+            "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba" : {
+                "balance" : "0x1bc16d674ece94ba",
+                "code" : "0x",
+                "nonce" : "0x00",
+                "storage" : {
+                }
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
+                "balance" : "0x3635c9adc5de996b46",
+                "code" : "0x",
+                "nonce" : "0x01",
+                "storage" : {
+                }
+            }
+        },
+        "pre" : {
+            "0x1000000000000000000000000000000000000000" : {
+                "balance" : "0x00",
+                "code" : "0x5a465a905090036002900360015500",
+                "nonce" : "0x00",
+                "storage" : {
+                }
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
+                "balance" : "0x3635c9adc5dea00000",
+                "code" : "0x",
+                "nonce" : "0x00",
+                "storage" : {
+                }
+            }
+        },
+        "sealEngine" : "NoProof"
+        */
+    }
 }

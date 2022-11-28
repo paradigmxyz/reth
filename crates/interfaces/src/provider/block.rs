@@ -1,8 +1,16 @@
-use crate::{Result, db::DbTxMut};
+use crate::{
+    consensus::Consensus,
+    db::{
+        models::{BlockNumHash, StoredBlockBody},
+        tables, DbTx, DbTxMut,
+    },
+    provider::Error as ProviderError,
+    Result,
+};
 use auto_impl::auto_impl;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, Header, H256, U256, BlockLocked,
+    Block, BlockHash, BlockLocked, Header, H256, U256,
 };
 
 /// Client trait for fetching `Header` related data.
@@ -89,21 +97,54 @@ pub struct ChainInfo {
     pub safe_finalized: Option<reth_primitives::BlockNumber>,
 }
 
-
 /// Fill block to database. Useful for tests.
-pub fn fill_block<'a, TX:DbTxMut<'a>>(tx: TX, block: &BlockLocked) {
-    //tx.put
-    /*
-            // Get next canonical block hashes to execute.
-        let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
-        // Get header with canonical hashes.
-        let mut headers = db_tx.cursor::<tables::Headers>()?;
-        // Get bodies (to get tx index) with canonical hashes.
-        let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
-        // Get transaction of the block that we are executing.
-        let mut tx = db_tx.cursor::<tables::Transactions>()?;
-        // Skip sender recovery and load signer from database.
-        let mut tx_sender = db_tx.cursor::<tables::TxSenders>()?;
+/// Check only parent dependency.
+pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    tx: &TX,
+    block: &BlockLocked,
+) -> Result<()> {
+    let block_num_hash = BlockNumHash((block.number, block.hash()));
+    tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
+    // Put header with canonical hashes.
+    tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
+    tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 
-        */
+    let start_tx_number = if block.number == 0 {
+        0
+    } else {
+        let parent_hash = block.parent_hash;
+        let parent_number = tx
+            .get::<tables::HeaderNumbers>(parent_hash)?
+            .ok_or(ProviderError::BlockHashNotExist { block_hash: parent_hash })?;
+
+        let parent_num_hash = BlockNumHash((parent_number, parent_hash));
+
+        let parent_body = tx
+            .get::<tables::BlockBodies>(parent_num_hash)?
+            .ok_or(ProviderError::BlockBodyNotExist { block_num_hash: parent_num_hash })?;
+        parent_body.next_block_tx_id()
+    };
+
+    // insert body
+    tx.put::<tables::BlockBodies>(
+        block_num_hash,
+        StoredBlockBody {
+            base_tx_id: start_tx_number,
+            tx_amount: block.body.len() as u64,
+            ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect(),
+        },
+    )?;
+
+    tx.put::<tables::CumulativeTxCount>(block_num_hash, start_tx_number)?;
+
+    let mut tx_number = start_tx_number;
+    for eth_tx in block.body.iter() {
+        println!("num: {tx_number}");
+        let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
+        tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
+        tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
+        tx_number += 1;
+    }
+
+    Ok(())
 }

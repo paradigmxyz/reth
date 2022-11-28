@@ -281,6 +281,8 @@ pub fn execute<DB: StateProvider>(
                 revm::Return::SelfDestruct
         );
 
+        // TODO add handling of other errors
+
         // Add spend gas.
         cumulative_gas_used += gas_used;
 

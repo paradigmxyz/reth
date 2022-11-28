@@ -1,5 +1,5 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::{consensus, db::Error as DbError};
+use reth_interfaces::{consensus, db::Error as DbError, executor};
 use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -19,6 +19,14 @@ pub enum StageError {
     /// The stage encountered a database error.
     #[error("An internal database error occurred.")]
     Database(#[from] DbError),
+    #[error("Stage encountered a execution error in block {block}: {error}.")]
+    ExecutionError {
+        /// The block that failed execution.
+        block: BlockNumber,
+        /// The underlying execution error.
+        #[source]
+        error: executor::Error,
+    },
     /// The stage encountered a database integrity error.
     #[error("A database integrity error occurred.")]
     DatabaseIntegrity(#[from] DatabaseIntegrityError),
