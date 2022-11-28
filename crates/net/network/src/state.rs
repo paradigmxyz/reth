@@ -285,8 +285,8 @@ where
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
             }
-            BlockResponseOutcome::BadResponse(_peer, _reputation_change) => {
-                // TODO handle reputation change
+            BlockResponseOutcome::BadResponse(peer, reputation_change) => {
+                self.peers_manager.apply_reputation_change(&peer, reputation_change);
             }
         }
         None
@@ -297,17 +297,14 @@ where
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
-                return self.on_block_response_outcome(outcome)
+                self.on_block_response_outcome(outcome)
             }
             PeerResponseResult::BlockBodies(res) => {
                 let outcome = self.state_fetcher.on_block_bodies_response(peer, res)?;
-                return self.on_block_response_outcome(outcome)
+                self.on_block_response_outcome(outcome)
             }
-            PeerResponseResult::PooledTransactions(_) => {}
-            PeerResponseResult::NodeData(_) => {}
-            PeerResponseResult::Receipts(_) => {}
+            _ => None,
         }
-        None
     }
 
     /// Advances the state
@@ -334,8 +331,10 @@ where
                 }
             }
 
+            // need to buffer results here to make borrow checker happy
             let mut disconnect_sessions = Vec::new();
             let mut received_responses = Vec::new();
+
             // poll all connected peers for responses
             for (id, peer) in self.connected_peers.iter_mut() {
                 if let Some(response) = peer.pending_response.as_mut() {
