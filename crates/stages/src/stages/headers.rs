@@ -119,7 +119,10 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         height: BlockNumber,
     ) -> Result<(), StageError> {
         let block_key = db.get_block_numhash(height)?;
-        let td: U256 = db.get::<tables::HeaderTD>(block_key)?.unwrap().into();
+        let td: U256 = db
+            .get::<tables::HeaderTD>(block_key)?
+            .ok_or_else(|| DatabaseIntegrityError::TotalDifficulty { number: height })?
+            .into();
         self.client.update_status(height, block_key.hash(), td);
         Ok(())
     }
