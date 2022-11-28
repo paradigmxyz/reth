@@ -13,7 +13,7 @@ use reth_rpc_types::{
 #[cfg_attr(feature = "client", rpc(server, client))]
 #[async_trait]
 pub trait EthApi {
-    /// Returns protocol version encoded as a string.
+    /// Returns the protocol version encoded as a string.
     #[method(name = "eth_protocolVersion")]
     fn protocol_version(&self) -> Result<U64>;
 
@@ -21,41 +21,39 @@ pub trait EthApi {
     #[method(name = "eth_syncing")]
     fn syncing(&self) -> Result<SyncStatus>;
 
-    /// Returns block author.
+    /// Returns the client coinbase address.
     #[method(name = "eth_coinbase")]
     async fn author(&self) -> Result<Address>;
 
-    /// Returns accounts list.
+    /// Returns a list of addresses owned by client.
     #[method(name = "eth_accounts")]
     async fn accounts(&self) -> Result<Vec<Address>>;
 
-    /// Returns the best block number.
+    /// Returns the number of most recent block.
     #[method(name = "eth_blockNumber")]
     fn block_number(&self) -> Result<U256>;
 
-    /// Returns the chain ID used for transaction signing at the
-    /// current best block. None is returned if not
-    /// available.
+    /// Returns the chain ID of the current network.
     #[method(name = "eth_chainId")]
     async fn chain_id(&self) -> Result<Option<U64>>;
 
-    /// Returns block with given hash.
+    /// Returns information about a block by hash.
     #[method(name = "eth_getBlockByHash")]
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>>;
 
-    /// Returns block with given number.
+    /// Returns information about a block by number.
     #[method(name = "eth_getBlockByNumber")]
     async fn block_by_number(&self, number: BlockNumber, full: bool) -> Result<Option<RichBlock>>;
 
-    /// Returns the number of transactions in a block with given hash.
+    /// Returns the number of transactions in a block from a block matching the given block hash.
     #[method(name = "eth_getBlockTransactionCountByHash")]
     async fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>>;
 
-    /// Returns the number of transactions in a block with given block number.
+    /// Returns the number of transactions in a block matching the given block number.
     #[method(name = "eth_getBlockTransactionCountByNumber")]
     async fn block_transaction_count_by_number(&self, number: BlockNumber) -> Result<Option<U256>>;
 
-    /// Returns the number of uncles in a block with given hash.
+    /// Returns the number of uncles in a block from a block matching the given block hash.
     #[method(name = "eth_getUncleCountByBlockHash")]
     async fn block_uncles_count_by_hash(&self, hash: H256) -> Result<U256>;
 
@@ -63,7 +61,7 @@ pub trait EthApi {
     #[method(name = "eth_getUncleCountByBlockNumber")]
     async fn block_uncles_count_by_number(&self, number: BlockNumber) -> Result<U256>;
 
-    /// Returns an uncles at given block and index.
+    /// Returns an uncle block of the given block and index.
     #[method(name = "eth_getUncleByBlockHashAndIndex")]
     async fn uncle_by_block_hash_and_index(
         &self,
@@ -71,7 +69,7 @@ pub trait EthApi {
         index: Index,
     ) -> Result<Option<RichBlock>>;
 
-    /// Returns an uncles at given block and index.
+    /// Returns an uncle block of the given block and index.
     #[method(name = "eth_getUncleByBlockNumberAndIndex")]
     async fn uncle_by_block_number_and_index(
         &self,
@@ -79,11 +77,11 @@ pub trait EthApi {
         index: Index,
     ) -> Result<Option<RichBlock>>;
 
-    /// Get transaction by its hash.
+    /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "eth_getTransactionByHash")]
     async fn transaction_by_hash(&self, hash: H256) -> Result<Option<Transaction>>;
 
-    /// Returns transaction at given block hash and index.
+    /// Returns information about a transaction by block hash and transaction index position.
     #[method(name = "eth_getTransactionByBlockHashAndIndex")]
     async fn transaction_by_block_hash_and_index(
         &self,
@@ -91,7 +89,7 @@ pub trait EthApi {
         index: Index,
     ) -> Result<Option<Transaction>>;
 
-    /// Returns transaction by given block number and index.
+    /// Returns information about a transaction by block number and transaction index position.
     #[method(name = "eth_getTransactionByBlockNumberAndIndex")]
     async fn transaction_by_block_number_and_index(
         &self,
@@ -99,15 +97,15 @@ pub trait EthApi {
         index: Index,
     ) -> Result<Option<Transaction>>;
 
-    /// Returns transaction receipt by transaction hash.
+    /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "eth_getTransactionReceipt")]
     async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>>;
 
-    /// Returns balance of the given account.
+    /// Returns the balance of the account of given address.
     #[method(name = "eth_getBalance")]
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256>;
 
-    /// Returns content of the storage at given address.
+    /// Returns the value from a storage position at a given address
     #[method(name = "eth_getStorageAt")]
     async fn storage_at(
         &self,
@@ -116,7 +114,7 @@ pub trait EthApi {
         block_number: Option<BlockId>,
     ) -> Result<H256>;
 
-    /// Returns the number of transactions sent from given address at given time (block number).
+    /// Returns the number of transactions sent from an address at given block number.
     #[method(name = "eth_getTransactionCount")]
     async fn transaction_count(
         &self,
@@ -124,17 +122,20 @@ pub trait EthApi {
         block_number: Option<BlockId>,
     ) -> Result<U256>;
 
-    /// Returns the code at given address at given time (block number).
+    /// Returns code at a given address at given block number.
     #[method(name = "eth_getCode")]
-    async fn code_at(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes>;
+    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes>;
 
-    /// Call contract, returning the output data.
+    /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "eth_call")]
     async fn call(&self, request: CallRequest, block_number: Option<BlockId>) -> Result<Bytes>;
 
-    /// This method creates an EIP2930 type accessList based on a given Transaction. The accessList
-    /// contains all storage slots and addresses read and written by the transaction, except for the
-    /// sender account and the precompiles.
+    /// Generates an access list for a transaction.
+    ///
+    /// This method creates an [EIP2930](https://eips.ethereum.org/EIPS/eip-2930) type accessList based on a given Transaction.
+    ///
+    /// An access list contains all storage slots and addresses touched by the transaction, except
+    /// for the sender account and the chain's precompiles.
     ///
     /// It returns list of addresses and storage keys used by the transaction, plus the gas
     /// consumed when the access list is added. That is, it gives you the list of addresses and
@@ -150,7 +151,8 @@ pub trait EthApi {
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed>;
 
-    /// Estimate gas needed for execution of given contract.
+    /// Generates and returns an estimate of how much gas is necessary to allow the transaction to
+    /// complete.
     #[method(name = "eth_estimateGas")]
     async fn estimate_gas(
         &self,
@@ -158,11 +160,17 @@ pub trait EthApi {
         block_number: Option<BlockId>,
     ) -> Result<U256>;
 
-    /// Returns current gas_price.
+    /// Returns the current price per gas in wei.
     #[method(name = "eth_gasPrice")]
     async fn gas_price(&self) -> Result<U256>;
 
+    /// Returns the Transaction fee history
+    ///
     /// Introduced in EIP-1159 for getting information on the appropriate priority fee to use.
+    ///
+    /// Returns transaction base fee per gas and effective priority fee per gas for the
+    /// requested/supported block range. The returned Fee history for the returned block range
+    /// can be a subsection of the requested range if not all blocks are available.
     #[method(name = "eth_feeHistory")]
     async fn fee_history(
         &self,
@@ -171,12 +179,11 @@ pub trait EthApi {
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory>;
 
-    /// Introduced in EIP-1159, a Geth-specific and simplified priority fee oracle.
-    /// Leverages the already existing fee history cache.
+    /// Returns the current maxPriorityFeePerGas per gas in wei.
     #[method(name = "eth_maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> Result<U256>;
 
-    /// Returns true if client is actively mining new blocks.
+    /// Returns whether the client is actively mining new blocks.
     #[method(name = "eth_mining")]
     async fn is_mining(&self) -> Result<bool>;
 
@@ -184,9 +191,10 @@ pub trait EthApi {
     #[method(name = "eth_hashrate")]
     async fn hashrate(&self) -> Result<U256>;
 
-    /// Returns the hash of the current block, the seedHash, and the boundary condition to be met.
+    /// Returns the hash of the current block, the seedHash, and the boundary condition to be met
+    /// (“target”)
     #[method(name = "eth_getWork")]
-    async fn work(&self) -> Result<Work>;
+    async fn get_work(&self) -> Result<Work>;
 
     /// Used for submitting mining hashrate.
     #[method(name = "eth_submitHashrate")]
