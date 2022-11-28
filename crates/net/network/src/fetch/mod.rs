@@ -11,7 +11,6 @@ use reth_primitives::{Header, PeerId, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
-    time::Instant,
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -160,10 +159,9 @@ impl StateFetcher {
             peer.state = req.peer_state();
         }
 
-        let started = Instant::now();
         match req {
             DownloadRequest::GetBlockHeaders { request, response } => {
-                let inflight = Request { request, response, started };
+                let inflight = Request { request, response };
                 self.inflight_headers_requests.insert(peer_id, inflight);
 
                 unimplemented!("unify start types");
@@ -177,7 +175,7 @@ impl StateFetcher {
                 // })
             }
             DownloadRequest::GetBlockBodies { request, response } => {
-                let inflight = Request { request: request.clone(), response, started };
+                let inflight = Request { request: request.clone(), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
@@ -314,7 +312,6 @@ impl PeerState {
 struct Request<Req, Resp> {
     request: Req,
     response: oneshot::Sender<Resp>,
-    started: Instant,
 }
 
 /// A message to update the status.

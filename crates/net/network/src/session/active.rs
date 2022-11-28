@@ -16,6 +16,7 @@ use reth_eth_wire::{
     message::{EthBroadcastMessage, RequestPair},
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
+use reth_interfaces::p2p::error::RequestError;
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
@@ -24,11 +25,12 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
+    time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, warn};
@@ -60,11 +62,15 @@ pub(crate) struct ActiveSession {
     /// Incoming request to send to delegate to the remote peer.
     pub(crate) request_tx: Fuse<ReceiverStream<PeerRequest>>,
     /// All requests sent to the remote peer we're waiting on a response
-    pub(crate) inflight_requests: FnvHashMap<u64, PeerRequest>,
+    pub(crate) inflight_requests: FnvHashMap<u64, InflightRequest>,
     /// All requests that were sent by the remote peer.
     pub(crate) received_requests: Vec<ReceivedRequest>,
     /// Buffered messages that should be handled and sent to the peer.
     pub(crate) queued_outgoing: VecDeque<OutgoingMessage>,
+    /// The maximum time we wait for a response from a peer.
+    pub(crate) request_timeout: Duration,
+    /// Interval when to check for timed out requests.
+    pub(crate) timeout_interval: Interval,
 }
 
 impl ActiveSession {
@@ -113,11 +119,11 @@ impl ActiveSession {
             ($this:ident, $resp:ident, $item:ident) => {
                 let RequestPair { request_id, message } = $resp;
                 #[allow(clippy::collapsible_match)]
-                if let Some(resp) = self.inflight_requests.remove(&request_id) {
-                    if let PeerRequest::$item { response, .. } = resp {
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    if let PeerRequest::$item { response, .. } = req.request {
                         let _ = response.send(Ok(message));
                     } else {
-                        resp.send_bad_response();
+                        req.request.send_bad_response();
                         $this.on_bad_message();
                     }
                 } else {
@@ -180,10 +186,11 @@ impl ActiveSession {
     }
 
     /// Handle an incoming peer request.
-    fn on_peer_request(&mut self, req: PeerRequest) {
+    fn on_peer_request(&mut self, request: PeerRequest, deadline: Instant) {
         let request_id = self.next_id();
-        let msg = req.create_request_message(request_id);
+        let msg = request.create_request_message(request_id);
         self.queued_outgoing.push_back(msg.into());
+        let req = InflightRequest { request, deadline };
         self.inflight_requests.insert(request_id, req);
     }
 
@@ -204,10 +211,16 @@ impl ActiveSession {
                     .push_back(EthBroadcastMessage::NewPooledTransactionHashes(msg).into());
             }
             PeerMessage::EthRequest(req) => {
-                self.on_peer_request(req);
+                let deadline = self.request_deadline();
+                self.on_peer_request(req, deadline);
             }
             PeerMessage::Other(_) => {}
         }
+    }
+
+    /// Returns the deadline timestamp at which the request times out
+    fn request_deadline(&self) -> Instant {
+        Instant::now() + self.request_timeout
     }
 
     /// Handle a Response to the peer
@@ -272,6 +285,20 @@ impl ActiveSession {
     fn start_disconnect(&mut self, reason: DisconnectReason) {
         self.conn.inner_mut().start_disconnect(reason);
     }
+
+    /// Removes all timed out requests
+    fn evict_timed_out_requests(&mut self, now: Instant) {
+        let mut timedout = Vec::new();
+        for (id, req) in self.inflight_requests.iter() {
+            if now > req.deadline {
+                timedout.push(*id)
+            }
+        }
+        for id in timedout {
+            let req = self.inflight_requests.remove(&id).expect("exists; qed");
+            req.request.send_err_response(RequestError::Timeout);
+        }
+    }
 }
 
 impl Future for ActiveSession {
@@ -315,9 +342,11 @@ impl Future for ActiveSession {
                 }
             }
 
+            let deadline = this.request_deadline();
+
             while let Poll::Ready(Some(req)) = this.request_tx.poll_next_unpin(cx) {
                 progress = true;
-                this.on_peer_request(req);
+                this.on_peer_request(req, deadline);
             }
 
             // Advance all active requests.
@@ -385,6 +414,9 @@ impl Future for ActiveSession {
             }
 
             if !progress {
+                // check for timed out requests
+                this.evict_timed_out_requests(Instant::now());
+
                 return Poll::Pending
             }
         }
@@ -399,6 +431,12 @@ pub(crate) struct ReceivedRequest {
     rx: PeerResponse,
     /// Timestamp when we read this msg from the wire.
     received: Instant,
+}
+
+/// A request that waits for a response from the peer
+pub(crate) struct InflightRequest {
+    request: PeerRequest,
+    deadline: Instant,
 }
 
 /// Outgoing messages that can be sent over the wire.
@@ -424,7 +462,9 @@ impl From<EthBroadcastMessage> for OutgoingMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+    use crate::session::{
+        config::REQUEST_TIMEOUT, handle::PendingSessionEvent, start_pending_incoming_session,
+    };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
         EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
@@ -543,6 +583,8 @@ mod tests {
                         conn,
                         queued_outgoing: Default::default(),
                         received_requests: Default::default(),
+                        timeout_interval: tokio::time::interval(REQUEST_TIMEOUT),
+                        request_timeout: REQUEST_TIMEOUT,
                     }
                 }
                 _ => {
