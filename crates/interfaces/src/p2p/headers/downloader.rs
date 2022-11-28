@@ -43,11 +43,7 @@ pub trait HeaderDownloader: Sync + Send + Unpin {
     fn client(&self) -> &Self::Client;
 
     /// Download the headers
-    fn download(
-        &self,
-        head: &SealedHeader,
-        forkchoice: &ForkchoiceState,
-    ) -> HeaderBatchDownload<'_>;
+    fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_>;
 
     /// Validate whether the header is valid in relation to it's parent
     ///

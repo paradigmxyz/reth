@@ -78,10 +78,10 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         // in descending order starting from the tip down to
         // the local head (latest block in db)
         // TODO: add batching
-        let headers = match self.downloader.download(&head, &forkchoice).await {
+        let headers = match self.downloader.download(head.clone(), forkchoice.clone()).await {
             Ok(res) => {
                 // Perform basic response validation
-                self.validate_header_response(&res, &head, &forkchoice)?;
+                self.validate_header_response(&res, head, forkchoice)?;
                 res
             }
             Err(e) => match e {
@@ -149,8 +149,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     fn validate_header_response(
         &self,
         headers: &[SealedHeader],
-        head: &SealedHeader,
-        forkchoice: &ForkchoiceState,
+        head: SealedHeader,
+        forkchoice: ForkchoiceState,
     ) -> Result<(), StageError> {
         // The response must include at least head and tip
         if headers.len() < 2 {
@@ -163,7 +163,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         }
 
         while let Some(header) = headers_iter.next() {
-            ensure_parent(&header, headers_iter.peek().unwrap_or(&head))
+            ensure_parent(header, headers_iter.peek().unwrap_or(&&head))
                 .map_err(|err| StageError::Download(err.to_string()))?;
         }
 

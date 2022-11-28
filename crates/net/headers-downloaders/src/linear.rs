@@ -58,14 +58,10 @@ where
         self.client.borrow()
     }
 
-    fn download(
-        &self,
-        head: &SealedHeader,
-        forkchoice: &ForkchoiceState,
-    ) -> HeaderBatchDownload<'_> {
+    fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_> {
         Box::pin(HeadersDownload {
-            head: head.clone(),
-            forkchoice: forkchoice.clone(),
+            head,
+            forkchoice,
             buffered: vec![],
             request: Default::default(),
             consensus: Arc::clone(&self.consensus),
@@ -370,8 +366,7 @@ mod tests {
         let downloader =
             LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
 
-        let result =
-            downloader.download(&SealedHeader::default(), &ForkchoiceState::default()).await;
+        let result = downloader.download(SealedHeader::default(), ForkchoiceState::default()).await;
         assert!(result.is_err());
     }
 
@@ -398,7 +393,7 @@ mod tests {
 
         let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
 
-        let result = downloader.download(&p0, &fork).await;
+        let result = downloader.download(p0, fork).await;
         let headers = result.unwrap();
         assert!(headers.is_empty());
     }
@@ -426,7 +421,7 @@ mod tests {
 
         let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
 
-        let result = downloader.download(&p3, &fork).await;
+        let result = downloader.download(p3, fork).await;
         let headers = result.unwrap();
         assert_eq!(headers.len(), 3);
         assert_eq!(headers[0], p2);
