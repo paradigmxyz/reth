@@ -2,7 +2,7 @@
 
 use crate::{pool::events::TransactionEvent, traits::PropagateKind};
 use reth_primitives::{rpc::TxHash, H256};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::UnboundedSender;
 
 type EventBroadcast = UnboundedSender<TransactionEvent>;
@@ -111,7 +111,7 @@ impl PoolEventBroadcaster {
 
     /// Transaction was propagated.
     fn propagated(&mut self, peers: Vec<PropagateKind>) {
-        self.broadcast(TransactionEvent::Propagated(peers));
+        self.broadcast(TransactionEvent::Propagated(Arc::new(peers)));
     }
 
     /// Transaction was replaced with the given transaction
