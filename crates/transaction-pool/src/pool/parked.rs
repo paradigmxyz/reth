@@ -83,6 +83,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     /// Whether the pool is empty
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }

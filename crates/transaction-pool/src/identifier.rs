@@ -1,6 +1,6 @@
 use fnv::FnvHashMap;
 use reth_primitives::Address;
-use std::{collections::HashMap, ops::Bound};
+use std::collections::HashMap;
 
 /// An internal mapping of addresses.
 ///
@@ -17,6 +17,7 @@ pub struct SenderIdentifiers {
 
 impl SenderIdentifiers {
     /// Returns the address for the given identifier.
+    #[allow(unused)]
     pub fn address(&self, id: &SenderId) -> Option<&Address> {
         self.sender_to_address.get(id)
     }
@@ -56,8 +57,9 @@ pub struct SenderId(u64);
 
 impl SenderId {
     /// Returns a `Bound` for `TransactionId` starting with nonce `0`
-    pub(crate) fn start_bound(self) -> Bound<TransactionId> {
-        Bound::Included(TransactionId::new(self, 0))
+    #[cfg(test)]
+    pub(crate) fn start_bound(self) -> std::ops::Bound<TransactionId> {
+        std::ops::Bound::Included(TransactionId::new(self, 0))
     }
 }
 

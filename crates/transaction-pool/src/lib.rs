@@ -1,6 +1,5 @@
 #![warn(missing_docs)]
 // unreachable_pub, missing_debug_implementations
-#![allow(unused)] // TODO(mattsse) remove after progress was made
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
@@ -86,11 +85,11 @@ pub use crate::{
 };
 use crate::{
     error::PoolResult,
-    pool::{OnNewBlockOutcome, PoolInner},
-    traits::{NewTransactionEvent, PoolStatus, TransactionOrigin},
+    pool::PoolInner,
+    traits::{NewTransactionEvent, PoolSize, TransactionOrigin},
     validate::ValidPoolTransaction,
 };
-use reth_primitives::{BlockID, TxHash, U256, U64};
+use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
@@ -126,6 +125,11 @@ where
     /// Returns the wrapped pool.
     pub(crate) fn inner(&self) -> &PoolInner<V, T> {
         &self.pool
+    }
+
+    /// Get the config the pool was configured with.
+    pub fn config(&self) -> &PoolConfig {
+        self.inner().config()
     }
 
     /// Returns future that validates all transaction in the given iterator.
@@ -178,8 +182,8 @@ where
 {
     type Transaction = T::Transaction;
 
-    fn status(&self) -> PoolStatus {
-        self.pool.status()
+    fn status(&self) -> PoolSize {
+        self.pool.size()
     }
 
     fn on_new_block(&self, event: OnNewBlockEvent) {
