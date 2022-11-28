@@ -5,6 +5,7 @@
 Documents on planning and process in the repository: what the labels mean, how issues are triaged, how a new release is cut and so on.
 
 - [Labels](./labels.md): Describes the labels in the repository.
+- [Release workflow](./release.md): Describes the release workflow for maintainers.
 
 ### Structure
 
