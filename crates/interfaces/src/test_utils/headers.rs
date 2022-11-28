@@ -60,8 +60,8 @@ impl HeaderDownloader for TestHeaderDownloader {
 
     fn download(
         &self,
-        _head: SealedHeader,
-        _forkchoice: ForkchoiceState,
+        _head: &SealedHeader,
+        _forkchoice: &ForkchoiceState,
     ) -> HeaderBatchDownload<'_> {
         Box::pin(TestDownload {
             client: Arc::clone(&self.client),
