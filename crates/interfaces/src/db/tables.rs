@@ -109,7 +109,7 @@ table!(
 
 table!(
     /// Stores the total difficulty from a block header.
-    HeaderTD => BlockNumHash => RlpTotalDifficulty);
+    HeaderTD => BlockNumHash => CompactU256);
 
 table!(
     /// Stores the block number corresponding to an header.
@@ -231,8 +231,6 @@ table!(
 
 /// List with transaction numbers.
 pub type TxNumberList = IntegerList;
-/// Temporary placeholder type for DB.
-pub type RlpTotalDifficulty = CompactU256;
 /// Encoded stage id.
 pub type StageId = Vec<u8>;
 
