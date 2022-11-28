@@ -94,10 +94,17 @@ impl<DB: Database> Stage<DB> for SendersStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Look up the hash of the unwind block
-        if let Some(unwind_hash) = db.get::<tables::CanonicalHeaders>(input.unwind_to)? {
+        if let Some((_, unwind_hash)) =
+            db.get_exact_or_prev::<tables::CanonicalHeaders>(input.unwind_to)?
+        {
             // Look up the cumulative tx count at unwind block
-            let latest_tx = db.get_tx_count((input.unwind_to, unwind_hash).into())?;
-            db.unwind_table_by_num::<tables::TxSenders>(latest_tx - 1)?;
+            let key = (input.unwind_to, unwind_hash).into();
+            if let Some((_, unwind_tx_count)) =
+                db.get_exact_or_prev::<tables::CumulativeTxCount>(key)?
+            {
+                // The last remaining tx_id should be at `cum_tx_count - 1`
+                db.unwind_table_by_num::<tables::TxSenders>(unwind_tx_count - 1)?;
+            }
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
