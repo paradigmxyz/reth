@@ -1,8 +1,8 @@
-use crate::Result;
+use crate::{Result, db::DbTxMut};
 use auto_impl::auto_impl;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, Header, H256, U256,
+    Block, BlockHash, Header, H256, U256, BlockLocked,
 };
 
 /// Client trait for fetching `Header` related data.
@@ -87,4 +87,23 @@ pub struct ChainInfo {
     pub last_finalized: Option<reth_primitives::BlockNumber>,
     /// Safe block
     pub safe_finalized: Option<reth_primitives::BlockNumber>,
+}
+
+
+/// Fill block to database. Useful for tests.
+pub fn fill_block<'a, TX:DbTxMut<'a>>(tx: TX, block: &BlockLocked) {
+    //tx.put
+    /*
+            // Get next canonical block hashes to execute.
+        let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
+        // Get header with canonical hashes.
+        let mut headers = db_tx.cursor::<tables::Headers>()?;
+        // Get bodies (to get tx index) with canonical hashes.
+        let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
+        // Get transaction of the block that we are executing.
+        let mut tx = db_tx.cursor::<tables::Transactions>()?;
+        // Skip sender recovery and load signer from database.
+        let mut tx_sender = db_tx.cursor::<tables::TxSenders>()?;
+
+        */
 }
