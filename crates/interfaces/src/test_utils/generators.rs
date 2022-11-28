@@ -1,7 +1,7 @@
 use rand::{thread_rng, Rng};
 use reth_primitives::{
     proofs, Address, BlockLocked, Bytes, Header, SealedHeader, Signature, Transaction,
-    TransactionKind, TransactionSigned, H256, U256,
+    TransactionKind, TransactionSigned, TxLegacy, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
 
@@ -46,7 +46,7 @@ pub fn random_header(number: u64, parent: Option<H256>) -> SealedHeader {
 /// - The chain ID, which is always 1
 /// - The input, which is always nothing
 pub fn random_tx() -> Transaction {
-    Transaction::Legacy {
+    Transaction::Legacy(TxLegacy {
         chain_id: Some(1),
         nonce: rand::random::<u16>().into(),
         gas_price: rand::random::<u16>().into(),
@@ -54,7 +54,7 @@ pub fn random_tx() -> Transaction {
         to: TransactionKind::Call(Address::random()),
         value: rand::random::<u16>().into(),
         input: Bytes::default(),
-    }
+    })
 }
 
 /// Generates a random legacy [Transaction] that is signed.
@@ -154,14 +154,14 @@ pub fn random_block_range(rng: std::ops::Range<u64>, head: H256) -> Vec<BlockLoc
 mod test {
     use super::*;
     use hex_literal::hex;
-    use reth_primitives::{keccak256, AccessList, Address, TransactionKind};
+    use reth_primitives::{keccak256, AccessList, Address, TransactionKind, TxEip1559};
     use secp256k1::KeyPair;
 
     #[test]
     fn test_sign_message() {
         let secp = Secp256k1::new();
 
-        let tx = Transaction::Eip1559 {
+        let tx = Transaction::Eip1559(TxEip1559 {
             chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
@@ -171,7 +171,7 @@ mod test {
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
             access_list: AccessList::default(),
-        };
+        });
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {

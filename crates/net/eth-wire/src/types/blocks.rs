@@ -101,7 +101,8 @@ mod test {
     };
     use hex_literal::hex;
     use reth_primitives::{
-        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned, U256,
+        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned,
+        TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
 
@@ -341,7 +342,7 @@ mod test {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
@@ -350,7 +351,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x200u64.into(),
                             input: Default::default(),
-                        },
+                        }),
                         Signature {
                                 odd_y_parity: false,
                                 r:
@@ -359,7 +360,7 @@ mod test {
     U256::from_str("64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                             }
                         ),
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
@@ -368,7 +369,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x2d9u64.into(),
                             input: Default::default(),
-                        }, Signature {
+                        }), Signature {
                                 odd_y_parity: false,
                                 r:
     U256::from_str("52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
@@ -422,7 +423,7 @@ mod test {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
@@ -431,7 +432,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x200u64.into(),
                             input: Default::default(),
-                        },
+                        }),
                         Signature {
                                 odd_y_parity: false,
                                 r:
@@ -440,7 +441,7 @@ mod test {
     U256::from_str("64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                             }
                         ),
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
@@ -449,7 +450,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x2d9u64.into(),
                             input: Default::default(),
-                        },
+                        }),
                         Signature {
                                 odd_y_parity: false,
                                 r:
