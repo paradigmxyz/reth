@@ -5,12 +5,12 @@ use crate::{
 use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
 use modular_bitfield::prelude::*;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::ops::Deref;
 
 /// Block header
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent

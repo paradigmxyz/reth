@@ -4,11 +4,16 @@ use super::*;
 pub struct StructHandler<'a> {
     fields_iterator: std::iter::Peekable<std::slice::Iter<'a, FieldTypes>>,
     lines: Vec<TokenStream2>,
+    pub is_wrapper: bool,
 }
 
 impl<'a> StructHandler<'a> {
     pub fn new(fields: &'a FieldList) -> Self {
-        StructHandler { lines: vec![], fields_iterator: fields.iter().peekable() }
+        StructHandler {
+            lines: vec![],
+            fields_iterator: fields.iter().peekable(),
+            is_wrapper: false,
+        }
     }
 
     pub fn next_field(&mut self) -> Option<&'a FieldTypes> {
@@ -18,8 +23,6 @@ impl<'a> StructHandler<'a> {
     pub fn generate_to(mut self) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
-                //  The following method will advance the
-                // `fields_iterator` by itself and stop right before the next variant.
                 FieldTypes::EnumVariant(_) => unreachable!(),
                 FieldTypes::EnumUnnamedField(_) => unreachable!(),
                 FieldTypes::StructField(field_descriptor) => self.to(field_descriptor),
@@ -28,11 +31,9 @@ impl<'a> StructHandler<'a> {
         self.lines
     }
 
-    pub fn generate_from(mut self, known_types: &[&str]) -> Vec<TokenStream2> {
+    pub fn generate_from(&mut self, known_types: &[&str]) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
-                //  The following method will advance the
-                // `fields_iterator` by itself and stop right before the next variant.
                 FieldTypes::EnumVariant(_) => unreachable!(),
                 FieldTypes::EnumUnnamedField(_) => unreachable!(),
                 FieldTypes::StructField(field_descriptor) => {
@@ -40,12 +41,29 @@ impl<'a> StructHandler<'a> {
                 }
             }
         }
-        self.lines
+        self.lines.clone()
     }
 
     /// Generates `to_compact` code for a struct field.
     fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
         let (name, ftype, is_compact) = field_descriptor;
+
+        // Should only happen on wrapper structs like `Struct(pub Field)`
+        if name.is_empty() {
+            self.is_wrapper = true;
+
+            self.lines.push(quote! {
+                let _len = self.0.to_compact(&mut buffer);
+            });
+
+            if is_flag_type(ftype) {
+                self.lines.push(quote! {
+                    flags.set_placeholder_len(_len as u8);
+                })
+            }
+
+            return
+        }
 
         let name = format_ident!("{name}");
         let set_len_method = format_ident!("set_{name}_len");
@@ -77,8 +95,14 @@ impl<'a> StructHandler<'a> {
     fn from(&mut self, field_descriptor: &StructFieldDescriptor, known_types: &[&str]) {
         let (name, ftype, is_compact) = field_descriptor;
 
-        let name = format_ident!("{name}");
-        let len = format_ident!("{name}_len");
+        let (name, len) = if name.is_empty() {
+            self.is_wrapper = true;
+
+            // Should only happen on wrapper structs like `Struct(pub Field)`
+            (format_ident!("placeholder"), format_ident!("placeholder_len"))
+        } else {
+            (format_ident!("{name}"), format_ident!("{name}_len"))
+        };
 
         assert!(
             known_types.contains(&ftype.as_str()) ||

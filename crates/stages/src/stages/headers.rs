@@ -7,7 +7,7 @@ use reth_interfaces::{
     db::{models::blocks::BlockNumHash, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut},
     p2p::headers::{client::HeadersClient, downloader::HeaderDownloader, error::DownloadError},
 };
-use reth_primitives::{rpc::BigEndianHash, BlockNumber, SealedHeader, H256, U256};
+use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -119,8 +119,10 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         height: BlockNumber,
     ) -> Result<(), StageError> {
         let block_key = db.get_block_numhash(height)?;
-        let td: Vec<u8> = db.get::<tables::HeaderTD>(block_key)?.unwrap(); // TODO:
-        self.client.update_status(height, block_key.hash(), H256::from_slice(&td).into_uint());
+        let td: U256 = *db
+            .get::<tables::HeaderTD>(block_key)?
+            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
+        self.client.update_status(height, block_key.hash(), td);
         Ok(())
     }
 
@@ -144,7 +146,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
         let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
         let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
-        let mut td = U256::from_big_endian(&cursor_td.last()?.map(|(_, v)| v).unwrap());
+        let mut td: U256 = cursor_td.last()?.map(|(_, v)| v).unwrap().into();
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -165,7 +167,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
             cursor_header.append(key, header)?;
             cursor_canonical.append(key.number(), key.hash())?;
-            cursor_td.append(key, H256::from_uint(&td).as_bytes().to_vec())?;
+            cursor_td.append(key, td.into())?;
         }
 
         Ok(latest)
@@ -380,12 +382,10 @@ mod tests {
                                     let parent_td = tx.get::<tables::HeaderTD>(
                                         (header.number - 1, header.parent_hash).into(),
                                     )?;
-                                    let td = tx.get::<tables::HeaderTD>(key)?.unwrap();
+                                    let td: U256 = *tx.get::<tables::HeaderTD>(key)?.unwrap();
                                     assert_eq!(
-                                        parent_td.map(
-                                            |td| U256::from_big_endian(&td) + header.difficulty
-                                        ),
-                                        Some(U256::from_big_endian(&td))
+                                        parent_td.map(|td| *td + header.difficulty),
+                                        Some(td)
                                     );
                                 }
                             }

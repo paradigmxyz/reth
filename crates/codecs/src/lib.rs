@@ -28,25 +28,33 @@ pub trait Compact {
         Self: Sized;
 }
 
-impl Compact for u64 {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        let leading = self.leading_zeros() as usize / 8;
-        buf.put_slice(&self.to_be_bytes()[leading..]);
-        8 - leading
-    }
+macro_rules! impl_uint_compact {
+    ($($name:tt),+) => {
+        $(
+            impl Compact for $name {
+                fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                    let leading = self.leading_zeros() as usize / 8;
+                    buf.put_slice(&self.to_be_bytes()[leading..]);
+                    std::mem::size_of::<$name>() - leading
+                }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        if len > 0 {
-            let mut arr = [0; 8];
-            arr[8 - len..].copy_from_slice(&buf[..len]);
+                fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+                    if len > 0 {
+                        let mut arr = [0; std::mem::size_of::<$name>()];
+                        arr[std::mem::size_of::<$name>() - len..].copy_from_slice(&buf[..len]);
 
-            buf.advance(len);
+                        buf.advance(len);
 
-            return (u64::from_be_bytes(arr), buf)
-        }
-        (0, buf)
-    }
+                        return ($name::from_be_bytes(arr), buf)
+                    }
+                    (0, buf)
+                }
+            }
+        )+
+    };
 }
+
+impl_uint_compact!(u64, u128);
 
 impl<T> Compact for Vec<T>
 where
@@ -144,12 +152,12 @@ impl Compact for Bytes {
 }
 
 macro_rules! impl_hash_compact {
-    ($(($name:tt, $size:tt)),+) => {
+    ($($name:tt),+) => {
         $(
             impl Compact for $name {
                 fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
                     buf.put_slice(&self.0);
-                    $size
+                    std::mem::size_of::<$name>()
                 }
 
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self,&[u8]) {
@@ -158,9 +166,9 @@ macro_rules! impl_hash_compact {
                     }
 
                     let v = $name::from_slice(
-                        buf.get(..$size).expect("size not matching"),
+                        buf.get(..std::mem::size_of::<$name>()).expect("size not matching"),
                     );
-                    buf.advance($size);
+                    buf.advance(std::mem::size_of::<$name>());
                     (v, buf)
                 }
             }
@@ -168,7 +176,7 @@ macro_rules! impl_hash_compact {
     };
 }
 
-impl_hash_compact!((H256, 32), (H160, 20));
+impl_hash_compact!(H256, H160);
 
 impl Compact for Bloom {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
@@ -337,7 +345,7 @@ mod tests {
         assert_eq!(u64::from_compact(&buf, 8), (0xffffffffffffffffu64, vec![].as_slice()));
     }
 
-    #[use_compact]
+    #[main_codec]
     #[derive(Debug, PartialEq, Clone)]
     pub struct TestStruct {
         f_u64: u64,
@@ -389,7 +397,7 @@ mod tests {
         );
     }
 
-    #[use_compact]
+    #[main_codec]
     #[derive(Debug, PartialEq, Clone, Default)]
     pub enum TestEnum {
         #[default]

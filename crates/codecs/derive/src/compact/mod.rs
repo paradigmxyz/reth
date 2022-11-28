@@ -124,16 +124,14 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
 /// Given the field type in a string format, return the amount of bits necessary to save its maximum
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
-    if ftype == "u64" || ftype == "BlockNumber" || ftype == "TxNumber" || ftype == "ChainId" {
-        return 4
-    } else if ftype == "TxType" {
-        return 2
-    } else if ftype == "bool" || ftype == "Option" {
-        return 1
-    } else if ftype == "U256" {
-        return 6
+    match ftype {
+        "bool" | "Option" => 1,
+        "TxType" => 2,
+        "u64" | "BlockNumber" | "TxNumber" | "ChainId" => 4,
+        "u128" => 5,
+        "U256" | "TxHash" => 6,
+        _ => 0,
     }
-    0
 }
 
 /// Given the field type in a string format, checks if its type should be added to the
