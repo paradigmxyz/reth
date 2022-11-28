@@ -1,4 +1,4 @@
-use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, BlockID};
+use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{Address, FromRecoveredTransaction, PeerId, TxHash, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -15,7 +15,7 @@ pub trait TransactionPool: Send + Sync + 'static {
     type Transaction: PoolTransaction;
 
     /// Returns stats about the pool.
-    fn status(&self) -> PoolStatus;
+    fn status(&self) -> PoolSize;
 
     /// Event listener for when a new block was mined.
     ///
@@ -271,7 +271,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 
 /// Represents the current status of the pool.
 #[derive(Debug, Clone)]
-pub struct PoolStatus {
+pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
     /// Reported size of transactions in the _pending_ sub-pool.

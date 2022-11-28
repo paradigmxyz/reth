@@ -5,7 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
-use reth_primitives::{rpc::Address, BlockID, TxHash, U256};
+use reth_primitives::{rpc::Address, TxHash, U256};
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
@@ -103,7 +103,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Whether the transaction originated locally.
-    pub(crate) fn is_local(&self) -> bool {
+    pub fn is_local(&self) -> bool {
         self.origin.is_local()
     }
 
