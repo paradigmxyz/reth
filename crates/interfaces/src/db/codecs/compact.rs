@@ -4,7 +4,7 @@ use crate::db::{
 };
 use bytes::Buf;
 use modular_bitfield::prelude::*;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_primitives::*;
 
 /// Implements compression for Compact type.
@@ -44,7 +44,7 @@ macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {
         $(
             /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
-            #[use_compact]
+            #[main_codec]
             #[derive(Debug, Clone, PartialEq, Eq, Default)]
             pub struct $wrapper(pub $name);
 
@@ -59,6 +59,15 @@ macro_rules! add_wrapper_struct {
                     value.0
                 }
             }
+
+            impl std::ops::Deref for $wrapper {
+                type Target = $name;
+
+                fn deref(&self) -> &Self::Target {
+                    &self.0
+                }
+            }
+
         )+
     };
 }

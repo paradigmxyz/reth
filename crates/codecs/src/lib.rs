@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(u64::from_compact(&buf, 8), (0xffffffffffffffffu64, vec![].as_slice()));
     }
 
-    #[use_compact]
+    #[main_codec]
     #[derive(Debug, PartialEq, Clone)]
     pub struct TestStruct {
         f_u64: u64,
@@ -397,7 +397,7 @@ mod tests {
         );
     }
 
-    #[use_compact]
+    #[main_codec]
     #[derive(Debug, PartialEq, Clone, Default)]
     pub enum TestEnum {
         #[default]

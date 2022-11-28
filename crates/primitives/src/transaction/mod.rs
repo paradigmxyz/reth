@@ -4,7 +4,7 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use ethers_core::utils::keccak256;
 use modular_bitfield::prelude::*;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 pub use tx_type::TxType;
@@ -15,7 +15,7 @@ mod tx_type;
 mod util;
 
 /// Legacy transaction.
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection
@@ -57,7 +57,7 @@ pub struct TxLegacy {
 }
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip2930 {
     /// Added as EIP-pub 155: Simple replay attack protection
@@ -105,7 +105,7 @@ pub struct TxEip2930 {
 }
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip1559 {
     /// Added as EIP-pub 155: Simple replay attack protection
@@ -163,7 +163,7 @@ pub struct TxEip1559 {
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Transaction {
     /// Legacy transaction.
@@ -485,7 +485,7 @@ impl Encodable for Transaction {
 }
 
 /// Whether or not the transaction is a contract creation.
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TransactionKind {
     /// A transaction that creates a contract.
@@ -527,7 +527,7 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSigned {
     /// Transaction hash
@@ -756,7 +756,7 @@ impl TransactionSigned {
 }
 
 /// Signed transaction with recovered signer.
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction

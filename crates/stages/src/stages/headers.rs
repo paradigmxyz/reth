@@ -119,10 +119,9 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         height: BlockNumber,
     ) -> Result<(), StageError> {
         let block_key = db.get_block_numhash(height)?;
-        let td: U256 = db
+        let td: U256 = *db
             .get::<tables::HeaderTD>(block_key)?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?
-            .into();
+            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
         self.client.update_status(height, block_key.hash(), td);
         Ok(())
     }
@@ -383,11 +382,10 @@ mod tests {
                                     let parent_td = tx.get::<tables::HeaderTD>(
                                         (header.number - 1, header.parent_hash).into(),
                                     )?;
-                                    let td = tx.get::<tables::HeaderTD>(key)?.unwrap();
+                                    let td: U256 = *tx.get::<tables::HeaderTD>(key)?.unwrap();
                                     assert_eq!(
-                                        parent_td
-                                            .map(|td| Into::<U256>::into(td) + header.difficulty),
-                                        Some(Into::<U256>::into(td))
+                                        parent_td.map(|td| *td + header.difficulty),
+                                        Some(td)
                                     );
                                 }
                             }

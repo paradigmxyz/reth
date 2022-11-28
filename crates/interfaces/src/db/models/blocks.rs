@@ -9,7 +9,7 @@ use crate::{
 };
 use bytes::{Buf, Bytes};
 use modular_bitfield::prelude::*;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, H256};
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ pub type NumTransactions = u64;
 /// The [TxNumber]s for all the transactions in the block are `base_tx_id..(base_tx_id +
 /// tx_amount)`.
 #[derive(Debug, Default, PartialEq, Clone)]
-#[use_compact]
+#[main_codec]
 pub struct StoredBlockBody {
     /// The ID of the first transaction in the block.
     pub base_tx_id: TxNumber,

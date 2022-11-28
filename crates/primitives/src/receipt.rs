@@ -1,12 +1,12 @@
 use crate::{Bloom, Log, TxType};
 use bytes::{Buf, BufMut, BytesMut};
 use modular_bitfield::prelude::*;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::cmp::Ordering;
 
 /// Receipt containing result of transaction execution.
-#[use_compact]
+#[main_codec]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
     /// Receipt type.
