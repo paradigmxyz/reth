@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, BlockID, TxHash, U256};
+use reth_primitives::{Address, TxHash, U256};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
