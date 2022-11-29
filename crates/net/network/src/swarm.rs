@@ -28,6 +28,38 @@ use tracing::warn;
 /// The manages the [`ConnectionListener`] and delegates new incoming connections to the
 /// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
+///
+/// Following diagram gives displays the dataflow contained in the [`Swarm`]
+///
+/// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
+/// tasks. After a successful RLPx authentication, the task is ready to accept ETH requests or
+/// broadcast messages. A task listens for messages from the [`SessionManager`] which include
+/// broadcast messages like `Transactions` or internal commands, for example to disconnect the
+/// session.
+///
+/// The [`NetworkState`] keeps track of all connected and discovered peers and can initiate outgoing
+/// connections. For each active session, the [`NetworkState`] keeps a sender half of the ETH
+/// request channel for the created session and sends requests it receives from the
+/// [`StateFetcher`], which receives request objects from the client interfaces responsible for
+/// downloading headers and bodies.
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ```mermaid
+///  graph TB
+///     connections(TCP Listener)
+///     Discovery[(Discovery)]
+///     fetchRequest(Client Interfaces)
+///     Sessions[(SessionManager)]
+///     SessionTask[(Peer Session)]
+///     State[(State)]
+///     StateFetch[(State Fetcher)]
+///   connections --> |incoming| Sessions
+///   State --> |initiate outgoing| Sessions
+///   Discovery --> |update peers| State
+///   Sessions --> |spawns| SessionTask
+///   SessionTask <--> |handle state requests| State
+///   fetchRequest --> |request Headers, Bodies| StateFetch
+///   State --> |poll pending requests| StateFetch
+/// ```
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
