@@ -16,6 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
+    blocks::IncomingBlockRequest,
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
@@ -88,7 +89,9 @@ pub struct NetworkManager<C> {
     /// All listeners for [`Network`] events.
     event_listeners: NetworkEventListeners,
     /// Sender half to send events to the [`TransactionsManager`] task, if configured.
-    to_transactions: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    /// Sender half to send events to the [`BlockRequestManager`] task, if configured.
+    to_block_requests_manager: Option<mpsc::UnboundedSender<IncomingBlockRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -154,14 +157,20 @@ where
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
             event_listeners: Default::default(),
-            to_transactions: None,
+            to_transactions_manager: None,
+            to_block_requests_manager: None,
             num_active_peers,
         })
     }
 
     /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
-        self.to_transactions = Some(tx);
+        self.to_transactions_manager = Some(tx);
+    }
+
+    /// Sets the dedicated channel for events indented for the [`BlockRequestManager`]
+    pub fn set_block_request_manager(&mut self, tx: mpsc::UnboundedSender<IncomingBlockRequest>) {
+        self.to_block_requests_manager = Some(tx);
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
@@ -221,8 +230,15 @@ where
 
     /// Sends an event to the [`TransactionsManager`] if configured
     fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
-        if let Some(ref tx) = self.to_transactions {
+        if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
+        }
+    }
+
+    /// Sends an event to the [`BlockRequestManager`] if configured
+    fn delegate_block_request(&self, event: IncomingBlockRequest) {
+        if let Some(ref reqs) = self.to_block_requests_manager {
+            let _ = reqs.send(event);
         }
     }
 

@@ -13,6 +13,7 @@
 //! port of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 
+pub mod blocks;
 mod cache;
 mod config;
 mod discovery;

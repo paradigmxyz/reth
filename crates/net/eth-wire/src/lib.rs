@@ -22,6 +22,6 @@ pub mod types;
 pub use types::*;
 
 pub use crate::{
-    ethstream::{EthStream, UnauthedEthStream},
+    ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
     p2pstream::{DisconnectReason, HelloMessage, P2PStream, ProtocolVersion, UnauthedP2PStream},
 };
