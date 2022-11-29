@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::warn;
+use tracing::{trace, warn};
 
 /// Contains the connectivity related state of the network.
 ///
@@ -99,6 +99,7 @@ where
     pub(crate) fn listener(&self) -> &ConnectionListener {
         &self.incoming
     }
+
     /// Mutable access to the [`SessionManager`].
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
@@ -171,12 +172,19 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
+                if let Err(limit) = self.state_mut().peers_mut().on_inbound_pending_session() {
+                    // We currently don't have additional capacity to establish a session from an
+                    // incoming connection, so we drop the connection.
+                    trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                    return None
+                }
+
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        warn!(?err, "Incoming connection rejected");
+                        warn!(target: "net", ?err, "Incoming connection rejected");
                     }
                 }
             }
@@ -188,7 +196,8 @@ where
     fn on_state_action(&mut self, event: StateAction) -> Option<SwarmEvent> {
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
-                self.sessions.dial_outbound(remote_addr, peer_id);
+                self.dial_outbound(remote_addr, peer_id);
+                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
@@ -301,6 +310,7 @@ pub(crate) enum SwarmEvent {
     /// An outbound connection is initiated.
     OutgoingTcpConnection {
         /// Address of the remote peer.
+        peer_id: PeerId,
         remote_addr: SocketAddr,
     },
     SessionEstablished {

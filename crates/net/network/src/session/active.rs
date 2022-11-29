@@ -42,6 +42,7 @@ use tracing::{error, warn};
 ///    - incoming commands from the [`SessionsManager`]
 ///    - incoming requests via the request channel
 ///    - responses for handled ETH requests received from the remote peer.
+#[allow(unused)]
 pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
@@ -216,7 +217,9 @@ impl ActiveSession {
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
             }
-            PeerMessage::Other(_) => {}
+            PeerMessage::Other(other) => {
+                error!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
+            }
         }
     }
 
@@ -432,6 +435,7 @@ pub(crate) struct ReceivedRequest {
     /// Receiver half of the channel that's supposed to receive the proper response.
     rx: PeerResponse,
     /// Timestamp when we read this msg from the wire.
+    #[allow(unused)]
     received: Instant,
 }
 
@@ -463,6 +467,7 @@ impl From<EthBroadcastMessage> for OutgoingMessage {
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
     use super::*;
     use crate::session::{
         config::REQUEST_TIMEOUT, handle::PendingSessionEvent, start_pending_incoming_session,

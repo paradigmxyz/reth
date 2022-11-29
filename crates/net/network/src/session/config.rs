@@ -155,6 +155,7 @@ impl SessionCounter {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn ensure_pending_outbound(&self) -> Result<(), ExceedsSessionLimit> {
         Self::ensure(self.pending_outbound, self.limits.max_pending_outbound)
     }

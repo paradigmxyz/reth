@@ -9,6 +9,7 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
+    FetchClient,
 };
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
@@ -83,6 +84,21 @@ where
     /// Returns mutable access to the [`PeersManager`]
     pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
+    }
+
+    /// Returns access to the [`PeersManager`]
+    pub(crate) fn peers(&self) -> &PeersManager {
+        &self.peers_manager
+    }
+
+    /// Returns a new [`FetchClient`]
+    pub(crate) fn fetch_client(&self) -> FetchClient {
+        self.state_fetcher.client()
+    }
+
+    /// How many peers we're currently connected to.
+    pub fn genesis_hash(&self) -> H256 {
+        self.genesis_hash
     }
 
     /// How many peers we're currently connected to.
@@ -381,10 +397,11 @@ where
 /// Tracks the state of a Peer.
 ///
 /// For example known blocks,so we can decide what to announce.
-pub struct ConnectedPeer {
+pub(crate) struct ConnectedPeer {
     /// Best block of the peer.
     pub(crate) best_hash: H256,
     /// The capabilities of the connected peer.
+    #[allow(unused)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender,

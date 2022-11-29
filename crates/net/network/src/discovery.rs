@@ -24,11 +24,11 @@ pub struct Discovery {
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
-    discv4: Discv4,
+    _discv4: Discv4,
     /// All KAD table updates from the discv4 service.
     discv4_updates: ReceiverStream<TableUpdate>,
     /// The initial config for the discv4 service
-    dsicv4_config: Discv4Config,
+    _dsicv4_config: Discv4Config,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
     /// The handle to the spawned discv4 service
@@ -57,9 +57,9 @@ impl Discovery {
 
         Ok(Self {
             local_enr,
-            discv4,
+            _discv4: discv4,
             discv4_updates,
-            dsicv4_config,
+            _dsicv4_config: dsicv4_config,
             _discv4_service,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
@@ -69,23 +69,6 @@ impl Discovery {
     /// Returns the id with which the local identifies itself in the network
     pub(crate) fn local_id(&self) -> PeerId {
         self.local_enr.id
-    }
-
-    /// Manually adds an address to the set.
-    ///
-    /// This has the same effect as adding node discovered via network gossip.
-    pub(crate) fn add_node_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        self.on_discv4_update(TableUpdate::Added(NodeRecord {
-            address: addr.ip(),
-            tcp_port: addr.port(),
-            udp_port: addr.port(),
-            id: peer_id,
-        }))
-    }
-
-    /// Returns all nodes we know exist in the network.
-    pub fn nodes(&mut self) -> &HashMap<PeerId, SocketAddr> {
-        &self.discovered_nodes
     }
 
     fn on_discv4_update(&mut self, update: TableUpdate) {

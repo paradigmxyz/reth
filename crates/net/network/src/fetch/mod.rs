@@ -2,7 +2,7 @@
 
 use crate::message::BlockRequest;
 use futures::StreamExt;
-use reth_eth_wire::{BlockBody, GetBlockBodies};
+use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{RequestError, RequestResult},
     headers::client::HeadersRequest,
@@ -161,18 +161,15 @@ impl StateFetcher {
 
         match req {
             DownloadRequest::GetBlockHeaders { request, response } => {
-                let inflight = Request { request, response };
+                let inflight = Request { request: request.clone(), response };
                 self.inflight_headers_requests.insert(peer_id, inflight);
-
-                unimplemented!("unify start types");
-
-                // BlockRequest::GetBlockHeaders(GetBlockHeaders {
-                //     // TODO: this should be converted
-                //     start_block: BlockHashOrNumber::Number(0),
-                //     limit: request.limit,
-                //     skip: 0,
-                //     reverse: request.reverse,
-                // })
+                let HeadersRequest { start, limit, reverse } = request;
+                BlockRequest::GetBlockHeaders(GetBlockHeaders {
+                    start_block: start,
+                    limit,
+                    skip: 0,
+                    reverse,
+                })
             }
             DownloadRequest::GetBlockBodies { request, response } => {
                 let inflight = Request { request: request.clone(), response };
@@ -307,9 +304,12 @@ impl PeerState {
     }
 }
 
-/// A request that waits for a response from the network so it can send it back through the response
-/// channel.
+/// A request that waits for a response from the network, so it can send it back through the
+/// response channel.
 struct Request<Req, Resp> {
+    /// The issued request object
+    /// TODO: this can be attached to the response in error case
+    #[allow(unused)]
     request: Req,
     response: oneshot::Sender<Resp>,
 }

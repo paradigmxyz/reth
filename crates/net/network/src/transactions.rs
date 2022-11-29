@@ -43,6 +43,19 @@ pub struct TransactionsHandle {
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
 }
 
+// === impl TransactionsHandle ===
+
+impl TransactionsHandle {
+    fn send(&self, cmd: TransactionsCommand) {
+        let _ = self.manager_tx.send(cmd);
+    }
+
+    /// Manually propagate the transaction that belongs to the hash.
+    pub fn propagate(&self, hash: TxHash) {
+        self.send(TransactionsCommand::PropagateHash(hash))
+    }
+}
+
 /// Manages transactions on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service while
@@ -248,6 +261,15 @@ where
         }
     }
 
+    /// Handles a command received from a detached [`TransactionsHandle`]
+    fn on_command(&mut self, cmd: TransactionsCommand) {
+        match cmd {
+            TransactionsCommand::PropagateHash(hash) => {
+                self.on_new_transactions(std::iter::once(hash))
+            }
+        }
+    }
+
     /// Handles a received event related to common network events.
     fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
@@ -355,6 +377,11 @@ where
             this.on_network_event(event);
         }
 
+        // drain network/peer related events
+        while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+            this.on_command(cmd);
+        }
+
         // drain incoming transaction events
         while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
             this.on_network_tx_event(event);
@@ -424,11 +451,12 @@ struct Peer {
 
 /// Commands to send to the [`TransactionManager`]
 enum TransactionsCommand {
-    Propagate(H256),
+    PropagateHash(H256),
 }
 
-/// All events related to transactions emitted by the network
+/// All events related to transactions emitted by the network.
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub enum NetworkTransactionEvent {
     /// Received list of transactions to the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
