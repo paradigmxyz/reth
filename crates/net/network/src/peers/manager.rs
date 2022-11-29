@@ -90,13 +90,32 @@ impl PeersManager {
         PeersHandle { manager_tx: self.manager_tx.clone() }
     }
 
+    /// Invoked when a new _incoming_ tcp connection is accepted.
+    ///
+    /// Returns an Err with the configured limit with the number of accepted incoming connections
+    /// exceeded the configured limit.
+    pub(crate) fn on_inbound_pending_session(&mut self) -> Result<(), usize> {
+        if !self.connection_info.has_in_capacity() {
+            return Err(self.connection_info.max_inbound)
+        }
+
+        // keep track of new connection
+        self.connection_info.inc_in();
+        Ok(())
+    }
+
+    /// Invoked when a pending session was closed.
+    pub(crate) fn on_closed_incoming_pending_session(&mut self) {
+        self.connection_info.decr_in()
+    }
+
     /// Called when a new _incoming_ active session was established to the given peer.
     ///
     /// This will update the state of the peer if not yet tracked.
     ///
     /// If the reputation of the peer is below the `BANNED_REPUTATION` threshold, a disconnect will
     /// be scheduled.
-    pub(crate) fn on_active_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
+    pub(crate) fn on_active_inbound_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
@@ -110,9 +129,6 @@ impl PeersManager {
                 entry.insert(Peer::with_state(addr, PeerConnectionState::In));
             }
         }
-
-        // keep track of new connection
-        self.connection_info.inc_in();
     }
 
     /// Apply the corresponding reputation change to the given peer
@@ -280,6 +296,11 @@ impl ConnectionInfo {
     ///  Returns `true` if there's still capacity for a new outgoing connection.
     fn has_out_capacity(&self) -> bool {
         self.num_outbound < self.max_outbound
+    }
+
+    ///  Returns `true` if there's still capacity for a new incoming connection.
+    fn has_in_capacity(&self) -> bool {
+        self.num_inbound < self.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {

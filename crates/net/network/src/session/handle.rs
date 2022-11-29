@@ -23,7 +23,7 @@ use tokio::{
 #[derive(Debug)]
 pub(crate) struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
-    pub(crate) disconnect_tx: oneshot::Sender<()>,
+    pub(crate) _disconnect_tx: oneshot::Sender<()>,
     /// The direction of the session
     pub(crate) direction: Direction,
 }
@@ -33,6 +33,7 @@ pub(crate) struct PendingSessionHandle {
 /// Within an active session that supports the `Ethereum Wire Protocol `, three high-level tasks can
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct ActiveSessionHandle {
     /// The direction of the session
     pub(crate) direction: Direction,
@@ -65,8 +66,6 @@ impl ActiveSessionHandle {
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
 pub(crate) enum PendingSessionEvent {
-    /// Initial handshake step was successful <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#initial-handshake>
-    SuccessfulHandshake { remote_addr: SocketAddr, session_id: SessionId },
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
         session_id: SessionId,
@@ -134,6 +133,7 @@ pub(crate) enum ActiveSessionMessage {
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
+    #[allow(unused)]
     InvalidMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,
