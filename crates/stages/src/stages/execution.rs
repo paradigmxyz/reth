@@ -15,7 +15,7 @@ use reth_interfaces::{
 use reth_primitives::{StorageEntry, TransactionSignedEcRecovered, H256};
 use std::{fmt::Debug, ops::DerefMut};
 
-const TX_INDEX: StageId = StageId("Execution");
+const EXECUTION: StageId = StageId("Execution");
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -62,7 +62,7 @@ const BATCH_SIZE: u64 = 1000;
 impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        TX_INDEX
+        EXECUTION
     }
 
     /// Execute the stage
@@ -74,7 +74,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let db_tx = db.deref_mut();
         let last_block = input.stage_progress.unwrap_or_default();
         let start_block = last_block + 1;
-        let end_block = start_block + BATCH_SIZE;
 
         // Get next canonical block hashes to execute.
         let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
@@ -87,15 +86,16 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Skip sender recovery and load signer from database.
         let mut tx_sender = db_tx.cursor::<tables::TxSenders>()?;
 
-        // get canonical block (num,hash)
-        let mut canonical_batch = Vec::new();
-        let mut canonicals_walker = canonicals.walk(start_block)?;
-        for _ in start_block..end_block {
-            if let Some(ch) = canonicals_walker.next() {
-                canonical_batch.push(BlockNumHash(ch?))
-            } else {
-                break
-            }
+        // get canonical blocks (num,hash)
+        let canonical_batch = canonicals
+            .walk(start_block)?
+            .take(BATCH_SIZE as usize)
+            .map(|i| i.map(BlockNumHash))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // no more canonical blocks, we are done with execution.
+        if canonical_batch.is_empty() {
+            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block })
         }
 
         // get headers from canonical numbers
@@ -227,8 +227,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // TODO insert Account/Storage ChangeSet
 
         let last_block = start_block + canonical_batch.len() as u64;
-        let is_done = canonical_batch.len() != BATCH_SIZE as usize;
-        // TODO not sure what exactly to set `reached_tip` to.
+        let is_done = canonical_batch.len() < BATCH_SIZE as usize;
         Ok(ExecOutput { done: is_done, reached_tip: true, stage_progress: last_block })
     }
 
@@ -255,7 +254,7 @@ mod tests {
     use reth_rlp::Decodable;
 
     #[tokio::test]
-    async fn senity_execution_of_block() {
+    async fn sanity_execution_of_block() {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut db = StageDB::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
@@ -340,151 +339,5 @@ mod tests {
             Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: 2.into() })),
             "Post changed of a account"
         );
-        /* PRE STATE:
-
-           "0x1000000000000000000000000000000000000000" : {
-               "balance" : "0x00",
-               "code" : "0x5a465a905090036002900360015500",
-               "nonce" : "0x00",
-               "storage" : {
-               }
-           },
-           "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-               "balance" : "0x3635c9adc5dea00000",
-               "code" : "0x",
-               "nonce" : "0x00",
-               "storage" : {
-               }
-           }
-
-           POST STATE:
-
-            "0x1000000000000000000000000000000000000000" : {
-               "balance" : "0x00",
-               "code" : "0x5a465a905090036002900360015500",
-               "nonce" : "0x00",
-               "storage" : {
-                   "0x01" : "0x02"
-               }
-           },
-           "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba" : {
-               "balance" : "0x1bc16d674ece94ba",
-               "code" : "0x",
-               "nonce" : "0x00",
-               "storage" : {
-               }
-           },
-           "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-               "balance" : "0x3635c9adc5de996b46",
-               "code" : "0x",
-               "nonce" : "0x01",
-               "storage" : {
-               }
-           }
-        */
-
-        /*
-        "blocks" : [
-            {
-                "blockHeader" : {
-                    "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-                    "coinbase" : "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
-                    "difficulty" : "0x020000",
-                    "extraData" : "0x00",
-                    "gasLimit" : "0x02540be400",
-                    "gasUsed" : "0xa879",
-                    "hash" : "0xb76eaf58836e69d39d21dc15f02bedd20fc67e71b9b6a632cdfcb6506f599eb5",
-                    "mixHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    "nonce" : "0x0000000000000000",
-                    "number" : "0x01",
-                    "parentHash" : "0x75c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82f",
-                    "receiptTrie" : "0x3f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbab",
-                    "stateRoot" : "0x98f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0",
-                    "timestamp" : "0x03e8",
-                    "transactionsTrie" : "0x8151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcb",
-                    "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
-                },
-                "rlp" : "0xf90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0",
-                "transactions" : [
-                    {
-                        "data" : "0x",
-                        "gasLimit" : "0x05f5e100",
-                        "gasPrice" : "0x0a",
-                        "nonce" : "0x00",
-                        "r" : "0x7e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37",
-                        "s" : "0x5f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509b",
-                        "sender" : "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-                        "to" : "0x1000000000000000000000000000000000000000",
-                        "v" : "0x1b",
-                        "value" : "0x00"
-                    }
-                ],
-                "uncleHeaders" : [
-                ]
-            }
-        ],
-        "genesisBlockHeader" : {
-            "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-            "coinbase" : "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
-            "difficulty" : "0x020000",
-            "extraData" : "0x00",
-            "gasLimit" : "0x02540be400",
-            "gasUsed" : "0x00",
-            "hash" : "0x75c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82f",
-            "mixHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
-            "nonce" : "0x0000000000000000",
-            "number" : "0x00",
-            "parentHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
-            "receiptTrie" : "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "stateRoot" : "0x45571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32ed",
-            "timestamp" : "0x00",
-            "transactionsTrie" : "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
-        },
-        "genesisRLP" : "0xf901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0",
-        "lastblockhash" : "0xb76eaf58836e69d39d21dc15f02bedd20fc67e71b9b6a632cdfcb6506f599eb5",
-        "network" : "Berlin",
-        "postState" : {
-            "0x1000000000000000000000000000000000000000" : {
-                "balance" : "0x00",
-                "code" : "0x5a465a905090036002900360015500",
-                "nonce" : "0x00",
-                "storage" : {
-                    "0x01" : "0x02"
-                }
-            },
-            "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba" : {
-                "balance" : "0x1bc16d674ece94ba",
-                "code" : "0x",
-                "nonce" : "0x00",
-                "storage" : {
-                }
-            },
-            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-                "balance" : "0x3635c9adc5de996b46",
-                "code" : "0x",
-                "nonce" : "0x01",
-                "storage" : {
-                }
-            }
-        },
-        "pre" : {
-            "0x1000000000000000000000000000000000000000" : {
-                "balance" : "0x00",
-                "code" : "0x5a465a905090036002900360015500",
-                "nonce" : "0x00",
-                "storage" : {
-                }
-            },
-            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-                "balance" : "0x3635c9adc5dea00000",
-                "code" : "0x",
-                "nonce" : "0x00",
-                "storage" : {
-                }
-            }
-        },
-        "sealEngine" : "NoProof"
-        */
     }
 }
