@@ -9,10 +9,13 @@ use reth_executor::{
     Config,
 };
 use reth_interfaces::{
-    db::{models::BlockNumHash, tables, Database, DbCursorRO, DbTx, DbTxMut},
+    db::{
+        models::{AccountBeforeTx, BlockNumHash, TxNumberAddress},
+        tables, Database, DbCursorRO, DbTx, DbTxMut,
+    },
     provider::db::StateProviderImplRefLatest,
 };
-use reth_primitives::{StorageEntry, TransactionSignedEcRecovered, H256};
+use reth_primitives::{Account, StorageEntry, TransactionSignedEcRecovered, H256};
 use std::{fmt::Debug, ops::DerefMut};
 
 const TX_INDEX: StageId = StageId("Execution");
@@ -121,7 +124,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // Fetch transactions, execute them and generate results
-        let mut results = Vec::new();
+        let mut block_change_paches = Vec::with_capacity(canonical_batch.len());
         for (header, body) in headers_batch.iter().zip(body_batch.iter()) {
             let start_tx_index = body.base_tx_id;
             let end_tx_index = body.tx_amount + start_tx_index;
@@ -168,7 +171,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
 
             // executiong and store output to results
-            results.extend(
+            block_change_paches.push((
                 reth_executor::executor::execute_and_verify_receipt(
                     header,
                     &recovered_transactions,
@@ -176,55 +179,86 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     &mut state_provider,
                 )
                 .map_err(|error| StageError::ExecutionError { block: header.number, error })?,
-            );
+                start_tx_index,
+            ));
         }
 
         // apply changes to plain database.
-        for result in results.into_iter() {
-            // insert account diff
-            for (address, AccountChangeSet { account, wipe_storage, storage }) in
-                result.state_diff.into_iter()
-            {
-                // insert account
-                if let Some(account) = account.1 {
-                    db_tx.put::<tables::PlainAccountState>(address, account)?;
-                } else {
-                    // if it is none it means it is just storage change.
-                    if account.0.is_some() {
-                        db_tx.delete::<tables::PlainAccountState>(address, None)?;
-                    }
-                }
-                // wipe storage
-                if wipe_storage {
-                    db_tx.delete::<tables::PlainStorageState>(address, None)?;
-                }
-                // insert storage diff
-                for (key, (old_value, new_value)) in storage {
-                    let mut hkey = H256::zero();
-                    key.to_big_endian(&mut hkey.0);
-                    if new_value.is_zero() {
-                        db_tx.delete::<tables::PlainStorageState>(
-                            address,
-                            Some(StorageEntry { key: hkey, value: old_value }),
+        for (results, start_tx_index) in block_change_paches.into_iter() {
+            for (index, result) in results.into_iter().enumerate() {
+                let tx_index = start_tx_index + index as u64;
+                // insert account diff
+                for (address, AccountChangeSet { account, wipe_storage, storage }) in
+                    result.state_diff.into_iter()
+                {
+                    // insert old account in AccountChangeDiff
+                    if let Some(account) = account.0 {
+                        // TODO optimize BeforeTx by checking if bytecode is same as in new account.
+                        db_tx.put::<tables::AccountChangeSet>(
+                            tx_index,
+                            AccountBeforeTx {
+                                address,
+                                info: Account {
+                                    nonce: account.nonce,
+                                    balance: account.balance,
+                                    bytecode_hash: account.bytecode_hash,
+                                },
+                            },
                         )?;
+                    }
+
+                    // insert account
+                    if let Some(account) = account.1 {
+                        db_tx.put::<tables::PlainAccountState>(address, account)?;
                     } else {
-                        db_tx.put::<tables::PlainStorageState>(
-                            address,
-                            StorageEntry { key: hkey, value: new_value },
+                        // if it is none it means it is just storage change.
+                        if account.0.is_some() {
+                            db_tx.delete::<tables::PlainAccountState>(address, None)?;
+                        }
+                    }
+                    // wipe storage
+                    if wipe_storage {
+                        db_tx.delete::<tables::PlainStorageState>(address, None)?;
+                    }
+                    // insert storage diff
+                    let storage_id = TxNumberAddress((tx_index, address));
+                    for (key, (old_value, new_value)) in storage {
+                        let mut hkey = H256::zero();
+                        key.to_big_endian(&mut hkey.0);
+
+                        // insert into StorageChangeDiff
+                        db_tx.put::<tables::StorageChangeSet>(
+                            storage_id.clone(),
+                            StorageEntry { key: hkey, value: old_value },
                         )?;
+
+                        if new_value.is_zero() {
+                            db_tx.delete::<tables::PlainStorageState>(
+                                address,
+                                Some(StorageEntry { key: hkey, value: old_value }),
+                            )?;
+                        } else {
+                            db_tx.put::<tables::PlainStorageState>(
+                                address,
+                                StorageEntry { key: hkey, value: new_value },
+                            )?;
+                        }
                     }
                 }
-            }
-            // insert bytecode
-            for (hash, bytecode) in result.new_bytecodes.into_iter() {
-                // make different types of bytecode. Checked and maybe even analyzed (needs to be
-                // packed). Currently save only raw bytes.
-                db_tx
-                    .put::<tables::Bytecodes>(hash, bytecode.bytes()[..bytecode.len()].to_vec())?;
+                // insert bytecode
+                for (hash, bytecode) in result.new_bytecodes.into_iter() {
+                    // make different types of bytecode. Checked and maybe even analyzed (needs to
+                    // be packed). Currently save only raw bytes.
+                    db_tx.put::<tables::Bytecodes>(
+                        hash,
+                        bytecode.bytes()[..bytecode.len()].to_vec(),
+                    )?;
+
+                    // NOTE: bytecode bytes are not inserted in change diff and it stand in saparate
+                    // table.
+                }
             }
         }
-
-        // TODO insert Account/Storage ChangeSet
 
         let last_block = start_block + canonical_batch.len() as u64;
         let is_done = canonical_batch.len() != BATCH_SIZE as usize;
@@ -238,6 +272,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         _db: &mut StageDB<'_, DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+        // get block body tx indexes
+        // get transaction diffs
+        // take transaction patches: AccountChangeDiff StorageChangeDiff
+        // apply changes to PlainAccountState and PlainStorageChange
+        // Discard transaction patches
+
         panic!("For unwindng we need Account/Storage ChangeSet");
         //Ok(UnwindOutput { stage_progress: input.unwind_to })
     }

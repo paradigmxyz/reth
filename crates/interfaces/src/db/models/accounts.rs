@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
-    address: Address,
+    pub address: Address,
     /// Account state before the transaction.
-    info: Account,
+    pub info: Account,
 }
 
 /// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]

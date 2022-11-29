@@ -151,6 +151,9 @@ table!(
 
 table!(
     /// Stores all smart contract bytecodes.
+    /// There will be multiple accounts that have same bytecode
+    /// So we would need to introduce reference counter.
+    /// This will be small optimization on state.
     Bytecodes => H256 => Bytecode);
 
 dupsort!(
