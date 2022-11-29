@@ -448,9 +448,8 @@ mod tests {
         };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
-            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(), /* TODO remove
-                                                                                * 2eth block
-                                                                                * reward */
+            // TODO remove 2eth block reward
+            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
             nonce: 0x00,
             bytecode_hash: Some(H256(hex!(
                 "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"

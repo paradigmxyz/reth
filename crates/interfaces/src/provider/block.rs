@@ -139,7 +139,6 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     let mut tx_number = start_tx_number;
     for eth_tx in block.body.iter() {
-        println!("num: {tx_number}");
         let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
         tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
         tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;

@@ -20,6 +20,7 @@ pub enum StageError {
     #[error("An internal database error occurred.")]
     Database(#[from] DbError),
     #[error("Stage encountered a execution error in block {block}: {error}.")]
+    /// The stage encountered a execution error
     ExecutionError {
         /// The block that failed execution.
         block: BlockNumber,

@@ -10,7 +10,6 @@ use reth_executor::{
 };
 use reth_interfaces::{
     db::{models::BlockNumHash, tables, DBContainer, Database, DbCursorRO, DbTx, DbTxMut},
-    executor::Error as ExecutorError,
     provider::db::StateProviderImplRefLatest,
 };
 use reth_primitives::{StorageEntry, TransactionSignedEcRecovered, H256};
@@ -98,7 +97,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 break
             }
         }
-        println!("num of blocks: {}", canonical_batch.len());
 
         // get headers from canonical numbers
         let mut headers_batch = Vec::with_capacity(canonical_batch.len());
@@ -131,9 +129,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let mut tx_walker = tx.walk(start_tx_index)?;
             let mut transactions = Vec::with_capacity(body.tx_amount as usize);
             // get next N transactions.
-            println!("start {start_tx_index} end {end_tx_index}");
             for index in start_tx_index..end_tx_index {
-                println!("index tx:{index}");
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
@@ -193,7 +189,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 if let Some(account) = account.1 {
                     db_tx.put::<tables::PlainAccountState>(address, account)?;
                 } else {
-                    db_tx.delete::<tables::PlainAccountState>(address, None)?;
+                    // if it is none it means it is just storage change.
+                    if account.0.is_some() {
+                        db_tx.delete::<tables::PlainAccountState>(address, None)?;
+                    }
                 }
                 // wipe storage
                 if wipe_storage {
@@ -252,7 +251,7 @@ mod tests {
         mdbx::WriteMap,
     };
     use reth_interfaces::provider::insert_canonical_block;
-    use reth_primitives::{hex_literal::hex, BlockLocked};
+    use reth_primitives::{hex_literal::hex, keccak256, Account, BlockLocked, H160, U256};
     use reth_rlp::Decodable;
 
     #[tokio::test]
@@ -272,7 +271,75 @@ mod tests {
         insert_canonical_block(db.get_mut(), &block).unwrap();
         db.commit().unwrap();
 
+        // insert pre state
+        let tx = db.get_mut();
+        let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
+        let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let code = hex!("5a465a905090036002900360015500");
+        let balance = U256::from(0x3635c9adc5dea00000u128);
+        let code_hash = keccak256(code);
+        tx.put::<tables::PlainAccountState>(
+            acc1,
+            Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) },
+        )
+        .unwrap();
+        tx.put::<tables::PlainAccountState>(
+            acc2,
+            Account { nonce: 0, balance, bytecode_hash: None },
+        )
+        .unwrap();
+        tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
+        db.commit().unwrap();
+
+        // execute
         let _o = ExecutionStage.execute(&mut db, input).await.unwrap();
+        db.commit().unwrap();
+        let tx = db.get_mut();
+        // check post state
+        let account1 = H160(hex!("1000000000000000000000000000000000000000"));
+        let account1_info =
+            Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: Some(code_hash) };
+        let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
+        let account2_info = Account {
+            // TODO remove 2eth block reward
+            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
+            nonce: 0x00,
+            bytecode_hash: Some(H256(hex!(
+                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+            ))),
+        };
+        let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let account3_info = Account {
+            balance: 0x3635c9adc5de996b46u128.into(),
+            nonce: 0x01,
+            bytecode_hash: Some(H256(hex!(
+                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+            ))),
+        };
+
+        // asert accounts
+        assert_eq!(
+            tx.get::<tables::PlainAccountState>(account1),
+            Ok(Some(account1_info)),
+            "Post changed of a account"
+        );
+        assert_eq!(
+            tx.get::<tables::PlainAccountState>(account2),
+            Ok(Some(account2_info)),
+            "Post changed of a account"
+        );
+        assert_eq!(
+            tx.get::<tables::PlainAccountState>(account3),
+            Ok(Some(account3_info)),
+            "Post changed of a account"
+        );
+        // assert storage
+        // Get on dupsort would return only first value. This is good enought for this test.
+        assert_eq!(
+            tx.get::<tables::PlainStorageState>(account1),
+            Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: 2.into() })),
+            "Post changed of a account"
+        );
         /* PRE STATE:
 
            "0x1000000000000000000000000000000000000000" : {
