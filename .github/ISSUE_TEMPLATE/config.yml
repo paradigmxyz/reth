@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/foundry-rs/reth/discussions
+    about: Please ask and answer questions here to keep the issue tracker clean.
+  - name: Security
+    url: mailto:georgios@paradigm.xyz
+    about: Please report security vulnerabilities here.
