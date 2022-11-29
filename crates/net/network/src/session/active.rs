@@ -137,7 +137,7 @@ impl ActiveSession {
                 return Some(EthStreamError::HandshakeError(HandshakeError::StatusNotInHandshake))
             }
             EthMessage::NewBlockHashes(msg) => {
-                self.emit_message(PeerMessage::NewBlockHashes(Arc::new(msg)));
+                self.emit_message(PeerMessage::NewBlockHashes(msg));
             }
             EthMessage::NewBlock(msg) => {
                 let block =
@@ -145,10 +145,10 @@ impl ActiveSession {
                 self.emit_message(PeerMessage::NewBlock(block));
             }
             EthMessage::Transactions(msg) => {
-                self.emit_message(PeerMessage::Transactions(Arc::new(msg)));
+                self.emit_message(PeerMessage::ReceivedTransaction(msg));
             }
             EthMessage::NewPooledTransactionHashes(msg) => {
-                self.emit_message(PeerMessage::PooledTransactions(Arc::new(msg)));
+                self.emit_message(PeerMessage::PooledTransactions(msg));
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders);
@@ -198,21 +198,23 @@ impl ActiveSession {
     fn on_peer_message(&mut self, msg: PeerMessage) {
         match msg {
             PeerMessage::NewBlockHashes(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::NewBlockHashes(msg).into());
+                self.queued_outgoing.push_back(EthMessage::NewBlockHashes(msg).into());
             }
             PeerMessage::NewBlock(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
-            PeerMessage::Transactions(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
-            }
             PeerMessage::PooledTransactions(msg) => {
-                self.queued_outgoing
-                    .push_back(EthBroadcastMessage::NewPooledTransactionHashes(msg).into());
+                self.queued_outgoing.push_back(EthMessage::NewPooledTransactionHashes(msg).into());
             }
             PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
                 self.on_peer_request(req, deadline);
+            }
+            PeerMessage::SendTransactions(msg) => {
+                self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
+            }
+            PeerMessage::ReceivedTransaction(_) => {
+                unreachable!("Not emitted by network")
             }
             PeerMessage::Other(_) => {}
         }

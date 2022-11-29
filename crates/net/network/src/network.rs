@@ -5,8 +5,8 @@ use crate::{
     peers::{PeersHandle, ReputationChangeKind},
 };
 use parking_lot::Mutex;
-use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, Transactions};
-use reth_primitives::{PeerId, H256};
+use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_primitives::{PeerId, TransactionSigned, H256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -107,8 +107,11 @@ impl NetworkHandle {
     }
 
     /// Send full transactions to the peer
-    pub fn send_transactions(&self, peer_id: PeerId, msg: Arc<Transactions>) {
-        self.send_message(NetworkHandleMessage::SendTransaction { peer_id, msg })
+    pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<TransactionSigned>>) {
+        self.send_message(NetworkHandleMessage::SendTransaction {
+            peer_id,
+            msg: SharedTransactions(msg),
+        })
     }
 }
 
@@ -139,9 +142,9 @@ pub(crate) enum NetworkHandleMessage {
     /// Broadcast event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, H256),
     /// Sends the list of transactions to the given peer.
-    SendTransaction { peer_id: PeerId, msg: Arc<Transactions> },
+    SendTransaction { peer_id: PeerId, msg: SharedTransactions },
     /// Sends the list of transactions hashes to the given peer.
-    SendPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
+    SendPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
     /// Send an `eth` protocol request to the peer.
     EthRequest {
         /// The peer to send the request to.

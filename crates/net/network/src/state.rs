@@ -173,7 +173,7 @@ where
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
         let number = msg.block.block.header.number;
-        let hashes = Arc::new(NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]));
+        let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
         for (peer_id, peer) in self.connected_peers.iter_mut() {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
@@ -186,7 +186,7 @@ where
 
             self.queued_messages.push_back(StateAction::NewBlockHashes {
                 peer_id: *peer_id,
-                hashes: Arc::clone(&hashes),
+                hashes: hashes.clone(),
             });
         }
     }
@@ -409,7 +409,7 @@ pub(crate) enum StateAction {
         /// Target of the message
         peer_id: PeerId,
         /// `NewBlockHashes` message to send to the peer.
-        hashes: Arc<NewBlockHashes>,
+        hashes: NewBlockHashes,
     },
     /// Create a new connection to the given node.
     Connect { remote_addr: SocketAddr, peer_id: PeerId },
