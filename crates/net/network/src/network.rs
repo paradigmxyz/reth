@@ -3,6 +3,7 @@ use crate::{
     manager::NetworkEvent,
     message::PeerRequest,
     peers::{PeersHandle, ReputationChangeKind},
+    FetchClient,
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
@@ -14,7 +15,7 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::{mpsc, mpsc::UnboundedSender};
+use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A _shareable_ network frontend. Used to interact with the network.
@@ -64,6 +65,13 @@ impl NetworkHandle {
         &self.inner.local_peer_id
     }
 
+    /// Returns the [`PeersHandle`] that can be cloned and shared.
+    ///
+    /// The [`PeersHandle`] can be used to interact with the network's peer set.
+    pub fn peers_handle(&self) -> &PeersHandle {
+        &self.inner.peers
+    }
+
     fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {
         &self.inner.to_manager_tx
     }
@@ -75,6 +83,15 @@ impl NetworkHandle {
         UnboundedReceiverStream::new(rx)
     }
 
+    /// Returns a new [`FetchClient`] that can be cloned and shared.
+    ///
+    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
+    pub async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
+        rx.await
+    }
+
     /// Returns the mode of the network, either pow, or pos
     pub fn mode(&self) -> &NetworkMode {
         &self.inner.network_mode
@@ -83,6 +100,13 @@ impl NetworkHandle {
     /// Sends a [`NetworkHandleMessage`] to the manager
     pub(crate) fn send_message(&self, msg: NetworkHandleMessage) {
         let _ = self.inner.to_manager_tx.send(msg);
+    }
+
+    /// Announce a block over devp2p
+    ///
+    /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
+    pub fn announce_block(&self, block: NewBlock, hash: H256) {
+        self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
     /// Sends a message to the [`NetworkManager`] to add a peer to the known set
@@ -154,4 +178,6 @@ pub(crate) enum NetworkHandleMessage {
     },
     /// Apply a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
+    /// Returns the client that can be used to interact with the network.
+    FetchClient(oneshot::Sender<FetchClient>),
 }
