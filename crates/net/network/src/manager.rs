@@ -245,8 +245,20 @@ where
     /// Handle an incoming request from the peer
     fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
         match req {
-            PeerRequest::GetBlockHeaders { .. } => {}
-            PeerRequest::GetBlockBodies { .. } => {}
+            PeerRequest::GetBlockHeaders { request, response } => {
+                self.delegate_block_request(IncomingBlockRequest::GetBlockHeaders {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetBlockBodies { request, response } => {
+                self.delegate_block_request(IncomingBlockRequest::GetBlockBodies {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,

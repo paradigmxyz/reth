@@ -94,7 +94,6 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
@@ -104,6 +103,7 @@ mod test {
         TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     use super::BlockBody;
 

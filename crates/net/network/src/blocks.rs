@@ -1,24 +1,22 @@
 //! Blocks/Headers management for the p2p network.
 
-use crate::{cache::LruCache, peers::PeersHandle};
+use crate::peers::PeersHandle;
 use futures::StreamExt;
 use reth_eth_wire::{BlockBodies, BlockBody, BlockHeaders, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::{
     p2p::error::RequestResult,
     provider::{BlockProvider, HeaderProvider},
 };
-use reth_primitives::PeerId;
+use reth_primitives::{BlockHashOrNumber, Header, PeerId, H256};
 use std::{
     borrow::Borrow,
-    cell::Cell,
     future::Future,
-    hash::{Hash, Hasher},
-    num::NonZeroUsize,
+    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, mpsc::UnboundedReceiver, oneshot};
+use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
@@ -54,8 +52,6 @@ pub struct BlockRequestManager<C> {
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`].
     incoming_requests: UnboundedReceiverStream<IncomingBlockRequest>,
-    /// A cache of previously answered [`GetBlockHeaders`] requests.
-    responded_headers: LruCache<RespondedGetBlockHeaders>,
 }
 
 // === impl BlockRequestManager ===
@@ -70,52 +66,99 @@ where
         peers: PeersHandle,
         incoming: UnboundedReceiver<IncomingBlockRequest>,
     ) -> Self {
-        Self {
-            client,
-            peers,
-            incoming_requests: UnboundedReceiverStream::new(incoming),
-            responded_headers: LruCache::new(
-                NonZeroUsize::new(HEADERS_REQUEST_CACHE_LIMIT).unwrap(),
-            ),
+        Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming) }
+    }
+
+    /// Returns the hash of the block to start with.
+    fn get_start_hash(
+        &self,
+        start_block: BlockHashOrNumber,
+        skip: u32,
+        reverse: bool,
+    ) -> Option<H256> {
+        let block_hash = match start_block {
+            BlockHashOrNumber::Hash(start) => {
+                if skip == 0 {
+                    start
+                } else {
+                    let num = self.client.block_number(start).unwrap_or_default()?;
+                    self.get_start_hash(BlockHashOrNumber::Number(num), skip, reverse)?
+                }
+            }
+            BlockHashOrNumber::Number(num) => {
+                let num = if reverse {
+                    num.checked_sub(skip as u64)?
+                } else {
+                    num.checked_add(skip as u64)?
+                };
+                self.client.block_hash(num.into()).unwrap_or_default()?
+            }
+        };
+
+        Some(block_hash)
+    }
+
+    /// Returns the list of requested heders
+    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+        let GetBlockHeaders { start_block, limit: _, skip, reverse } = request;
+
+        let mut headers = Vec::new();
+
+        let block_hash = if let Some(hash) = self.get_start_hash(start_block, skip, reverse) {
+            hash
+        } else {
+            return headers
+        };
+
+        while let Some(header) = self.client.header(&block_hash).unwrap_or_default() {
+            headers.push(header);
+
+            // TODO: size estimation
+
+            if headers.len() >= MAX_HEADERS_SERVE {
+                break
+            }
         }
+
+        headers
     }
 
     fn on_headers_request(
         &mut self,
-        peer_id: PeerId,
+        _peer_id: PeerId,
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
+        let headers = self.get_headers_response(request);
 
-        // for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit &&
-        //     len(headers) < MaxHeadersServe && lookups < 2*MaxHeadersServe {
+        let _ = response.send(Ok(BlockHeaders(headers)));
     }
 
     fn on_bodies_request(
         &mut self,
-        peer_id: PeerId,
+        _peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
-        let hashes = request.0;
-        let mut blocks = Vec::new();
+        let mut bodies = Vec::new();
 
-        let mut total_size: usize = 0;
         for hash in request.0 {
             if let Some(block) = self.client.block(hash.into()).unwrap_or_default() {
-                let body = BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers
+                let body = BlockBody { transactions: block.body, ommers: block.ommers };
+
+                bodies.push(body);
+
+                // TODO: size estimation
+
+                if bodies.len() >= MAX_BODIES_SERVE {
+                    break
                 }
             } else {
                 break
             }
         }
-    }
-        while let Some(header) = self.client.header(block_id).unwrap_or_default() {
-        // if bytes >= softResponseLimit || len(bodies) >= MaxBodiesServe
-        //     break
-        // }
+
+        let _ = response.send(Ok(BlockBodies(bodies)));
     }
 }
 
@@ -152,31 +195,17 @@ where
 ///
 /// This is the key type for spam detection cache. The counter is ignored during `PartialEq` and
 /// `Hash`.
+#[derive(Debug, PartialEq, Hash)]
+#[allow(unused)]
 struct RespondedGetBlockHeaders {
     req: (PeerId, GetBlockHeaders),
-    counter: Cell<usize>,
 }
 
 // === impl RespondedGetBlockHeaders ===
 
 impl RespondedGetBlockHeaders {
     fn new(req: (PeerId, GetBlockHeaders)) -> Self {
-        Self { req, counter: Cell::new(0) }
-    }
-}
-
-impl Hash for RespondedGetBlockHeaders {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.req.0.hash(state);
-        self.req.1.hash(state);
-    }
-}
-
-impl Eq for RespondedGetBlockHeaders {}
-
-impl PartialEq for RespondedGetBlockHeaders {
-    fn eq(&self, other: &Self) -> bool {
-        self.req.0.eq(&other.req.0) && self.req.1.eq(&other.req.1)
+        Self { req }
     }
 }
 
