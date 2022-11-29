@@ -6,7 +6,8 @@ use reth_interfaces::{
     Result as RethResult,
 };
 use reth_primitives::{
-    Account, BlockLocked, BlockNumber, SealedHeader, Transaction, EMPTY_OMMER_ROOT, H256, U256,
+    Account, BlockLocked, BlockNumber, SealedHeader, Transaction, TxEip1559, TxEip2930, TxLegacy,
+    EMPTY_OMMER_ROOT, H256, U256,
 };
 use std::time::SystemTime;
 
@@ -74,21 +75,26 @@ pub fn validate_transaction_regarding_header(
     base_fee: Option<u64>,
 ) -> Result<(), Error> {
     let chain_id = match transaction {
-        Transaction::Legacy { chain_id, .. } => {
+        Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
             if config.spurious_dragon_hard_fork_block <= at_block_number && chain_id.is_some() {
                 return Err(Error::TransactionOldLegacyChainId)
             }
             *chain_id
         }
-        Transaction::Eip2930 { chain_id, .. } => {
+        Transaction::Eip2930(TxEip2930 { chain_id, .. }) => {
             // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
             if config.berlin_hard_fork_block > at_block_number {
                 return Err(Error::TransactionEip2930Disabled)
             }
             Some(*chain_id)
         }
-        Transaction::Eip1559 { chain_id, max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+        Transaction::Eip1559(TxEip1559 {
+            chain_id,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            ..
+        }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
             if config.berlin_hard_fork_block > at_block_number {
                 return Err(Error::TransactionEip1559Disabled)
@@ -130,13 +136,13 @@ pub fn validate_transaction_regarding_account(
     }
 
     let (nonce, gas_price, gas_limit, value) = match transaction {
-        Transaction::Legacy { nonce, gas_price, gas_limit, value, .. } => {
+        Transaction::Legacy(TxLegacy { nonce, gas_price, gas_limit, value, .. }) => {
             (nonce, gas_price, gas_limit, value)
         }
-        Transaction::Eip2930 { nonce, gas_price, gas_limit, value, .. } => {
+        Transaction::Eip2930(TxEip2930 { nonce, gas_price, gas_limit, value, .. }) => {
             (nonce, gas_price, gas_limit, value)
         }
-        Transaction::Eip1559 { nonce, gas_limit, max_fee_per_gas, value, .. } => {
+        Transaction::Eip1559(TxEip1559 { nonce, gas_limit, max_fee_per_gas, value, .. }) => {
             (nonce, max_fee_per_gas, gas_limit, value)
         }
     };

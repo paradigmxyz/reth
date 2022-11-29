@@ -84,6 +84,12 @@ pub enum DatabaseIntegrityError {
     EndOfTransactionTable,
     #[error("Got to the end of transaction table")]
     EndOfTransactionSenderTable,
+    /// The total difficulty from the block header is missing.
+    #[error("Total difficulty not found for block #{number}")]
+    TotalDifficulty {
+        /// The block number key
+        number: BlockNumber,
+    },
 }
 
 /// A pipeline execution error.

@@ -100,8 +100,7 @@ where
         capabilities: Arc<Capabilities>,
         status: Status,
         request_tx: PeerRequestSender,
-    ) -> Result<(), AddSessionError> {
-        // TODO add capacity check
+    ) {
         debug_assert!(!self.connected_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
@@ -119,8 +118,6 @@ where
                 blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
             },
         );
-
-        Ok(())
     }
 
     /// Event hook for a disconnected session for the peer.
@@ -288,8 +285,8 @@ where
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
             }
-            BlockResponseOutcome::BadResponse(_peer, _reputation_change) => {
-                // TODO handle reputation change
+            BlockResponseOutcome::BadResponse(peer, reputation_change) => {
+                self.peers_manager.apply_reputation_change(&peer, reputation_change);
             }
         }
         None
@@ -300,17 +297,14 @@ where
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
-                return self.on_block_response_outcome(outcome)
+                self.on_block_response_outcome(outcome)
             }
             PeerResponseResult::BlockBodies(res) => {
                 let outcome = self.state_fetcher.on_block_bodies_response(peer, res)?;
-                return self.on_block_response_outcome(outcome)
+                self.on_block_response_outcome(outcome)
             }
-            PeerResponseResult::PooledTransactions(_) => {}
-            PeerResponseResult::NodeData(_) => {}
-            PeerResponseResult::Receipts(_) => {}
+            _ => None,
         }
-        None
     }
 
     /// Advances the state
@@ -337,8 +331,10 @@ where
                 }
             }
 
+            // need to buffer results here to make borrow checker happy
             let mut disconnect_sessions = Vec::new();
             let mut received_responses = Vec::new();
+
             // poll all connected peers for responses
             for (id, peer) in self.connected_peers.iter_mut() {
                 if let Some(response) = peer.pending_response.as_mut() {
@@ -422,14 +418,5 @@ pub(crate) enum StateAction {
         peer_id: PeerId,
         /// Why the disconnect was initiated
         reason: Option<DisconnectReason>,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AddSessionError {
-    #[error("No capacity for new sessions")]
-    AtCapacity {
-        /// The peer of the session
-        peer: PeerId,
     },
 }

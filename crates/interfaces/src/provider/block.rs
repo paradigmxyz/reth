@@ -1,5 +1,4 @@
 use crate::{
-    consensus::Consensus,
     db::{
         models::{BlockNumHash, StoredBlockBody},
         tables, DbTx, DbTxMut,

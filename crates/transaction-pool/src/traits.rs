@@ -1,6 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, BlockID};
-use reth_primitives::{Address, FromRecoveredTransaction, TxHash, H256, U256};
-use std::{fmt, sync::Arc};
+use reth_primitives::{Address, FromRecoveredTransaction, PeerId, TxHash, H256, U256};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
 /// General purpose abstraction fo a transaction-pool.
@@ -109,6 +110,47 @@ pub trait TransactionPool: Send + Sync + 'static {
         &self,
         txs: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Notify the pool about transactions that are propagated to peers.
+    ///
+    /// Consumer: P2P
+    fn on_propagated(&self, txs: PropagatedTransactions);
+}
+
+/// Represents a transaction that was propagated over the network.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
+
+/// Represents how a transaction was propagated over the network.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PropagateKind {
+    /// The full transaction object was sent to the peer.
+    ///
+    /// This is equivalent to the `Transaction` message
+    Full(PeerId),
+    /// Only the Hash was propagated to the peer.
+    Hash(PeerId),
+}
+
+// === impl PropagateKind ===
+
+impl PropagateKind {
+    /// Returns the peer the transaction was sent to
+    pub fn peer(&self) -> &PeerId {
+        match self {
+            PropagateKind::Full(peer) => peer,
+            PropagateKind::Hash(peer) => peer,
+        }
+    }
+}
+
+impl From<PropagateKind> for PeerId {
+    fn from(value: PropagateKind) -> Self {
+        match value {
+            PropagateKind::Full(peer) => peer,
+            PropagateKind::Hash(peer) => peer,
+        }
+    }
 }
 
 /// Represents a new transaction

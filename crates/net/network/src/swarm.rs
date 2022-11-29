@@ -3,13 +3,12 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
     session::{Direction, SessionEvent, SessionId, SessionManager},
-    state::{AddSessionError, NetworkState, StateAction},
+    state::{NetworkState, StateAction},
 };
 use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    DisconnectReason,
 };
 use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
@@ -88,29 +87,21 @@ where
                 status,
                 messages,
                 direction,
-            } => match self.state.on_session_activated(
-                peer_id,
-                capabilities.clone(),
-                status,
-                messages.clone(),
-            ) {
-                Ok(_) => Some(SwarmEvent::SessionEstablished {
+            } => {
+                self.state.on_session_activated(
+                    peer_id,
+                    capabilities.clone(),
+                    status,
+                    messages.clone(),
+                );
+                Some(SwarmEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     capabilities,
                     messages,
                     direction,
-                }),
-                Err(err) => {
-                    match err {
-                        AddSessionError::AtCapacity { peer } => {
-                            self.sessions.disconnect(peer, Some(DisconnectReason::TooManyPeers));
-                        }
-                    };
-                    self.state.peers_mut().on_disconnected(&peer_id);
-                    None
-                }
-            },
+                })
+            }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
             }

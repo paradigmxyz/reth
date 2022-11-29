@@ -17,11 +17,11 @@ use crate::db::{
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
-    ($(($name:tt, $size:tt)),+) => {
+    ($($name:tt),+) => {
         $(
             impl Encode for $name
             {
-                type Encoded = [u8; $size];
+                type Encoded = [u8; std::mem::size_of::<$name>()];
 
                 fn encode(self) -> Self::Encoded {
                     self.to_be_bytes()
@@ -43,7 +43,7 @@ macro_rules! impl_uints {
     };
 }
 
-impl_uints!((u64, 8), (u32, 4), (u16, 2), (u8, 1));
+impl_uints!(u64, u32, u16, u8);
 
 impl Encode for Vec<u8> {
     type Encoded = Vec<u8>;

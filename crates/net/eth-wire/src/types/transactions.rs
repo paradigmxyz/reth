@@ -97,7 +97,9 @@ mod test {
 
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use hex_literal::hex;
-    use reth_primitives::{Signature, Transaction, TransactionKind, TransactionSigned, U256};
+    use reth_primitives::{
+        Signature, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy, U256,
+    };
     use reth_rlp::{Decodable, Encodable};
 
     #[test]
@@ -142,7 +144,7 @@ mod test {
             request_id: 1111,
             message: vec![
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(1),
                         nonce: 0x8u64,
                         gas_price: 0x4a817c808,
@@ -152,7 +154,7 @@ mod test {
                         ),
                         value: 0x200u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -166,7 +168,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(1),
                         nonce: 0x09u64,
                         gas_price: 0x4a817c809,
@@ -176,7 +178,7 @@ mod test {
                         ),
                         value: 0x2d9u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -204,7 +206,7 @@ mod test {
             request_id: 1111,
             message: vec![
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(1),
                         nonce: 0x8u64,
                         gas_price: 0x4a817c808,
@@ -214,7 +216,7 @@ mod test {
                         ),
                         value: 0x200u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -228,7 +230,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(1),
                         nonce: 0x09u64,
                         gas_price: 0x4a817c809,
@@ -238,7 +240,7 @@ mod test {
                         ),
                         value: 0x2d9u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -269,7 +271,7 @@ mod test {
             request_id: 0,
             message: vec![
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 15u64,
                         gas_price: 2200000000,
@@ -279,7 +281,7 @@ mod test {
                         ),
                         value: 1234u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
@@ -293,7 +295,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Eip1559 {
+                    Transaction::Eip1559(TxEip1559 {
                         chain_id: 4,
                         nonce: 26u64,
                         max_priority_fee_per_gas: 1500000000,
@@ -305,7 +307,7 @@ mod test {
                         value: 3000000000000000000u64.into(),
                         input: Default::default(),
                         access_list: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
@@ -319,7 +321,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 3u64,
                         gas_price: 2000000000,
@@ -329,7 +331,7 @@ mod test {
                         ),
                         value: 1000000000000000u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -343,7 +345,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 1u64,
                         gas_price: 1000000000,
@@ -353,7 +355,7 @@ mod test {
                         ),
                         value: 693361000000000u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -367,7 +369,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 2u64,
                         gas_price: 1000000000,
@@ -377,7 +379,7 @@ mod test {
                         ),
                         value: 1000000000000000u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -412,7 +414,7 @@ mod test {
             request_id: 0,
             message: vec![
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 15u64,
                         gas_price: 2200000000,
@@ -422,7 +424,7 @@ mod test {
                         ),
                         value: 1234u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
@@ -436,7 +438,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Eip1559 {
+                    Transaction::Eip1559(TxEip1559 {
                         chain_id: 4,
                         nonce: 26u64,
                         max_priority_fee_per_gas: 1500000000,
@@ -448,7 +450,7 @@ mod test {
                         value: 3000000000000000000u64.into(),
                         input: Default::default(),
                         access_list: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
@@ -462,7 +464,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 3u64,
                         gas_price: 2000000000,
@@ -472,7 +474,7 @@ mod test {
                         ),
                         value: 1000000000000000u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -486,7 +488,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 1u64,
                         gas_price: 1000000000,
@@ -496,7 +498,7 @@ mod test {
                         ),
                         value: 693361000000000u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
@@ -510,7 +512,7 @@ mod test {
                     },
                 ),
                 TransactionSigned::from_transaction_and_signature(
-                    Transaction::Legacy {
+                    Transaction::Legacy(TxLegacy {
                         chain_id: Some(4),
                         nonce: 2u64,
                         gas_price: 1000000000,
@@ -520,7 +522,7 @@ mod test {
                         ),
                         value: 1000000000000000u64.into(),
                         input: Default::default(),
-                    },
+                    }),
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(

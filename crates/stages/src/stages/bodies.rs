@@ -1,13 +1,13 @@
 use crate::{
-    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use futures_util::TryStreamExt;
 use reth_interfaces::{
     consensus::Consensus,
     db::{
-        models::StoredBlockBody, tables, DBContainer, Database, DatabaseGAT, DbCursorRO,
-        DbCursorRW, DbTx, DbTxMut,
+        models::StoredBlockBody, tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx,
+        DbTxMut,
     },
     p2p::bodies::downloader::BodyDownloader,
 };
@@ -72,11 +72,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let tx = db.get_mut();
-
         let previous_stage_progress = input.previous_stage_progress();
         if previous_stage_progress == 0 {
             warn!("The body stage seems to be running first, no work can be completed.");
@@ -95,18 +93,18 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
         }
 
-        let bodies_to_download = self.bodies_to_download::<DB>(tx, starting_block, target)?;
+        let bodies_to_download = self.bodies_to_download::<DB>(db, starting_block, target)?;
 
         // Cursors used to write bodies and transactions
-        let mut bodies_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
+        let mut bodies_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
         let mut base_tx_id = bodies_cursor
             .last()?
             .map(|(_, body)| body.base_tx_id + body.tx_amount)
             .ok_or(DatabaseIntegrityError::BlockBody { number: starting_block })?;
 
         // Cursor used to look up headers for block pre-validation
-        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+        let mut header_cursor = db.cursor::<tables::Headers>()?;
 
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
@@ -167,12 +165,11 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let tx = db.get_mut();
-        let mut block_body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let mut transaction_cursor = tx.cursor_mut::<tables::Transactions>()?;
+        let mut block_body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
 
         let mut entry = block_body_cursor.last()?;
         while let Some((key, body)) = entry {
@@ -237,7 +234,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{consensus, p2p::bodies::error::DownloadError};
+    use reth_interfaces::{consensus, p2p::error::RequestError};
     use std::collections::HashMap;
     use test_utils::*;
 
@@ -440,10 +437,7 @@ mod tests {
 
         // overwrite responses
         let header = blocks.last().unwrap();
-        runner.set_responses(HashMap::from([(
-            header.hash(),
-            Err(DownloadError::Timeout { header_hash: header.hash() }),
-        )]));
+        runner.set_responses(HashMap::from([(header.hash(), Err(RequestError::Timeout))]));
 
         // Run the stage
         let rx = runner.execute(input);
@@ -457,7 +451,7 @@ mod tests {
         use crate::{
             stages::bodies::BodyStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestDB, StageTestRunner, TestRunnerError,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -466,10 +460,12 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             db::{models::StoredBlockBody, tables, DbCursorRO, DbTx, DbTxMut},
-            p2p::bodies::{
-                client::BodiesClient,
-                downloader::{BodiesStream, BodyDownloader},
-                error::{BodiesClientError, DownloadError},
+            p2p::{
+                bodies::{
+                    client::BodiesClient,
+                    downloader::{BodiesStream, BodyDownloader},
+                },
+                error::RequestResult,
             },
             test_utils::{generators::random_block_range, TestConsensus},
         };
@@ -480,9 +476,7 @@ mod tests {
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
 
         /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(
-            block: &BlockLocked,
-        ) -> (H256, Result<BlockBody, DownloadError>) {
+        pub(crate) fn body_by_hash(block: &BlockLocked) -> (H256, RequestResult<BlockBody>) {
             (
                 block.hash(),
                 Ok(BlockBody {
@@ -495,8 +489,8 @@ mod tests {
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
-            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
-            db: StageTestDB,
+            responses: HashMap<H256, RequestResult<BlockBody>>,
+            db: TestStageDB,
             batch_size: u64,
         }
 
@@ -505,7 +499,7 @@ mod tests {
                 Self {
                     consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
-                    db: StageTestDB::default(),
+                    db: TestStageDB::default(),
                     batch_size: 1000,
                 }
             }
@@ -518,7 +512,7 @@ mod tests {
 
             pub(crate) fn set_responses(
                 &mut self,
-                responses: HashMap<H256, Result<BlockBody, DownloadError>>,
+                responses: HashMap<H256, RequestResult<BlockBody>>,
             ) {
                 self.responses = responses;
             }
@@ -527,7 +521,7 @@ mod tests {
         impl StageTestRunner for BodyTestRunner {
             type S = BodyStage<TestBodyDownloader, TestConsensus>;
 
-            fn db(&self) -> &StageTestDB {
+            fn db(&self) -> &TestStageDB {
                 &self.db
             }
 
@@ -651,7 +645,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
-            async fn get_block_body(&self, _: H256) -> Result<BlockBody, BodiesClientError> {
+            async fn get_block_body(&self, _: Vec<H256>) -> RequestResult<Vec<BlockBody>> {
                 panic!("Noop client should not be called")
             }
         }
@@ -660,11 +654,11 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug, Default, Clone)]
         pub(crate) struct TestBodyDownloader {
-            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
+            responses: HashMap<H256, RequestResult<BlockBody>>,
         }
 
         impl TestBodyDownloader {
-            pub(crate) fn new(responses: HashMap<H256, Result<BlockBody, DownloadError>>) -> Self {
+            pub(crate) fn new(responses: HashMap<H256, RequestResult<BlockBody>>) -> Self {
                 Self { responses }
             }
         }

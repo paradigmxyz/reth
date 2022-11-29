@@ -1,8 +1,8 @@
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::Compact;
+use serde::{Deserialize, Serialize};
 
 /// Transaction Type
-#[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929
     #[default]

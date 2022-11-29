@@ -1,6 +1,6 @@
 //! Fetch data from the network.
 
-use crate::{message::BlockRequest, peers::ReputationChange};
+use crate::message::BlockRequest;
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies};
 use reth_interfaces::p2p::{
@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 mod client;
+use crate::peers::ReputationChangeKind;
 pub use client::FetchClient;
 
 /// Manages data fetching operations.
@@ -198,10 +199,22 @@ impl StateFetcher {
         peer_id: PeerId,
         res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
+        let is_error = res.is_err();
         if let Some(resp) = self.inflight_headers_requests.remove(&peer_id) {
             let _ = resp.response.send(res);
         }
+
+        if is_error {
+            // if the response was erroneous we want to report the peer.
+            return Some(BlockResponseOutcome::BadResponse(
+                peer_id,
+                ReputationChangeKind::BadMessage,
+            ))
+        }
+
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // If the peer is still ready to be accept new requests, we try to send a followup
+            // request immediately.
             if peer.state.on_request_finished() {
                 return self.followup_request(peer_id)
             }
@@ -356,5 +369,5 @@ pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
     Request(PeerId, BlockRequest),
     /// How to handle a bad response and the reputation change to apply.
-    BadResponse(PeerId, ReputationChange),
+    BadResponse(PeerId, ReputationChangeKind),
 }

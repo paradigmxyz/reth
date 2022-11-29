@@ -16,7 +16,9 @@ use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
-use reth_transaction_pool::{error::PoolResult, TransactionPool};
+use reth_transaction_pool::{
+    error::PoolResult, PropagateKind, PropagatedTransactions, TransactionPool,
+};
 use std::{
     collections::{hash_map::Entry, HashMap},
     future::Future,
@@ -27,6 +29,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tracing::trace;
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -149,6 +152,55 @@ where
             let resp = PooledTransactions(transactions);
             let _ = response.send(Ok(resp));
         }
+    }
+
+    /// Invoked when a new transaction is pending.
+    ///
+    /// When new transactions appear in the pool, we propagate them to the network using the
+    /// `Transactions` and `NewPooledTransactionHashes` messages. The Transactions message relays
+    /// complete transaction objects and is typically sent to a small, random fraction of connected
+    /// peers.
+    ///
+    /// All other peers receive a notification of the transaction hash and can request the
+    /// complete transaction object if it is unknown to them. The dissemination of complete
+    /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
+    /// and won't need to request it.
+    fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+        trace!(target: "net::tx", "Start propagating transactions");
+
+        let propagated = self.propagate_transactions(
+            self.pool
+                .get_all(hashes)
+                .into_iter()
+                .map(|tx| (*tx.hash(), tx.transaction.to_recovered_transaction().into_signed()))
+                .collect(),
+        );
+
+        // notify pool so events get fired
+        self.pool.on_propagated(propagated);
+    }
+
+    fn propagate_transactions(
+        &mut self,
+        txs: Vec<(TxHash, TransactionSigned)>,
+    ) -> PropagatedTransactions {
+        let mut propagated = PropagatedTransactions::default();
+
+        for (peer_id, peer) in self.peers.iter_mut() {
+            let (hashes, full): (Vec<_>, Vec<_>) =
+                txs.iter().filter(|(hash, _)| peer.transactions.insert(*hash)).cloned().unzip();
+
+            if !full.is_empty() {
+                // TODO select peer for full or hash
+                self.network.send_transactions(*peer_id, Arc::new(Transactions(full)));
+
+                for hash in hashes {
+                    propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                }
+            }
+        }
+
+        propagated
     }
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
@@ -301,30 +353,14 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // drain incoming events
-        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
-            this.on_network_tx_event(event);
-        }
-
+        // drain network/peer related events
         while let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
             this.on_network_event(event);
         }
 
-        // Advance all imports
-        while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            match import_res {
-                Ok(hash) => {
-                    this.on_good_import(hash);
-                }
-                Err(err) => {
-                    this.on_bad_import(*err.hash());
-                }
-            }
-        }
-
-        // handle new transactions
-        while let Poll::Ready(Some(_hash)) = this.pending_transactions.poll_next_unpin(cx) {
-            // TODO(mattsse): propagate new transactions
+        // drain incoming transaction events
+        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
+            this.on_network_tx_event(event);
         }
 
         // Advance all requests.
@@ -346,6 +382,29 @@ where
                 }
             }
         }
+
+        // Advance all imports
+        while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
+            match import_res {
+                Ok(hash) => {
+                    this.on_good_import(hash);
+                }
+                Err(err) => {
+                    this.on_bad_import(*err.hash());
+                }
+            }
+        }
+
+        // handle and propagate new transactions
+        let mut new_txs = Vec::new();
+        while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+            new_txs.push(hash);
+        }
+        if !new_txs.is_empty() {
+            this.on_new_transactions(new_txs);
+        }
+
+        // all channels are fully drained and import futures pending
 
         Poll::Pending
     }

@@ -19,7 +19,7 @@ serde = { version = "1.0.*", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 
 [features]
-default = ["scale"]
+default = ["compact"]
 compact = []
 scale = []
 postcard = []

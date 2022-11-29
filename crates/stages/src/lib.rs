@@ -14,6 +14,7 @@
 //!
 //! - `stage.progress{stage}`: The block number each stage has currently reached.
 
+mod db;
 mod error;
 mod id;
 mod pipeline;

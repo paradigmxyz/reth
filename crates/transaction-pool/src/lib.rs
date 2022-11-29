@@ -78,7 +78,10 @@
 pub use crate::{
     config::PoolConfig,
     ordering::TransactionOrdering,
-    traits::{BestTransactions, OnNewBlockEvent, PoolTransaction, TransactionPool},
+    traits::{
+        BestTransactions, OnNewBlockEvent, PoolTransaction, PropagateKind, PropagatedTransactions,
+        TransactionPool,
+    },
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{
@@ -240,6 +243,10 @@ where
         txs: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get_all(txs)
+    }
+
+    fn on_propagated(&self, txs: PropagatedTransactions) {
+        self.inner().on_propagated(txs)
     }
 }
 

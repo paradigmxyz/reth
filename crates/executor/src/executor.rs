@@ -362,7 +362,7 @@ mod tests {
 
     impl AccountProvider for StateProviderTest {
         fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
-            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| acc.clone()));
+            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
             ret
         }
     }
@@ -376,8 +376,7 @@ mod tests {
             Ok(self
                 .accounts
                 .get(&account)
-                .map(|(storage, _)| storage.get(&storage_key).cloned())
-                .flatten())
+                .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
         fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {

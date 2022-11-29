@@ -71,6 +71,9 @@ fn build_struct_field_flags(
 
     // Find out the adequate bit size for the length of each field, if applicable.
     for (name, ftype, is_compact) in fields {
+        // This happens when dealing with a wrapper struct eg. Struct(pub U256).
+        let name = if name.is_empty() { "placeholder" } else { name };
+
         if *is_compact {
             if is_flag_type(ftype) {
                 let name = format_ident!("{name}_len");

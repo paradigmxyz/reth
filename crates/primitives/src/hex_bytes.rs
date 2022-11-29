@@ -1,4 +1,4 @@
-use reth_codecs::main_codec;
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Deserializer, Serializer};
 use std::{

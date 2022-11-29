@@ -1,5 +1,5 @@
 use super::client::BodiesClient;
-use crate::p2p::bodies::error::DownloadError;
+use crate::p2p::error::RequestResult;
 use reth_eth_wire::BlockBody;
 use reth_primitives::{BlockNumber, H256};
 use std::pin::Pin;
@@ -38,4 +38,4 @@ pub trait BodyDownloader: Sync + Send {
 
 /// A stream of block bodies.
 pub type BodiesStream<'a> =
-    Pin<Box<dyn Stream<Item = Result<(BlockNumber, H256, BlockBody), DownloadError>> + Send + 'a>>;
+    Pin<Box<dyn Stream<Item = RequestResult<(BlockNumber, H256, BlockBody)>> + Send + 'a>>;

@@ -1,6 +1,6 @@
 use crate::{
-    DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_executor::{
     config::SpecUpgrades,
@@ -9,11 +9,11 @@ use reth_executor::{
     Config,
 };
 use reth_interfaces::{
-    db::{models::BlockNumHash, tables, DBContainer, Database, DbCursorRO, DbTx, DbTxMut},
+    db::{models::BlockNumHash, tables, Database, DbCursorRO, DbTx, DbTxMut},
     provider::db::StateProviderImplRefLatest,
 };
 use reth_primitives::{StorageEntry, TransactionSignedEcRecovered, H256};
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::DerefMut};
 
 const TX_INDEX: StageId = StageId("Execution");
 
@@ -68,10 +68,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Execute the stage
     async fn execute(
         &mut self,
-        db: &mut DBContainer<'_, DB>,
+        db: &mut StageDB<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let db_tx = db.get_mut();
+        let db_tx = db.deref_mut();
         let last_block = input.stage_progress.unwrap_or_default();
         let start_block = last_block + 1;
         let end_block = start_block + BATCH_SIZE;
@@ -235,7 +235,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        _db: &mut DBContainer<'_, DB>,
+        _db: &mut StageDB<'_, DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         panic!("For unwindng we need Account/Storage ChangeSet");
@@ -257,7 +257,7 @@ mod tests {
     #[tokio::test]
     async fn senity_execution_of_block() {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut db = DBContainer::new(state_db.as_ref()).unwrap();
+        let mut db = StageDB::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
             previous_stage: None,
             /// The progress of this stage the last time it was executed.
@@ -267,12 +267,12 @@ mod tests {
         let genesis = BlockLocked::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = BlockLocked::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(db.get_mut(), &genesis).unwrap();
-        insert_canonical_block(db.get_mut(), &block).unwrap();
+        insert_canonical_block(db.deref_mut(), &genesis).unwrap();
+        insert_canonical_block(db.deref_mut(), &block).unwrap();
         db.commit().unwrap();
 
         // insert pre state
-        let tx = db.get_mut();
+        let tx = db.deref_mut();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let code = hex!("5a465a905090036002900360015500");
@@ -294,7 +294,7 @@ mod tests {
         // execute
         let _o = ExecutionStage.execute(&mut db, input).await.unwrap();
         db.commit().unwrap();
-        let tx = db.get_mut();
+        let tx = db.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =

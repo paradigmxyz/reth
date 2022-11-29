@@ -1,12 +1,14 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
-use reth_codecs::main_codec;
+use bytes::Buf;
+use modular_bitfield::prelude::*;
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,
