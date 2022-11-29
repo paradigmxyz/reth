@@ -10,7 +10,7 @@ pub struct Block {
     /// Transactions in this block.
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header
-    pub ommers: Vec<SealedHeader>,
+    pub ommers: Vec<Header>,
 }
 
 impl Deref for Block {
