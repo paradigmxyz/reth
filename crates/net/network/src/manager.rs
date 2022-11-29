@@ -60,6 +60,7 @@ use tracing::{error, trace};
 ///  graph TB
 ///    handle(NetworkHandle)
 ///    events(NetworkEvents)
+///    transactions[(Transactions Task)]
 ///    subgraph NetworkManager
 ///      direction LR
 ///      subgraph Swarm
@@ -71,6 +72,7 @@ use tracing::{error, trace};
 ///    end
 ///   handle <--> |request/response channel| NetworkManager
 ///   NetworkManager --> |Network events| events
+///   transactions --> |propagate transactions| NetworkManager
 /// ```
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
