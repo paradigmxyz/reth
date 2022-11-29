@@ -266,12 +266,11 @@ where
         }
     }
 
-    /// Handles a received Message from the peer.
+    /// Handles a received Message from the peer's session.
     fn on_peer_message(&mut self, peer_id: PeerId, msg: PeerMessage) {
         match msg {
             PeerMessage::NewBlockHashes(hashes) => {
                 self.within_pow_or_disconnect(peer_id, |this| {
-                    let hashes = Arc::try_unwrap(hashes).unwrap_or_else(|arc| (*arc).clone());
                     // update peer's state, to track what blocks this peer has seen
                     this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
                 })
@@ -289,14 +288,17 @@ where
                     msg,
                 });
             }
-            PeerMessage::Transactions(msg) => {
+            PeerMessage::EthRequest(req) => {
+                self.on_eth_request(peer_id, req);
+            }
+            PeerMessage::ReceivedTransaction(msg) => {
                 self.notify_tx_manager(NetworkTransactionEvent::IncomingTransactions {
                     peer_id,
                     msg,
                 });
             }
-            PeerMessage::EthRequest(req) => {
-                self.on_eth_request(peer_id, req);
+            PeerMessage::SendTransactions(_) => {
+                unreachable!("Not emitted by session")
             }
             PeerMessage::Other(_) => {}
         }
@@ -320,7 +322,7 @@ where
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
             }
             NetworkHandleMessage::SendTransaction { peer_id, msg } => {
-                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::Transactions(msg))
+                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SendTransactions(msg))
             }
             NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => self
                 .swarm

@@ -172,7 +172,9 @@ where
             self.pool
                 .get_all(hashes)
                 .into_iter()
-                .map(|tx| (*tx.hash(), tx.transaction.to_recovered_transaction().into_signed()))
+                .map(|tx| {
+                    (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_signed()))
+                })
                 .collect(),
         );
 
@@ -182,7 +184,7 @@ where
 
     fn propagate_transactions(
         &mut self,
-        txs: Vec<(TxHash, TransactionSigned)>,
+        txs: Vec<(TxHash, Arc<TransactionSigned>)>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
 
@@ -192,7 +194,7 @@ where
 
             if !full.is_empty() {
                 // TODO select peer for full or hash
-                self.network.send_transactions(*peer_id, Arc::new(Transactions(full)));
+                self.network.send_transactions(*peer_id, full);
 
                 for hash in hashes {
                     propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
@@ -204,13 +206,9 @@ where
     }
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
-    fn on_new_pooled_transactions(
-        &mut self,
-        peer_id: PeerId,
-        msg: Arc<NewPooledTransactionHashes>,
-    ) {
+    fn on_new_pooled_transactions(&mut self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            let mut transactions = Arc::try_unwrap(msg).unwrap_or_else(|arc| (*arc).clone()).0;
+            let mut transactions = msg.0;
 
             // keep track of the transactions the peer knows
             peer.transactions.extend(transactions.clone());
@@ -239,8 +237,7 @@ where
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
-                let transactions = Arc::try_unwrap(msg).unwrap_or_else(|arc| (*arc).clone());
-                self.import_transactions(peer_id, transactions.0);
+                self.import_transactions(peer_id, msg.0);
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
                 self.on_new_pooled_transactions(peer_id, msg)
@@ -272,7 +269,7 @@ where
 
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
-                let msg = Arc::new(NewPooledTransactionHashes(self.pool.pooled_transactions()));
+                let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
                 self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
                     peer_id,
                     msg,
@@ -434,9 +431,9 @@ enum TransactionsCommand {
 #[derive(Debug)]
 pub enum NetworkTransactionEvent {
     /// Received list of transactions to the given peer.
-    IncomingTransactions { peer_id: PeerId, msg: Arc<Transactions> },
+    IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: Arc<NewPooledTransactionHashes> },
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,
