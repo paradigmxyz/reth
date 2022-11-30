@@ -43,6 +43,14 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
                 #(#from_compact)*
                 (obj, buf)
             }
+
+            fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                self.to_compact(buf)
+            }
+
+            fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+                Self::from_compact(buf, len)
+            }
         }
     }
 }
@@ -82,7 +90,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
             });
         } else {
             let fields = fields.iter().filter_map(|field| {
-                if let FieldTypes::StructField((name, _, _)) = field {
+                if let FieldTypes::StructField((name, _, _, _)) = field {
                     let ident = format_ident!("{name}");
                     return Some(quote! {
                         #ident: #ident,

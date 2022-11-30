@@ -26,6 +26,12 @@ pub trait Compact {
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized;
+
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
+
+    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    where
+        Self: Sized;
 }
 
 macro_rules! impl_uint_compact {
@@ -36,6 +42,14 @@ macro_rules! impl_uint_compact {
                     let leading = self.leading_zeros() as usize / 8;
                     buf.put_slice(&self.to_be_bytes()[leading..]);
                     std::mem::size_of::<$name>() - leading
+                }
+
+                fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                    self.to_compact(buf)
+                }
+
+                fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+                    Self::from_compact(buf, len)
                 }
 
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -89,6 +103,32 @@ where
 
         (list, buf)
     }
+
+    /// To be used by fixed sized types like Vec<H256>.
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        buf.put_u16(self.len() as u16);
+
+        for element in self {
+            element.to_compact(buf);
+        }
+        0
+    }
+
+    /// To be used by fixed sized types like Vec<H256>.
+    fn alternative_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let mut list = vec![];
+        let length = buf.get_u16();
+        for _ in 0..length {
+            #[allow(unused_assignments)]
+            let mut element = T::default();
+
+            (element, buf) = T::from_compact(buf, len);
+
+            list.push(element);
+        }
+
+        (list, buf)
+    }
 }
 
 impl<T> Compact for Option<T>
@@ -117,6 +157,26 @@ where
 
         (Some(element), buf)
     }
+
+    /// To be used by fixed sized types like Option<H256>.
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        if let Some(element) = self {
+            element.to_compact(buf);
+            return 1
+        }
+        0
+    }
+
+    /// To be used by fixed sized types like Option<H256>.
+    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        if len == 0 {
+            return (None, buf)
+        }
+
+        let (element, buf) = T::from_compact(buf, len);
+
+        (Some(element), buf)
+    }
 }
 
 impl Compact for U256 {
@@ -138,6 +198,13 @@ impl Compact for U256 {
 
         (U256::zero(), buf)
     }
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        self.to_compact(buf)
+    }
+
+    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        Self::from_compact(buf, len)
+    }
 }
 
 impl Compact for Bytes {
@@ -148,6 +215,13 @@ impl Compact for Bytes {
     }
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         (buf.copy_to_bytes(len), buf)
+    }
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        self.to_compact(buf)
+    }
+
+    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        Self::from_compact(buf, len)
     }
 }
 
@@ -171,6 +245,14 @@ macro_rules! impl_hash_compact {
                     buf.advance(std::mem::size_of::<$name>());
                     (v, buf)
                 }
+
+                fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                    self.to_compact(buf)
+                }
+
+                fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+                    Self::from_compact(buf, len)
+                }
             }
         )+
     };
@@ -189,6 +271,14 @@ impl Compact for Bloom {
         buf.advance(256);
         (result, buf)
     }
+
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        self.to_compact(buf)
+    }
+
+    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        Self::from_compact(buf, len)
+    }
 }
 
 impl Compact for bool {
@@ -200,6 +290,14 @@ impl Compact for bool {
     /// `bool` expects the real value to come in `len`, and does not advance the cursor.
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         (len != 0, buf)
+    }
+
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        self.to_compact(buf)
+    }
+
+    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        Self::from_compact(buf, len)
     }
 }
 
@@ -288,11 +386,17 @@ mod tests {
 
         assert_eq!(None::<H256>.to_compact(&mut buf), 0);
         assert_eq!(opt.to_compact(&mut buf), 1);
+        assert_eq!(buf.len(), 34);
 
         assert_eq!(Option::<H256>::from_compact(&buf, 1), (opt, vec![].as_slice()));
 
         // If `None`, it returns the slice at the same cursor position.
         assert_eq!(Option::<H256>::from_compact(&buf, 0), (None, buf.as_slice()));
+
+        let mut buf = vec![];
+        assert_eq!(opt.alternative_to_compact(&mut buf), 1);
+        assert_eq!(buf.len(), 32);
+        assert_eq!(Option::<H256>::alternative_from_compact(&buf, 1), (opt, vec![].as_slice()));
     }
 
     #[test]
@@ -367,10 +471,10 @@ mod tests {
                 f_bool_f: false,                              // 1 bit  | 0 bytes
                 f_bool_t: true,                               // 1 bit  | 0 bytes
                 f_option_none: None,                          // 1 bit  | 0 bytes
-                f_option_some: Some(H256::zero()),            // 1 bit  | 2 + 32 bytes
+                f_option_some: Some(H256::zero()),            // 1 bit  | 32 bytes
                 f_option_some_u64: Some(0xffffu64),           // 1 bit  | 2 + 2 bytes
                 f_vec_empty: vec![],                          // 0 bits | 2 bytes
-                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 2 + (2+20)*2 bytes
+                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 2 + 20*2 bytes
             }
         }
     }
@@ -385,10 +489,10 @@ mod tests {
             1 +
             1 +
             // 0 + 0 + 0 +
-            2 + 32 +
+            32 +
             2 + 2 +
             2 +
-            2 + (2 + 20) * 2
+            2 + 20 * 2
         );
 
         assert_eq!(
