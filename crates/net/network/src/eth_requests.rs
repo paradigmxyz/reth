@@ -10,7 +10,7 @@ use reth_interfaces::{
     p2p::error::RequestResult,
     provider::{BlockProvider, HeaderProvider},
 };
-use reth_primitives::{BlockHashOrNumber, Header, PeerId, H256};
+use reth_primitives::{BlockHashOrNumber, Header, PeerId};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -75,70 +75,65 @@ where
         Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming) }
     }
 
-    /// Returns the hash of the block to start with.
-    fn get_start_hash(
-        &self,
-        start_block: BlockHashOrNumber,
-        skip: u32,
-        direction: HeadersDirection,
-    ) -> Option<H256> {
-        let block_hash = match start_block {
-            BlockHashOrNumber::Hash(start) => {
-                if skip == 0 {
-                    start
-                } else {
-                    let num = self.client.block_number(start).unwrap_or_default()?;
-                    self.get_start_hash(BlockHashOrNumber::Number(num), skip, direction)?
-                }
-            }
-            BlockHashOrNumber::Number(num) => {
-                let num = if direction.is_rising() {
-                    num.checked_add(skip as u64)?
-                } else {
-                    num.checked_sub(skip as u64)?
-                };
-                self.client.block_hash(num.into()).unwrap_or_default()?
-            }
-        };
-
-        Some(block_hash)
-    }
-
     /// Returns the list of requested heders
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
-        let GetBlockHeaders { start_block, limit: _, skip, reverse } = request;
+        let GetBlockHeaders { start_block, limit, skip, reverse } = request;
 
         let direction = HeadersDirection::new(reverse);
         let mut headers = Vec::new();
 
-        let mut block: BlockHashOrNumber =
-            if let Some(hash) = self.get_start_hash(start_block, skip, direction) {
-                hash.into()
-            } else {
-                return headers
-            };
+        let mut block: BlockHashOrNumber = match start_block {
+            BlockHashOrNumber::Hash(start) => start.into(),
+            BlockHashOrNumber::Number(num) => {
+                if let Some(hash) = self.client.block_hash(num.into()).unwrap_or_default() {
+                    hash.into()
+                } else {
+                    return headers
+                }
+            }
+        };
 
+        let skip = skip as u64;
         let mut total_bytes = APPROX_HEADER_SIZE;
 
-        while let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
-            match direction {
-                HeadersDirection::Rising => {
-                    // SAFETY: this does not need checked math because the header exists (<<
-                    // u64::MAX)
-                    block = (header.number + 1).into();
+        for _ in 0..limit {
+            if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
+                match direction {
+                    HeadersDirection::Rising => {
+                        if let Some(next) = (header.number + 1).checked_add(skip) {
+                            block = next.into()
+                        } else {
+                            break
+                        }
+                    }
+                    HeadersDirection::Falling => {
+                        if skip > 0 {
+                            // prevent under flows for block.number == 0 and `block.number - skip < 0`
+                            if let Some(next) =
+                                header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
+                            {
+                                block = next.into()
+                            } else {
+                                break
+                            }
+                        } else {
+                            block = header.parent_hash.into()
+                        }
+                    }
                 }
-                HeadersDirection::Falling => block = header.parent_hash.into(),
-            }
 
-            headers.push(header);
+                headers.push(header);
 
-            if headers.len() >= MAX_HEADERS_SERVE {
-                break
-            }
+                if headers.len() >= MAX_HEADERS_SERVE {
+                    break
+                }
 
-            total_bytes += APPROX_HEADER_SIZE;
+                total_bytes += APPROX_HEADER_SIZE;
 
-            if total_bytes > SOFT_RESPONSE_LIMIT {
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
+                }
+            } else {
                 break
             }
         }
@@ -153,7 +148,6 @@ where
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
         let headers = self.get_headers_response(request);
-
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
 
@@ -229,16 +223,14 @@ where
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
 #[derive(Copy, Clone)]
-enum HeadersDirection {
+pub enum HeadersDirection {
+    /// Rising block number.
     Rising,
+    /// Falling block number.
     Falling,
 }
 
 impl HeadersDirection {
-    fn is_rising(&self) -> bool {
-        matches!(self, HeadersDirection::Rising)
-    }
-
     fn new(reverse: bool) -> Self {
         if reverse {
             HeadersDirection::Rising
