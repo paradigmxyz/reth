@@ -11,7 +11,6 @@ pub struct Account {
     pub nonce: u64,
     /// Account balance.
     pub balance: U256,
-    #[maybe_zero]
     /// Hash of the bytecode.
     pub bytecode_hash: Option<H256>,
 }
