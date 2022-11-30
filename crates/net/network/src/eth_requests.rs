@@ -108,7 +108,8 @@ where
                     }
                     HeadersDirection::Falling => {
                         if skip > 0 {
-                            // prevent under flows for block.number == 0 and `block.number - skip < 0`
+                            // prevent under flows for block.number == 0 and `block.number - skip <
+                            // 0`
                             if let Some(next) =
                                 header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
                             {
