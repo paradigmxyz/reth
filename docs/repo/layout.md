@@ -32,8 +32,8 @@ These crates are related to networking (p2p and RPC), as well as networking prot
 
 #### P2P
 
-- [`net/network`](../../crates/net/network): The main P2P networking crate.
-- [`net/p2p`](../../crates/net/p2p): Implements the Ethereum P2P protocol.
+- [`net/network`](../../crates/net/network): The main P2P networking crate, handling message egress, message ingress, peer management, and session management.
+- [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the RLPx networking stack.
 - [`net/discv4`](../../crates/net/discv4): An implementation of the [discv4][discv4] protocol
 - [`net/ipc`](../../crates/net/ipc): IPC server and client implementation for [`jsonrpsee`][jsonrpsee].
 
