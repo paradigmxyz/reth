@@ -36,6 +36,8 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     pub consensus: Arc<C>,
     /// Downloader client implementation
     pub client: Arc<H>,
+    /// The minimum number of block headers to commit at once
+    pub commit_threshold: u64,
 }
 
 #[async_trait::async_trait]
@@ -363,6 +365,7 @@ mod tests {
                     consensus: self.consensus.clone(),
                     client: self.client.clone(),
                     downloader: self.downloader.clone(),
+                    commit_threshold: 100,
                 }
             }
         }

@@ -144,17 +144,41 @@ where
 {
     /// Returns the start hash for a new request.
     fn request_start(&self) -> H256 {
-        self.buffered.last().map_or(self.forkchoice.head_block_hash, |h| h.parent_hash)
+        self.buffered.first().map_or(self.forkchoice.head_block_hash, |h| h.parent_hash)
     }
 
+    /// Get the headers request to dispatch
     fn headers_request(&self) -> HeadersRequest {
         HeadersRequest { start: self.request_start().into(), limit: self.batch_size, reverse: true }
+    }
+
+    /// Insert the header into buffer
+    fn buffer_header(&mut self, header: SealedHeader) {
+        self.buffered.insert(0, header);
+    }
+
+    /// Get a current future or instantiate a new one
+    fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
+        match self.request.take() {
+            Some(fut) => fut,
+            None => {
+                // queue in the first request
+                let client = Arc::clone(&self.client);
+                let req = self.headers_request();
+                HeadersRequestFuture {
+                    request: req.clone(),
+                    fut: Box::pin(async move { client.get_headers(req).await }),
+                    retries: 0,
+                    max_retries: self.request_retries,
+                }
+            }
+        }
     }
 
     /// Tries to fuse the future with a new request
     ///
     /// Returns an `Err` if the request exhausted all retries
-    fn try_fuse_request_fut(&self, fut: &mut HeadersRequestFuture) -> Result<(), ()> {
+    fn try_fuse_request_fut(&mut self, mut fut: HeadersRequestFuture) -> Result<(), ()> {
         if !fut.inc_err() {
             return Err(())
         }
@@ -162,6 +186,7 @@ where
         fut.request = req.clone();
         let client = Arc::clone(&self.client);
         fut.fut = Box::pin(async move { client.get_headers(req).await });
+        self.request = Some(fut);
         Ok(())
     }
 
@@ -172,6 +197,30 @@ where
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
+}
+
+macro_rules! try_fuse_or_continue {
+    ($this:ident, $fut:ident, $jumpdest:lifetime) => {
+        try_fuse_or_continue!($this, $fut, RequestError::BadResponse.into(), $jumpdest)
+    };
+    ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
+        if $this.try_fuse_request_fut($fut).is_err() {
+            return Poll::Ready(Err($err))
+        }
+        continue $jumpdest
+    };
+}
+
+macro_rules! stream_try_fuse_or_continue {
+    ($this:ident, $fut:ident, $jumpdest:lifetime) => {
+        stream_try_fuse_or_continue!($this, $fut, RequestError::BadResponse.into(), $jumpdest)
+    };
+    ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
+        if $this.try_fuse_request_fut($fut).is_err() {
+            return Poll::Ready(Some(Err($err)))
+        }
+        continue $jumpdest
+    };
 }
 
 impl<C, H> Future for HeadersDownload<C, H>
@@ -185,33 +234,14 @@ where
         let this = self.get_mut();
 
         'outer: loop {
-            let mut fut = match this.request.take() {
-                Some(fut) => fut,
-                None => {
-                    // queue in the first request
-                    let client = Arc::clone(&this.client);
-                    let req = this.headers_request();
-                    HeadersRequestFuture {
-                        request: req.clone(),
-                        fut: Box::pin(async move { client.get_headers(req).await }),
-                        retries: 0,
-                        max_retries: this.request_retries,
-                    }
-                }
-            };
-
+            let mut fut = this.get_or_init_fut();
             match ready!(fut.poll_unpin(cx)) {
                 Ok(resp) => {
                     let mut headers = resp.0;
                     headers.sort_unstable_by_key(|h| h.number);
 
                     if headers.is_empty() {
-                        if this.try_fuse_request_fut(&mut fut).is_err() {
-                            return Poll::Ready(Err(RequestError::BadResponse.into()))
-                        } else {
-                            this.request = Some(fut);
-                            continue
-                        }
+                        try_fuse_or_continue!(this, fut, 'outer);
                     }
 
                     // Iterate headers in reverse
@@ -226,38 +256,23 @@ where
                         }
 
                         if let Some(header) = this.buffered.last() {
-                            match this.validate(header, &parent) {
-                                Ok(_) => {
-                                    // record new parent
-                                    this.buffered.push(parent);
-                                }
-                                Err(err) => {
-                                    if this.try_fuse_request_fut(&mut fut).is_err() {
-                                        return Poll::Ready(Err(err))
-                                    }
-                                    this.request = Some(fut);
-                                    continue 'outer
-                                }
+                            // Proceed to insert unless there is a validation error
+                            if let Err(err) = this.validate(header, &parent) {
+                                try_fuse_or_continue!(this, fut, err, 'outer);
                             }
-                        } else {
+
                             // The buffer is empty and the first header does not match the tip,
                             // discard
-                            if parent.hash() != this.forkchoice.head_block_hash {
-                                if this.try_fuse_request_fut(&mut fut).is_err() {
-                                    return Poll::Ready(Err(RequestError::BadResponse.into()))
-                                }
-                                this.request = Some(fut);
-                                continue 'outer
-                            }
-                            this.buffered.push(parent);
+                        } else if parent.hash() != this.forkchoice.head_block_hash {
+                            try_fuse_or_continue!(this, fut, 'outer);
                         }
+
+                        // Record new parent
+                        this.buffer_header(parent);
                     }
                 }
                 Err(err) => {
-                    if this.try_fuse_request_fut(&mut fut).is_err() {
-                        return Poll::Ready(Err(DownloadError::RequestError(err)))
-                    }
-                    this.request = Some(fut);
+                    try_fuse_or_continue!(this, fut, DownloadError::RequestError(err), 'outer);
                 }
             }
         }
@@ -271,8 +286,62 @@ where
 {
     type Item = Result<SealedHeader, DownloadError>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        'outer: loop {
+            // TODO: short curcuit next request on head reached
+            let mut fut = this.get_or_init_fut();
+            match fut.poll_unpin(cx) {
+                Poll::Ready(t) => match t {
+                    Ok(resp) => {
+                        let mut headers = resp.0;
+                        headers.sort_unstable_by_key(|h| h.number);
+
+                        if headers.is_empty() {
+                            stream_try_fuse_or_continue!(this, fut, 'outer);
+                        }
+
+                        // Iterate headers in reverse
+                        for parent in headers.into_iter().rev() {
+                            let parent = parent.seal();
+
+                            if let Some(header) = this.buffered.last() {
+                                // Proceed to insert unless there is a validation error
+                                if let Err(err) = this.validate(header, &parent) {
+                                    stream_try_fuse_or_continue!(this, fut, err, 'outer);
+                                }
+
+                            // The buffer is empty and the first header does not match the tip,
+                            // discard
+                            } else if parent.hash() != this.forkchoice.head_block_hash {
+                                stream_try_fuse_or_continue!(this, fut, 'outer);
+                            }
+
+                            // Record new parent
+                            this.buffer_header(parent);
+                        }
+                    }
+                    Err(err) => {
+                        stream_try_fuse_or_continue!(this, fut, DownloadError::RequestError(err), 'outer);
+                    }
+                },
+                Poll::Pending => {
+                    // TODO: reverse the buffer
+                    if let Some(header) = this.buffered.pop() {
+                        return Poll::Ready(if this.head.hash() != header.hash() {
+                            // Stream buffered header
+                            Some(Ok(header))
+                        } else {
+                            // Polling finished, we've reached the target
+                            None
+                        })
+                    } else {
+                        return Poll::Pending
+                    }
+                }
+            };
+        }
     }
 }
 
