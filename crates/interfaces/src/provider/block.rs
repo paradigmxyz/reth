@@ -19,7 +19,7 @@ pub trait HeaderProvider: Send + Sync {
     /// Get header by block number
     fn header_by_number(&self, num: u64) -> Result<Option<Header>>;
 
-    /// Get header by block number
+    /// Get header by block number or hash
     fn header_by_hash_or_number(&self, hash_or_num: BlockHashOrNumber) -> Result<Option<Header>> {
         match hash_or_num {
             BlockHashOrNumber::Hash(hash) => self.header(&hash),
