@@ -68,6 +68,7 @@ where
             request_retries: self.request_retries,
             batch_size: self.batch_size,
             client: Arc::clone(&self.client),
+            done: false,
         })
     }
 }
@@ -135,6 +136,8 @@ pub struct HeadersDownload<C, H> {
     batch_size: u64,
     /// The number of retries for downloading
     request_retries: usize,
+    /// TODO:
+    done: bool,
 }
 
 impl<C, H> HeadersDownload<C, H>
@@ -158,20 +161,20 @@ where
     }
 
     /// Get a current future or instantiate a new one
-    fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
+    fn get_or_init_fut(&mut self) -> Option<HeadersRequestFuture> {
         match self.request.take() {
-            Some(fut) => fut,
-            None => {
+            None if !self.done => {
                 // queue in the first request
                 let client = Arc::clone(&self.client);
                 let req = self.headers_request();
-                HeadersRequestFuture {
+                Some(HeadersRequestFuture {
                     request: req.clone(),
                     fut: Box::pin(async move { client.get_headers(req).await }),
                     retries: 0,
                     max_retries: self.request_retries,
-                }
+                })
             }
+            fut => fut,
         }
     }
 
@@ -211,15 +214,18 @@ macro_rules! try_fuse_or_continue {
     };
 }
 
-macro_rules! stream_try_fuse_or_continue {
-    ($this:ident, $fut:ident, $jumpdest:lifetime) => {
-        stream_try_fuse_or_continue!($this, $fut, RequestError::BadResponse.into(), $jumpdest)
+macro_rules! try_fuse_or_return {
+    ($this:ident, $fut:ident) => {
+        try_fuse_or_return!($this, $fut, RequestError::BadResponse.into())
     };
-    ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
+    ($this:ident, $fut:ident, $err:expr) => {
         if $this.try_fuse_request_fut($fut).is_err() {
             return Poll::Ready(Some(Err($err)))
+        } else if let Some(header) = $this.buffered.pop() {
+            return Poll::Ready(Some(Ok(header)))
+        } else {
+            return Poll::Pending
         }
-        continue $jumpdest
     };
 }
 
@@ -234,7 +240,9 @@ where
         let this = self.get_mut();
 
         'outer: loop {
-            let mut fut = this.get_or_init_fut();
+            // Safe to unwrap, because the future is `done`
+            // only upon return the result
+            let mut fut = this.get_or_init_fut().unwrap();
             match ready!(fut.poll_unpin(cx)) {
                 Ok(resp) => {
                     let mut headers = resp.0;
@@ -250,7 +258,8 @@ where
 
                         if this.head.hash() == parent.hash() {
                             // We've reached the target
-                            let headers: Vec<SealedHeader> =
+                            this.done = true;
+                            let headers =
                                 std::mem::take(&mut this.buffered).into_iter().rev().collect();
                             return Poll::Ready(Ok(headers))
                         }
@@ -288,34 +297,36 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        'outer: loop {
-            // TODO: short curcuit next request on head reached
-            let mut fut = this.get_or_init_fut();
-            match fut.poll_unpin(cx) {
-                Poll::Ready(t) => match t {
+        if let Some(mut fut) = this.get_or_init_fut() {
+            if let Poll::Ready(t) = fut.poll_unpin(cx) {
+                match t {
                     Ok(resp) => {
                         let mut headers = resp.0;
                         headers.sort_unstable_by_key(|h| h.number);
 
-                        // Stop storing headers at head
-
                         if headers.is_empty() {
-                            stream_try_fuse_or_continue!(this, fut, 'outer);
+                            try_fuse_or_return!(this, fut);
                         }
 
                         // Iterate headers in reverse
                         for parent in headers.into_iter().rev() {
                             let parent = parent.seal();
 
+                            if this.head.hash() == parent.hash() {
+                                // We've reached the target, stop buffering headers
+                                this.done = true;
+                                break
+                            }
+
                             if let Some(header) = this.buffered.first() {
                                 // Proceed to insert unless there is a validation error
                                 if let Err(err) = this.validate(header, &parent) {
-                                    stream_try_fuse_or_continue!(this, fut, err, 'outer);
+                                    try_fuse_or_return!(this, fut, err);
                                 }
                             } else if parent.hash() != this.forkchoice.head_block_hash {
                                 // The buffer is empty and the first header does not match the tip,
                                 // discard
-                                stream_try_fuse_or_continue!(this, fut, 'outer);
+                                try_fuse_or_return!(this, fut);
                             }
 
                             // Record new parent
@@ -323,23 +334,20 @@ where
                         }
                     }
                     Err(err) => {
-                        stream_try_fuse_or_continue!(this, fut, err.into(), 'outer);
+                        try_fuse_or_return!(this, fut, err.into());
                     }
-                },
-                Poll::Pending => {
-                    if let Some(header) = this.buffered.pop() {
-                        return Poll::Ready(if this.head.hash() != header.hash() {
-                            // Stream buffered header
-                            Some(Ok(header))
-                        } else {
-                            // Polling finished, we've reached the target
-                            None
-                        })
-                    } else {
-                        return Poll::Pending
-                    }
-                }
-            };
+                };
+            }
+        }
+
+        if let Some(header) = this.buffered.pop() {
+            // Stream buffered header
+            Poll::Ready(Some(Ok(header)))
+        } else if this.done {
+            // Polling finished, we've reached the target
+            Poll::Ready(None)
+        } else {
+            Poll::Pending
         }
     }
 }
