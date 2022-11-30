@@ -32,17 +32,18 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// Maximum number of block headers to serve.
 ///
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
-/// softResponseLimit.
+/// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
+
+/// Estimated size in bytes of an RLP encoded body.
+// TODO: check 24kb blocksize assumption
+const APPROX_BODY_SIZE: usize = 24 * 1024;
 
 /// Maximum size of replies to data retrievals.
 const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
-/// To punish spam, we answer the same request only a limited number.
-const MAX_REPEAT_REQUESTS_PER_PEER: usize = 2;
-
-/// Heuristic limit for recording header requests.
-const HEADERS_REQUEST_CACHE_LIMIT: usize = 100;
+/// Estimated size in bytes of an RLP encoded header.
+const APPROX_HEADER_SIZE: usize = 500;
 
 /// Manages eth related requests on top of the p2p network.
 ///
@@ -52,6 +53,8 @@ pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Used for reporting peers.
+    #[allow(unused)]
+    // TODO use to report spammers
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`].
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
@@ -77,7 +80,7 @@ where
         &self,
         start_block: BlockHashOrNumber,
         skip: u32,
-        reverse: bool,
+        direction: HeadersDirection,
     ) -> Option<H256> {
         let block_hash = match start_block {
             BlockHashOrNumber::Hash(start) => {
@@ -85,14 +88,14 @@ where
                     start
                 } else {
                     let num = self.client.block_number(start).unwrap_or_default()?;
-                    self.get_start_hash(BlockHashOrNumber::Number(num), skip, reverse)?
+                    self.get_start_hash(BlockHashOrNumber::Number(num), skip, direction)?
                 }
             }
             BlockHashOrNumber::Number(num) => {
-                let num = if reverse {
-                    num.checked_sub(skip as u64)?
-                } else {
+                let num = if direction.is_rising() {
                     num.checked_add(skip as u64)?
+                } else {
+                    num.checked_sub(skip as u64)?
                 };
                 self.client.block_hash(num.into()).unwrap_or_default()?
             }
@@ -105,20 +108,37 @@ where
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
         let GetBlockHeaders { start_block, limit: _, skip, reverse } = request;
 
+        let direction = HeadersDirection::new(reverse);
         let mut headers = Vec::new();
 
-        let block_hash = if let Some(hash) = self.get_start_hash(start_block, skip, reverse) {
-            hash
-        } else {
-            return headers
-        };
+        let mut block: BlockHashOrNumber =
+            if let Some(hash) = self.get_start_hash(start_block, skip, direction) {
+                hash.into()
+            } else {
+                return headers
+            };
 
-        while let Some(header) = self.client.header(&block_hash).unwrap_or_default() {
+        let mut total_bytes = APPROX_HEADER_SIZE;
+
+        while let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
+            match direction {
+                HeadersDirection::Rising => {
+                    // SAFETY: this does not need checked math because the header exists (<<
+                    // u64::MAX)
+                    block = (header.number + 1).into();
+                }
+                HeadersDirection::Falling => block = header.parent_hash.into(),
+            }
+
             headers.push(header);
 
-            // TODO: size estimation
-
             if headers.len() >= MAX_HEADERS_SERVE {
+                break
+            }
+
+            total_bytes += APPROX_HEADER_SIZE;
+
+            if total_bytes > SOFT_RESPONSE_LIMIT {
                 break
             }
         }
@@ -145,13 +165,19 @@ where
     ) {
         let mut bodies = Vec::new();
 
+        let mut total_bytes = APPROX_BODY_SIZE;
+
         for hash in request.0 {
             if let Some(block) = self.client.block(hash.into()).unwrap_or_default() {
                 let body = BlockBody { transactions: block.body, ommers: block.ommers };
 
                 bodies.push(body);
 
-                // TODO: size estimation
+                total_bytes += APPROX_BODY_SIZE;
+
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
+                }
 
                 if bodies.len() >= MAX_BODIES_SERVE {
                     break
@@ -196,6 +222,32 @@ where
     }
 }
 
+/// Represents the direction for a headers request depending on the `reverse` field of the request.
+///
+/// [`HeadersDirection::Rising`] block numbers for `reverse == true`
+/// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+///
+/// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+#[derive(Copy, Clone)]
+enum HeadersDirection {
+    Rising,
+    Falling,
+}
+
+impl HeadersDirection {
+    fn is_rising(&self) -> bool {
+        matches!(self, HeadersDirection::Rising)
+    }
+
+    fn new(reverse: bool) -> Self {
+        if reverse {
+            HeadersDirection::Rising
+        } else {
+            HeadersDirection::Falling
+        }
+    }
+}
+
 /// Represents a handled [`GetBlockHeaders`] requests
 ///
 /// This is the key type for spam detection cache. The counter is ignored during `PartialEq` and
@@ -204,14 +256,6 @@ where
 #[allow(unused)]
 struct RespondedGetBlockHeaders {
     req: (PeerId, GetBlockHeaders),
-}
-
-// === impl RespondedGetBlockHeaders ===
-
-impl RespondedGetBlockHeaders {
-    fn new(req: (PeerId, GetBlockHeaders)) -> Self {
-        Self { req }
-    }
 }
 
 impl Borrow<(PeerId, GetBlockHeaders)> for RespondedGetBlockHeaders {
