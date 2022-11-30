@@ -9,11 +9,16 @@ use ethers_core::types::{Bloom, H160, H256, U256};
 /// * Fixed array types (H256, Address, Bloom) are not compacted.
 /// * Max size of `T` in `Option<T>` or `Vec<T>` shouldn't exceed `0xffff`.
 /// * Any `bytes::Bytes` field **should be placed last**.
-/// * Any other type which is not known to the derive module **should be placed last**.
+/// * Any other type which is not known to the derive module **should be placed last** in they
+///   contain a `bytes::Bytes` field.
 ///
 /// The last two points make it easier to decode the data without saving the length on the
 /// `StructFlags`. It will fail compilation if it's not respected. If they're alias to known types,
 /// add their definitions to `get_bit_size()` or `known_types` in `generator.rs`.
+///
+/// Regarding the `alternative_*` methods: Mainly used as a workaround for not being able to
+/// specialize an impl over certain types like Vec<T>/Option<T> where T is a fixed size array like
+/// Vec<H256>.
 pub trait Compact {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
@@ -27,8 +32,10 @@ pub trait Compact {
     where
         Self: Sized;
 
+    /// "Optional": If there's no good reason to use it, just call `to_compact`
     fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
 
+    /// "Optional": If there's no good reason to use it, just call `from_compact`
     fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized;
