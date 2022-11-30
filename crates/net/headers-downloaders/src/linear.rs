@@ -250,20 +250,19 @@ where
 
                         if this.head.hash() == parent.hash() {
                             // We've reached the target
-                            let headers =
+                            let headers: Vec<SealedHeader> =
                                 std::mem::take(&mut this.buffered).into_iter().rev().collect();
                             return Poll::Ready(Ok(headers))
                         }
 
-                        if let Some(header) = this.buffered.last() {
+                        if let Some(header) = this.buffered.first() {
                             // Proceed to insert unless there is a validation error
                             if let Err(err) = this.validate(header, &parent) {
                                 try_fuse_or_continue!(this, fut, err, 'outer);
                             }
-
+                        } else if parent.hash() != this.forkchoice.head_block_hash {
                             // The buffer is empty and the first header does not match the tip,
                             // discard
-                        } else if parent.hash() != this.forkchoice.head_block_hash {
                             try_fuse_or_continue!(this, fut, 'outer);
                         }
 
@@ -272,7 +271,7 @@ where
                     }
                 }
                 Err(err) => {
-                    try_fuse_or_continue!(this, fut, DownloadError::RequestError(err), 'outer);
+                    try_fuse_or_continue!(this, fut, err.into(), 'outer);
                 }
             }
         }
@@ -298,6 +297,8 @@ where
                         let mut headers = resp.0;
                         headers.sort_unstable_by_key(|h| h.number);
 
+                        // Stop storing headers at head
+
                         if headers.is_empty() {
                             stream_try_fuse_or_continue!(this, fut, 'outer);
                         }
@@ -306,15 +307,14 @@ where
                         for parent in headers.into_iter().rev() {
                             let parent = parent.seal();
 
-                            if let Some(header) = this.buffered.last() {
+                            if let Some(header) = this.buffered.first() {
                                 // Proceed to insert unless there is a validation error
                                 if let Err(err) = this.validate(header, &parent) {
                                     stream_try_fuse_or_continue!(this, fut, err, 'outer);
                                 }
-
-                            // The buffer is empty and the first header does not match the tip,
-                            // discard
                             } else if parent.hash() != this.forkchoice.head_block_hash {
+                                // The buffer is empty and the first header does not match the tip,
+                                // discard
                                 stream_try_fuse_or_continue!(this, fut, 'outer);
                             }
 
@@ -323,11 +323,10 @@ where
                         }
                     }
                     Err(err) => {
-                        stream_try_fuse_or_continue!(this, fut, DownloadError::RequestError(err), 'outer);
+                        stream_try_fuse_or_continue!(this, fut, err.into(), 'outer);
                     }
                 },
                 Poll::Pending => {
-                    // TODO: reverse the buffer
                     if let Some(header) = this.buffered.pop() {
                         return Poll::Ready(if this.head.hash() != header.hash() {
                             // Stream buffered header
@@ -493,8 +492,8 @@ mod tests {
         let result = downloader.download(p3, fork).await;
         let headers = result.unwrap();
         assert_eq!(headers.len(), 3);
-        assert_eq!(headers[0], p2);
+        assert_eq!(headers[0], p0);
         assert_eq!(headers[1], p1);
-        assert_eq!(headers[2], p0);
+        assert_eq!(headers[2], p2);
     }
 }

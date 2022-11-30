@@ -93,9 +93,10 @@ impl Future for TestDownload {
         };
         match ready!(self.client.get_headers(request).poll_unpin(cx)) {
             Ok(resp) => {
+                // Skip head and seal headers
                 let mut headers = resp.0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
                 headers.sort_unstable_by_key(|h| h.number);
-                Poll::Ready(Ok(headers))
+                Poll::Ready(Ok(headers.into_iter().rev().collect()))
             }
             Err(err) => Poll::Ready(Err(match err {
                 RequestError::Timeout => DownloadError::Timeout,
@@ -120,34 +121,6 @@ impl BatchDownload for TestDownload {
     fn into_stream_unordered(self) -> Box<dyn Stream<Item = Result<Self::Ok, Self::Error>>> {
         Box::new(self)
     }
-
-    // async fn download(
-    //     &self,
-    //     _: &SealedHeader,
-    //     _: &ForkchoiceState,
-    // ) -> Result<Vec<SealedHeader>, DownloadError> {
-    //     // call consensus stub first. fails if the flag is set
-    //     let empty = SealedHeader::default();
-    //     self.consensus
-    //         .validate_header(&empty, &empty)
-    //         .map_err(|error| DownloadError::HeaderValidation { hash: empty.hash(), error })?;
-    //
-    //     let stream = self.client.stream_headers().await;
-    //     let stream = stream.timeout(Duration::from_secs(1));
-    //
-    //     match Box::pin(stream).try_next().await {
-    //         Ok(Some(res)) => {
-    //             let mut headers = res.headers.iter().map(|h|
-    // h.clone().seal()).collect::<Vec<_>>();             if !headers.is_empty() {
-    //                 headers.sort_unstable_by_key(|h| h.number);
-    //                 headers.remove(0); // remove head from response
-    //                 headers.reverse();
-    //             }
-    //             Ok(headers)
-    //         }
-    //         _ => Err(DownloadError::Timeout { request_id: 0 }),
-    //     }
-    // }
 }
 
 /// A test client for fetching headers

@@ -79,7 +79,6 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
-        // TODO: add batching
         let headers = match self.downloader.download(head.clone(), forkchoice.clone()).await {
             Ok(res) => {
                 // Perform basic response validation
@@ -159,9 +158,9 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             return Err(StageError::Download("Not enough headers".to_owned()))
         }
 
-        let mut headers_iter = headers.iter().rev().peekable();
+        let mut headers_iter = headers.iter().peekable();
         if headers_iter.peek().unwrap().hash() != forkchoice.head_block_hash {
-            return Err(StageError::Download("Response must end with tip".to_owned()))
+            return Err(StageError::Download("Response must start with tip".to_owned()))
         }
 
         while let Some(header) = headers_iter.next() {
@@ -186,7 +185,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let mut latest = None;
         // Since the headers were returned in descending order,
         // iterate them in the reverse order
-        for header in headers.into_iter() {
+        for header in headers.into_iter().rev() {
             if header.number == 0 {
                 continue
             }
