@@ -76,9 +76,9 @@ pub enum DatabaseIntegrityError {
         /// The block number key
         number: BlockNumber,
     },
-    #[error("Gap in transaction table")]
+    #[error("Gap in transaction table. Missing tx number #{missing}.")]
     TransactionsGap { missing: TxNumber },
-    #[error("Gap in transaction table")]
+    #[error("Gap in transaction signer table. Missing tx number #{missing}.")]
     TransactionsSignerGap { missing: TxNumber },
     #[error("Got to the end of transaction table")]
     EndOfTransactionTable,
