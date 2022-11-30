@@ -208,24 +208,10 @@ macro_rules! try_fuse_or_continue {
     };
     ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
         if $this.try_fuse_request_fut($fut).is_err() {
+            $this.done = true;
             return Poll::Ready(Err($err))
         }
         continue $jumpdest
-    };
-}
-
-macro_rules! try_fuse_or_return {
-    ($this:ident, $fut:ident) => {
-        try_fuse_or_return!($this, $fut, RequestError::BadResponse.into())
-    };
-    ($this:ident, $fut:ident, $err:expr) => {
-        if $this.try_fuse_request_fut($fut).is_err() {
-            return Poll::Ready(Some(Err($err)))
-        } else if let Some(header) = $this.buffered.pop() {
-            return Poll::Ready(Some(Ok(header)))
-        } else {
-            return Poll::Pending
-        }
     };
 }
 
@@ -287,6 +273,24 @@ where
     }
 }
 
+macro_rules! try_fuse_or_return {
+    ($this:ident, $fut:ident) => {
+        try_fuse_or_return!($this, $fut, RequestError::BadResponse.into())
+    };
+    ($this:ident, $fut:ident, $err:expr) => {
+        if $this.try_fuse_request_fut($fut).is_err() {
+            // We exhausted all of the retries. Stream must terminate
+            $this.done = true;
+            $this.buffered.clear();
+            return Poll::Ready(Some(Err($err)))
+        } else if let Some(header) = $this.buffered.pop() {
+            return Poll::Ready(Some(Ok(header)))
+        } else {
+            return Poll::Pending
+        }
+    };
+}
+
 impl<C, H> Stream for HeadersDownload<C, H>
 where
     C: Consensus + 'static,
@@ -294,6 +298,16 @@ where
 {
     type Item = Result<SealedHeader, DownloadError>;
 
+    /// Linear header downloader implemented as a [Stream]. The downloader sends header
+    /// requests until the head is reached and buffers the responses. If the request future
+    /// is still pending, the downloader will return a buffered header if any is available.
+    ///
+    /// Internally, the stream is terminated if the `done` flag has been set and there are no
+    /// more headers available in the buffer.
+    ///
+    /// Upon encountering an error, the downloader will attempt to retry the failed request.
+    /// If the number of retries is exhausted, the downloader will stream an error, set the `done`
+    /// flag to true and clear the buffered headers, thus resulting in stream termination.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
