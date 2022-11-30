@@ -2,7 +2,10 @@
 
 use crate::peers::PeersHandle;
 use futures::StreamExt;
-use reth_eth_wire::{BlockBodies, BlockBody, BlockHeaders, GetBlockBodies, GetBlockHeaders};
+use reth_eth_wire::{
+    BlockBodies, BlockBody, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetReceipts, NodeData, Receipts,
+};
 use reth_interfaces::{
     p2p::error::RequestResult,
     provider::{BlockProvider, HeaderProvider},
@@ -41,22 +44,22 @@ const MAX_REPEAT_REQUESTS_PER_PEER: usize = 2;
 /// Heuristic limit for recording header requests.
 const HEADERS_REQUEST_CACHE_LIMIT: usize = 100;
 
-/// Manages block requests on top of the p2p network.
+/// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
 #[must_use = "Manager does nothing unless polled."]
-pub struct BlockRequestManager<C> {
+pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Used for reporting peers.
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`].
-    incoming_requests: UnboundedReceiverStream<IncomingBlockRequest>,
+    incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
 }
 
-// === impl BlockRequestManager ===
+// === impl EthRequestHandler ===
 
-impl<C> BlockRequestManager<C>
+impl<C> EthRequestHandler<C>
 where
     C: BlockProvider + HeaderProvider,
 {
@@ -64,7 +67,7 @@ where
     pub fn new(
         client: Arc<C>,
         peers: PeersHandle,
-        incoming: UnboundedReceiver<IncomingBlockRequest>,
+        incoming: UnboundedReceiver<IncomingEthRequest>,
     ) -> Self {
         Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming) }
     }
@@ -165,7 +168,7 @@ where
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
-impl<C> Future for BlockRequestManager<C>
+impl<C> Future for EthRequestHandler<C>
 where
     C: BlockProvider + HeaderProvider,
 {
@@ -179,12 +182,14 @@ where
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(None) => return Poll::Ready(()),
                 Poll::Ready(Some(incoming)) => match incoming {
-                    IncomingBlockRequest::GetBlockHeaders { peer_id, request, response } => {
+                    IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
                         this.on_headers_request(peer_id, request, response)
                     }
-                    IncomingBlockRequest::GetBlockBodies { peer_id, request, response } => {
+                    IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
                         this.on_bodies_request(peer_id, request, response)
                     }
+                    IncomingEthRequest::GetNodeData { .. } => {}
+                    IncomingEthRequest::GetReceipts { .. } => {}
                 },
             }
         }
@@ -215,14 +220,10 @@ impl Borrow<(PeerId, GetBlockHeaders)> for RespondedGetBlockHeaders {
     }
 }
 
-// SAFETY: The [`RespondedGetBlockHeaders`] is only ever accessed mutably via
-// [`BlockRequestManager`]
-unsafe impl Send for RespondedGetBlockHeaders {}
-
-/// All request related to blocks delegated by the network.
+/// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
 #[allow(missing_docs)]
-pub enum IncomingBlockRequest {
+pub enum IncomingEthRequest {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
@@ -238,5 +239,21 @@ pub enum IncomingBlockRequest {
         peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
+    },
+    /// Request Node Data from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetNodeData {
+        peer_id: PeerId,
+        request: GetNodeData,
+        response: oneshot::Sender<RequestResult<NodeData>>,
+    },
+    /// Request Receipts from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetReceipts {
+        peer_id: PeerId,
+        request: GetReceipts,
+        response: oneshot::Sender<RequestResult<Receipts>>,
     },
 }

@@ -16,10 +16,10 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
-    blocks::IncomingBlockRequest,
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
+    eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
@@ -90,8 +90,8 @@ pub struct NetworkManager<C> {
     event_listeners: NetworkEventListeners,
     /// Sender half to send events to the [`TransactionsManager`] task, if configured.
     to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
-    /// Sender half to send events to the [`BlockRequestManager`] task, if configured.
-    to_block_requests_manager: Option<mpsc::UnboundedSender<IncomingBlockRequest>>,
+    /// Sender half to send events to the [`EthRequestHandler`] task, if configured.
+    to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -158,7 +158,7 @@ where
             block_import,
             event_listeners: Default::default(),
             to_transactions_manager: None,
-            to_block_requests_manager: None,
+            to_eth_request_handler: None,
             num_active_peers,
         })
     }
@@ -168,9 +168,9 @@ where
         self.to_transactions_manager = Some(tx);
     }
 
-    /// Sets the dedicated channel for events indented for the [`BlockRequestManager`]
-    pub fn set_block_request_manager(&mut self, tx: mpsc::UnboundedSender<IncomingBlockRequest>) {
-        self.to_block_requests_manager = Some(tx);
+    /// Sets the dedicated channel for events indented for the [`EthRequestHandler`]
+    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
+        self.to_eth_request_handler = Some(tx);
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
@@ -235,9 +235,9 @@ where
         }
     }
 
-    /// Sends an event to the [`BlockRequestManager`] if configured
-    fn delegate_block_request(&self, event: IncomingBlockRequest) {
-        if let Some(ref reqs) = self.to_block_requests_manager {
+    /// Sends an event to the [`EthRequestManager`] if configured
+    fn delegate_eth_request(&self, event: IncomingEthRequest) {
+        if let Some(ref reqs) = self.to_eth_request_handler {
             let _ = reqs.send(event);
         }
     }
@@ -246,14 +246,28 @@ where
     fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
         match req {
             PeerRequest::GetBlockHeaders { request, response } => {
-                self.delegate_block_request(IncomingBlockRequest::GetBlockHeaders {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
                     peer_id,
                     request,
                     response,
                 })
             }
             PeerRequest::GetBlockBodies { request, response } => {
-                self.delegate_block_request(IncomingBlockRequest::GetBlockBodies {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockBodies {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetNodeData { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetNodeData {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetReceipts { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetReceipts {
                     peer_id,
                     request,
                     response,
@@ -266,8 +280,6 @@ where
                     response,
                 });
             }
-            PeerRequest::GetNodeData { .. } => {}
-            PeerRequest::GetReceipts { .. } => {}
         }
     }
 

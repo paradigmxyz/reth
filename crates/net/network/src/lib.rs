@@ -13,11 +13,11 @@
 //! port of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 
-pub mod blocks;
 mod cache;
 mod config;
 mod discovery;
 pub mod error;
+pub mod eth_requests;
 mod fetch;
 mod import;
 mod listener;
