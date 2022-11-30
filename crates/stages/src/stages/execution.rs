@@ -15,7 +15,7 @@ use reth_interfaces::{
     },
     provider::db::StateProviderImplRefLatest,
 };
-use reth_primitives::{Account, StorageEntry, TransactionSignedEcRecovered, H256};
+use reth_primitives::{Account, StorageEntry, TransactionSignedEcRecovered, H256, Address};
 use std::{fmt::Debug, ops::DerefMut};
 
 const EXECUTION: StageId = StageId("Execution");
@@ -98,7 +98,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
-            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block })
+            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block });
         }
 
         // get headers from canonical numbers
@@ -136,7 +136,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
-                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
+                    return Err(
+                        DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into()
+                    );
                 }
                 transactions.push(tx);
             }
@@ -149,9 +151,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .next()
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
-                    return Err(
-                        DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
-                    )
+                    return Err(DatabaseIntegrityError::TransactionsSignerGap {
+                        missing: tx_index,
+                    }
+                    .into());
                 }
                 signers.push(tx);
             }
@@ -187,11 +190,11 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (results, start_tx_index) in block_change_paches.into_iter() {
             for (index, result) in results.into_iter().enumerate() {
                 let tx_index = start_tx_index + index as u64;
-                // insert account diff
+                // insert account change set
                 for (address, AccountChangeSet { account, wipe_storage, storage }) in
                     result.state_diff.into_iter()
                 {
-                    // insert old account in AccountChangeDiff
+                    // insert old account in AccountChangeSet
                     if let Some(account) = account.0 {
                         // TODO optimize BeforeTx by checking if bytecode is same as in new account.
                         db_tx.put::<tables::AccountChangeSet>(
@@ -218,6 +221,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     }
                     // wipe storage
                     if wipe_storage {
+                        // TODO insert all changes to StorageChangeSet
                         db_tx.delete::<tables::PlainStorageState>(address, None)?;
                     }
                     // insert storage diff
@@ -226,7 +230,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         let mut hkey = H256::zero();
                         key.to_big_endian(&mut hkey.0);
 
-                        // insert into StorageChangeDiff
+                        // insert into StorageChangeSet
                         db_tx.put::<tables::StorageChangeSet>(
                             storage_id.clone(),
                             StorageEntry { key: hkey, value: old_value },
@@ -254,8 +258,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         bytecode.bytes()[..bytecode.len()].to_vec(),
                     )?;
 
-                    // NOTE: bytecode bytes are not inserted in change diff and it stand in saparate
-                    // table.
+                    // NOTE: bytecode bytes are not inserted in change set and it stand in saparate table
                 }
             }
         }
@@ -268,11 +271,65 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        _db: &mut StageDB<'_, DB>,
-        _input: UnwindInput,
+        db: &mut StageDB<'_, DB>,
+        input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+        let unwind_from = input.stage_progress;
+        let unwind_to = input.unwind_to;
+        let _bad_block = input.bad_block;
+
         // get block body tx indexes
-        // get transaction diffs
+        let db_tx = db.deref_mut();
+
+        //let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
+        // Get transaction of the block that we are executing.
+        let mut account_change_set = db_tx.cursor::<tables::AccountChangeSet>()?;
+        // Skip sender recovery and load signer from database.
+        let mut storage_change_set = db_tx.cursor::<tables::StorageChangeSet>()?;
+
+        // TODO replace unwraps with Inconsistency error
+
+        // get transacitons numbers
+        let unwind_to_hash = db_tx.get::<tables::CanonicalHeaders>(unwind_to)?.unwrap();
+        let unwind_from_hash = db_tx.get::<tables::CanonicalHeaders>(unwind_from)?.unwrap();
+
+        let unwind_to_num_hash = BlockNumHash((unwind_to, unwind_to_hash));
+        let unwind_from_num_hash = BlockNumHash((unwind_from, unwind_from_hash));
+
+        let from_tx_number = db_tx.get::<tables::CumulativeTxCount>(unwind_from_num_hash)?.unwrap();
+
+        let previous_to_tx_number =
+            db_tx.get::<tables::BlockBodies>(unwind_to_num_hash)?.unwrap().base_tx_id;
+
+        let num_of_tx = (from_tx_number - previous_to_tx_number) as usize;
+        let to_tx_number = previous_to_tx_number + 1;
+
+        // if there is no transaction ids, this means blocks were empty and block reward change set is not present.
+        if num_of_tx == 0 {
+            return Ok(UnwindOutput { stage_progress: unwind_to });
+        }
+
+        // get all batches for account change
+        // Check if walk and walk_dup would do the same thing
+        let account_chageset_batch = account_change_set
+            .walk(to_tx_number)?
+            .take(num_of_tx)
+            .map(|i| i)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // revert all changes to PlainState
+        for (key, account_chageset) in account_chageset_batch.into_iter().rev() {}
+
+        // get all batches for account change
+        let storage_chageset_batch = storage_change_set
+            .walk(TxNumberAddress((to_tx_number,Address::zero())))?
+            .take(num_of_tx)
+            .map(|i| i)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // revert all changes to PlainState
+        for (key, account_chageset) in storage_chageset_batch.into_iter().rev() {}
+
         // take transaction patches: AccountChangeDiff StorageChangeDiff
         // apply changes to PlainAccountState and PlainStorageChange
         // Discard transaction patches

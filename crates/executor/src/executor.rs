@@ -24,7 +24,8 @@ pub struct Executor {
 #[derive(Debug, Clone)]
 pub struct AccountChangeSet {
     /// Old and New account.
-    /// If account is deleted (selfdestructed) we would have (Some,None).
+    /// If account is deleted (selfdestructed) or if we have touched empty account we would have (Some,None).
+    /// (Look at state clear EIP https://eips.ethereum.org/EIPS/eip-161)
     /// If account is newly created we would have (None,Some).
     /// If it is only a storage change we would have (None,None)
     /// If account is changed (balance,nonce) we would have (Some,Some)

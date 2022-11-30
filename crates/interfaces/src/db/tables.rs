@@ -211,10 +211,14 @@ table!(
 
 dupsort!(
     /// Stores the state of an account before a certain transaction changed it.
+    /// Change on state can be: account is created, selfdestructed,touched while empty
+    /// or changed (balance,nonce). 
     AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
 
 dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
+    /// If [`StorageEntry::value`] is zero, this means storage was not existing
+    /// and needs to be removed. 
     StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
 
 table!(
