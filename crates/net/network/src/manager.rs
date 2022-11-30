@@ -19,6 +19,7 @@ use crate::{
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
+    eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
@@ -88,7 +89,9 @@ pub struct NetworkManager<C> {
     /// All listeners for [`Network`] events.
     event_listeners: NetworkEventListeners,
     /// Sender half to send events to the [`TransactionsManager`] task, if configured.
-    to_transactions: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    /// Sender half to send events to the [`EthRequestHandler`] task, if configured.
+    to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -154,14 +157,20 @@ where
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
             event_listeners: Default::default(),
-            to_transactions: None,
+            to_transactions_manager: None,
+            to_eth_request_handler: None,
             num_active_peers,
         })
     }
 
     /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
-        self.to_transactions = Some(tx);
+        self.to_transactions_manager = Some(tx);
+    }
+
+    /// Sets the dedicated channel for events indented for the [`EthRequestHandler`]
+    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
+        self.to_eth_request_handler = Some(tx);
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
@@ -221,16 +230,49 @@ where
 
     /// Sends an event to the [`TransactionsManager`] if configured
     fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
-        if let Some(ref tx) = self.to_transactions {
+        if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
+        }
+    }
+
+    /// Sends an event to the [`EthRequestManager`] if configured
+    fn delegate_eth_request(&self, event: IncomingEthRequest) {
+        if let Some(ref reqs) = self.to_eth_request_handler {
+            let _ = reqs.send(event);
         }
     }
 
     /// Handle an incoming request from the peer
     fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
         match req {
-            PeerRequest::GetBlockHeaders { .. } => {}
-            PeerRequest::GetBlockBodies { .. } => {}
+            PeerRequest::GetBlockHeaders { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetBlockBodies { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockBodies {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetNodeData { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetNodeData {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetReceipts { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetReceipts {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,
@@ -238,8 +280,6 @@ where
                     response,
                 });
             }
-            PeerRequest::GetNodeData { .. } => {}
-            PeerRequest::GetReceipts { .. } => {}
         }
     }
 
