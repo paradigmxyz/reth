@@ -22,7 +22,7 @@ We appreciate your patience until we get there. Until then, we are happy to answ
 
 # What does this solve? Why a new Rust implementation?
 
-Reth is a new Apache/MIT-licensed full node implementation of Ethereum focused on contributor friendliness, modularity, and performance. Reth does not include code from any existing client but stands on the shoulders of giants including Geth, Erigon, OpenEthereum, Akula and more. We are working on a "lineage" document which will communicate the series of innovations.
+Reth is a new Apache/MIT-licensed full node implementation of Ethereum focused on contributor friendliness, modularity, and performance. Reth does not include code from any existing client but stands on the shoulders of giants including Geth, Erigon, OpenEthereum, Akula and more.
 
 Our goals are:
 1. **Modularity**: Every component of Reth is built to be used as a library: well-tested, heavily documented and benchmarked. We envision that developers will import the node's crates, mix and match, and innovate on top of them. To achieve that, we are licensing Reth under the Apache/MIT permissive license.
@@ -39,9 +39,9 @@ cd reth
 cargo test --all
 ```
 
-Or via `cargo install --git https://github.com/foundry-rs/foundry --profile local --locked foundry-cli anvil`.
-
 ## Completion Checklist
+
+Is this project ready to use?
 
 * Coming Soon :) Contributions welcome!
 
