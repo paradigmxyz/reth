@@ -88,8 +88,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
                     // Perform basic response validation
-                    // TODO: update validation logic
-                    // self.validate_header_response(&res, head.clone(), forkchoice.clone())?;
+                    self.validate_header_response(&res)?;
                     let write_progress =
                         self.write_headers::<DB>(db, res).await?.unwrap_or_default();
                     current_progress = current_progress.max(write_progress);
@@ -160,25 +159,13 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     }
 
     /// Perform basic header response validation
-    fn validate_header_response(
-        &self,
-        headers: &[SealedHeader],
-        head: SealedHeader,
-        forkchoice: ForkchoiceState,
-    ) -> Result<(), StageError> {
-        // The response must include at least head and tip
-        if headers.len() < 2 {
-            return Err(StageError::Download("Not enough headers".to_owned()))
-        }
-
+    fn validate_header_response(&self, headers: &[SealedHeader]) -> Result<(), StageError> {
         let mut headers_iter = headers.iter().peekable();
-        if headers_iter.peek().unwrap().hash() != forkchoice.head_block_hash {
-            return Err(StageError::Download("Response must start with tip".to_owned()))
-        }
-
         while let Some(header) = headers_iter.next() {
-            ensure_parent(header, headers_iter.peek().unwrap_or(&&head))
-                .map_err(|err| StageError::Download(err.to_string()))?;
+            if let Some(parent) = headers_iter.peek() {
+                ensure_parent(header, parent)
+                    .map_err(|err| StageError::Download(err.to_string()))?;
+            }
         }
 
         Ok(())
@@ -192,10 +179,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     ) -> Result<Option<BlockNumber>, StageError> {
         // TODO:
         // let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
-        // cursor_header.seek_exact(head)?;
-
         // let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
-        // cursor_canonical.seek_exact(head.number())?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
