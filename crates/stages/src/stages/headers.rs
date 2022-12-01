@@ -2,6 +2,7 @@ use crate::{
     db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use futures_util::StreamExt;
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     db::{models::blocks::BlockNumHash, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut},
@@ -37,7 +38,7 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     /// Downloader client implementation
     pub client: Arc<H>,
     /// The minimum number of block headers to commit at once
-    pub commit_threshold: u64,
+    pub commit_threshold: usize,
 }
 
 #[async_trait::async_trait]
@@ -76,32 +77,44 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
             }
         }
 
+        let mut current_progress = stage_progress;
+        let mut stream =
+            self.downloader.stream(head.clone(), forkchoice.clone()).chunks(self.commit_threshold);
+
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
-        let headers = match self.downloader.download(head.clone(), forkchoice.clone()).await {
-            Ok(res) => {
-                // Perform basic response validation
-                self.validate_header_response(&res, head, forkchoice)?;
-                res
+        while let Some(headers) = stream.next().await {
+            match headers.into_iter().collect::<Result<Vec<_>, _>>() {
+                Ok(res) => {
+                    // Perform basic response validation
+                    // TODO: update validation logic
+                    // self.validate_header_response(&res, head.clone(), forkchoice.clone())?;
+                    let write_progress =
+                        self.write_headers::<DB>(db, res).await?.unwrap_or_default();
+                    current_progress = current_progress.max(write_progress);
+                }
+                Err(e) => match e {
+                    DownloadError::Timeout => {
+                        warn!("No response for header request");
+                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
+                    }
+                    DownloadError::HeaderValidation { hash, error } => {
+                        warn!("Validation error for header {hash}: {error}");
+                        return Err(StageError::Validation { block: stage_progress, error })
+                    }
+                    error => {
+                        warn!("Unexpected error occurred: {error}");
+                        return Err(StageError::Download(error.to_string()))
+                    }
+                },
             }
-            Err(e) => match e {
-                DownloadError::Timeout => {
-                    warn!("No response for header request");
-                    return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
-                }
-                DownloadError::HeaderValidation { hash, error } => {
-                    warn!("Validation error for header {hash}: {error}");
-                    return Err(StageError::Validation { block: stage_progress, error })
-                }
-                error => {
-                    warn!("Unexpected error occurred: {error}");
-                    return Err(StageError::Download(error.to_string()))
-                }
-            },
-        };
-        let stage_progress = self.write_headers::<DB>(db, headers).await?.unwrap_or(stage_progress);
-        Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+        }
+
+        // Write total difficulty values after all headers have been inserted
+        self.write_td::<DB>(db, stage_progress)?;
+
+        Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })
     }
 
     /// Unwind the stage.
@@ -177,10 +190,12 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         db: &StageDB<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
-        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
-        let mut td: U256 = cursor_td.last()?.map(|(_, v)| v).unwrap().into();
+        // TODO:
+        // let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
+        // cursor_header.seek_exact(head)?;
+
+        // let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
+        // cursor_canonical.seek_exact(head.number())?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -195,16 +210,39 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             let header = header.unseal();
             latest = Some(header.number);
 
-            td += header.difficulty;
-
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
             db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
-            cursor_header.append(key, header)?;
-            cursor_canonical.append(key.number(), key.hash())?;
-            cursor_td.append(key, td.into())?;
+            db.put::<tables::Headers>(key, header)?;
+            db.put::<tables::CanonicalHeaders>(key.number(), key.hash())?;
+            // TODO:
+            // cursor_header.append(key, header)?;
+            // cursor_canonical.append(key.number(), key.hash())?;
         }
 
         Ok(latest)
+    }
+
+    /// Iterate over inserted headers and write td entries
+    fn write_td<DB: Database>(
+        &self,
+        db: &StageDB<'_, DB>,
+        previous_stage_progress: u64,
+    ) -> Result<(), StageError> {
+        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
+
+        // Get last total difficulty
+        let mut td: U256 = cursor_td.last()?.map(|(_, v)| v).unwrap().into();
+
+        // Start at first inserted block during this iteration
+        let start_key = db.get_block_numhash(previous_stage_progress + 1)?;
+
+        // Walk over newly inserted headers, update & insert td
+        for entry in db.cursor::<tables::Headers>()?.walk(start_key)? {
+            let (key, header) = entry?;
+            td += header.difficulty;
+            cursor_td.append(key, td.into())?;
+        }
+        Ok(())
     }
 }
 
