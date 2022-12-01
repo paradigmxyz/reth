@@ -13,7 +13,7 @@ use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrap
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -94,8 +94,6 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
@@ -105,6 +103,7 @@ mod test {
         TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     use super::BlockBody;
 

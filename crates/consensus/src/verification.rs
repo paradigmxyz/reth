@@ -417,6 +417,10 @@ mod tests {
         fn header(&self, _block_number: &BlockHash) -> Result<Option<Header>> {
             Ok(self.parent.clone())
         }
+
+        fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
+            Ok(self.parent.clone())
+        }
     }
     /// got test block
     fn mock_block() -> (BlockLocked, Header) {

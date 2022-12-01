@@ -9,6 +9,7 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
+    FetchClient,
 };
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
@@ -83,6 +84,21 @@ where
     /// Returns mutable access to the [`PeersManager`]
     pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
+    }
+
+    /// Returns access to the [`PeersManager`]
+    pub(crate) fn peers(&self) -> &PeersManager {
+        &self.peers_manager
+    }
+
+    /// Returns a new [`FetchClient`]
+    pub(crate) fn fetch_client(&self) -> FetchClient {
+        self.state_fetcher.client()
+    }
+
+    /// How many peers we're currently connected to.
+    pub fn genesis_hash(&self) -> H256 {
+        self.genesis_hash
     }
 
     /// How many peers we're currently connected to.
@@ -173,7 +189,7 @@ where
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
         let number = msg.block.block.header.number;
-        let hashes = Arc::new(NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]));
+        let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
         for (peer_id, peer) in self.connected_peers.iter_mut() {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
@@ -186,7 +202,7 @@ where
 
             self.queued_messages.push_back(StateAction::NewBlockHashes {
                 peer_id: *peer_id,
-                hashes: Arc::clone(&hashes),
+                hashes: hashes.clone(),
             });
         }
     }
@@ -381,10 +397,11 @@ where
 /// Tracks the state of a Peer.
 ///
 /// For example known blocks,so we can decide what to announce.
-pub struct ConnectedPeer {
+pub(crate) struct ConnectedPeer {
     /// Best block of the peer.
     pub(crate) best_hash: H256,
     /// The capabilities of the connected peer.
+    #[allow(unused)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender,
@@ -409,7 +426,7 @@ pub(crate) enum StateAction {
         /// Target of the message
         peer_id: PeerId,
         /// `NewBlockHashes` message to send to the peer.
-        hashes: Arc<NewBlockHashes>,
+        hashes: NewBlockHashes,
     },
     /// Create a new connection to the given node.
     Connect { remote_addr: SocketAddr, peer_id: PeerId },

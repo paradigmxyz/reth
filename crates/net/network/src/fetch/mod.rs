@@ -2,7 +2,7 @@
 
 use crate::message::BlockRequest;
 use futures::StreamExt;
-use reth_eth_wire::{BlockBody, GetBlockBodies};
+use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{RequestError, RequestResult},
     headers::client::HeadersRequest,
@@ -11,7 +11,6 @@ use reth_primitives::{Header, PeerId, H256, U256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
-    time::Instant,
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -109,46 +108,35 @@ impl StateFetcher {
         Some(FetchAction::BlockRequest { peer_id, request })
     }
 
-    /// Received a request via a downloader
-    fn on_download_request(&mut self, request: DownloadRequest) -> Option<FetchAction> {
-        match request {
-            DownloadRequest::GetBlockHeaders { request: _, response: _ } => {}
-            DownloadRequest::GetBlockBodies { .. } => {}
-        }
-        None
-    }
-
     /// Advance the state the syncer
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchAction> {
         // drain buffered actions first
-        if let Some(action) = self.poll_action() {
-            return Poll::Ready(action)
-        }
-
-        if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
-            return Poll::Ready(FetchAction::StatusUpdate(status))
-        }
-
         loop {
-            // poll incoming requests
-            match self.download_requests_rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(request)) => {
-                    if let Some(action) = self.on_download_request(request) {
-                        return Poll::Ready(action)
+            if let Some(action) = self.poll_action() {
+                return Poll::Ready(action)
+            }
+
+            if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
+                return Poll::Ready(FetchAction::StatusUpdate(status))
+            }
+
+            loop {
+                // poll incoming requests
+                match self.download_requests_rx.poll_next_unpin(cx) {
+                    Poll::Ready(Some(request)) => {
+                        self.queued_requests.push_back(request);
                     }
+                    Poll::Ready(None) => {
+                        unreachable!("channel can't close")
+                    }
+                    Poll::Pending => break,
                 }
-                Poll::Ready(None) => {
-                    unreachable!("channel can't close")
-                }
-                Poll::Pending => break,
+            }
+
+            if self.queued_requests.is_empty() {
+                return Poll::Pending
             }
         }
-
-        if self.queued_requests.is_empty() {
-            return Poll::Pending
-        }
-
-        Poll::Pending
     }
 
     /// Handles a new request to a peer.
@@ -160,24 +148,20 @@ impl StateFetcher {
             peer.state = req.peer_state();
         }
 
-        let started = Instant::now();
         match req {
             DownloadRequest::GetBlockHeaders { request, response } => {
-                let inflight = Request { request, response, started };
+                let inflight = Request { request: request.clone(), response };
                 self.inflight_headers_requests.insert(peer_id, inflight);
-
-                unimplemented!("unify start types");
-
-                // BlockRequest::GetBlockHeaders(GetBlockHeaders {
-                //     // TODO: this should be converted
-                //     start_block: BlockHashOrNumber::Number(0),
-                //     limit: request.limit,
-                //     skip: 0,
-                //     reverse: request.reverse,
-                // })
+                let HeadersRequest { start, limit, reverse } = request;
+                BlockRequest::GetBlockHeaders(GetBlockHeaders {
+                    start_block: start,
+                    limit,
+                    skip: 0,
+                    reverse,
+                })
             }
             DownloadRequest::GetBlockBodies { request, response } => {
-                let inflight = Request { request: request.clone(), response, started };
+                let inflight = Request { request: request.clone(), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
@@ -309,12 +293,14 @@ impl PeerState {
     }
 }
 
-/// A request that waits for a response from the network so it can send it back through the response
-/// channel.
+/// A request that waits for a response from the network, so it can send it back through the
+/// response channel.
 struct Request<Req, Resp> {
+    /// The issued request object
+    /// TODO: this can be attached to the response in error case
+    #[allow(unused)]
     request: Req,
     response: oneshot::Sender<Resp>,
-    started: Instant,
 }
 
 /// A message to update the status.

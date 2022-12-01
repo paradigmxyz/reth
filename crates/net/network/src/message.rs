@@ -5,10 +5,10 @@
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::CapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
+    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
     EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    Transactions,
+    SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
@@ -36,21 +36,25 @@ impl NewBlockMessage {
     }
 }
 
-/// Represents all messages that can be sent to a peer session
+/// All Bi-directional eth-message variants that can be sent to a session or received from a
+/// session.
 #[derive(Debug)]
 pub enum PeerMessage {
     /// Announce new block hashes
-    NewBlockHashes(Arc<NewBlockHashes>),
+    NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
     NewBlock(NewBlockMessage),
-    /// Broadcast transactions.
-    Transactions(Arc<Transactions>),
+    /// Received transactions _from_ the peer
+    ReceivedTransaction(Transactions),
+    /// Broadcast transactions _from_ local _to_ a peer.
+    SendTransactions(SharedTransactions),
     /// Send new pooled transactions
-    PooledTransactions(Arc<NewPooledTransactionHashes>),
+    PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest),
     /// Other than eth namespace message
-    Other(CapabilityMessage),
+    #[allow(unused)]
+    Other(RawCapabilityMessage),
 }
 
 /// Request Variants that only target block related data.
@@ -60,32 +64,6 @@ pub enum PeerMessage {
 pub enum BlockRequest {
     GetBlockHeaders(GetBlockHeaders),
     GetBlockBodies(GetBlockBodies),
-}
-
-/// All Request variants of an [`EthMessage`]
-///
-/// Note: These variants come without a request ID, as it's expected that the peer session will
-/// manage those
-#[derive(Debug, Clone)]
-#[allow(missing_docs)]
-#[allow(clippy::enum_variant_names)]
-pub enum EthRequest {
-    GetBlockHeaders(GetBlockHeaders),
-    GetBlockBodies(GetBlockBodies),
-    GetPooledTransactions(GetPooledTransactions),
-    GetNodeData(GetNodeData),
-    GetReceipts(GetReceipts),
-}
-
-/// Corresponding Response variants for [`EthRequest`]
-#[derive(Debug, Clone)]
-#[allow(missing_docs)]
-pub enum EthResponse {
-    BlockHeaders(BlockHeaders),
-    BlockBodies(BlockBodies),
-    PooledTransactions(PooledTransactions),
-    NodeData(NodeData),
-    Receipts(Receipts),
 }
 
 /// Protocol related request messages that expect a response
@@ -262,6 +240,7 @@ impl PeerResponseResult {
     }
 
     /// Returns whether this result is an error.
+    #[allow(unused)]
     pub fn is_err(&self) -> bool {
         match self {
             PeerResponseResult::BlockHeaders(res) => res.is_err(),
@@ -288,5 +267,10 @@ impl PeerRequestSender {
     /// Attempts to immediately send a message on this Sender
     pub fn try_send(&self, req: PeerRequest) -> Result<(), TrySendError<PeerRequest>> {
         self.to_session_tx.try_send(req)
+    }
+
+    /// Returns the peer id of the remote peer.
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
     }
 }

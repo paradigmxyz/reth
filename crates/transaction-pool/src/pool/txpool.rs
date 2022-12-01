@@ -11,7 +11,7 @@ use crate::{
         update::{Destination, PoolUpdate},
         AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
     },
-    traits::{PoolStatus, StateDiff},
+    traits::{PoolSize, StateDiff},
     OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
@@ -19,7 +19,7 @@ use fnv::FnvHashMap;
 use reth_primitives::{TxHash, H256};
 use std::{
     cmp::Ordering,
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -107,9 +107,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self.all_transactions
     }
 
-    /// Returns stats about the pool.
-    pub(crate) fn status(&self) -> PoolStatus {
-        PoolStatus {
+    /// Returns stats about the size of pool.
+    pub(crate) fn size(&self) -> PoolSize {
+        PoolSize {
             pending: self.pending_pool.len(),
             pending_size: self.pending_pool.size(),
             basefee: self.basefee_pool.len(),
@@ -210,7 +210,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             .or_default()
             .update(on_chain_nonce, on_chain_balance);
 
-        let hash = *tx.hash();
+        let _hash = *tx.hash();
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
@@ -478,6 +478,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns the internal transaction with additional metadata
+    #[cfg(test)]
     pub(crate) fn get(&self, id: &TransactionId) -> Option<&PoolInternalTransaction<T>> {
         self.txs.get(id)
     }
@@ -518,7 +519,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn update(
         &mut self,
         pending_block_base_fee: U256,
-        state_diffs: &StateDiff,
+        _state_diffs: &StateDiff,
     ) -> Vec<PoolUpdate> {
         // update new basefee
         self.pending_basefee = pending_block_base_fee;
@@ -636,6 +637,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
     #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn txs_iter(
         &self,
         sender: SenderId,
@@ -648,6 +650,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns a mutable iterator over all transactions for the given sender, starting with the
     /// lowest nonce
     #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn txs_iter_mut(
         &mut self,
         sender: SenderId,

@@ -12,13 +12,13 @@ pub struct SizeTracker(isize);
 
 impl AddAssign<usize> for SizeTracker {
     fn add_assign(&mut self, rhs: usize) {
-        self.0 += (rhs as isize)
+        self.0 += rhs as isize
     }
 }
 
 impl SubAssign<usize> for SizeTracker {
     fn sub_assign(&mut self, rhs: usize) {
-        self.0 -= (rhs as isize)
+        self.0 -= rhs as isize
     }
 }
 
