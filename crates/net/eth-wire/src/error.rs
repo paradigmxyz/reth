@@ -112,6 +112,8 @@ pub enum P2PHandshakeError {
     NoResponse,
     #[error("handshake timed out")]
     Timeout,
+    #[error("Disconnected by peer: {0}")]
+    Disconnected(DisconnectReason),
 }
 
 /// An error that can occur when interacting with a [`Pinger`].
