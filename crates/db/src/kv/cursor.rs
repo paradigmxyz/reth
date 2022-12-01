@@ -128,6 +128,8 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
             .map_err(|e| Error::Write(e.into()))
     }
 
+    /// Appends the data to the end of the table. Consequently, the append operation
+    /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND)
