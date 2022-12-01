@@ -269,6 +269,79 @@ impl SealedHeader {
     }
 }
 
+/// Represents the direction for a headers request depending on the `reverse` field of the request.
+///
+/// [`HeadersDirection::Rising`] block numbers for `reverse == true`
+/// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+///
+/// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
+pub enum HeadersDirection {
+    /// Falling block number.
+    #[default]
+    Falling,
+    /// Rising block number.
+    Rising,
+}
+
+impl HeadersDirection {
+    /// Returns true for rising block numbers
+    pub fn is_rising(&self) -> bool {
+        matches!(self, HeadersDirection::Rising)
+    }
+
+    /// Returns true for falling block numbers
+    pub fn is_falling(&self) -> bool {
+        matches!(self, HeadersDirection::Falling)
+    }
+
+    /// Converts the bool into a direction.
+    ///
+    /// Returns:
+    ///
+    /// [`HeadersDirection::Rising`] block numbers for `reverse == true`
+    /// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+    pub fn new(reverse: bool) -> Self {
+        if reverse {
+            HeadersDirection::Rising
+        } else {
+            HeadersDirection::Falling
+        }
+    }
+}
+
+impl Encodable for HeadersDirection {
+    fn encode(&self, out: &mut dyn BufMut) {
+        bool::from(*self).encode(out)
+    }
+
+    fn length(&self) -> usize {
+        bool::from(*self).length()
+    }
+}
+
+impl Decodable for HeadersDirection {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+        let value: bool = Decodable::decode(buf)?;
+        Ok(value.into())
+    }
+}
+
+impl From<bool> for HeadersDirection {
+    fn from(reverse: bool) -> Self {
+        Self::new(reverse)
+    }
+}
+
+impl From<HeadersDirection> for bool {
+    fn from(value: HeadersDirection) -> Self {
+        match value {
+            HeadersDirection::Rising => true,
+            HeadersDirection::Falling => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Decodable, Encodable, Header, H256};

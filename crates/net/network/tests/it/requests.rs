@@ -9,8 +9,8 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{
-    Block, Bytes, Header, Signature, Transaction, TransactionKind, TransactionSigned, TxEip2930,
-    H256, U256,
+    Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
+    TransactionSigned, TxEip2930, H256, U256,
 };
 use std::sync::Arc;
 
@@ -108,7 +108,8 @@ async fn test_get_header() {
 
         mock_provider.add_header(hash, header.clone());
 
-        let req = HeadersRequest { start: hash.into(), limit: 1, reverse: false };
+        let req =
+            HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Rising };
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok());
