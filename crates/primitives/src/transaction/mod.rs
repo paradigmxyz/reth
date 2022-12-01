@@ -541,15 +541,15 @@ pub struct TransactionSigned {
 }
 
 impl Encodable for TransactionSigned {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, true);
+    }
+
     fn length(&self) -> usize {
         let len = self.payload_len();
 
         // add the length of the RLP header
         len + length_of_length(len)
-    }
-
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.encode_inner(out, true);
     }
 }
 

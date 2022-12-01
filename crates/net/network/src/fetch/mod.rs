@@ -108,46 +108,35 @@ impl StateFetcher {
         Some(FetchAction::BlockRequest { peer_id, request })
     }
 
-    /// Received a request via a downloader
-    fn on_download_request(&mut self, request: DownloadRequest) -> Option<FetchAction> {
-        match request {
-            DownloadRequest::GetBlockHeaders { request: _, response: _ } => {}
-            DownloadRequest::GetBlockBodies { .. } => {}
-        }
-        None
-    }
-
     /// Advance the state the syncer
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchAction> {
         // drain buffered actions first
-        if let Some(action) = self.poll_action() {
-            return Poll::Ready(action)
-        }
-
-        if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
-            return Poll::Ready(FetchAction::StatusUpdate(status))
-        }
-
         loop {
-            // poll incoming requests
-            match self.download_requests_rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(request)) => {
-                    if let Some(action) = self.on_download_request(request) {
-                        return Poll::Ready(action)
+            if let Some(action) = self.poll_action() {
+                return Poll::Ready(action)
+            }
+
+            if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
+                return Poll::Ready(FetchAction::StatusUpdate(status))
+            }
+
+            loop {
+                // poll incoming requests
+                match self.download_requests_rx.poll_next_unpin(cx) {
+                    Poll::Ready(Some(request)) => {
+                        self.queued_requests.push_back(request);
                     }
+                    Poll::Ready(None) => {
+                        unreachable!("channel can't close")
+                    }
+                    Poll::Pending => break,
                 }
-                Poll::Ready(None) => {
-                    unreachable!("channel can't close")
-                }
-                Poll::Pending => break,
+            }
+
+            if self.queued_requests.is_empty() {
+                return Poll::Pending
             }
         }
-
-        if self.queued_requests.is_empty() {
-            return Poll::Pending
-        }
-
-        Poll::Pending
     }
 
     /// Handles a new request to a peer.
