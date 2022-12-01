@@ -83,7 +83,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get header with canonical hashes.
         let mut headers = db_tx.cursor::<tables::Headers>()?;
         // Get bodies (to get tx index) with canonical hashes.
-        let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
+        //let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
         // Get transaction of the block that we are executing.
         let mut tx = db_tx.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -327,14 +327,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             .map(|i| i)
             .collect::<Result<Vec<_>, _>>()?;
 
-        // revert all changes to PlainState
+        // revert all changes to PlainStorage
         for (key, account_chageset) in storage_chageset_batch.into_iter().rev() {}
 
-        // take transaction patches: AccountChangeDiff StorageChangeDiff
-        // apply changes to PlainAccountState and PlainStorageChange
-        // Discard transaction patches
+        // TODO Discard transaction patches
 
-        panic!("For unwindng we need Account/Storage ChangeSet");
+        panic!("For unwinding we need Account/Storage ChangeSet");
         //Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
