@@ -108,7 +108,8 @@ impl<'a> StructHandler<'a> {
             known_types.contains(&ftype.as_str()) ||
                 is_flag_type(ftype) ||
                 self.fields_iterator.peek().is_none(),
-            "{ftype} field should be placed as the last one since it's not known. "
+            "`{ftype}` field should be placed as the last one since it's not known. 
+            If it's an alias type (which are not supported by proc_macro), be sure to add it to either `known_types` or `get_bit_size` lists in the derive crate."
         );
 
         if ftype == "bytes::Bytes" {
