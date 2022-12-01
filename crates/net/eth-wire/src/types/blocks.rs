@@ -1,7 +1,7 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 use super::RawBlockBody;
-use reth_primitives::{BlockHashOrNumber, Header, TransactionSigned, H256};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// A request for a peer to return block headers starting at the requested block.
@@ -27,8 +27,8 @@ pub struct GetBlockHeaders {
     /// [`limit`](#structfield.limit) headers.
     pub skip: u32,
 
-    /// Whether or not the headers should be returned in reverse order.
-    pub reverse: bool,
+    /// The direction in which the headers should be returned in.
+    pub direction: HeadersDirection,
 }
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
@@ -172,7 +172,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         }
         .encode(&mut data);
@@ -193,7 +193,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -211,7 +211,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         }
         .encode(&mut data);
@@ -228,7 +228,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         };
         let result = RequestPair::decode(&mut &data[..]);

@@ -10,7 +10,7 @@ use reth_interfaces::{
     p2p::error::RequestResult,
     provider::{BlockProvider, HeaderProvider},
 };
-use reth_primitives::{BlockHashOrNumber, Header, PeerId};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, PeerId};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -77,9 +77,8 @@ where
 
     /// Returns the list of requested heders
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
-        let GetBlockHeaders { start_block, limit, skip, reverse } = request;
+        let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
-        let direction = HeadersDirection::new(reverse);
         let mut headers = Vec::new();
 
         let mut block: BlockHashOrNumber = match start_block {
@@ -213,30 +212,6 @@ where
                     IncomingEthRequest::GetReceipts { .. } => {}
                 },
             }
-        }
-    }
-}
-
-/// Represents the direction for a headers request depending on the `reverse` field of the request.
-///
-/// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-/// [`HeadersDirection::Falling`] block numbers for `reverse == false`
-///
-/// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
-#[derive(Copy, Clone)]
-pub enum HeadersDirection {
-    /// Rising block number.
-    Rising,
-    /// Falling block number.
-    Falling,
-}
-
-impl HeadersDirection {
-    fn new(reverse: bool) -> Self {
-        if reverse {
-            HeadersDirection::Rising
-        } else {
-            HeadersDirection::Falling
         }
     }
 }

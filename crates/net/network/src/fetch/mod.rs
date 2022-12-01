@@ -152,12 +152,12 @@ impl StateFetcher {
             DownloadRequest::GetBlockHeaders { request, response } => {
                 let inflight = Request { request: request.clone(), response };
                 self.inflight_headers_requests.insert(peer_id, inflight);
-                let HeadersRequest { start, limit, reverse } = request;
+                let HeadersRequest { start, limit, direction } = request;
                 BlockRequest::GetBlockHeaders(GetBlockHeaders {
                     start_block: start,
                     limit,
                     skip: 0,
-                    reverse,
+                    direction,
                 })
             }
             DownloadRequest::GetBlockBodies { request, response } => {
