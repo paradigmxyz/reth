@@ -100,18 +100,35 @@ where
 
         // get the message id
         let id = *hello_bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+        let id = P2PMessageID::try_from(id)?;
 
-        // the first message sent MUST be the hello message
-        if id != P2PMessageID::Hello as u8 {
-            return Err(P2PStreamError::HandshakeError(
-                P2PHandshakeError::NonHelloMessageInHandshake,
-            ))
+        // the first message sent MUST be the hello OR disconnect message
+        match id {
+            P2PMessageID::Hello => {}
+            P2PMessageID::Disconnect => {
+                return match P2PMessage::decode(&mut &hello_bytes[..])? {
+                    P2PMessage::Disconnect(reason) => {
+                        tracing::error!("Disconnected by peer during handshake: {}", reason);
+                        Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
+                    }
+                    msg => Err(P2PStreamError::HandshakeError(
+                        P2PHandshakeError::NonHelloMessageInHandshake,
+                    )),
+                }
+            }
+            id => {
+                tracing::error!("expected hello message but received: {:?}", id);
+                return Err(P2PStreamError::HandshakeError(
+                    P2PHandshakeError::NonHelloMessageInHandshake,
+                ))
+            }
         }
 
         let their_hello = match P2PMessage::decode(&mut &hello_bytes[..])? {
             P2PMessage::Hello(hello) => Ok(hello),
-            _ => {
-                // TODO: this should never occur due to the id check
+            msg => {
+                // Note: this should never occur due to the id check
+                tracing::error!("expected hello message but received: {:?}", msg);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
             }
         }?;
@@ -575,6 +592,7 @@ impl Decodable for P2PMessage {
 }
 
 /// Message IDs for `p2p` subprotocol messages.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum P2PMessageID {
     /// Message ID for the [`P2PMessage::Hello`] message.
     Hello = 0x00,
@@ -642,12 +660,12 @@ pub enum ProtocolVersion {
 }
 
 impl Encodable for ProtocolVersion {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        (*self as u8).encode(out)
+    }
     fn length(&self) -> usize {
         // the version should be a single byte
         (*self as u8).length()
-    }
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        (*self as u8).encode(out)
     }
 }
 
@@ -748,12 +766,6 @@ impl TryFrom<u8> for DisconnectReason {
 }
 
 impl Encodable for DisconnectReason {
-    fn length(&self) -> usize {
-        // disconnect reasons are snappy encoded as follows:
-        // [0x01, 0x00, reason as u8]
-        // this is 3 bytes
-        3
-    }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         // disconnect reasons are snappy encoded as follows:
         // [0x01, 0x00, reason as u8]
@@ -761,6 +773,12 @@ impl Encodable for DisconnectReason {
         out.put_u8(0x01);
         out.put_u8(0x00);
         out.put_u8(*self as u8);
+    }
+    fn length(&self) -> usize {
+        // disconnect reasons are snappy encoded as follows:
+        // [0x01, 0x00, reason as u8]
+        // this is 3 bytes
+        3
     }
 }
 
