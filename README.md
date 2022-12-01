@@ -29,16 +29,46 @@ Our goals are:
 2. **Performance**: Reth aims to be fast, so we used Rust and the [Erigon staged-sync](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) node architecture. We also use our Ethereum libraries (including [ethers-rs](https://github.com/gakonst/ethers-rs/) and [revm](https://github.com/bluealloy/revm/)) which we’ve battle-tested and optimized via [Foundry](https://github.com/foundry-rs/foundry/).
 3. **Free for anyone to use any way they want**: Reth is free open source software, built for the community, by the community. By licensing the software under the Apache/MIT license, we want developers to use it without being bound by business licenses, or having to think about the virality of GPL-like licenses.
 
-## Build
+## Build & Test
 
 Rust minimum required version to build this project is 1.65.0 published 02.11.2022
 
-## Docs
+```sh
+git clone https://github.com/foundry-rs/reth
+cd reth
+cargo test --all
+```
 
-- [User docs][book]
-- [Contributor docs](./docs)
+Or via `cargo install --git https://github.com/foundry-rs/foundry --profile local --locked foundry-cli anvil`.
+
+## Completion Checklist
+
+* Coming Soon :) Contributions welcome!
+
+## Contributing and Getting Help
+
+If you want to contribute, or follow along with contributor discussion, you can use our [main telegram](https://t.me/paradigm_reth) to chat with us about the development of Reth!
+
+If you have any questions, first see if the answer to your question can be found in the [book][book], or in the relevant [crate](./docs/repo/layout.md).
+
+If the answer is not there:
+
+-   Join the [Telegram][tg-url] to get help, or
+-   Open a [discussion](https://github.com/foundry-rs/reth/discussions/new) with your question, or
+-   Open an issue with [the bug](https://github.com/foundry-rs/reth/issues/new)
+
+Guidelines on how to contribute can be found in our [`CONTRIBUTING.md`](./CONTRIBUTING.md). Get started with contributing in our [contributor docs](./docs)
+
+## Security
+
+See [`SECURITY.md`](./SECURITY.md).
+
+## Acknowledgements
+
+* Coming Soon :) "Reth Lineage" will be an attempt at doing a historical analysis of the innovations of every client that has existed. We stand on the shoulders of giants, and none of this would have been possible without them.
 
 [codecov]: https://app.codecov.io/gh/foundry-rs/reth
 [gh-ci]: https://github.com/foundry-rs/reth/actions/workflows/ci.yml
 [gh-deny]: https://github.com/foundry-rs/reth/actions/workflows/deny.yml
 [book]: https://foundry-rs.github.io/reth/
+
