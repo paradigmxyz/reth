@@ -141,7 +141,7 @@ where
         todo!()
     }
 
-    async fn code_at(&self, _address: Address, _block_number: Option<BlockId>) -> Result<Bytes> {
+    async fn get_code(&self, _address: Address, _block_number: Option<BlockId>) -> Result<Bytes> {
         todo!()
     }
 
@@ -190,7 +190,7 @@ where
         todo!()
     }
 
-    async fn work(&self) -> Result<Work> {
+    async fn get_work(&self) -> Result<Work> {
         todo!()
     }
 

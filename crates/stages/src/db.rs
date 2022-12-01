@@ -3,6 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use reth_db::kv::cursor::PairResult;
 use reth_interfaces::db::{
     models::{BlockNumHash, NumTransactions},
     tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table,
@@ -87,6 +88,12 @@ where
     /// Close the current inner transaction.
     pub fn close(&mut self) {
         self.tx.take();
+    }
+
+    /// Get exact or previous value from the database
+    pub(crate) fn get_exact_or_prev<T: Table>(&self, key: T::Key) -> PairResult<T> {
+        let mut cursor = self.cursor::<T>()?;
+        Ok(cursor.seek_exact(key)?.or(cursor.prev()?))
     }
 
     /// Query [tables::CanonicalHeaders] table for block hash by block number

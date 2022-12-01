@@ -12,8 +12,10 @@ Rust minimum required version to build this project is 1.65.0 published 02.11.20
 
 ## Docs
 
-Contributor docs can be found [here](./docs).
+- [User docs][book]
+- [Contributor docs](./docs)
 
 [codecov]: https://app.codecov.io/gh/foundry-rs/reth
 [gh-ci]: https://github.com/foundry-rs/reth/actions/workflows/ci.yml
 [gh-deny]: https://github.com/foundry-rs/reth/actions/workflows/deny.yml
+[book]: https://foundry-rs.github.io/reth/

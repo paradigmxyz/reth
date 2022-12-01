@@ -1,6 +1,7 @@
 use crate::traits::PropagateKind;
 use reth_primitives::{TxHash, H256};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Various events that describe status changes of a transaction.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -20,5 +21,5 @@ pub enum TransactionEvent {
     /// Transaction became invalid indefinitely.
     Invalid,
     /// Transaction was propagated to peers.
-    Propagated(Vec<PropagateKind>),
+    Propagated(Arc<Vec<PropagateKind>>),
 }

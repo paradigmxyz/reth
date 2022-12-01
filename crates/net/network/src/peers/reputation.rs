@@ -106,16 +106,6 @@ pub(crate) struct ReputationChange(Reputation);
 // === impl ReputationChange ===
 
 impl ReputationChange {
-    /// Apply no reputation change.
-    pub(crate) const fn none() -> Self {
-        Self(0)
-    }
-
-    /// Reputation change for a peer that dropped the connection.
-    pub(crate) const fn dropped() -> Self {
-        Self(REMOTE_DISCONNECT_REPUTATION_CHANGE)
-    }
-
     /// Helper type for easier conversion
     #[inline]
     pub(crate) fn as_i32(self) -> Reputation {

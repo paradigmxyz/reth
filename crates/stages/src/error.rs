@@ -17,7 +17,7 @@ pub enum StageError {
         error: consensus::Error,
     },
     /// The stage encountered a database error.
-    #[error("An internal database error occurred.")]
+    #[error("An internal database error occurred: {0}")]
     Database(#[from] DbError),
     #[error("Stage encountered a execution error in block {block}: {error}.")]
     /// The stage encountered a execution error
@@ -29,8 +29,12 @@ pub enum StageError {
         error: executor::Error,
     },
     /// The stage encountered a database integrity error.
-    #[error("A database integrity error occurred.")]
+    #[error("A database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] DatabaseIntegrityError),
+    /// Invalid download response. Applicable for stages which
+    /// rely on external downloaders
+    #[error("Invalid download response: {0}")]
+    Download(String),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

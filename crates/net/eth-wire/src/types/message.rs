@@ -4,6 +4,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
     NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
+use crate::SharedTransactions;
 use bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
@@ -225,13 +226,17 @@ impl Encodable for EthMessage {
     }
 }
 
-/// Represents broadcast messages of [`EthMessage`] that can be sent to multiple peers
+/// Represents broadcast messages of [`EthMessage`] with the same object that can be sent to
+/// multiple peers.
+///
+/// Messages that contain a list of hashes depend on the peer the message is sent to. A peer should
+/// never receive a hash of an object (block, transaction) it has already seen.
+///
+/// Note: This is only useful for outgoing messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EthBroadcastMessage {
-    NewBlockHashes(Arc<NewBlockHashes>),
     NewBlock(Arc<NewBlock>),
-    Transactions(Arc<Transactions>),
-    NewPooledTransactionHashes(Arc<NewPooledTransactionHashes>),
+    Transactions(SharedTransactions),
 }
 
 // === impl EthBroadcastMessage ===
@@ -240,12 +245,8 @@ impl EthBroadcastMessage {
     /// Returns the message's ID.
     pub fn message_id(&self) -> EthMessageID {
         match self {
-            EthBroadcastMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthBroadcastMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthBroadcastMessage::Transactions(_) => EthMessageID::Transactions,
-            EthBroadcastMessage::NewPooledTransactionHashes(_) => {
-                EthMessageID::NewPooledTransactionHashes
-            }
         }
     }
 }
@@ -253,19 +254,15 @@ impl EthBroadcastMessage {
 impl Encodable for EthBroadcastMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
-            EthBroadcastMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
             EthBroadcastMessage::NewBlock(new_block) => new_block.encode(out),
             EthBroadcastMessage::Transactions(transactions) => transactions.encode(out),
-            EthBroadcastMessage::NewPooledTransactionHashes(hashes) => hashes.encode(out),
         }
     }
 
     fn length(&self) -> usize {
         match self {
-            EthBroadcastMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
             EthBroadcastMessage::NewBlock(new_block) => new_block.length(),
             EthBroadcastMessage::Transactions(transactions) => transactions.length(),
-            EthBroadcastMessage::NewPooledTransactionHashes(hashes) => hashes.length(),
         }
     }
 }

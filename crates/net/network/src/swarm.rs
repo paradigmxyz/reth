@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::warn;
+use tracing::{trace, warn};
 
 /// Contains the connectivity related state of the network.
 ///
@@ -28,6 +28,38 @@ use tracing::warn;
 /// The manages the [`ConnectionListener`] and delegates new incoming connections to the
 /// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
+///
+/// Following diagram gives displays the dataflow contained in the [`Swarm`]
+///
+/// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
+/// tasks. After a successful RLPx authentication, the task is ready to accept ETH requests or
+/// broadcast messages. A task listens for messages from the [`SessionManager`] which include
+/// broadcast messages like `Transactions` or internal commands, for example to disconnect the
+/// session.
+///
+/// The [`NetworkState`] keeps track of all connected and discovered peers and can initiate outgoing
+/// connections. For each active session, the [`NetworkState`] keeps a sender half of the ETH
+/// request channel for the created session and sends requests it receives from the
+/// [`StateFetcher`], which receives request objects from the client interfaces responsible for
+/// downloading headers and bodies.
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ```mermaid
+///  graph TB
+///     connections(TCP Listener)
+///     Discovery[(Discovery)]
+///     fetchRequest(Client Interfaces)
+///     Sessions[(SessionManager)]
+///     SessionTask[(Peer Session)]
+///     State[(State)]
+///     StateFetch[(State Fetcher)]
+///   connections --> |incoming| Sessions
+///   State --> |initiate outgoing| Sessions
+///   Discovery --> |update peers| State
+///   Sessions --> |spawns| SessionTask
+///   SessionTask <--> |handle state requests| State
+///   fetchRequest --> |request Headers, Bodies| StateFetch
+///   State --> |poll pending requests| StateFetch
+/// ```
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
@@ -67,6 +99,7 @@ where
     pub(crate) fn listener(&self) -> &ConnectionListener {
         &self.incoming
     }
+
     /// Mutable access to the [`SessionManager`].
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
@@ -139,12 +172,19 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
+                if let Err(limit) = self.state_mut().peers_mut().on_inbound_pending_session() {
+                    // We currently don't have additional capacity to establish a session from an
+                    // incoming connection, so we drop the connection.
+                    trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                    return None
+                }
+
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        warn!(?err, "Incoming connection rejected");
+                        warn!(target: "net", ?err, "Incoming connection rejected");
                     }
                 }
             }
@@ -156,7 +196,8 @@ where
     fn on_state_action(&mut self, event: StateAction) -> Option<SwarmEvent> {
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
-                self.sessions.dial_outbound(remote_addr, peer_id);
+                self.dial_outbound(remote_addr, peer_id);
+                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
@@ -269,6 +310,7 @@ pub(crate) enum SwarmEvent {
     /// An outbound connection is initiated.
     OutgoingTcpConnection {
         /// Address of the remote peer.
+        peer_id: PeerId,
         remote_addr: SocketAddr,
     },
     SessionEstablished {

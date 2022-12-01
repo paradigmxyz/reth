@@ -4,8 +4,6 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO remove later
-#![allow(dead_code, clippy::too_many_arguments)]
 
 //! reth P2P networking.
 //!
@@ -19,17 +17,18 @@ mod cache;
 mod config;
 mod discovery;
 pub mod error;
+pub mod eth_requests;
 mod fetch;
 mod import;
 mod listener;
 mod manager;
 mod message;
 mod network;
-mod peers;
+pub mod peers;
 mod session;
 mod state;
 mod swarm;
-mod transactions;
+pub mod transactions;
 
 pub use config::NetworkConfig;
 pub use fetch::FetchClient;
