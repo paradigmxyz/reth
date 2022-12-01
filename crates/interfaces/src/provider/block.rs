@@ -129,10 +129,10 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
         let parent_num_hash = BlockNumHash((parent_number, parent_hash));
 
-        let parent_body = tx
-            .get::<tables::BlockBodies>(parent_num_hash)?
+        let parent_commulative_tx_cnt = tx
+            .get::<tables::CumulativeTxCount>(parent_num_hash)?
             .ok_or(ProviderError::BlockBodyNotExist { block_num_hash: parent_num_hash })?;
-        parent_body.next_block_tx_id()
+        parent_commulative_tx_cnt
     };
 
     // insert body
@@ -145,8 +145,6 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         },
     )?;
 
-    tx.put::<tables::CumulativeTxCount>(block_num_hash, start_tx_number)?;
-
     let mut tx_number = start_tx_number;
     for eth_tx in block.body.iter() {
         let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
@@ -154,6 +152,9 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
         tx_number += 1;
     }
+
+    tx.put::<tables::CumulativeTxCount>(block_num_hash, tx_number)?;
+
 
     Ok(())
 }
