@@ -14,7 +14,7 @@ use reth_interfaces::{
         traits::BatchDownload,
     },
 };
-use reth_primitives::{SealedHeader, H256};
+use reth_primitives::{HeadersDirection, SealedHeader, H256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     borrow::Borrow,
@@ -175,7 +175,11 @@ where
 
     /// Get the headers request to dispatch
     fn headers_request(&self) -> HeadersRequest {
-        HeadersRequest { start: self.request_start().into(), limit: self.batch_size, reverse: true }
+        HeadersRequest {
+            start: self.request_start().into(),
+            limit: self.batch_size,
+            direction: HeadersDirection::Rising,
+        }
     }
 
     /// Insert the header into buffer

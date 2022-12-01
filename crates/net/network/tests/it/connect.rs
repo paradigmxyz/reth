@@ -2,8 +2,11 @@
 
 use super::testnet::Testnet;
 use futures::StreamExt;
-use reth_network::NetworkEvent;
-use std::collections::HashSet;
+use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
+use reth_interfaces::test_utils::TestApi;
+use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
+use secp256k1::SecretKey;
+use std::{collections::HashSet, sync::Arc};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -54,5 +57,26 @@ async fn test_establish_connections() {
         assert_eq!(net.peers()[0].num_peers(), 2);
         assert_eq!(net.peers()[1].num_peers(), 1);
         assert_eq!(net.peers()[2].num_peers(), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_connect_with_boot_nodes() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let mut discv4 = Discv4Config::builder();
+    discv4.add_boot_nodes(mainnet_nodes());
+
+    let config =
+        NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).discovery(discv4).build();
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    let mut events = handle.event_listener();
+    tokio::task::spawn(network);
+
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
     }
 }

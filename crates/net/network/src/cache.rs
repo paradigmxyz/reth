@@ -29,11 +29,19 @@ impl<T: Hash + Eq> LruCache<T> {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                self.inner.pop_front();
+                self.remove_lru();
             }
             return true
         }
         false
+    }
+
+    /// Remove the least recently used entry and return it.
+    ///
+    /// If the `LruCache` is empty this will return None.
+    #[inline]
+    fn remove_lru(&mut self) {
+        self.inner.pop_front();
     }
 
     /// Returns `true` if the set contains a value.

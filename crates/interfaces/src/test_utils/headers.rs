@@ -13,7 +13,7 @@ use crate::{
 };
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockLocked, Header, SealedHeader, H256, U256};
+use reth_primitives::{BlockLocked, Header, HeadersDirection, SealedHeader, H256, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     pin::Pin,
@@ -98,7 +98,7 @@ impl TestDownload {
         if self.fut.is_none() {
             let request = HeadersRequest {
                 limit: self.limit,
-                reverse: true,
+                direction: HeadersDirection::Rising,
                 start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
             };
             let client = Arc::clone(&self.client);

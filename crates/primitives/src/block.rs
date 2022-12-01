@@ -46,7 +46,7 @@ impl Deref for BlockLocked {
 }
 
 /// Either a block hash _or_ a block number
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BlockHashOrNumber {
     /// A block hash
     Hash(H256),
@@ -68,16 +68,16 @@ impl From<u64> for BlockHashOrNumber {
 
 /// Allows for RLP encoding of either a block hash or block number
 impl Encodable for BlockHashOrNumber {
-    fn length(&self) -> usize {
-        match self {
-            Self::Hash(block_hash) => block_hash.length(),
-            Self::Number(block_number) => block_number.length(),
-        }
-    }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::Hash(block_hash) => block_hash.encode(out),
             Self::Number(block_number) => block_number.encode(out),
+        }
+    }
+    fn length(&self) -> usize {
+        match self {
+            Self::Hash(block_hash) => block_hash.length(),
+            Self::Number(block_number) => block_number.length(),
         }
     }
 }

@@ -1,4 +1,4 @@
-//! Transaction management for the p2p network.
+//! Transactions management for the p2p network.
 
 use crate::{
     cache::LruCache,
