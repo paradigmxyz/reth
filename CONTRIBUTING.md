@@ -9,7 +9,7 @@ There are multiple opportunities to contribute at any level. It doesn't matter i
 This document will help you get started. **Do not let the document intimidate you**.
 It should be considered as a guide to help you navigate the process.
 
-<!-- The [dev Telegram][dev-tg] is available for any concerns you may have that are not covered in this guide. -->
+The [dev Telegram][dev-tg] is available for any concerns you may have that are not covered in this guide.
 
 ### Code of Conduct
 
@@ -94,8 +94,6 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
 ```
 
 If you are working on a larger feature, we encourage you to open up a draft pull request, to make sure that other contributors are not duplicating work.
-
-<!-- If you would like to test the binaries built from your change, see [foundryup](https://github.com/foundry-rs/foundry/tree/master/foundryup). -->
 
 #### Adding tests
 
@@ -182,9 +180,8 @@ Releases are automatically done by the release workflow when a tag is pushed, ho
 
 [rust-coc]: https://github.com/rust-lang/rust/blob/master/CODE_OF_CONDUCT.md
 [coc-header]: #code-of-conduct
-<!-- [dev-tg]: https://t.me/foundry_rs -->
-[reth-book]: https://github.com/foundry-rs/reth/tree/main/book
-<!-- [support-tg]: https://t.me/foundry_support -->
+[dev-tg]: https://t.me/paradigm_reth
+[reth-book]: https://github.com/paradigmxyz/reth/tree/main/book
 [mcve]: https://stackoverflow.com/help/mcve
 [hiding-a-comment]: https://help.github.com/articles/managing-disruptive-comments/#hiding-a-comment
 [foundry-contributing]: https://github.com/foundry-rs/foundry/blob/master/CONTRIBUTING.md
