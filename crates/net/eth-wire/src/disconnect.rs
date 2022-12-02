@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use bytes::Buf;
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use thiserror::Error;
 
 /// RLPx disconnect reason.
@@ -129,7 +129,7 @@ impl Decodable for DisconnectReason {
         }
 
         let third = buf[2];
-        if third != 0xc1 {
+        if third != EMPTY_LIST_CODE + 1 {
             return Err(DecodeError::Custom("invalid disconnect reason - invalid rlp header"))
         }
 
