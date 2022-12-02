@@ -14,7 +14,7 @@
 
 # What is this?
 
-Reth is a new Apache/MIT-licensed full node implementation of Ethereum focused on contributor friendliness, modularity, and performance.
+Reth is a new Apache/MIT-licensed full node implementation of Ethereum focused on contributor friendliness, modularity, and performance - built by [Paradigm](https://paradigm.xyz/) and the community.
 
 An Ethereum node is a piece of software that connects to the Ethereum network and allows users to send and receive transactions, as well as access and interact with the Ethereum blockchain. The Ethereum network is decentralized, which means that it relies on a network of nodes to validate and process transactions, rather than a central authority.
 
@@ -28,11 +28,9 @@ Our goals are:
 5. **Support as many EVM chains as possible**: We aspire that Reth can full-sync not only Ethereum, but also other chains like Optimism, Polygon, Binance Smart Chain, and more. If you're working on any of these projects, please reach out.
 6. **Archive & pruned nodes, full sync and fast syncs**: We want to solve for node operators that care about fast historical queries, but also for hobbyists who cannot operate on large hardware. We also want to support teams and individuals who want both sync from genesis and via "fast sync". We envision that Reth will be configurable enough and provide configurable "profiles" for the tradeoffs that each team faces.
 
-# Completion Checklist
+# Status
 
-Is this project ready to use?
-
-* Coming Soon :) Contributions welcome!
+The project is not ready for use. We hope to have full sync implemented sometime in January/February 2022, followed by optimizations. In the meantime, we're working on making sure every crate of the repository is well documented, abstracted and tested.
 
 ---
 
@@ -72,8 +70,8 @@ Reth is a new implementation of the Ethereum protocol, and does not include code
 
 None of this would have been possible without them, so big shoutout to the teams below for the inspiration:
 * [Geth](https://github.com/ethereum/go-ethereum/):
-* [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth):
-* [Akula](https://github.com/akula-bft/akula/):
+* [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth): Erigon pioneered the ["Staged Sync" architecture](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) that Reth is using, as well as [introduced MDBX](https://github.com/ledgerwatch/erigon/wiki/Choice-of-storage-engine) as the database of choice.
+* [Akula](https://github.com/akula-bft/akula/) (deprecated): Reth uses forks of the Apache versions of the [MDBX Bindings](https://github.com/foundry-rs/reth/pull/132), [FastRLP](https://github.com/foundry-rs/reth/pull/63) and [ECIES](https://github.com/foundry-rs/reth/pull/80) . While we could have reimplemented these packages, they implement standardized Ethereum protocols, and bindings to a database. Given that they were already released as Apache, we decided it was easier to use that code to iterate faster. We thank the Akula team for their contributions to the Rust Ethereum ecosystem and for publishing these packages.
 
 [codecov]: https://app.codecov.io/gh/foundry-rs/reth
 [gh-ci]: https://github.com/foundry-rs/reth/actions/workflows/ci.yml
