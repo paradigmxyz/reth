@@ -84,23 +84,24 @@ where
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
-        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
+        let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
             .await
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
 
         // let's check the compressed length first, we will need to check again once confirming
         // that it contains snappy-compressed data (this will be the case for all non-p2p messages).
-        if hello_bytes.len() > MAX_PAYLOAD_SIZE {
+        if first_message_bytes.len() > MAX_PAYLOAD_SIZE {
             return Err(P2PStreamError::MessageTooBig {
-                message_size: hello_bytes.len(),
+                message_size: first_message_bytes.len(),
                 max_size: MAX_PAYLOAD_SIZE,
             })
         }
 
-        // get the message id
-        let id = *hello_bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
-        let id = P2PMessageID::try_from(id)?;
+        // the u8::decode implementation handles the 0x80 case for P2PMessageID::Hello, and the
+        // TryFrom implementation ensures that the message id is known.
+        let message_id = u8::decode(&mut &first_message_bytes[..])?;
+        let id = P2PMessageID::try_from(message_id)?;
 
         // The first message sent MUST be a hello OR disconnect message
         //
@@ -114,7 +115,7 @@ where
                 // the u8::decode implementation handles the 0x80 case for
                 // DisconnectReason::DisconnectRequested, and the TryFrom implementation ensures
                 // that the disconnect reason is known.
-                let disconnect_id = u8::decode(&mut &hello_bytes[1..])?;
+                let disconnect_id = u8::decode(&mut &first_message_bytes[1..])?;
                 let reason =  DisconnectReason::try_from(disconnect_id)?;
 
                 tracing::error!("Disconnected by peer during handshake: {}", reason);
@@ -128,7 +129,7 @@ where
             }
         }
 
-        let their_hello = match P2PMessage::decode(&mut &hello_bytes[..])? {
+        let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..])? {
             P2PMessage::Hello(hello) => Ok(hello),
             msg => {
                 // Note: this should never occur due to the id check
@@ -581,8 +582,8 @@ impl Encodable for P2PMessage {
 /// the hello message is never compressed in the `p2p` subprotocol.
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let first = buf.first().expect("cannot decode empty p2p message");
-        let id = P2PMessageID::try_from(*first)
+        let message_id = u8::decode(&mut &buf[..])?;
+        let id = P2PMessageID::try_from(message_id)
             .or(Err(DecodeError::Custom("unknown p2p message id")))?;
         buf.advance(1);
         match id {
