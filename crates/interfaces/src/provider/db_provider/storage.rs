@@ -22,13 +22,14 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
         // get block hash
         let block_hash = tx
             .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockNumberNotExists { block_number })?;
+            .ok_or(Error::BlockNumber { block_number })?;
 
         // get transaction number
         let block_num_hash = (block_number, block_hash);
         let transaction_number = tx
-            .get::<tables::CumulativeTxCount>(block_num_hash.into())?
-            .ok_or(Error::BlockTxNumberNotExists { block_hash })?;
+            .get::<tables::BlockBodies>(block_num_hash.into())?
+            .ok_or(Error::BlockNumberHash { block_number, block_hash })?
+            .base_tx_id;
 
         Ok(StateProviderImplHistory::new(tx, transaction_number))
     }
@@ -36,15 +37,15 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<Self::HistorySP<'_>> {
         let tx = self.db.tx()?;
         // get block number
-        let block_number = tx
-            .get::<tables::HeaderNumbers>(block_hash)?
-            .ok_or(Error::BlockHashNotExist { block_hash })?;
+        let block_number =
+            tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
 
         // get transaction number
         let block_num_hash = (block_number, block_hash);
         let transaction_number = tx
-            .get::<tables::CumulativeTxCount>(block_num_hash.into())?
-            .ok_or(Error::BlockTxNumberNotExists { block_hash })?;
+            .get::<tables::BlockBodies>(block_num_hash.into())?
+            .ok_or(Error::BlockNumberHash { block_number, block_hash })?
+            .base_tx_id;
 
         Ok(StateProviderImplHistory::new(tx, transaction_number))
     }

@@ -4,7 +4,7 @@ use crate::db::{
     codecs::CompactU256,
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
-        blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockBody},
+        blocks::{BlockNumHash, HeaderHash, StoredBlockBody},
         ShardedKey,
     },
     DupSort,
@@ -24,13 +24,12 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 20] = [
+pub const TABLES: [(TableType, &str); 19] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
     (TableType::Table, BlockBodies::const_name()),
-    (TableType::Table, CumulativeTxCount::const_name()),
     (TableType::Table, NonCanonicalTransactions::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, Receipts::const_name()),
@@ -124,10 +123,6 @@ table!(
     /// 
     /// The transaction IDs point to the [`Transactions`] table.
     BlockBodies => BlockNumHash => StoredBlockBody);
-
-table!(
-    /// Stores the maximum [`TxNumber`] from which this particular block starts.
-    CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
 
 table!(
     /// Stores the transaction body from non canonical transactions.

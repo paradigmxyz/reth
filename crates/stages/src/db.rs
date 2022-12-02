@@ -3,9 +3,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use reth_db::kv::cursor::PairResult;
 use reth_interfaces::db::{
-    models::{BlockNumHash, NumTransactions},
+    models::{BlockNumHash, StoredBlockBody},
     tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table,
 };
 use reth_primitives::{BlockHash, BlockNumber};
@@ -90,12 +89,6 @@ where
         self.tx.take();
     }
 
-    /// Get exact or previous value from the database
-    pub(crate) fn get_exact_or_prev<T: Table>(&self, key: T::Key) -> PairResult<T> {
-        let mut cursor = self.cursor::<T>()?;
-        Ok(cursor.seek_exact(key)?.or(cursor.prev()?))
-    }
-
     /// Query [tables::CanonicalHeaders] table for block hash by block number
     pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
         let hash = self
@@ -112,13 +105,23 @@ where
         Ok((number, self.get_block_hash(number)?).into())
     }
 
-    /// Query [tables::CumulativeTxCount] table for total transaction
-    /// count block by [BlockNumHash] key
-    pub(crate) fn get_tx_count(&self, key: BlockNumHash) -> Result<NumTransactions, StageError> {
-        let count = self.get::<tables::CumulativeTxCount>(key)?.ok_or(
-            DatabaseIntegrityError::CumulativeTxCount { number: key.number(), hash: key.hash() },
-        )?;
-        Ok(count)
+    /// Query for block by [BlockNumHash] key
+    pub(crate) fn get_block(&self, key: BlockNumHash) -> Result<StoredBlockBody, StageError> {
+        let block = self
+            .get::<tables::BlockBodies>(key)?
+            .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
+        Ok(block)
+    }
+
+    /// Query [tables::BlockBodies] for block by retrieving hash from [tables::CanonicalHeaders]
+    /// first
+    pub(crate) fn get_block_by_num(
+        &self,
+        number: BlockNumber,
+    ) -> Result<StoredBlockBody, StageError> {
+        let key = self.get_block_numhash(number)?;
+        let body = self.get_block(key)?;
+        Ok(body)
     }
 
     /// Unwind table by some number key

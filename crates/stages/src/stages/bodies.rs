@@ -45,8 +45,7 @@ const BODIES: StageId = StageId("Bodies");
 ///
 /// This stage expects that the genesis has been inserted into the appropriate tables:
 ///
-/// - The header tables (see [HeadersStage][crate::stages::headers::HeadersStage])
-/// - The various indexes (e.g. [TotalTxIndex][crate::stages::tx_index::TxIndex])
+/// - The header tables (see [`HeaderStage`][crate::stages::headers::HeaderStage])
 /// - The [`BlockBodies`][reth_interfaces::db::tables::BlockBodies] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {

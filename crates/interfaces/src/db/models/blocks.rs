@@ -13,9 +13,6 @@ use reth_codecs::{main_codec, Compact};
 use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, H256};
 use serde::{Deserialize, Serialize};
 
-/// Total chain number of transactions. Key for [`CumulativeTxCount`].
-pub type NumTransactions = u64;
-
 /// The storage representation of a block body.
 ///
 /// A block body is stored as a pointer to the first transaction in the block (`base_tx_id`), a

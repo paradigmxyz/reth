@@ -39,7 +39,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount],
+    /// [`BlockBodies`][reth_interfaces::db::tables::BlockBodies],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
     /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
@@ -49,22 +49,23 @@ impl<DB: Database> Stage<DB> for SendersStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         // Look up the start index for transaction range
-        let last_block = db.get_block_numhash(input.stage_progress.unwrap_or_default())?;
-        let start_tx_index = db.get_tx_count(last_block)?;
+        let last_block = db.get_block_by_num(input.stage_progress.unwrap_or_default())?;
+        let start_tx_index = last_block.base_tx_id + last_block.tx_amount + 1;
 
-        // Look up the end index for transaction range (exclusive)
-        let max_block = db.get_block_numhash(input.previous_stage_progress())?;
-        let end_tx_index = db.get_tx_count(max_block)?;
+        // Look up the end index for transaction range (inclusive)
+        let max_block_key = db.get_block_numhash(input.previous_stage_progress())?;
+        let max_block = db.get_block(max_block_key)?;
+        let end_tx_index = max_block.base_tx_id + max_block.tx_amount + 1;
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = db.cursor_mut::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
         let mut tx_cursor = db.cursor::<tables::Transactions>()?;
-        // Walk the transactions from start to end index (exclusive)
+        // Walk the transactions from start to end index (inclusive)
         let entries = tx_cursor
             .walk(start_tx_index)?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < end_tx_index).unwrap_or_default());
+            .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
 
         // Iterate over transactions in chunks
         for chunk in &entries.chunks(self.batch_size) {
@@ -84,7 +85,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
             recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id, sender))?;
         }
 
-        Ok(ExecOutput { stage_progress: max_block.number(), done: true, reached_tip: true })
+        Ok(ExecOutput { stage_progress: max_block_key.number(), done: true, reached_tip: true })
     }
 
     /// Unwind the stage.
@@ -93,20 +94,11 @@ impl<DB: Database> Stage<DB> for SendersStage {
         db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        // Look up the hash of the unwind block
-        if let Some((_, unwind_hash)) =
-            db.get_exact_or_prev::<tables::CanonicalHeaders>(input.unwind_to)?
-        {
-            // Look up the cumulative tx count at unwind block
-            let key = (input.unwind_to, unwind_hash).into();
-            if let Some((_, unwind_tx_count)) =
-                db.get_exact_or_prev::<tables::CumulativeTxCount>(key)?
-            {
-                // The last remaining tx_id should be at `cum_tx_count - 1`
-                db.unwind_table_by_num::<tables::TxSenders>(unwind_tx_count - 1)?;
-            }
-        }
-
+        // Look up the unwind block
+        let unwind_block = db.get_block_by_num(input.unwind_to)?;
+        // Unwind to the last tx for that block
+        let last_tx_index = unwind_block.base_tx_id + unwind_block.tx_amount;
+        db.unwind_table_by_num::<tables::TxSenders>(last_tx_index)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -165,11 +157,10 @@ mod tests {
                         num_hash,
                         StoredBlockBody { base_tx_id, tx_amount, ommers },
                     )?;
-                    tx.put::<tables::CumulativeTxCount>(num_hash, base_tx_id + tx_amount)?;
 
                     for body_tx in txs {
-                        tx.put::<tables::Transactions>(base_tx_id, body_tx)?;
                         base_tx_id += 1;
+                        tx.put::<tables::Transactions>(base_tx_id, body_tx)?;
                     }
 
                     Ok(())
@@ -200,7 +191,7 @@ mod tests {
 
                     for entry in body_walker {
                         let (_, body) = entry?;
-                        for tx_id in body.base_tx_id..body.base_tx_id + body.tx_amount {
+                        for tx_id in body.base_tx_id + 1..=body.base_tx_id + body.tx_amount {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");
