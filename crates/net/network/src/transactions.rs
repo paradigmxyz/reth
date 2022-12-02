@@ -201,16 +201,29 @@ where
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
 
-        for (peer_id, peer) in self.peers.iter_mut() {
+        // send full transactions to a fraction fo the connected peers (square root of the total
+        // number of connected peers)
+        let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
+
+        // Note: Assuming ~random~ order due to random state of the peers map hasher
+        for (idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
             let (hashes, full): (Vec<_>, Vec<_>) =
                 txs.iter().filter(|(hash, _)| peer.transactions.insert(*hash)).cloned().unzip();
 
             if !full.is_empty() {
-                // TODO select peer for full or hash
-                self.network.send_transactions(*peer_id, full);
+                if idx > max_num_full {
+                    for hash in &hashes {
+                        propagated.0.entry(*hash).or_default().push(PropagateKind::Hash(*peer_id));
+                    }
+                    // send hashes of transactions
+                    self.network.send_transactions_hashes(*peer_id, hashes);
+                } else {
+                    // send full transactions
+                    self.network.send_transactions(*peer_id, full);
 
-                for hash in hashes {
-                    propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                    for hash in hashes {
+                        propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                    }
                 }
             }
         }
