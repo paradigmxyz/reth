@@ -161,7 +161,6 @@ impl Stream for TestDownload {
                         resp.0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
-                    cx.waker().wake_by_ref();
                     this.done = true;
                     continue
                 }
