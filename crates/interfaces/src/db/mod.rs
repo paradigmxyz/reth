@@ -247,7 +247,7 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
     /// Cursor to be used to walk through the table.
     pub cursor: &'cursor mut CURSOR,
     /// Value where to start the walk.
-    pub start: Option<Result<T::Value, Error>>,
+    pub start: Option<Result<(T::Key, T::Value), Error>>,
     /// Phantom data for 'tx. As it is only used for `DbDupCursorRO`.
     pub _tx_phantom: PhantomData<&'tx T>,
 }
@@ -255,13 +255,13 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
 impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterator
     for DupWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<T::Value, Error>;
+    type Item = Result<(T::Key, T::Value), Error>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
             return start
         }
-        self.cursor.next_dup_val().transpose()
+        self.cursor.next_dup().transpose()
     }
 }
 

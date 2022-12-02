@@ -155,6 +155,5 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     tx.put::<tables::CumulativeTxCount>(block_num_hash, tx_number)?;
 
-
     Ok(())
 }
