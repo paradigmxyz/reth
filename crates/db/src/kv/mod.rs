@@ -238,6 +238,34 @@ mod tests {
     }
 
     #[test]
+    fn db_cursor_insert() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3, 4, 5]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let key_to_insert = 2;
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+
+        // INSERT
+        cursor.seek_exact(1).unwrap();
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Ok(()));
+        assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+
+        // INSERT (failure)
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(db::Error::Write(4294936497)));
+        assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+    }
+
+    #[test]
     fn db_cursor_append_failure() {
         let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
 
@@ -250,11 +278,11 @@ mod tests {
         tx.commit().expect(ERROR_COMMIT);
 
         // APPEND
-        let key_to_insert = 2;
+        let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
         cursor.seek_exact(1).unwrap();
-        assert_eq!(cursor.append(key_to_insert, H256::zero()), Err(db::Error::Write(4294936878)));
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(db::Error::Write(4294936878)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
     }
 
