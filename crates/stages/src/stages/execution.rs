@@ -316,7 +316,7 @@ mod tests {
             ))),
         };
 
-        // asert accounts
+        // assert accounts
         assert_eq!(
             tx.get::<tables::PlainAccountState>(account1),
             Ok(Some(account1_info)),
