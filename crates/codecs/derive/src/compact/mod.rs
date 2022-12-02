@@ -22,8 +22,14 @@ type IsCompact = bool;
 type FieldName = String;
 // Helper Alias type
 type FieldType = String;
+/// `Compact` has alternative functions that can be used as a workaround for type
+/// specialization of fixed sized types.
+///
+/// Example: `Vec<H256>` vs `Vec<U256>`. The first does not
+/// require the len of the element, while the latter one does.
+type UseAlternative = bool;
 // Helper Alias type
-type StructFieldDescriptor = (FieldName, FieldType, IsCompact);
+type StructFieldDescriptor = (FieldName, FieldType, IsCompact, UseAlternative);
 // Helper Alias type
 type FieldList = Vec<FieldTypes>;
 
@@ -31,7 +37,7 @@ type FieldList = Vec<FieldTypes>;
 pub enum FieldTypes {
     StructField(StructFieldDescriptor),
     EnumVariant(String),
-    EnumUnnamedField(FieldType),
+    EnumUnnamedField((FieldType, UseAlternative)),
 }
 
 /// Derives the [`Compact`] trait and its from/to implementations.
@@ -96,15 +102,20 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
         let segments = &path.path.segments;
         if !segments.is_empty() {
             let mut ftype = String::new();
+
+            let mut use_alt_impl: UseAlternative = false;
+
             for (index, segment) in segments.iter().enumerate() {
                 ftype.push_str(&segment.ident.to_string());
                 if index < segments.len() - 1 {
                     ftype.push_str("::");
                 }
+
+                use_alt_impl = should_use_alt_impl(&ftype, segment);
             }
 
             if is_enum {
-                fields.push(FieldTypes::EnumUnnamedField(ftype.to_string()));
+                fields.push(FieldTypes::EnumUnnamedField((ftype.to_string(), use_alt_impl)));
             } else {
                 let should_compact = is_flag_type(&ftype) ||
                     field.attrs.iter().any(|attr| {
@@ -115,10 +126,33 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
                     field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default(),
                     ftype,
                     should_compact,
+                    use_alt_impl,
                 )));
             }
         }
     }
+}
+
+/// Since there's no impl specialization in rust stable atm, once we find we have a
+/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type.
+/// eg, Vec<H256>. If so, we use another impl to code/decode its data.
+fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
+    if *ftype == "Vec" || *ftype == "Option" {
+        if let syn::PathArguments::AngleBracketed(ref args) = segment.arguments {
+            if let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() {
+                if let (Some(path), 1) =
+                    (arg_path.path.segments.first(), arg_path.path.segments.len())
+                {
+                    if ["H256", "H160", "Address", "Bloom"]
+                        .contains(&path.ident.to_string().as_str())
+                    {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Given the field type in a string format, return the amount of bits necessary to save its maximum
@@ -154,10 +188,10 @@ mod tests {
                 f_u256: U256,
                 f_bool_t: bool,
                 f_bool_f: bool,
-                f_option_none: Option<H256>,
+                f_option_none: Option<U256>,
                 f_option_some: Option<H256>,
                 f_option_some_u64: Option<u64>,
-                f_vec_empty: Vec<H160>,
+                f_vec_empty: Vec<U256>,
                 f_vec_some: Vec<H160>,
             }
         };
@@ -220,12 +254,12 @@ mod tests {
                     flags.set_f_bool_f_len(f_bool_f_len as u8);
                     let f_option_none_len = self.f_option_none.to_compact(&mut buffer);
                     flags.set_f_option_none_len(f_option_none_len as u8);
-                    let f_option_some_len = self.f_option_some.to_compact(&mut buffer);
+                    let f_option_some_len = self.f_option_some.specialized_to_compact(&mut buffer);
                     flags.set_f_option_some_len(f_option_some_len as u8);
                     let f_option_some_u64_len = self.f_option_some_u64.to_compact(&mut buffer);
                     flags.set_f_option_some_u64_len(f_option_some_u64_len as u8);
                     let f_vec_empty_len = self.f_vec_empty.to_compact(&mut buffer);
-                    let f_vec_some_len = self.f_vec_some.to_compact(&mut buffer);
+                    let f_vec_some_len = self.f_vec_some.specialized_to_compact(&mut buffer);
                     let flags = flags.into_bytes();
                     total_len += flags.len() + buffer.len();
                     buf.put_slice(&flags);
@@ -245,14 +279,14 @@ mod tests {
                     let mut f_option_none = Option::default();
                     (f_option_none, buf) = Option::from_compact(buf, flags.f_option_none_len() as usize);
                     let mut f_option_some = Option::default();
-                    (f_option_some, buf) = Option::from_compact(buf, flags.f_option_some_len() as usize);
+                    (f_option_some, buf) = Option::specialized_from_compact(buf, flags.f_option_some_len() as usize);
                     let mut f_option_some_u64 = Option::default();
                     (f_option_some_u64, buf) =
                         Option::from_compact(buf, flags.f_option_some_u64_len() as usize);
                     let mut f_vec_empty = Vec::default();
                     (f_vec_empty, buf) = Vec::from_compact(buf, buf.len());
                     let mut f_vec_some = Vec::default();
-                    (f_vec_some, buf) = Vec::from_compact(buf, buf.len());
+                    (f_vec_some, buf) = Vec::specialized_from_compact(buf, buf.len());
                     let obj = TestStruct {
                         f_u64: f_u64,
                         f_u256: f_u256,

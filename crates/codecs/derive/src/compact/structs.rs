@@ -46,14 +46,20 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `to_compact` code for a struct field.
     fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
-        let (name, ftype, is_compact) = field_descriptor;
+        let (name, ftype, is_compact, use_alt_impl) = field_descriptor;
+
+        let to_compact_ident = if !use_alt_impl {
+            format_ident!("to_compact")
+        } else {
+            format_ident!("specialized_to_compact")
+        };
 
         // Should only happen on wrapper structs like `Struct(pub Field)`
         if name.is_empty() {
             self.is_wrapper = true;
 
             self.lines.push(quote! {
-                let _len = self.0.to_compact(&mut buffer);
+                let _len = self.0.#to_compact_ident(&mut buffer);
             });
 
             if is_flag_type(ftype) {
@@ -76,12 +82,12 @@ impl<'a> StructHandler<'a> {
             self.lines.push(quote! {
                 if self.#name != #itype::zero() {
                     flags.#set_bool_method(true);
-                    self.#name.to_compact(&mut buffer);
+                    self.#name.#to_compact_ident(&mut buffer);
                 };
             });
         } else {
             self.lines.push(quote! {
-                let #len = self.#name.to_compact(&mut buffer);
+                let #len = self.#name.#to_compact_ident(&mut buffer);
             });
         }
         if is_flag_type(ftype) {
@@ -93,7 +99,7 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `from_compact` code for a struct field.
     fn from(&mut self, field_descriptor: &StructFieldDescriptor, known_types: &[&str]) {
-        let (name, ftype, is_compact) = field_descriptor;
+        let (name, ftype, is_compact, use_alt_impl) = field_descriptor;
 
         let (name, len) = if name.is_empty() {
             self.is_wrapper = true;
@@ -102,6 +108,12 @@ impl<'a> StructHandler<'a> {
             (format_ident!("placeholder"), format_ident!("placeholder_len"))
         } else {
             (format_ident!("{name}"), format_ident!("{name}_len"))
+        };
+
+        let from_compact_ident = if !use_alt_impl {
+            format_ident!("from_compact")
+        } else {
+            format_ident!("specialized_from_compact")
         };
 
         assert!(
@@ -125,11 +137,11 @@ impl<'a> StructHandler<'a> {
             if !is_flag_type(ftype) {
                 // It's a type that handles its own length requirements. (h256, Custom, ...)
                 self.lines.push(quote! {
-                    (#name, buf) = #ident_type::from_compact(buf, buf.len());
+                    (#name, buf) = #ident_type::#from_compact_ident(buf, buf.len());
                 })
             } else if *is_compact {
                 self.lines.push(quote! {
-                    (#name, buf) = #ident_type::from_compact(buf, flags.#len() as usize);
+                    (#name, buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
                 });
             } else {
                 todo!()
