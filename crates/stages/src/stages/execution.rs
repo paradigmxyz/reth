@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_executor::{
     config::SpecUpgrades,
-    executor::AccountChangeSet,
+    executor::{AccountChangeSet, AccountInfoChangeSet},
     revm_wrap::{State, SubState},
     Config,
 };
@@ -15,7 +15,7 @@ use reth_interfaces::{
     },
     provider::db::StateProviderImplRefLatest,
 };
-use reth_primitives::{Account, Address, StorageEntry, TransactionSignedEcRecovered, H256, U256};
+use reth_primitives::{Address, StorageEntry, TransactionSignedEcRecovered, H256, U256};
 use std::{fmt::Debug, ops::DerefMut};
 
 const EXECUTION: StageId = StageId("Execution");
@@ -23,37 +23,30 @@ const EXECUTION: StageId = StageId("Execution");
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
-/// Input:
+/// Input tables:
 /// [tables::CanonicalHeaders] get next block to execute.
-/// [tables::Headers] get for env
+/// [tables::Headers] get for revm environment variables.
 /// [tables::CumulativeTxCount] to get tx number
 /// [tables::Transactions] to execute
 ///
-/// [StateProvider] needed for execution on most recent state:
+/// For state access [StateProvider] provides us latest state and history state
+/// For latest most recent state [StateProvider] would need (Used for execution Stage):
 /// [tables::PlainAccountState]
 /// [tables::Bytecodes]
 /// [tables::PlainStorageState]
 ///
-/// [StateProvider] needed for execution on history state (Not needed for stage):
-/// [tables::AccountHistory]
-/// [tables::Bytecodes]
-/// [tables::StorageHistory]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
-///
-/// Output:
+/// Tables updated after state finishes execution:
 /// [tables::PlainAccountState]
 /// [tables::PlainStorageState]
 /// [tables::Bytecodes]
 /// [tables::AccountChangeSet]
 /// [tables::StorageChangeSet]
-/// [tables::AccountHistory] and [tables::StorageHistory] indexes can be updated later in next
-/// stage?
 ///
-/// For unwinds:
+/// For unwinds we are accessing:
 /// [tables::CumulativeTxCount] get tx index to know what needs to be unwinded
-/// [tables::AccountHistory] remove change set and apply old values to [tables::PlainAccountState]
-/// [tables::StorageHistory] remove change set and apply old values to [tables::PlainStorageState]
+/// [tables::AccountHistory] to remove change set and apply old values to
+/// [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
+/// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage;
 
@@ -216,43 +209,28 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     result.state_diff.into_iter()
                 {
                     match account {
-                        (Some(old_acc), Some(new_acc)) => {
+                        AccountInfoChangeSet::Changed { old, new } => {
                             // insert old account in AccountChangeSet
-                            if old_acc != new_acc {
-                                db_tx.put::<tables::AccountChangeSet>(
-                                    tx_index,
-                                    AccountBeforeTx {
-                                        address,
-                                        info: Account {
-                                            nonce: old_acc.nonce,
-                                            balance: old_acc.balance,
-                                            bytecode_hash: old_acc.bytecode_hash,
-                                        },
-                                    },
-                                )?;
-                                db_tx.put::<tables::PlainAccountState>(address, new_acc)?;
-                            }
+                            // check for old != new was already done
+                            db_tx.put::<tables::AccountChangeSet>(
+                                tx_index,
+                                AccountBeforeTx { address, info: old },
+                            )?;
+                            db_tx.put::<tables::PlainAccountState>(address, new)?;
                         }
-                        (None, Some(new_acc)) => {
+                        AccountInfoChangeSet::Created { new } => {
                             // TODO put None accounts inside changeset when `AccountBeforeTx` get
                             // fixed
-                            db_tx.put::<tables::PlainAccountState>(address, new_acc)?;
+                            db_tx.put::<tables::PlainAccountState>(address, new)?;
                         }
-                        (Some(old_acc), None) => {
+                        AccountInfoChangeSet::Destroyed { old } => {
                             db_tx.delete::<tables::PlainAccountState>(address, None)?;
                             db_tx.put::<tables::AccountChangeSet>(
                                 tx_index,
-                                AccountBeforeTx {
-                                    address,
-                                    info: Account {
-                                        nonce: old_acc.nonce,
-                                        balance: old_acc.balance,
-                                        bytecode_hash: old_acc.bytecode_hash,
-                                    },
-                                },
+                                AccountBeforeTx { address, info: old },
                             )?;
                         }
-                        (None, None) => {
+                        AccountInfoChangeSet::NoChange => {
                             // do nothing storage account didn't change
                         }
                     }
@@ -358,7 +336,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let account_chageset_batch = account_changeset
             .walk_dup(to_tx_number, Address::zero())?
             .take(num_of_tx)
-            .map(|i| i)
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
@@ -374,7 +351,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let storage_chageset_batch = storage_changeset
             .walk_dup(TxNumberAddress((to_tx_number, Address::zero())), H256::zero())?
             .take(num_of_tx)
-            .map(|i| i)
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
@@ -419,9 +395,7 @@ mod tests {
         mdbx::WriteMap,
     };
     use reth_interfaces::provider::insert_canonical_block;
-    use reth_primitives::{
-        hex_literal::hex, keccak256, Account, BlockLocked, H160, KECCAK_EMPTY, U256,
-    };
+    use reth_primitives::{hex_literal::hex, keccak256, Account, BlockLocked, H160, U256};
     use reth_rlp::Decodable;
 
     #[tokio::test]
@@ -539,7 +513,7 @@ mod tests {
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc1_info = Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) };
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let acc2_info = Account { nonce: 0, balance, bytecode_hash: Some(KECCAK_EMPTY) };
+        let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 
         tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
         tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();

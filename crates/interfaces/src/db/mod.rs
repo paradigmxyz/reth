@@ -247,7 +247,7 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
     /// Cursor to be used to walk through the table.
     pub cursor: &'cursor mut CURSOR,
     /// Value where to start the walk.
-    pub start: Option<Result<(T::Key, T::Value), Error>>,
+    pub start: IterPairResult<T>,
     /// Phantom data for 'tx. As it is only used for `DbDupCursorRO`.
     pub _tx_phantom: PhantomData<&'tx T>,
 }
