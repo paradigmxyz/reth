@@ -1,12 +1,16 @@
 //! Connection tests
 
+use enr::EnrPublicKey;
 use super::testnet::Testnet;
+use ethers_core::utils::Geth;
+use ethers_providers::{Http, Provider, Middleware};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
 use reth_provider::test_utils::TestApi;
+use reth_primitives::PeerId;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, net::SocketAddr};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -75,6 +79,35 @@ async fn test_connect_with_boot_nodes() {
     let handle = network.handle().clone();
     let mut events = handle.event_listener();
     tokio::task::spawn(network);
+
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_with_single_geth() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+    let config =
+        NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).build();
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    let mut events = handle.event_listener();
+    tokio::task::spawn(network);
+
+    // instantiate geth and add ourselves as a peer
+    let geth = Geth::new().disable_discovery().spawn();
+    let geth_p2p_port = geth.p2p_port().unwrap();
+    let geth_socket = SocketAddr::from(([127, 0, 0, 1], geth_p2p_port));
+    let geth_endpoint = geth_socket.to_string();
+    println!("geth endpoint: {}", geth_endpoint);
+    let provider = Provider::<Http>::try_from(format!("http://localhost:{}", geth_p2p_port)).unwrap();
+    let peer_id: PeerId = provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+
+    handle.add_peer(peer_id, geth_socket);
 
     while let Some(ev) = events.next().await {
         dbg!(ev);
