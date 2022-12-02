@@ -3,7 +3,9 @@ use std::io;
 
 use reth_primitives::{Chain, ValidationError, H256};
 
-use crate::{capability::SharedCapabilityError, DisconnectReason};
+use crate::{
+    capability::SharedCapabilityError, disconnect::UnknownDisconnectReason, DisconnectReason,
+};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
@@ -84,6 +86,8 @@ pub enum P2PStreamError {
     SendBufferFull,
     #[error("disconnected")]
     Disconnected(DisconnectReason),
+    #[error("unknown disconnect reason: {0}")]
+    UnknownDisconnectReason(#[from] UnknownDisconnectReason),
 }
 
 // === impl P2PStreamError ===
