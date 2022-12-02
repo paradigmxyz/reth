@@ -185,6 +185,12 @@ macro_rules! decode_integer {
                 if buf.remaining() < h.payload_length {
                     return Err(DecodeError::InputTooShort)
                 }
+                // In the case of 0x80, the Header will be decoded, leaving h.payload_length to be
+                // zero.
+                // 0x80 is the canonical encoding of 0, so we return 0 here.
+                if h.payload_length == 0 {
+                    return Ok(<$t>::from(0u8))
+                }
                 let v = <$t>::from_be_bytes(
                     static_left_pad(&buf[..h.payload_length]).ok_or(DecodeError::LeadingZero)?,
                 );
@@ -251,6 +257,12 @@ mod ethereum_types_support {
                     }
                     if buf.remaining() < h.payload_length {
                         return Err(DecodeError::InputTooShort)
+                    }
+                    // In the case of 0x80, the Header will be decoded, leaving h.payload_length to
+                    // be zero.
+                    // 0x80 is the canonical encoding of 0, so we return 0 here.
+                    if h.payload_length == 0 {
+                        return Ok(<$t>::from(0u8))
                     }
                     let n = <$t>::from_big_endian(
                         &static_left_pad::<$n_bytes>(&buf[..h.payload_length])
