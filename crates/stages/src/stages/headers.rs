@@ -177,9 +177,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         db: &StageDB<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        // TODO:
-        // let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
-        // let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
+        let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
+        let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -196,11 +195,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
 
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
             db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
-            db.put::<tables::Headers>(key, header)?;
-            db.put::<tables::CanonicalHeaders>(key.number(), key.hash())?;
-            // TODO:
-            // cursor_header.append(key, header)?;
-            // cursor_canonical.append(key.number(), key.hash())?;
+            cursor_header.insert(key, header)?;
+            cursor_canonical.insert(key.number(), key.hash())?;
         }
 
         Ok(latest)
