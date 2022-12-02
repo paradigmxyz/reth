@@ -143,7 +143,10 @@ impl Decodable for DisconnectReason {
 
 #[cfg(test)]
 mod tests {
-    use crate::{p2pstream::{P2PMessage, P2PMessageID}, DisconnectReason};
+    use crate::{
+        p2pstream::{P2PMessage, P2PMessageID},
+        DisconnectReason,
+    };
     use reth_rlp::{Decodable, Encodable};
 
     #[test]

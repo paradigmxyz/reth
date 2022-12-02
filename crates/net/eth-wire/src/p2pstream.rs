@@ -116,7 +116,7 @@ where
                 // DisconnectReason::DisconnectRequested, and the TryFrom implementation ensures
                 // that the disconnect reason is known.
                 let disconnect_id = u8::decode(&mut &first_message_bytes[1..])?;
-                let reason =  DisconnectReason::try_from(disconnect_id)?;
+                let reason = DisconnectReason::try_from(disconnect_id)?;
 
                 tracing::error!("Disconnected by peer during handshake: {}", reason);
                 return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))

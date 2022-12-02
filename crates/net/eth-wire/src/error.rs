@@ -3,7 +3,9 @@ use std::io;
 
 use reth_primitives::{Chain, ValidationError, H256};
 
-use crate::{capability::SharedCapabilityError, DisconnectReason, disconnect::UnknownDisconnectReason};
+use crate::{
+    capability::SharedCapabilityError, disconnect::UnknownDisconnectReason, DisconnectReason,
+};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
