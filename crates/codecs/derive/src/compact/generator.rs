@@ -43,14 +43,6 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
                 #(#from_compact)*
                 (obj, buf)
             }
-
-            fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-                self.to_compact(buf)
-            }
-
-            fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-                Self::from_compact(buf, len)
-            }
         }
     }
 }

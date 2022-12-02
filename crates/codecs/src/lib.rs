@@ -33,12 +33,20 @@ pub trait Compact {
         Self: Sized;
 
     /// "Optional": If there's no good reason to use it, just call `to_compact`
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
+    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize
+    where
+        Self: Sized,
+    {
+        self.to_compact(buf)
+    }
 
     /// "Optional": If there's no good reason to use it, just call `from_compact`
     fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        Self::from_compact(buf, len)
+    }
 }
 
 macro_rules! impl_uint_compact {
@@ -49,14 +57,6 @@ macro_rules! impl_uint_compact {
                     let leading = self.leading_zeros() as usize / 8;
                     buf.put_slice(&self.to_be_bytes()[leading..]);
                     std::mem::size_of::<$name>() - leading
-                }
-
-                fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-                    self.to_compact(buf)
-                }
-
-                fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-                    Self::from_compact(buf, len)
                 }
 
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -205,13 +205,6 @@ impl Compact for U256 {
 
         (U256::zero(), buf)
     }
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        self.to_compact(buf)
-    }
-
-    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        Self::from_compact(buf, len)
-    }
 }
 
 impl Compact for Bytes {
@@ -222,13 +215,6 @@ impl Compact for Bytes {
     }
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         (buf.copy_to_bytes(len), buf)
-    }
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        self.to_compact(buf)
-    }
-
-    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        Self::from_compact(buf, len)
     }
 }
 
@@ -278,14 +264,6 @@ impl Compact for Bloom {
         buf.advance(256);
         (result, buf)
     }
-
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        self.to_compact(buf)
-    }
-
-    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        Self::from_compact(buf, len)
-    }
 }
 
 impl Compact for bool {
@@ -297,14 +275,6 @@ impl Compact for bool {
     /// `bool` expects the real value to come in `len`, and does not advance the cursor.
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         (len != 0, buf)
-    }
-
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        self.to_compact(buf)
-    }
-
-    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        Self::from_compact(buf, len)
     }
 }
 
