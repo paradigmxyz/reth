@@ -405,13 +405,8 @@ mod tests {
             HashMap::new(),
         );
 
-        let account3_old_info = Account {
-            balance: 0x3635c9adc5dea00000u128.into(),
-            nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let account3_old_info =
+            Account { balance: 0x3635c9adc5dea00000u128.into(), nonce: 0x00, bytecode_hash: None };
 
         db.insert_account(
             H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
@@ -438,30 +433,17 @@ mod tests {
         assert_eq!(patch.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let _account1_info = Account {
-            balance: 0x00.into(),
-            nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let _account1_info = Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
             // TODO remove 2eth block reward
             balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
             nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
+            bytecode_hash: None,
         };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let account3_info = Account {
-            balance: 0x3635c9adc5de996b46u128.into(),
-            nonce: 0x01,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let account3_info =
+            Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
 
         assert_eq!(
             patch.state_diff.get(&account1).unwrap().account,
