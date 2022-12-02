@@ -9,7 +9,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE};
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
     io,
@@ -102,19 +102,23 @@ where
         let id = *hello_bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
         let id = P2PMessageID::try_from(id)?;
 
-        // the first message sent MUST be the hello OR disconnect message
+        // The first message sent MUST be a hello OR disconnect message
+        //
+        // If the first message is a disconnect message, we should not decode using
+        // Decodable::decode, because the first message (either Disconnect or Hello) is not snappy
+        // compressed, and the Decodable implementation assumes that non-hello messages are snappy
+        // compressed.
         match id {
             P2PMessageID::Hello => {}
             P2PMessageID::Disconnect => {
-                return match P2PMessage::decode(&mut &hello_bytes[..])? {
-                    P2PMessage::Disconnect(reason) => {
-                        tracing::error!("Disconnected by peer during handshake: {}", reason);
-                        Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
-                    }
-                    msg => Err(P2PStreamError::HandshakeError(
-                        P2PHandshakeError::NonHelloMessageInHandshake,
-                    )),
-                }
+                // the u8::decode implementation handles the 0x80 case for
+                // DisconnectReason::DisconnectRequested, and the TryFrom implementation ensures
+                // that the disconnect reason is known.
+                let disconnect_id = u8::decode(&mut &hello_bytes[1..])?;
+                let reason =  DisconnectReason::try_from(disconnect_id)?;
+
+                tracing::error!("Disconnected by peer during handshake: {}", reason);
+                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             id => {
                 tracing::error!("expected hello message but received: {:?}", id);
@@ -538,6 +542,10 @@ impl P2PMessage {
     }
 }
 
+/// The [`Encodable`](reth_rlp::Encodable) implementation for [`P2PMessage::Ping`] and
+/// [`P2PMessage::Pong`] encodes the message as RLP, and prepends a snappy header to the RLP bytes
+/// for all variants except the [`P2PMessage::Hello`] variant, because the hello message is never
+/// compressed in the `p2p` subprotocol.
 impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         out.put_u8(self.message_id() as u8);
@@ -547,12 +555,12 @@ impl Encodable for P2PMessage {
             P2PMessage::Ping => {
                 out.put_u8(0x01);
                 out.put_u8(0x00);
-                out.put_u8(0x80);
+                out.put_u8(EMPTY_STRING_CODE);
             }
             P2PMessage::Pong => {
                 out.put_u8(0x01);
                 out.put_u8(0x00);
-                out.put_u8(0x80);
+                out.put_u8(EMPTY_STRING_CODE);
             }
         }
     }
@@ -568,6 +576,9 @@ impl Encodable for P2PMessage {
     }
 }
 
+/// The [`Decodable`](reth_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
+/// the message variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since
+/// the hello message is never compressed in the `p2p` subprotocol.
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         let first = buf.first().expect("cannot decode empty p2p message");
@@ -858,46 +869,6 @@ mod tests {
         let decompressed = snappy_decoder.decompress_vec(&pong_encoded[1..]).unwrap();
 
         assert_eq!(decompressed, pong_raw);
-    }
-
-    #[test]
-    fn test_disconnect_snappy_encoding_parity() {
-        // encode disconnect using our `Encodable` implementation
-        let disconnect = P2PMessage::Disconnect(DisconnectReason::DisconnectRequested);
-        let mut disconnect_encoded = Vec::new();
-        disconnect.encode(&mut disconnect_encoded);
-
-        // the definition of disconnectrequested is c1 00 [disconnectrequested]
-        let disconnect_raw = vec![0xc1, 0x00];
-        let mut snappy_encoder = snap::raw::Encoder::new();
-        let disconnect_compressed = snappy_encoder.compress_vec(&disconnect_raw).unwrap();
-        let mut disconnect_expected = vec![P2PMessageID::Disconnect as u8];
-        disconnect_expected.extend(&disconnect_compressed);
-
-        // ensure that the two encodings are equal
-        assert_eq!(
-            disconnect_expected, disconnect_encoded,
-            "left: {:#x?}, right: {:#x?}",
-            disconnect_expected, disconnect_encoded
-        );
-
-        // also ensure that the length is correct
-        assert_eq!(
-            disconnect_expected.len(),
-            P2PMessage::Disconnect(DisconnectReason::DisconnectRequested).length()
-        );
-
-        // try to decode using Decodable
-        let p2p_message = P2PMessage::decode(&mut &disconnect_expected[..]).unwrap();
-        assert_eq!(p2p_message, P2PMessage::Disconnect(DisconnectReason::DisconnectRequested));
-
-        // finally decode the encoded message with snappy
-        let mut snappy_decoder = snap::raw::Decoder::new();
-
-        // the message id is not compressed, only compress the latest bits
-        let decompressed = snappy_decoder.decompress_vec(&disconnect_encoded[1..]).unwrap();
-
-        assert_eq!(decompressed, disconnect_raw);
     }
 
     #[test]

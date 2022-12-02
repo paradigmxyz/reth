@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use bytes::Buf;
 use reth_rlp::{Decodable, DecodeError, Encodable};
+use thiserror::Error;
 
 /// RLPx disconnect reason.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,7 +61,8 @@ impl Display for DisconnectReason {
 }
 
 /// This represents an unknown disconnect reason with the given code.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("unknown disconnect reason: {0}")]
 pub struct UnknownDisconnectReason(u8);
 
 impl TryFrom<u8> for DisconnectReason {
@@ -88,30 +90,32 @@ impl TryFrom<u8> for DisconnectReason {
     }
 }
 
+/// The [`Encodable`](reth_rlp::Encodable) implementation for [`DisconnectReason`] encodes the
+/// disconnect reason as RLP, and prepends a snappy header to the RLP bytes.
 impl Encodable for DisconnectReason {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         // disconnect reasons are snappy encoded as follows:
-        // [0x02, 0x04, 0xc1, reason as u8]
-        // this is 3 bytes
+        // [0x02, 0x04, 0xc1, rlp(reason as u8)]
+        // this is 4 bytes
         out.put_u8(0x02);
         out.put_u8(0x04);
-        out.put_u8(0xc1);
-        out.put_u8(*self as u8);
+        vec![*self as u8].encode(out);
     }
     fn length(&self) -> usize {
         // disconnect reasons are snappy encoded as follows:
-        // [0x02, 0x04, 0xc1, reason as u8]
+        // [0x02, 0x04, 0xc1, rlp(reason as u8)]
         // this is 4 bytes
         4
     }
 }
 
+/// The [`Decodable`](reth_rlp::Decodable) implementation for [`DisconnectReason`] assumes that the
+/// input is snappy compressed.
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         if buf.len() < 4 {
             return Err(DecodeError::Custom("disconnect reason should have 4 bytes"))
         }
-        println!("{:x?}", buf);
 
         let first = buf[0];
         if first != 0x02 {
@@ -129,7 +133,7 @@ impl Decodable for DisconnectReason {
             return Err(DecodeError::Custom("invalid disconnect reason - invalid rlp header"))
         }
 
-        let reason = buf[3];
+        let reason = u8::decode(&mut &buf[3..])?;
         let reason = DisconnectReason::try_from(reason)
             .map_err(|_| DecodeError::Custom("unknown disconnect reason"))?;
         buf.advance(4);
@@ -139,7 +143,7 @@ impl Decodable for DisconnectReason {
 
 #[cfg(test)]
 mod tests {
-    use crate::{p2pstream::P2PMessage, DisconnectReason};
+    use crate::{p2pstream::{P2PMessage, P2PMessageID}, DisconnectReason};
     use reth_rlp::{Decodable, Encodable};
 
     #[test]
@@ -203,5 +207,61 @@ mod tests {
 
             assert_eq!(disconnect_encoded.len(), disconnect.length());
         }
+    }
+
+    #[test]
+    fn disconnect_snappy_encoding_parity() {
+        // encode disconnect using our `Encodable` implementation
+        let disconnect = P2PMessage::Disconnect(DisconnectReason::DisconnectRequested);
+        let mut disconnect_encoded = Vec::new();
+        disconnect.encode(&mut disconnect_encoded);
+
+        let mut disconnect_raw = Vec::new();
+        // encode [DisconnectRequested]
+        // DisconnectRequested will be converted to 0x80 (encoding of 0) in Encodable::encode
+        Encodable::encode(&vec![0x00u8], &mut disconnect_raw);
+
+        let mut snappy_encoder = snap::raw::Encoder::new();
+        let disconnect_compressed = snappy_encoder.compress_vec(&disconnect_raw).unwrap();
+        let mut disconnect_expected = vec![P2PMessageID::Disconnect as u8];
+        disconnect_expected.extend(&disconnect_compressed);
+
+        // ensure that the two encodings are equal
+        assert_eq!(
+            disconnect_expected, disconnect_encoded,
+            "left: {:#x?}, right: {:#x?}",
+            disconnect_expected, disconnect_encoded
+        );
+
+        // also ensure that the length is correct
+        assert_eq!(
+            disconnect_expected.len(),
+            P2PMessage::Disconnect(DisconnectReason::DisconnectRequested).length()
+        );
+    }
+
+    #[test]
+    fn disconnect_snappy_decoding_parity() {
+        // encode disconnect using our `Encodable` implementation
+        let disconnect = P2PMessage::Disconnect(DisconnectReason::DisconnectRequested);
+        let mut disconnect_encoded = Vec::new();
+        disconnect.encode(&mut disconnect_encoded);
+
+        // try to decode using Decodable
+        let p2p_message = P2PMessage::decode(&mut &disconnect_encoded[..]).unwrap();
+        assert_eq!(p2p_message, P2PMessage::Disconnect(DisconnectReason::DisconnectRequested));
+
+        // finally decode the encoded message with snappy
+        let mut snappy_decoder = snap::raw::Decoder::new();
+
+        // the message id is not compressed, only compress the latest bits
+        let decompressed = snappy_decoder.decompress_vec(&disconnect_encoded[1..]).unwrap();
+
+        let mut disconnect_raw = Vec::new();
+        // encode [DisconnectRequested]
+        // DisconnectRequested will be converted to 0x80 (encoding of 0) in Encodable::encode
+        Encodable::encode(&vec![0x00u8], &mut disconnect_raw);
+
+        assert_eq!(decompressed, disconnect_raw);
     }
 }
