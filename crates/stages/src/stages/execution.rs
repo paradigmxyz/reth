@@ -54,7 +54,7 @@ const EXECUTION: StageId = StageId("Execution");
 #[derive(Debug)]
 pub struct ExecutionStage;
 
-/// SPecify batch sizes of block in execution
+/// Specify batch sizes of block in execution
 /// TODO make this as config
 const BATCH_SIZE: u64 = 1000;
 
