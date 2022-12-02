@@ -3,15 +3,15 @@ use crate::{
     capability::{Capability, SharedCapability},
     error::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
+    DisconnectReason,
 };
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE};
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
-    fmt::Display,
     io,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -84,37 +84,42 @@ where
 
         tracing::trace!("waiting for p2p hello from peer ...");
 
-        let hello_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
+        let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
             .await
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
 
         // let's check the compressed length first, we will need to check again once confirming
         // that it contains snappy-compressed data (this will be the case for all non-p2p messages).
-        if hello_bytes.len() > MAX_PAYLOAD_SIZE {
+        if first_message_bytes.len() > MAX_PAYLOAD_SIZE {
             return Err(P2PStreamError::MessageTooBig {
-                message_size: hello_bytes.len(),
+                message_size: first_message_bytes.len(),
                 max_size: MAX_PAYLOAD_SIZE,
             })
         }
 
-        // get the message id
-        let id = *hello_bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
-        let id = P2PMessageID::try_from(id)?;
+        // the u8::decode implementation handles the 0x80 case for P2PMessageID::Hello, and the
+        // TryFrom implementation ensures that the message id is known.
+        let message_id = u8::decode(&mut &first_message_bytes[..])?;
+        let id = P2PMessageID::try_from(message_id)?;
 
-        // the first message sent MUST be the hello OR disconnect message
+        // The first message sent MUST be a hello OR disconnect message
+        //
+        // If the first message is a disconnect message, we should not decode using
+        // Decodable::decode, because the first message (either Disconnect or Hello) is not snappy
+        // compressed, and the Decodable implementation assumes that non-hello messages are snappy
+        // compressed.
         match id {
             P2PMessageID::Hello => {}
             P2PMessageID::Disconnect => {
-                return match P2PMessage::decode(&mut &hello_bytes[..])? {
-                    P2PMessage::Disconnect(reason) => {
-                        tracing::error!("Disconnected by peer during handshake: {}", reason);
-                        Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
-                    }
-                    msg => Err(P2PStreamError::HandshakeError(
-                        P2PHandshakeError::NonHelloMessageInHandshake,
-                    )),
-                }
+                // the u8::decode implementation handles the 0x80 case for
+                // DisconnectReason::DisconnectRequested, and the TryFrom implementation ensures
+                // that the disconnect reason is known.
+                let disconnect_id = u8::decode(&mut &first_message_bytes[1..])?;
+                let reason = DisconnectReason::try_from(disconnect_id)?;
+
+                tracing::error!("Disconnected by peer during handshake: {}", reason);
+                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             id => {
                 tracing::error!("expected hello message but received: {:?}", id);
@@ -124,7 +129,7 @@ where
             }
         }
 
-        let their_hello = match P2PMessage::decode(&mut &hello_bytes[..])? {
+        let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..])? {
             P2PMessage::Hello(hello) => Ok(hello),
             msg => {
                 // Note: this should never occur due to the id check
@@ -538,6 +543,10 @@ impl P2PMessage {
     }
 }
 
+/// The [`Encodable`](reth_rlp::Encodable) implementation for [`P2PMessage::Ping`] and
+/// [`P2PMessage::Pong`] encodes the message as RLP, and prepends a snappy header to the RLP bytes
+/// for all variants except the [`P2PMessage::Hello`] variant, because the hello message is never
+/// compressed in the `p2p` subprotocol.
 impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         out.put_u8(self.message_id() as u8);
@@ -547,12 +556,12 @@ impl Encodable for P2PMessage {
             P2PMessage::Ping => {
                 out.put_u8(0x01);
                 out.put_u8(0x00);
-                out.put_u8(0x80);
+                out.put_u8(EMPTY_STRING_CODE);
             }
             P2PMessage::Pong => {
                 out.put_u8(0x01);
                 out.put_u8(0x00);
-                out.put_u8(0x80);
+                out.put_u8(EMPTY_STRING_CODE);
             }
         }
     }
@@ -568,10 +577,13 @@ impl Encodable for P2PMessage {
     }
 }
 
+/// The [`Decodable`](reth_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
+/// the message variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since
+/// the hello message is never compressed in the `p2p` subprotocol.
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let first = buf.first().expect("cannot decode empty p2p message");
-        let id = P2PMessageID::try_from(*first)
+        let message_id = u8::decode(&mut &buf[..])?;
+        let id = P2PMessageID::try_from(message_id)
             .or(Err(DecodeError::Custom("unknown p2p message id")))?;
         buf.advance(1);
         match id {
@@ -680,137 +692,10 @@ impl Decodable for ProtocolVersion {
     }
 }
 
-/// RLPx disconnect reason.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DisconnectReason {
-    /// Disconnect requested by the local node or remote peer.
-    DisconnectRequested = 0x00,
-    /// TCP related error
-    TcpSubsystemError = 0x01,
-    /// Breach of protocol at the transport or p2p level
-    ProtocolBreach = 0x02,
-    /// Node has no matching protocols.
-    UselessPeer = 0x03,
-    /// Either the remote or local node has too many peers.
-    TooManyPeers = 0x04,
-    /// Already connected to the peer.
-    AlreadyConnected = 0x05,
-    /// `p2p` protocol version is incompatible
-    IncompatibleP2PProtocolVersion = 0x06,
-    NullNodeIdentity = 0x07,
-    ClientQuitting = 0x08,
-    UnexpectedHandshakeIdentity = 0x09,
-    /// The node is connected to itself
-    ConnectedToSelf = 0x0a,
-    /// Peer or local node did not respond to a ping in time.
-    PingTimeout = 0x0b,
-    /// Peer or local node violated a subprotocol-specific rule.
-    SubprotocolSpecific = 0x10,
-}
-
-impl Display for DisconnectReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
-            DisconnectReason::DisconnectRequested => "Disconnect requested",
-            DisconnectReason::TcpSubsystemError => "TCP sub-system error",
-            DisconnectReason::ProtocolBreach => {
-                "Breach of protocol, e.g. a malformed message, bad RLP, ..."
-            }
-            DisconnectReason::UselessPeer => "Useless peer",
-            DisconnectReason::TooManyPeers => "Too many peers",
-            DisconnectReason::AlreadyConnected => "Already connected",
-            DisconnectReason::IncompatibleP2PProtocolVersion => "Incompatible P2P protocol version",
-            DisconnectReason::NullNodeIdentity => {
-                "Null node identity received - this is automatically invalid"
-            }
-            DisconnectReason::ClientQuitting => "Client quitting",
-            DisconnectReason::UnexpectedHandshakeIdentity => "Unexpected identity in handshake",
-            DisconnectReason::ConnectedToSelf => {
-                "Identity is the same as this node (i.e. connected to itself)"
-            }
-            DisconnectReason::PingTimeout => "Ping timeout",
-            DisconnectReason::SubprotocolSpecific => "Some other reason specific to a subprotocol",
-        };
-
-        write!(f, "{message}")
-    }
-}
-
-/// This represents an unknown disconnect reason with the given code.
-#[derive(Debug, Clone)]
-pub struct UnknownDisconnectReason(u8);
-
-impl TryFrom<u8> for DisconnectReason {
-    // This error type should not be used to crash the node, but rather to log the error and
-    // disconnect the peer.
-    type Error = UnknownDisconnectReason;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0x00 => Ok(DisconnectReason::DisconnectRequested),
-            0x01 => Ok(DisconnectReason::TcpSubsystemError),
-            0x02 => Ok(DisconnectReason::ProtocolBreach),
-            0x03 => Ok(DisconnectReason::UselessPeer),
-            0x04 => Ok(DisconnectReason::TooManyPeers),
-            0x05 => Ok(DisconnectReason::AlreadyConnected),
-            0x06 => Ok(DisconnectReason::IncompatibleP2PProtocolVersion),
-            0x07 => Ok(DisconnectReason::NullNodeIdentity),
-            0x08 => Ok(DisconnectReason::ClientQuitting),
-            0x09 => Ok(DisconnectReason::UnexpectedHandshakeIdentity),
-            0x0a => Ok(DisconnectReason::ConnectedToSelf),
-            0x0b => Ok(DisconnectReason::PingTimeout),
-            0x10 => Ok(DisconnectReason::SubprotocolSpecific),
-            _ => Err(UnknownDisconnectReason(value)),
-        }
-    }
-}
-
-impl Encodable for DisconnectReason {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        // disconnect reasons are snappy encoded as follows:
-        // [0x01, 0x00, reason as u8]
-        // this is 3 bytes
-        out.put_u8(0x01);
-        out.put_u8(0x00);
-        out.put_u8(*self as u8);
-    }
-    fn length(&self) -> usize {
-        // disconnect reasons are snappy encoded as follows:
-        // [0x01, 0x00, reason as u8]
-        // this is 3 bytes
-        3
-    }
-}
-
-impl Decodable for DisconnectReason {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        if buf.len() < 3 {
-            return Err(DecodeError::Custom("disconnect reason should have 3 bytes"))
-        }
-
-        let first = buf[0];
-        if first != 0x01 {
-            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
-        }
-
-        let second = buf[1];
-        if second != 0x00 {
-            // TODO: make sure this error message is correct
-            return Err(DecodeError::Custom("invalid disconnect reason - invalid snappy header"))
-        }
-
-        let reason = buf[2];
-        let reason = DisconnectReason::try_from(reason)
-            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))?;
-        buf.advance(3);
-        Ok(reason)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EthVersion;
+    use crate::{DisconnectReason, EthVersion};
     use reth_ecies::util::pk2id;
     use reth_rlp::EMPTY_STRING_CODE;
     use secp256k1::{SecretKey, SECP256K1};
@@ -1042,68 +927,5 @@ mod tests {
         hello.encode(&mut hello_encoded);
 
         assert_eq!(hello_encoded[0], P2PMessageID::Hello as u8);
-    }
-
-    #[test]
-    fn disconnect_round_trip() {
-        let all_reasons = vec![
-            DisconnectReason::DisconnectRequested,
-            DisconnectReason::TcpSubsystemError,
-            DisconnectReason::ProtocolBreach,
-            DisconnectReason::UselessPeer,
-            DisconnectReason::TooManyPeers,
-            DisconnectReason::AlreadyConnected,
-            DisconnectReason::IncompatibleP2PProtocolVersion,
-            DisconnectReason::NullNodeIdentity,
-            DisconnectReason::ClientQuitting,
-            DisconnectReason::UnexpectedHandshakeIdentity,
-            DisconnectReason::ConnectedToSelf,
-            DisconnectReason::PingTimeout,
-            DisconnectReason::SubprotocolSpecific,
-        ];
-
-        for reason in all_reasons {
-            let disconnect = P2PMessage::Disconnect(reason);
-
-            let mut disconnect_encoded = Vec::new();
-            disconnect.encode(&mut disconnect_encoded);
-
-            let disconnect_decoded = P2PMessage::decode(&mut &disconnect_encoded[..]).unwrap();
-
-            assert_eq!(disconnect, disconnect_decoded);
-        }
-    }
-
-    #[test]
-    fn test_reason_too_short() {
-        assert!(DisconnectReason::decode(&mut &[0u8][..]).is_err())
-    }
-
-    #[test]
-    fn disconnect_encoding_length() {
-        let all_reasons = vec![
-            DisconnectReason::DisconnectRequested,
-            DisconnectReason::TcpSubsystemError,
-            DisconnectReason::ProtocolBreach,
-            DisconnectReason::UselessPeer,
-            DisconnectReason::TooManyPeers,
-            DisconnectReason::AlreadyConnected,
-            DisconnectReason::IncompatibleP2PProtocolVersion,
-            DisconnectReason::NullNodeIdentity,
-            DisconnectReason::ClientQuitting,
-            DisconnectReason::UnexpectedHandshakeIdentity,
-            DisconnectReason::ConnectedToSelf,
-            DisconnectReason::PingTimeout,
-            DisconnectReason::SubprotocolSpecific,
-        ];
-
-        for reason in all_reasons {
-            let disconnect = P2PMessage::Disconnect(reason);
-
-            let mut disconnect_encoded = Vec::new();
-            disconnect.encode(&mut disconnect_encoded);
-
-            assert_eq!(disconnect_encoded.len(), disconnect.length());
-        }
     }
 }

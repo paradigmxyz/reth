@@ -552,6 +552,7 @@ mod tests {
     #[test]
     fn rlp_list() {
         assert_eq!(encoded_list::<u64>(&[]), &hex!("c0")[..]);
+        assert_eq!(encoded_list::<u8>(&[0x00u8]), &hex!("c180")[..]);
         assert_eq!(encoded_list(&[0xFFCCB5_u64, 0xFFC0B5_u64]), &hex!("c883ffccb583ffc0b5")[..]);
     }
 
