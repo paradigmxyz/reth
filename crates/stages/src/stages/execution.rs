@@ -97,19 +97,22 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // get headers from canonical numbers
-        let mut headers_batch = Vec::with_capacity(canonical_batch.len());
-        for ch_index in canonical_batch.iter() {
-            // TODO see if walker next has better performance then seek_exact calls.
-            let (_, header) =
-                headers.seek_exact(*ch_index)?.ok_or(DatabaseIntegrityError::Header {
-                    number: ch_index.number(),
-                    hash: ch_index.hash(),
-                })?;
-            headers_batch.push(header);
-        }
-
-        // get block
-        let mut commulative_tx_count_batch = Vec::with_capacity(canonical_batch.len() + 1);
+        let headers_batch = canonical_batch
+            .iter()
+            .map(|ch_index| {
+                // TODO see if walker next has better performance then seek_exact calls.
+                headers.seek_exact(*ch_index).map_err(StageError::Database).and_then(|res| {
+                    res.ok_or_else(|| {
+                        DatabaseIntegrityError::Header {
+                            number: ch_index.number(),
+                            hash: ch_index.hash(),
+                        }
+                        .into()
+                    })
+                    .map(|(_, header)| header)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // get last tx count so that we can know amount of transaction in the block.
         let mut last_tx_count = if last_block == 0 {
@@ -127,17 +130,29 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             tx_cnt
         };
 
-        for ch_index in canonical_batch.iter() {
-            // TODO see if walker next has better performance then seek_exact calls.
-            let (_, commulative_tx_count) = commulative_tx_count.seek_exact(*ch_index)?.ok_or(
-                DatabaseIntegrityError::CumulativeTxCount {
-                    number: ch_index.number(),
-                    hash: ch_index.hash(),
-                },
-            )?;
-            commulative_tx_count_batch.push((last_tx_count, commulative_tx_count));
-            last_tx_count = commulative_tx_count;
-        }
+        let commulative_tx_count_batch = canonical_batch
+            .iter()
+            .map(|ch_index| {
+                // TODO see if walker next has better performance then seek_exact calls.
+                commulative_tx_count
+                    .seek_exact(*ch_index)
+                    .map_err(StageError::Database)
+                    .and_then(|res| {
+                        res.ok_or_else(|| {
+                            DatabaseIntegrityError::CumulativeTxCount {
+                                number: ch_index.number(),
+                                hash: ch_index.hash(),
+                            }
+                            .into()
+                        })
+                    })
+                    .map(|(_, commulative_tx_count)| {
+                        let ret = (last_tx_count, commulative_tx_count);
+                        last_tx_count = commulative_tx_count;
+                        ret
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Fetch transactions, execute them and generate results
         let mut block_change_paches = Vec::with_capacity(canonical_batch.len());
@@ -303,24 +318,33 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Skip sender recovery and load signer from database.
         let mut storage_changeset = db_tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        // TODO replace unwraps with Inconsistency error
-
         // get from tx_number
-        let unwind_from_hash = db_tx.get::<tables::CanonicalHeaders>(unwind_from)?.unwrap();
+        let unwind_from_hash = db_tx
+            .get::<tables::CanonicalHeaders>(unwind_from)?
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: unwind_from })?;
+
         let from_tx_number = db_tx
             .get::<tables::CumulativeTxCount>(BlockNumHash((unwind_from, unwind_from_hash)))?
-            .unwrap();
+            .ok_or(DatabaseIntegrityError::CumulativeTxCount {
+                number: unwind_from,
+                hash: unwind_from_hash,
+            })?;
 
         // get to tx_number
         let to_tx_number = if unwind_to == 0 {
             0
         } else {
             let parent_number = unwind_to - 1;
-            let parent_hash = db_tx.get::<tables::CanonicalHeaders>(parent_number)?.unwrap();
+            let parent_hash = db_tx
+                .get::<tables::CanonicalHeaders>(parent_number)?
+                .ok_or(DatabaseIntegrityError::CanonicalHeader { number: parent_number })?;
 
             db_tx
                 .get::<tables::CumulativeTxCount>(BlockNumHash((parent_number, parent_hash)))?
-                .unwrap()
+                .ok_or(DatabaseIntegrityError::CumulativeTxCount {
+                    number: parent_number,
+                    hash: parent_hash,
+                })?
         };
 
         let num_of_tx = (from_tx_number - to_tx_number) as usize;
@@ -449,18 +473,11 @@ mod tests {
             // TODO remove 2eth block reward
             balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
             nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
+            bytecode_hash: None,
         };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let account3_info = Account {
-            balance: 0x3635c9adc5de996b46u128.into(),
-            nonce: 0x01,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let account3_info =
+            Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
 
         // assert accounts
         assert_eq!(
