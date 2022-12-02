@@ -1,7 +1,7 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 use super::RawBlockBody;
-use reth_primitives::{BlockHashOrNumber, Header, TransactionSigned, H256};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// A request for a peer to return block headers starting at the requested block.
@@ -13,7 +13,7 @@ use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrap
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -27,8 +27,8 @@ pub struct GetBlockHeaders {
     /// [`limit`](#structfield.limit) headers.
     pub skip: u32,
 
-    /// Whether or not the headers should be returned in reverse order.
-    pub reverse: bool,
+    /// The direction in which the headers should be returned in.
+    pub direction: HeadersDirection,
 }
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
@@ -94,16 +94,16 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
     use hex_literal::hex;
     use reth_primitives::{
-        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned, U256,
+        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned,
+        TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     use super::BlockBody;
 
@@ -172,7 +172,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         }
         .encode(&mut data);
@@ -193,7 +193,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -211,7 +211,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         }
         .encode(&mut data);
@@ -228,7 +228,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                reverse: false,
+                direction: Default::default(),
             },
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -341,7 +341,7 @@ mod test {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
@@ -350,7 +350,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x200u64.into(),
                             input: Default::default(),
-                        },
+                        }),
                         Signature {
                                 odd_y_parity: false,
                                 r:
@@ -359,7 +359,7 @@ mod test {
     U256::from_str("64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                             }
                         ),
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
@@ -368,7 +368,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x2d9u64.into(),
                             input: Default::default(),
-                        }, Signature {
+                        }), Signature {
                                 odd_y_parity: false,
                                 r:
     U256::from_str("52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
@@ -422,7 +422,7 @@ mod test {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
@@ -431,7 +431,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x200u64.into(),
                             input: Default::default(),
-                        },
+                        }),
                         Signature {
                                 odd_y_parity: false,
                                 r:
@@ -440,7 +440,7 @@ mod test {
     U256::from_str("64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                             }
                         ),
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy {
+                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
@@ -449,7 +449,7 @@ mod test {
     TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: 0x2d9u64.into(),
                             input: Default::default(),
-                        },
+                        }),
                         Signature {
                                 odd_y_parity: false,
                                 r:

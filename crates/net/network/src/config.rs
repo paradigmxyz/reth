@@ -147,6 +147,12 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
+    /// Sets the discv4 config to use.
+    pub fn discovery(mut self, builder: Discv4ConfigBuilder) -> Self {
+        self.discovery_v4_builder = builder;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     pub fn build(self) -> NetworkConfig<C> {
         let Self {

@@ -176,6 +176,14 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
         todo!()
     }
 
+    fn insert(
+        &mut self,
+        _key: <T as Table>::Key,
+        _value: <T as Table>::Value,
+    ) -> Result<(), super::Error> {
+        todo!()
+    }
+
     fn append(
         &mut self,
         _key: <T as Table>::Key,

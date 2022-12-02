@@ -7,7 +7,7 @@ repository = "https://github.com/foundry-rs/reth"
 readme = "README.md"
 
 [features]
-default = ["scale"]
+default = ["compact"]
 compact = ["codecs-derive/compact"]
 scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]

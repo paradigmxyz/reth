@@ -1,17 +1,16 @@
 use crate::{H256, U256};
 use bytes::Buf;
 use modular_bitfield::prelude::*;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 
 /// Account saved in database
-#[use_compact]
+#[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Account {
     /// Nonce.
     pub nonce: u64,
     /// Account balance.
     pub balance: U256,
-    #[maybe_zero]
     /// Hash of the bytecode.
     pub bytecode_hash: Option<H256>,
 }

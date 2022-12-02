@@ -1,7 +1,7 @@
 use crate::p2p::error::RequestResult;
 use async_trait::async_trait;
 pub use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, H256, U256};
+use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
 use std::fmt::Debug;
 
 /// The header request struct to be sent to connected peers, which
@@ -12,9 +12,8 @@ pub struct HeadersRequest {
     pub start: BlockHashOrNumber,
     /// The response max size
     pub limit: u64,
-    /// Flag indicating whether the blocks should
-    /// arrive in reverse
-    pub reverse: bool,
+    /// The direction in which headers should be returned.
+    pub direction: HeadersDirection,
 }
 
 /// The block headers downloader client

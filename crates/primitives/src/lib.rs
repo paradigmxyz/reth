@@ -36,7 +36,7 @@ pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;
 pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
 pub use hardfork::Hardfork;
-pub use header::{Header, SealedHeader};
+pub use header::{Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
@@ -45,7 +45,8 @@ pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
-    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxType,
+    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
+    TxEip2930, TxLegacy, TxType,
 };
 
 /// A block hash.

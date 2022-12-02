@@ -8,12 +8,12 @@ use crate::{
     impl_fixed_arbitrary,
 };
 use bytes::Bytes;
-use reth_codecs::{use_compact, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_primitives::{Account, Address, TxNumber};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
-#[use_compact]
+#[main_codec]
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.

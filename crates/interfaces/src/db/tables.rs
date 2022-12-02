@@ -1,6 +1,7 @@
 //! Declaration of all Database tables.
 
 use crate::db::{
+    codecs::CompactU256,
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
         blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockBody},
@@ -108,7 +109,7 @@ table!(
 
 table!(
     /// Stores the total difficulty from a block header.
-    HeaderTD => BlockNumHash => RlpTotalDifficulty);
+    HeaderTD => BlockNumHash => CompactU256);
 
 table!(
     /// Stores the block number corresponding to an header.
@@ -243,8 +244,6 @@ pub type ConfigKey = Vec<u8>;
 pub type ConfigValue = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type BlockNumHashTxNumber = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type RlpTotalDifficulty = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type AddressStorageKey = Vec<u8>;
 /// Temporary placeholder type for DB.

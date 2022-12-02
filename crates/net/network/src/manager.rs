@@ -19,15 +19,17 @@ use crate::{
     config::NetworkConfig,
     discovery::Discovery,
     error::NetworkError,
+    eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersManager, ReputationChangeKind},
+    peers::{PeersHandle, PeersManager, ReputationChangeKind},
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
+    FetchClient,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -36,7 +38,7 @@ use reth_eth_wire::{
     DisconnectReason,
 };
 use reth_interfaces::provider::BlockProvider;
-use reth_primitives::PeerId;
+use reth_primitives::{PeerId, H256};
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -48,7 +50,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -60,6 +62,7 @@ use tracing::{error, trace};
 ///  graph TB
 ///    handle(NetworkHandle)
 ///    events(NetworkEvents)
+///    transactions[(Transactions Task)]
 ///    subgraph NetworkManager
 ///      direction LR
 ///      subgraph Swarm
@@ -71,6 +74,7 @@ use tracing::{error, trace};
 ///    end
 ///   handle <--> |request/response channel| NetworkManager
 ///   NetworkManager --> |Network events| events
+///   transactions --> |propagate transactions| NetworkManager
 /// ```
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
@@ -82,12 +86,12 @@ pub struct NetworkManager<C> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
-    /// The address of this node that listens for incoming connections.
-    listener_address: Arc<Mutex<SocketAddr>>,
     /// All listeners for [`Network`] events.
     event_listeners: NetworkEventListeners,
     /// Sender half to send events to the [`TransactionsManager`] task, if configured.
-    to_transactions: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
+    /// Sender half to send events to the [`EthRequestHandler`] task, if configured.
+    to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -140,7 +144,7 @@ where
         let num_active_peers = Arc::new(AtomicUsize::new(0));
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
-            Arc::clone(&listener_address),
+            listener_address,
             to_manager_tx,
             local_peer_id,
             peers_handle,
@@ -152,21 +156,31 @@ where
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
-            listener_address,
             event_listeners: Default::default(),
-            to_transactions: None,
+            to_transactions_manager: None,
+            to_eth_request_handler: None,
             num_active_peers,
         })
     }
 
     /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
-        self.to_transactions = Some(tx);
+        self.to_transactions_manager = Some(tx);
+    }
+
+    /// Sets the dedicated channel for events indented for the [`EthRequestHandler`]
+    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
+        self.to_eth_request_handler = Some(tx);
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     pub fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
+    }
+
+    /// Returns the configured genesis hash
+    pub fn genesis_hash(&self) -> H256 {
+        self.swarm.state().genesis_hash()
     }
 
     /// How many peers we're currently connected to.
@@ -186,6 +200,20 @@ where
         &self.handle
     }
 
+    /// Returns a new [`PeersHandle`] that can be cloned and shared.
+    ///
+    /// The [`PeersHandle`] can be used to interact with the network's peer set.
+    pub fn peers_handle(&self) -> PeersHandle {
+        self.swarm.state().peers().handle()
+    }
+
+    /// Returns a new [`FetchClient`] that can be cloned and shared.
+    ///
+    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
+    pub fn fetch_client(&self) -> FetchClient {
+        self.swarm.state().fetch_client()
+    }
+
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &mut self,
@@ -202,16 +230,49 @@ where
 
     /// Sends an event to the [`TransactionsManager`] if configured
     fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
-        if let Some(ref tx) = self.to_transactions {
+        if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
+        }
+    }
+
+    /// Sends an event to the [`EthRequestManager`] if configured
+    fn delegate_eth_request(&self, event: IncomingEthRequest) {
+        if let Some(ref reqs) = self.to_eth_request_handler {
+            let _ = reqs.send(event);
         }
     }
 
     /// Handle an incoming request from the peer
     fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
         match req {
-            PeerRequest::GetBlockHeaders { .. } => {}
-            PeerRequest::GetBlockBodies { .. } => {}
+            PeerRequest::GetBlockHeaders { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetBlockBodies { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockBodies {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetNodeData { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetNodeData {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetReceipts { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetReceipts {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,
@@ -219,8 +280,6 @@ where
                     response,
                 });
             }
-            PeerRequest::GetNodeData { .. } => {}
-            PeerRequest::GetReceipts { .. } => {}
         }
     }
 
@@ -300,7 +359,9 @@ where
             PeerMessage::SendTransactions(_) => {
                 unreachable!("Not emitted by session")
             }
-            PeerMessage::Other(_) => {}
+            PeerMessage::Other(other) => {
+                error!(target : "net", message_id=%other.id, "Ignoring unsupported message");
+            }
         }
     }
 
@@ -336,6 +397,9 @@ where
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
+            }
+            NetworkHandleMessage::FetchClient(tx) => {
+                let _ = tx.send(self.fetch_client());
             }
         }
     }
@@ -385,11 +449,11 @@ where
                 SwarmEvent::TcpListenerError(err) => {
                     trace!(target : "net", ?err, "TCP connection error.");
                 }
-                SwarmEvent::IncomingTcpConnection { remote_addr, .. } => {
-                    trace!(target : "net",?remote_addr, "Incoming connection");
+                SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
+                    trace!(target : "net", ?session_id, ?remote_addr, "Incoming connection");
                 }
-                SwarmEvent::OutgoingTcpConnection { remote_addr } => {
-                    trace!(target : "net", ?remote_addr,"Starting outbound connection.");
+                SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
+                    trace!(target : "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
                 }
                 SwarmEvent::SessionEstablished {
                     peer_id,
@@ -408,7 +472,10 @@ where
                     );
 
                     if direction.is_incoming() {
-                        this.swarm.state_mut().peers_mut().on_active_session(peer_id, remote_addr);
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_active_inbound_session(peer_id, remote_addr);
                     }
 
                     this.event_listeners.send(NetworkEvent::SessionEstablished {
@@ -438,14 +505,36 @@ where
 
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id });
                 }
-                SwarmEvent::IncomingPendingSessionClosed { .. } => {}
-                SwarmEvent::OutgoingPendingSessionClosed { peer_id, .. } => {
+                SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
+                    warn!(
+                        target : "net",
+                        ?remote_addr,
+                        ?error,
+                        "Incoming pending session failed"
+                    );
+                    this.swarm.state_mut().peers_mut().on_closed_incoming_pending_session()
+                }
+                SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
+                    warn!(
+                        target : "net",
+                        ?remote_addr,
+                        ?peer_id,
+                        ?error,
+                        "Outgoing pending session failed"
+                    );
                     this.swarm
                         .state_mut()
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
                 }
-                SwarmEvent::OutgoingConnectionError { peer_id, .. } => {
+                SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
+                    warn!(
+                        target : "net",
+                        ?remote_addr,
+                        ?peer_id,
+                        ?error,
+                        "Outgoing connection error"
+                    );
                     this.swarm
                         .state_mut()
                         .peers_mut()

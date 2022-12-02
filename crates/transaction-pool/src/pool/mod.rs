@@ -65,25 +65,23 @@
 //!    transactions are _currently_ waiting for state changes that eventually move them into
 //!    category (2.) and become pending.
 
+#![allow(dead_code)] // TODO(mattsse): remove once remaining checks implemented
+
 use crate::{
     error::{PoolError, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
-    pool::{listener::PoolEventListener, state::SubPool, txpool::TxPool},
+    pool::{listener::PoolEventBroadcast, state::SubPool, txpool::TxPool},
     traits::{
-        NewTransactionEvent, PoolStatus, PoolTransaction, PropagatedTransactions, TransactionOrigin,
+        NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator, U256,
+    OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash, H256};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -109,7 +107,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventListener>,
+    event_listener: RwLock<PoolEventBroadcast>,
     /// Listeners for new ready transactions.
     pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
@@ -136,9 +134,9 @@ where
         }
     }
 
-    /// Returns stats about the pool.
-    pub(crate) fn status(&self) -> PoolStatus {
-        self.pool.read().status()
+    /// Returns stats about the size of the pool.
+    pub(crate) fn size(&self) -> PoolSize {
+        self.pool.read().size()
     }
 
     /// Returns the internal `SenderId` for this address
@@ -146,24 +144,23 @@ where
         self.identifiers.write().sender_id_or_create(addr)
     }
 
+    /// Get the config the pool was configured with.
+    pub fn config(&self) -> &PoolConfig {
+        &self.config
+    }
+
     /// Get the validator reference.
     pub fn validator(&self) -> &V {
         &self.validator
     }
 
-    /// Adds a new transaction listener to the pool that gets notified about every new _ready_
-    /// transaction
+    /// Adds a new transaction listener to the pool that gets notified about every new _pending_
+    /// transaction.
     pub fn add_pending_listener(&self) -> mpsc::Receiver<TxHash> {
         const TX_LISTENER_BUFFER_SIZE: usize = 2048;
         let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
         self.pending_transaction_listener.lock().push(tx);
         rx
-    }
-
-    /// Returns hashes of _all_ transactions in the pool.
-    pub(crate) fn pooled_transactions(&self) -> Vec<TxHash> {
-        let pool = self.pool.read();
-        pool.all().hashes_iter().collect()
     }
 
     /// Adds a new transaction listener to the pool that gets notified about every new transaction
@@ -174,15 +171,16 @@ where
         rx
     }
 
-    /// Updates the entire pool after a new block was mined.
+    /// Returns hashes of _all_ transactions in the pool.
+    pub(crate) fn pooled_transactions(&self) -> Vec<TxHash> {
+        let pool = self.pool.read();
+        pool.all().hashes_iter().collect()
+    }
+
+    /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_new_block(&self, block: OnNewBlockEvent) {
         let outcome = self.pool.write().on_new_block(block);
         self.notify_on_new_block(outcome);
-    }
-
-    /// Resubmits transactions back into the pool.
-    pub fn resubmit(&self, _transactions: HashMap<TxHash, ValidPoolTransaction<T::Transaction>>) {
-        unimplemented!()
     }
 
     /// Add a single validated transaction into the pool.
@@ -224,8 +222,9 @@ where
 
                 Ok(hash)
             }
-            TransactionValidationOutcome::Invalid(_tx, err) => {
-                // TODO notify listeners about invalid
+            TransactionValidationOutcome::Invalid(tx, err) => {
+                let mut listener = self.event_listener.write();
+                listener.discarded(tx.hash());
                 Err(err)
             }
         }
@@ -291,7 +290,7 @@ where
                 if matches!(err, mpsc::error::TrySendError::Full(_)) {
                     warn!(
                         target: "txpool",
-                        "dropping full transaction listener",
+                        "skipping transaction on full transaction listener",
                     );
                     true
                 } else {

@@ -140,9 +140,12 @@ mod tests {
     use super::{test_utils, Env, EnvKind};
     use reth_interfaces::{
         db::{
+            self,
             models::ShardedKey,
-            tables::{AccountHistory, Headers, PlainAccountState, PlainStorageState},
-            Database, DbCursorRO, DbDupCursorRO, DbTx, DbTxMut,
+            tables::{
+                AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
+            },
+            Database, DbCursorRO, DbCursorRW, DbDupCursorRO, DbTx, DbTxMut,
         },
         provider::{ProviderImpl, StateProviderFactory},
     };
@@ -206,6 +209,81 @@ mod tests {
         let walk = cursor.walk(key.into()).unwrap();
         let first = walk.into_iter().next().unwrap().unwrap();
         assert_eq!(first.1, value, "First next should be put value");
+    }
+
+    #[test]
+    fn db_cursor_seek_exact_or_previous_key() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        // Cursor
+        let missing_key = 2;
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor::<CanonicalHeaders>().unwrap();
+        assert_eq!(cursor.current(), Ok(None));
+
+        // Seek exact
+        let exact = cursor.seek_exact(missing_key).unwrap();
+        assert_eq!(exact, None);
+        assert_eq!(cursor.current(), Ok(Some((missing_key + 1, H256::zero()))));
+        assert_eq!(cursor.prev(), Ok(Some((missing_key - 1, H256::zero()))));
+        assert_eq!(cursor.prev(), Ok(Some((missing_key - 2, H256::zero()))));
+    }
+
+    #[test]
+    fn db_cursor_insert() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3, 4, 5]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let key_to_insert = 2;
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+
+        // INSERT
+        cursor.seek_exact(1).unwrap();
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Ok(()));
+        assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+
+        // INSERT (failure)
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(db::Error::Write(4294936497)));
+        assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+    }
+
+    #[test]
+    fn db_cursor_append_failure() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3, 4, 5]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        // APPEND
+        let key_to_append = 2;
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+        cursor.seek_exact(1).unwrap();
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(db::Error::Write(4294936878)));
+        assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
     }
 
     #[test]

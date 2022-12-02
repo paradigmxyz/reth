@@ -9,6 +9,7 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
+    FetchClient,
 };
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
@@ -83,6 +84,21 @@ where
     /// Returns mutable access to the [`PeersManager`]
     pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
+    }
+
+    /// Returns access to the [`PeersManager`]
+    pub(crate) fn peers(&self) -> &PeersManager {
+        &self.peers_manager
+    }
+
+    /// Returns a new [`FetchClient`]
+    pub(crate) fn fetch_client(&self) -> FetchClient {
+        self.state_fetcher.client()
+    }
+
+    /// How many peers we're currently connected to.
+    pub fn genesis_hash(&self) -> H256 {
+        self.genesis_hash
     }
 
     /// How many peers we're currently connected to.
@@ -285,8 +301,8 @@ where
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
             }
-            BlockResponseOutcome::BadResponse(_peer, _reputation_change) => {
-                // TODO handle reputation change
+            BlockResponseOutcome::BadResponse(peer, reputation_change) => {
+                self.peers_manager.apply_reputation_change(&peer, reputation_change);
             }
         }
         None
@@ -297,17 +313,14 @@ where
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
-                return self.on_block_response_outcome(outcome)
+                self.on_block_response_outcome(outcome)
             }
             PeerResponseResult::BlockBodies(res) => {
                 let outcome = self.state_fetcher.on_block_bodies_response(peer, res)?;
-                return self.on_block_response_outcome(outcome)
+                self.on_block_response_outcome(outcome)
             }
-            PeerResponseResult::PooledTransactions(_) => {}
-            PeerResponseResult::NodeData(_) => {}
-            PeerResponseResult::Receipts(_) => {}
+            _ => None,
         }
-        None
     }
 
     /// Advances the state
@@ -334,8 +347,10 @@ where
                 }
             }
 
+            // need to buffer results here to make borrow checker happy
             let mut disconnect_sessions = Vec::new();
             let mut received_responses = Vec::new();
+
             // poll all connected peers for responses
             for (id, peer) in self.connected_peers.iter_mut() {
                 if let Some(response) = peer.pending_response.as_mut() {
@@ -382,10 +397,11 @@ where
 /// Tracks the state of a Peer.
 ///
 /// For example known blocks,so we can decide what to announce.
-pub struct ConnectedPeer {
+pub(crate) struct ConnectedPeer {
     /// Best block of the peer.
     pub(crate) best_hash: H256,
     /// The capabilities of the connected peer.
+    #[allow(unused)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender,

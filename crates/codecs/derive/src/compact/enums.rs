@@ -56,15 +56,20 @@ impl<'a> EnumHandler<'a> {
 
         if let Some(next_field) = self.fields_iterator.peek() {
             match next_field {
-                FieldTypes::EnumUnnamedField(next_ftype) => {
+                FieldTypes::EnumUnnamedField((next_ftype, use_alt_impl)) => {
                     // This variant is of the type `EnumVariant(UnnamedField)`
                     let field_type = format_ident!("{next_ftype}");
+                    let from_compact_ident = if !use_alt_impl {
+                        format_ident!("from_compact")
+                    } else {
+                        format_ident!("specialized_from_compact")
+                    };
 
                     // Unamed type
                     self.enum_lines.push(quote! {
                         #current_variant_index => {
                             let mut inner = #field_type::default();
-                            (inner, buf) = #field_type::from_compact(buf, buf.len());
+                            (inner, buf) = #field_type::#from_compact_ident(buf, buf.len());
                             #ident::#variant_name(inner)
                         }
                     });
@@ -94,11 +99,17 @@ impl<'a> EnumHandler<'a> {
 
         if let Some(next_field) = self.fields_iterator.peek() {
             match next_field {
-                FieldTypes::EnumUnnamedField(_) => {
+                FieldTypes::EnumUnnamedField((_, use_alt_impl)) => {
+                    let to_compact_ident = if !use_alt_impl {
+                        format_ident!("to_compact")
+                    } else {
+                        format_ident!("specialized_to_compact")
+                    };
+
                     // Unamed type
                     self.enum_lines.push(quote! {
                         #ident::#variant_name(field) => {
-                            field.to_compact(&mut buffer);
+                            field.#to_compact_ident(&mut buffer);
                             #current_variant_index
                         },
                     });

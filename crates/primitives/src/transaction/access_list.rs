@@ -1,6 +1,6 @@
 use crate::{Address, H256};
 
-use reth_codecs::main_codec;
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 /// A list of addresses and storage keys that the transaction plans to access.

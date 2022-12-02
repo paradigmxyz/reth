@@ -1,11 +1,6 @@
 //! Support types for updating the pool.
-use crate::{
-    identifier::TransactionId,
-    pool::{state::SubPool, txpool::PoolInternalTransaction},
-    PoolTransaction,
-};
+use crate::{identifier::TransactionId, pool::state::SubPool};
 use reth_primitives::TxHash;
-use std::ops::{Deref, DerefMut};
 
 /// A change of the transaction's location
 ///
