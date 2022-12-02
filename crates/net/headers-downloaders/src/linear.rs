@@ -164,6 +164,7 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
+    /// Returns the first header from the vector of buffered headers
     fn earliest_header(&self) -> Option<&SealedHeader> {
         self.buffered.back()
     }
@@ -183,7 +184,7 @@ where
     }
 
     /// Insert the header into buffer
-    fn buffer_header(&mut self, header: SealedHeader) {
+    fn push_header_into_buffer(&mut self, header: SealedHeader) {
         self.buffered.push_back(header);
     }
 
@@ -356,13 +357,13 @@ where
                                 }
 
                                 if let Some(header) = this.earliest_header() {
-                                    // Proceed to insert unless there is a validation error
+                                    // Proceed to insert. If there is a validation error re-queue the future.
                                     if let Err(err) = this.validate(header, &parent) {
                                         stream_try_fuse_or_continue!(this, fut, err, 'outer);
                                     }
                                 } else if parent.hash() != this.forkchoice.head_block_hash {
                                     // The buffer is empty and the first header does not match the
-                                    // tip, discard
+                                    // tip, requeue the future
                                     stream_try_fuse_or_continue!(this, fut, 'outer);
                                 }
 
