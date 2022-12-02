@@ -287,7 +287,7 @@ where
                         }
 
                         // Record new parent
-                        this.buffer_header(parent);
+                        this.push_header_into_buffer(parent);
                     }
                 }
                 Err(err) => {
@@ -357,7 +357,8 @@ where
                                 }
 
                                 if let Some(header) = this.earliest_header() {
-                                    // Proceed to insert. If there is a validation error re-queue the future.
+                                    // Proceed to insert. If there is a validation error re-queue
+                                    // the future.
                                     if let Err(err) = this.validate(header, &parent) {
                                         stream_try_fuse_or_continue!(this, fut, err, 'outer);
                                     }
@@ -368,7 +369,7 @@ where
                                 }
 
                                 // Record new parent
-                                this.buffer_header(parent);
+                                this.push_header_into_buffer(parent);
                             }
                         }
                         Err(err) => {

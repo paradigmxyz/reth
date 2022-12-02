@@ -138,37 +138,40 @@ impl Stream for TestDownload {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if let Some(header) = this.buffer.pop() {
-            return Poll::Ready(Some(Ok(header)))
-        } else if this.done {
-            return Poll::Ready(None)
-        }
-
-        let empty = SealedHeader::default();
-        if let Err(error) = this.consensus.validate_header(&empty, &empty) {
-            this.done = true;
-            return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
-                hash: empty.hash(),
-                error,
-            })))
-        }
-
-        match ready!(this.get_or_init_fut().poll_unpin(cx)) {
-            Ok(resp) => {
-                // Skip head and seal headers
-                let mut headers = resp.0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
-                headers.sort_unstable_by_key(|h| h.number);
-                headers.into_iter().for_each(|h| this.buffer.push(h));
-                cx.waker().wake_by_ref();
-                this.done = true;
-                Poll::Pending
+        loop {
+            if let Some(header) = this.buffer.pop() {
+                return Poll::Ready(Some(Ok(header)))
+            } else if this.done {
+                return Poll::Ready(None)
             }
-            Err(err) => {
+
+            let empty = SealedHeader::default();
+            if let Err(error) = this.consensus.validate_header(&empty, &empty) {
                 this.done = true;
-                Poll::Ready(Some(Err(match err {
-                    RequestError::Timeout => DownloadError::Timeout,
-                    _ => DownloadError::RequestError(err),
+                return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
+                    hash: empty.hash(),
+                    error,
                 })))
+            }
+
+            match ready!(this.get_or_init_fut().poll_unpin(cx)) {
+                Ok(resp) => {
+                    // Skip head and seal headers
+                    let mut headers =
+                        resp.0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                    headers.sort_unstable_by_key(|h| h.number);
+                    headers.into_iter().for_each(|h| this.buffer.push(h));
+                    cx.waker().wake_by_ref();
+                    this.done = true;
+                    continue
+                }
+                Err(err) => {
+                    this.done = true;
+                    return Poll::Ready(Some(Err(match err {
+                        RequestError::Timeout => DownloadError::Timeout,
+                        _ => DownloadError::RequestError(err),
+                    })))
+                }
             }
         }
     }
