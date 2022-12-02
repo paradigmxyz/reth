@@ -227,20 +227,50 @@ where
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
-}
 
-macro_rules! try_fuse_or_continue {
-    ($this:ident, $fut:ident, $jumpdest:lifetime) => {
-        try_fuse_or_continue!($this, $fut, RequestError::BadResponse.into(), $jumpdest)
-    };
-    ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
-        if $this.try_fuse_request_fut(&mut $fut).is_err() {
-            $this.done = true;
-            return Poll::Ready(Err($err))
+    fn process_header_response(
+        &mut self,
+        response: Result<BlockHeaders, RequestError>,
+    ) -> Result<(), DownloadError> {
+        match response {
+            Ok(res) => {
+                let mut headers = res.0;
+                headers.sort_unstable_by_key(|h| h.number);
+
+                if headers.is_empty() {
+                    return Err(RequestError::BadResponse.into())
+                }
+
+                // Iterate headers in reverse
+                for parent in headers.into_iter().rev() {
+                    let parent = parent.seal();
+
+                    if self.head.hash() == parent.hash() {
+                        // We've reached the target, stop buffering headers
+                        self.done = true;
+                        break
+                    }
+
+                    if let Some(header) = self.earliest_header() {
+                        // Proceed to insert. If there is a validation error re-queue
+                        // the future.
+                        if let Err(err) = self.validate(header, &parent) {
+                            return Err(err)
+                        }
+                    } else if parent.hash() != self.forkchoice.head_block_hash {
+                        // The buffer is empty and the first header does not match the
+                        // tip, requeue the future
+                        return Err(RequestError::BadResponse.into())
+                    }
+
+                    // Record new parent
+                    self.push_header_into_buffer(parent);
+                }
+                Ok(())
+            }
+            Err(err) => Err(err.into()),
         }
-        $this.request = Some($fut);
-        continue $jumpdest
-    };
+    }
 }
 
 impl<C, H> Future for HeadersDownload<C, H>
@@ -256,62 +286,21 @@ where
             // Safe to unwrap, because the future is `done`
             // only upon returning the result
             let mut fut = this.get_or_init_fut().expect("fut exists; qed");
-            match ready!(fut.poll_unpin(cx)) {
-                Ok(resp) => {
-                    let mut headers = resp.0;
-                    headers.sort_unstable_by_key(|h| h.number);
-
-                    if headers.is_empty() {
-                        try_fuse_or_continue!(this, fut, 'outer);
-                    }
-
-                    // Iterate headers in reverse
-                    for parent in headers.into_iter().rev() {
-                        let parent = parent.seal();
-
-                        if this.head.hash() == parent.hash() {
-                            // We've reached the target
-                            this.done = true;
-                            return Poll::Ready(Ok(std::mem::take(&mut this.buffered).into()))
-                        }
-
-                        if let Some(header) = this.earliest_header() {
-                            // Proceed to insert unless there is a validation error
-                            if let Err(err) = this.validate(header, &parent) {
-                                try_fuse_or_continue!(this, fut, err, 'outer);
-                            }
-                        } else if parent.hash() != this.forkchoice.head_block_hash {
-                            // The buffer is empty and the first header does not match the tip,
-                            // discard
-                            try_fuse_or_continue!(this, fut, 'outer);
-                        }
-
-                        // Record new parent
-                        this.push_header_into_buffer(parent);
-                    }
+            let response = ready!(fut.poll_unpin(cx));
+            if let Err(err) = this.process_header_response(response) {
+                if this.try_fuse_request_fut(&mut fut).is_err() {
+                    this.done = true;
+                    return Poll::Ready(Err(err))
                 }
-                Err(err) => {
-                    try_fuse_or_continue!(this, fut, err.into(), 'outer);
-                }
+                this.request = Some(fut);
+                continue 'outer
+            }
+
+            if this.done {
+                return Poll::Ready(Ok(std::mem::take(&mut this.buffered).into()))
             }
         }
     }
-}
-
-macro_rules! stream_try_fuse_or_continue {
-    ($this:ident, $fut:ident, $jumpdest:lifetime) => {
-        stream_try_fuse_or_continue!($this, $fut, RequestError::BadResponse.into(), $jumpdest)
-    };
-    ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
-        if $this.try_fuse_request_fut(&mut $fut).is_err() {
-            // We exhausted all of the retries. Stream must terminate
-            $this.done = true;
-            $this.buffered.clear();
-            return Poll::Ready(Some(Err($err)))
-        }
-        $this.request = Some($fut);
-        continue $jumpdest
-    };
 }
 
 impl<C, H> Stream for HeadersDownload<C, H>
@@ -336,46 +325,17 @@ where
 
         'outer: loop {
             if let Some(mut fut) = this.get_or_init_fut() {
-                if let Poll::Ready(t) = fut.poll_unpin(cx) {
-                    match t {
-                        Ok(resp) => {
-                            let mut headers = resp.0;
-                            headers.sort_unstable_by_key(|h| h.number);
-
-                            if headers.is_empty() {
-                                stream_try_fuse_or_continue!(this, fut, 'outer);
-                            }
-
-                            // Iterate headers in reverse
-                            for parent in headers.into_iter().rev() {
-                                let parent = parent.seal();
-
-                                if this.head.hash() == parent.hash() {
-                                    // We've reached the target, stop buffering headers
-                                    this.done = true;
-                                    break
-                                }
-
-                                if let Some(header) = this.earliest_header() {
-                                    // Proceed to insert. If there is a validation error re-queue
-                                    // the future.
-                                    if let Err(err) = this.validate(header, &parent) {
-                                        stream_try_fuse_or_continue!(this, fut, err, 'outer);
-                                    }
-                                } else if parent.hash() != this.forkchoice.head_block_hash {
-                                    // The buffer is empty and the first header does not match the
-                                    // tip, requeue the future
-                                    stream_try_fuse_or_continue!(this, fut, 'outer);
-                                }
-
-                                // Record new parent
-                                this.push_header_into_buffer(parent);
-                            }
+                if let Poll::Ready(result) = fut.poll_unpin(cx) {
+                    if let Err(err) = this.process_header_response(result) {
+                        if this.try_fuse_request_fut(&mut fut).is_err() {
+                            // We exhausted all of the retries. Stream must terminate
+                            this.done = true;
+                            this.buffered.clear();
+                            return Poll::Ready(Some(Err(err)))
                         }
-                        Err(err) => {
-                            stream_try_fuse_or_continue!(this, fut, err.into(), 'outer);
-                        }
-                    };
+                        this.request = Some(fut);
+                        continue 'outer
+                    }
                 }
             }
 
