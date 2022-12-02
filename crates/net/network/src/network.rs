@@ -7,7 +7,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_primitives::{PeerId, TransactionSigned, H256};
+use reth_primitives::{PeerId, TransactionSigned, TxHash, H256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -128,6 +128,14 @@ impl NetworkHandle {
     /// Sends a [`PeerRequest`] to the given peer's session.
     pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
+    }
+
+    /// Send transactions hashes to the peer.
+    pub fn send_transactions_hashes(&self, peer_id: PeerId, msg: Vec<TxHash>) {
+        self.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
+            peer_id,
+            msg: NewPooledTransactionHashes(msg),
+        })
     }
 
     /// Send full transactions to the peer
