@@ -176,7 +176,7 @@ impl Discv4 {
         let socket = UdpSocket::bind(local_address).await?;
         let local_addr = socket.local_addr()?;
         local_enr.udp_port = local_addr.port();
-        trace!(?local_addr, target = "net::disc", "opened UDP socket");
+        trace!( target : "net::disc",  ?local_addr,"opened UDP socket");
 
         // We don't expect many commands, so the buffer can be quite small here.
         let (to_service, rx) = mpsc::channel(5);
@@ -392,7 +392,7 @@ impl Discv4Service {
     /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
         for node in self.config.bootstrap_nodes.clone() {
-            debug!(?node, target = "net::disc", "Adding bootstrap node");
+            debug!(target : "net::disc",  ?node, "Adding bootstrap node");
             self.add_node(node);
         }
     }
@@ -404,7 +404,7 @@ impl Discv4Service {
         tokio::task::spawn(async move {
             self.bootstrap();
             while let Some(event) = self.next().await {
-                trace!(?event, target = "net::disc", "processed");
+                trace!(target : "net::disc", ?event,  "processed");
             }
         })
     }
@@ -469,7 +469,7 @@ impl Discv4Service {
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target.
     fn find_node(&mut self, node: &NodeRecord, ctx: LookupContext) {
-        trace!(?node, lookup=?ctx.target(), target = "net::disc", "Sending FindNode");
+        trace!(target : "net::disc", ?node, lookup=?ctx.target(),  "Sending FindNode");
         ctx.mark_queried(node.id);
         let id = ctx.target();
         let msg = Message::FindNode(FindNode { id, expire: self.find_node_timeout() });
@@ -523,14 +523,14 @@ impl Discv4Service {
             },
         ) {
             InsertResult::Inserted => {
-                trace!(?record, target = "net::disc", "inserted new record to table");
+                trace!( target : "net::disc",?record, "inserted new record to table");
                 self.notify(TableUpdate::Added(record));
             }
             InsertResult::ValueUpdated { .. } | InsertResult::Updated { .. } => {
-                trace!(?record, target = "net::disc", "updated record");
+                trace!(target : "net::disc",?record,  "updated record");
             }
             res => {
-                debug!(?record, ?res, target = "net::disc", "failed to insert");
+                debug!(target : "net::disc",?record, ?res,  "failed to insert");
             }
         }
     }
@@ -551,7 +551,7 @@ impl Discv4Service {
     /// Encodes the packet, sends it and returns the hash.
     pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
         let (payload, hash) = msg.encode(&self.secret_key);
-        trace!(r#type=?msg.msg_type(), ?to, ?hash, target = "net::disc", "sending packet");
+        trace!(target : "net::disc",  r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to));
         hash
     }
@@ -600,7 +600,7 @@ impl Discv4Service {
         let id = node.id;
         let ping =
             Ping { from: self.local_enr.into(), to: node.into(), expire: self.ping_timeout() };
-        trace!(?ping, target = "net::disc", "sending ping");
+        trace!(target : "net::disc",  ?ping, "sending ping");
         let echo_hash = self.send_packet(Message::Ping(ping), remote_addr);
 
         self.pending_pings
@@ -619,7 +619,7 @@ impl Discv4Service {
                 {
                     let request = entry.get();
                     if request.echo_hash != pong.echo {
-                        debug!(from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo, target = "net::disc", "Got unexpected Pong");
+                        debug!( target : "net::disc",  from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
                         return
                     }
                 }
@@ -686,7 +686,7 @@ impl Discv4Service {
                     if total <= MAX_NODES_PER_BUCKET {
                         request.response_count = total;
                     } else {
-                        debug!(total, from=?remote_addr, target = "net::disc", "Got oversized Neighbors packet");
+                        debug!(target : "net::disc", total, from=?remote_addr,  "Got oversized Neighbors packet");
                         return
                     }
                 };
@@ -700,7 +700,7 @@ impl Discv4Service {
                 }
             }
             Entry::Vacant(_) => {
-                debug!(from=?remote_addr, target = "net::disc", "Received unsolicited Neighbours");
+                debug!( target : "net::disc", from=?remote_addr, "Received unsolicited Neighbours");
                 return
             }
         };
@@ -737,7 +737,7 @@ impl Discv4Service {
 
         for nodes in all_nodes.chunks(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS) {
             let nodes = nodes.iter().map(|node| node.value.record).collect::<Vec<NodeRecord>>();
-            trace!(len = nodes.len(), to=?to, target = "net::disc", "Sent neighbours packet");
+            trace!( target : "net::disc",  len = nodes.len(), to=?to,"Sent neighbours packet");
             let msg = Message::Neighbours(Neighbours { nodes, expire });
             self.send_packet(msg, to);
         }
@@ -746,7 +746,7 @@ impl Discv4Service {
     /// Returns the current status of the node
     fn node_status(&mut self, node: PeerId, addr: SocketAddr) -> NodeEntryStatus {
         if node == self.local_enr.id {
-            debug!(?node, target = "net::disc", "Got an incoming discovery request from self");
+            debug!( target : "net::disc",  ?node,"Got an incoming discovery request from self");
             return NodeEntryStatus::IsLocal
         }
         let key = kad_key(node);
@@ -901,26 +901,26 @@ impl Discv4Service {
             match event {
                 IngressEvent::RecvError(_) => {}
                 IngressEvent::BadPacket(from, err, data) => {
-                    warn!(?from, ?err, packet=?hex::encode(&data),  target = "net::disc", "bad packet");
+                    warn!(target : "net::disc", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                 }
                 IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
-                    trace!(r#type=?msg.msg_type(), from=?remote_addr, target = "net::disc", "received packet");
-                    match msg {
+                    trace!( target : "net::disc",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
+                    return match msg {
                         Message::Ping(ping) => {
                             self.on_ping(ping, remote_addr, node_id, hash);
-                            return Poll::Ready(Discv4Event::Ping)
+                            Poll::Ready(Discv4Event::Ping)
                         }
                         Message::Pong(pong) => {
                             self.on_pong(pong, remote_addr, node_id);
-                            return Poll::Ready(Discv4Event::Pong)
+                            Poll::Ready(Discv4Event::Pong)
                         }
                         Message::FindNode(msg) => {
                             self.on_find_node(msg, remote_addr, node_id);
-                            return Poll::Ready(Discv4Event::FindNode)
+                            Poll::Ready(Discv4Event::FindNode)
                         }
                         Message::Neighbours(msg) => {
                             self.on_neighbours(msg, remote_addr, node_id);
-                            return Poll::Ready(Discv4Event::Neighbours)
+                            Poll::Ready(Discv4Event::Neighbours)
                         }
                     }
                 }
@@ -964,10 +964,10 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     while let Some((payload, to)) = stream.next().await {
         match udp.send_to(&payload, to).await {
             Ok(size) => {
-                trace!(?to, ?size, target = "net::disc", "sent payload");
+                trace!( target : "net::disc",  ?to, ?size,"sent payload");
             }
             Err(err) => {
-                warn!(?to, ?err, target = "net::disc", "Failed to send datagram.");
+                warn!( target : "net::disc",  ?to, ?err,"Failed to send datagram.");
             }
         }
     }
@@ -980,7 +980,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         let res = udp.recv_from(&mut buf).await;
         match res {
             Err(err) => {
-                warn!(?err, target = "net::disc", "Failed to read datagram.");
+                warn!(target : "net::disc",  ?err, "Failed to read datagram.");
                 let _ = tx.send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
@@ -989,13 +989,13 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                     Ok(packet) => {
                         if packet.node_id == local_id {
                             // received our own message
-                            warn!(?remote_addr, target = "net::disc", "Received own packet.");
+                            warn!(target : "net::disc", ?remote_addr,  "Received own packet.");
                             continue
                         }
                         let _ = tx.send(IngressEvent::Packet(remote_addr, packet)).await;
                     }
                     Err(err) => {
-                        warn!(?err, target = "net::disc", "Failed to decode packet");
+                        warn!( target : "net::disc",  ?err,"Failed to decode packet");
                         let _ = tx
                             .send(IngressEvent::BadPacket(remote_addr, err, packet.to_vec()))
                             .await;
