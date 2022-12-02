@@ -281,7 +281,7 @@ mod tests {
 
     /// Check that unexpected download errors are caught
     #[tokio::test]
-    async fn executed_download_error() {
+    async fn execute_download_error() {
         let mut runner = HeadersTestRunner::default();
         let (stage_progress, previous_stage) = (1000, 1200);
         let input = ExecInput {
