@@ -62,7 +62,7 @@ impl<'a> EnumHandler<'a> {
                     let from_compact_ident = if !use_alt_impl {
                         format_ident!("from_compact")
                     } else {
-                        format_ident!("alternative_from_compact")
+                        format_ident!("specialized_from_compact")
                     };
 
                     // Unamed type
@@ -103,7 +103,7 @@ impl<'a> EnumHandler<'a> {
                     let to_compact_ident = if !use_alt_impl {
                         format_ident!("to_compact")
                     } else {
-                        format_ident!("alternative_to_compact")
+                        format_ident!("specialized_to_compact")
                     };
 
                     // Unamed type

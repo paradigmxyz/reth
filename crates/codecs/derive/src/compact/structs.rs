@@ -51,7 +51,7 @@ impl<'a> StructHandler<'a> {
         let to_compact_ident = if !use_alt_impl {
             format_ident!("to_compact")
         } else {
-            format_ident!("alternative_to_compact")
+            format_ident!("specialized_to_compact")
         };
 
         // Should only happen on wrapper structs like `Struct(pub Field)`
@@ -113,7 +113,7 @@ impl<'a> StructHandler<'a> {
         let from_compact_ident = if !use_alt_impl {
             format_ident!("from_compact")
         } else {
-            format_ident!("alternative_from_compact")
+            format_ident!("specialized_from_compact")
         };
 
         assert!(

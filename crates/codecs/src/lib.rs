@@ -16,9 +16,9 @@ use ethers_core::types::{Bloom, H160, H256, U256};
 /// `StructFlags`. It will fail compilation if it's not respected. If they're alias to known types,
 /// add their definitions to `get_bit_size()` or `known_types` in `generator.rs`.
 ///
-/// Regarding the `alternative_*` methods: Mainly used as a workaround for not being able to
-/// specialize an impl over certain types like Vec<T>/Option<T> where T is a fixed size array like
-/// Vec<H256>.
+/// Regarding the `specialized_to/from_compact` methods: Mainly used as a workaround for not being
+/// able to specialize an impl over certain types like Vec<T>/Option<T> where T is a fixed size
+/// array like Vec<H256>.
 pub trait Compact {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
@@ -32,16 +32,16 @@ pub trait Compact {
     where
         Self: Sized;
 
-    /// "Optional": If there's no good reason to use it, just call `to_compact`
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize
+    /// "Optional": If there's no good reason to use it, don't.
+    fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize
     where
         Self: Sized,
     {
         self.to_compact(buf)
     }
 
-    /// "Optional": If there's no good reason to use it, just call `from_compact`
-    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    /// "Optional": If there's no good reason to use it, don't.
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
@@ -112,7 +112,7 @@ where
     }
 
     /// To be used by fixed sized types like Vec<H256>.
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         buf.put_u16(self.len() as u16);
 
         for element in self {
@@ -122,7 +122,7 @@ where
     }
 
     /// To be used by fixed sized types like Vec<H256>.
-    fn alternative_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn specialized_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let mut list = vec![];
         let length = buf.get_u16();
         for _ in 0..length {
@@ -166,7 +166,7 @@ where
     }
 
     /// To be used by fixed sized types like Option<H256>.
-    fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         if let Some(element) = self {
             element.to_compact(buf);
             return 1
@@ -175,7 +175,7 @@ where
     }
 
     /// To be used by fixed sized types like Option<H256>.
-    fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
             return (None, buf)
         }
@@ -239,11 +239,11 @@ macro_rules! impl_hash_compact {
                     (v, buf)
                 }
 
-                fn alternative_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
                     self.to_compact(buf)
                 }
 
-                fn alternative_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+                fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
                     Self::from_compact(buf, len)
                 }
             }
@@ -371,9 +371,9 @@ mod tests {
         assert_eq!(Option::<H256>::from_compact(&buf, 0), (None, buf.as_slice()));
 
         let mut buf = vec![];
-        assert_eq!(opt.alternative_to_compact(&mut buf), 1);
+        assert_eq!(opt.specialized_to_compact(&mut buf), 1);
         assert_eq!(buf.len(), 32);
-        assert_eq!(Option::<H256>::alternative_from_compact(&buf, 1), (opt, vec![].as_slice()));
+        assert_eq!(Option::<H256>::specialized_from_compact(&buf, 1), (opt, vec![].as_slice()));
     }
 
     #[test]
