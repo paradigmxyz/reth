@@ -237,6 +237,7 @@ macro_rules! try_fuse_or_continue {
             $this.done = true;
             return Poll::Ready(Err($err))
         }
+        $this.request = Some($fut);
         continue $jumpdest
     };
 }
@@ -296,19 +297,19 @@ where
     }
 }
 
-macro_rules! try_fuse_or_return {
-    ($this:ident, $fut:ident) => {
-        try_fuse_or_return!($this, $fut, RequestError::BadResponse.into())
+macro_rules! stream_try_fuse_or_continue {
+    ($this:ident, $fut:ident, $jumpdest:lifetime) => {
+        stream_try_fuse_or_continue!($this, $fut, RequestError::BadResponse.into(), $jumpdest)
     };
-    ($this:ident, $fut:ident, $err:expr) => {
+    ($this:ident, $fut:ident, $err:expr, $jumpdest:lifetime) => {
         if $this.try_fuse_request_fut(&mut $fut).is_err() {
             // We exhausted all of the retries. Stream must terminate
             $this.done = true;
             $this.buffered.clear();
             return Poll::Ready(Some(Err($err)))
-        } else {
-            return Poll::Pending
         }
+        $this.request = Some($fut);
+        continue $jumpdest
     };
 }
 
@@ -332,65 +333,65 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if let Some(mut fut) = this.get_or_init_fut() {
-            if let Poll::Ready(t) = fut.poll_unpin(cx) {
-                match t {
-                    Ok(resp) => {
-                        let mut headers = resp.0;
-                        headers.sort_unstable_by_key(|h| h.number);
+        'outer: loop {
+            if let Some(mut fut) = this.get_or_init_fut() {
+                if let Poll::Ready(t) = fut.poll_unpin(cx) {
+                    match t {
+                        Ok(resp) => {
+                            let mut headers = resp.0;
+                            headers.sort_unstable_by_key(|h| h.number);
 
-                        if headers.is_empty() {
-                            try_fuse_or_return!(this, fut);
-                        }
-
-                        // Iterate headers in reverse
-                        for parent in headers.into_iter().rev() {
-                            let parent = parent.seal();
-
-                            if this.head.hash() == parent.hash() {
-                                // We've reached the target, stop buffering headers
-                                this.done = true;
-                                break
+                            if headers.is_empty() {
+                                stream_try_fuse_or_continue!(this, fut, 'outer);
                             }
 
-                            if let Some(header) = this.earliest_header() {
-                                // Proceed to insert unless there is a validation error
-                                if let Err(err) = this.validate(header, &parent) {
-                                    try_fuse_or_return!(this, fut, err);
+                            // Iterate headers in reverse
+                            for parent in headers.into_iter().rev() {
+                                let parent = parent.seal();
+
+                                if this.head.hash() == parent.hash() {
+                                    // We've reached the target, stop buffering headers
+                                    this.done = true;
+                                    break
                                 }
-                            } else if parent.hash() != this.forkchoice.head_block_hash {
-                                // The buffer is empty and the first header does not match the tip,
-                                // discard
-                                try_fuse_or_return!(this, fut);
+
+                                if let Some(header) = this.earliest_header() {
+                                    // Proceed to insert unless there is a validation error
+                                    if let Err(err) = this.validate(header, &parent) {
+                                        stream_try_fuse_or_continue!(this, fut, err, 'outer);
+                                    }
+                                } else if parent.hash() != this.forkchoice.head_block_hash {
+                                    // The buffer is empty and the first header does not match the
+                                    // tip, discard
+                                    stream_try_fuse_or_continue!(this, fut, 'outer);
+                                }
+
+                                // Record new parent
+                                this.buffer_header(parent);
                             }
-
-                            // Record new parent
-                            this.buffer_header(parent);
                         }
-                    }
-                    Err(err) => {
-                        try_fuse_or_return!(this, fut, err.into());
-                    }
-                };
+                        Err(err) => {
+                            stream_try_fuse_or_continue!(this, fut, err.into(), 'outer);
+                        }
+                    };
+                }
+            }
+
+            if !this.done && this.buffered.len() > 1 {
+                if let Some(header) = this.buffered.pop_front() {
+                    // Stream buffered header
+                    return Poll::Ready(Some(Ok(header)))
+                }
+            } else if this.done {
+                if let Some(header) = this.buffered.pop_front() {
+                    // Stream buffered header
+                    return Poll::Ready(Some(Ok(header)))
+                } else {
+                    // Polling finished, we've reached the target
+                    return Poll::Ready(None)
+                }
             }
         }
-
-        if !this.done && this.buffered.len() > 1 {
-            if let Some(header) = this.buffered.pop_front() {
-                // Stream buffered header
-                return Poll::Ready(Some(Ok(header)))
-            }
-        } else if this.done {
-            if let Some(header) = this.buffered.pop_front() {
-                // Stream buffered header
-                return Poll::Ready(Some(Ok(header)))
-            } else {
-                // Polling finished, we've reached the target
-                return Poll::Ready(None)
-            }
-        }
-
-        Poll::Pending
     }
 }
 
@@ -546,6 +547,19 @@ mod tests {
         assert_eq!(headers[0], p0);
         assert_eq!(headers[1], p1);
         assert_eq!(headers[2], p2);
+    }
+
+    #[tokio::test]
+    async fn download_empty_stream() {
+        let client = Arc::new(TestHeadersClient::default());
+        let downloader =
+            LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
+
+        let result = downloader
+            .stream(SealedHeader::default(), ForkchoiceState::default())
+            .try_collect::<Vec<_>>()
+            .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
