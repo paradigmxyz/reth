@@ -3,7 +3,7 @@ use crate::{
     peers::PeersConfig,
     session::SessionsConfig,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{Chain, ForkId, H256};
 use secp256k1::SecretKey;
 use std::{
@@ -17,6 +17,8 @@ pub struct NetworkConfig<C> {
     pub client: Arc<C>,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
+    /// All boot nodes to start network discovery with.
+    pub boot_nodes: Vec<NodeRecord>,
     /// How to set up discovery.
     pub discovery_v4_config: Discv4Config,
     /// Address to use for discovery
@@ -75,6 +77,8 @@ pub struct NetworkConfigBuilder<C> {
     secret_key: SecretKey,
     /// How to set up discovery.
     discovery_v4_builder: Discv4ConfigBuilder,
+    /// All boot nodes to start network discovery with.
+    boot_nodes: Vec<NodeRecord>,
     /// Address to use for discovery
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
@@ -105,6 +109,7 @@ impl<C> NetworkConfigBuilder<C> {
             client,
             secret_key,
             discovery_v4_builder: Default::default(),
+            boot_nodes: vec![],
             discovery_addr: None,
             listener_addr: None,
             peers_config: None,
@@ -153,12 +158,19 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
+    /// Sets the discv4 config to use.
+    pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
+        self.boot_nodes = nodes.into_iter().collect();
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     pub fn build(self) -> NetworkConfig<C> {
         let Self {
             client,
             secret_key,
             discovery_v4_builder,
+            boot_nodes,
             discovery_addr,
             listener_addr,
             peers_config,
@@ -172,6 +184,7 @@ impl<C> NetworkConfigBuilder<C> {
         NetworkConfig {
             client,
             secret_key,
+            boot_nodes,
             discovery_v4_config: discovery_v4_builder.build(),
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
