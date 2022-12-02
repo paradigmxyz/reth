@@ -12,11 +12,15 @@
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 [tg-url]: https://t.me/paradigm_reth
 
-# What is this?
+# What is Reth?
 
-Reth is a new Apache/MIT-licensed full node implementation of Ethereum focused on contributor friendliness, modularity, and performance - built by [Paradigm](https://paradigm.xyz/) and the community.
+Reth (short for Rust Ethereum) is a new Apache/MIT-licensed Ethereum full node implementation focused on contributor friendliness, modularity, and performance - built by [Paradigm](https://paradigm.xyz/) and the community.
 
 An Ethereum node is a piece of software that connects to the Ethereum network and allows users to send and receive transactions, as well as access and interact with the Ethereum blockchain. The Ethereum network is decentralized, which means that it relies on a network of nodes to validate and process transactions, rather than a central authority.
+
+Building a successful Ethereum node requires creating a high quality implementation that is secure, fast and easy to use on consumer hardware.  It also requires building a strong community of contributors who can help support and improve the software.
+
+We envision that Reth will create a new wave of Rust Ethereum core developers, and contribute to the robustness Ethereum.
 
 # What are the goals of this project?
 
@@ -27,6 +31,7 @@ Our goals are:
 4. **Client Diversity**: The Ethereum protocol becomes more antifragile when no node implementation dominates. This ensures that if there's a software bug, the network does not finalize a bad block. By building a new client, we hope to contribute to Ethereum's antifragility.
 5. **Support as many EVM chains as possible**: We aspire that Reth can full-sync not only Ethereum, but also other chains like Optimism, Polygon, Binance Smart Chain, and more. If you're working on any of these projects, please reach out.
 6. **Archive & pruned nodes, full sync and fast syncs**: We want to solve for node operators that care about fast historical queries, but also for hobbyists who cannot operate on large hardware. We also want to support teams and individuals who want both sync from genesis and via "fast sync". We envision that Reth will be configurable enough and provide configurable "profiles" for the tradeoffs that each team faces.
+
 
 # Status
 
