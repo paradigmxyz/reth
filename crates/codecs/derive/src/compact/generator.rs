@@ -82,7 +82,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
             });
         } else {
             let fields = fields.iter().filter_map(|field| {
-                if let FieldTypes::StructField((name, _, _)) = field {
+                if let FieldTypes::StructField((name, _, _, _)) = field {
                     let ident = format_ident!("{name}");
                     return Some(quote! {
                         #ident: #ident,
