@@ -319,12 +319,7 @@ impl Discv4Service {
             None,
         );
 
-        // delay the first lookup for a bit to give the bootstrap process a chance to resolve
-        // entries first
-        let self_lookup_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + config.ping_timeout / 2,
-            config.lookup_interval,
-        );
+        let self_lookup_interval = tokio::time::interval(config.lookup_interval);
 
         let ping_interval = tokio::time::interval(config.ping_interval);
 
