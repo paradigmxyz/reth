@@ -1,6 +1,8 @@
 # <h1 align="center"> reth 🏗️🚧 </h1>
 
-*Blazing-fast implementation of the Ethereum protocol*
+**Blazing-fast implementation of the Ethereum protocol**
+
+*The project is still work in progress, see the [disclaimer below](#-warning-under-construction-).*
 
 [![CI status](https://github.com/foundry-rs/reth/workflows/ci/badge.svg)][gh-ci]
 [![cargo-deny status](https://github.com/foundry-rs/reth/workflows/deny/badge.svg)][gh-deny]
