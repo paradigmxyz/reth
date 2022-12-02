@@ -50,7 +50,7 @@ const EXECUTION: StageId = StageId("Execution");
 #[derive(Debug)]
 pub struct ExecutionStage;
 
-/// SPecify batch sizes of block in execution
+/// Specify batch sizes of block in execution
 /// TODO make this as config
 const BATCH_SIZE: u64 = 1000;
 
@@ -462,7 +462,7 @@ mod tests {
             ))),
         };
 
-        // asert accounts
+        // assert accounts
         assert_eq!(
             tx.get::<tables::PlainAccountState>(account1),
             Ok(Some(account1_info)),
