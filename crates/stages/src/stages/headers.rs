@@ -111,7 +111,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         }
 
         // Write total difficulty values after all headers have been inserted
-        self.write_td::<DB>(db, stage_progress)?;
+        self.write_td::<DB>(db, &head)?;
 
         Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })
     }
@@ -206,15 +206,19 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     fn write_td<DB: Database>(
         &self,
         db: &StageDB<'_, DB>,
-        previous_stage_progress: u64,
+        head: &SealedHeader,
     ) -> Result<(), StageError> {
+        // Acquire cursor over total difficulty table
         let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
 
-        // Get last total difficulty
-        let mut td: U256 = cursor_td.last()?.map(|(_, v)| v).unwrap().into();
+        // Get latest total difficulty
+        let last_entry = cursor_td
+            .seek_exact(head.num_hash().into())?
+            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: head.number })?;
+        let mut td: U256 = last_entry.1.into();
 
         // Start at first inserted block during this iteration
-        let start_key = db.get_block_numhash(previous_stage_progress + 1)?;
+        let start_key = db.get_block_numhash(head.number + 1)?;
 
         // Walk over newly inserted headers, update & insert td
         for entry in db.cursor::<tables::Headers>()?.walk(start_key)? {
