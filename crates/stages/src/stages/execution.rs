@@ -167,7 +167,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let mut state_provider =
                 SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
 
-            // executiong and store output to results
+            // execution and store output to results
             results.extend(
                 reth_executor::executor::execute_and_verify_receipt(
                     header,
