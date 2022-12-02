@@ -16,6 +16,8 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
     /// All transactions sorted by their order function.
+    ///
+    /// The higher, the better.
     best: BTreeSet<ParkedPoolTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
@@ -23,7 +25,7 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     size_of: SizeTracker,
 }
 
-// === impl QueuedPool ===
+// === impl ParkedPool ===
 
 impl<T: ParkedOrd> ParkedPool<T> {
     /// Adds a new transactions to the pending queue.
@@ -62,7 +64,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
     /// Removes the worst transaction from this pool.
     pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let worst = self.best.iter().next_back().map(|tx| *tx.transaction.id())?;
+        let worst = self.best.iter().next().map(|tx| *tx.transaction.id())?;
         self.remove_transaction(&worst)
     }
 
@@ -131,10 +133,11 @@ impl<T: ParkedOrd> PartialOrd<Self> for ParkedPoolTransaction<T> {
 impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // This compares by the transactions first, and only if two tx are equal this compares
-        // the unique `transaction_id`.
+        // the unique `submission_id`.
+        // "better" transactions are Greater
         self.transaction
             .cmp(&other.transaction)
-            .then_with(|| self.transaction.id().cmp(other.transaction.id()))
+            .then_with(|| other.submission_id.cmp(&self.submission_id))
     }
 }
 
@@ -213,7 +216,7 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self.0.transaction.max_fee_per_gas(), other.0.transaction.max_fee_per_gas()) {
             (Some(fee), Some(other)) => fee.cmp(&other),
-            (None, Some(_other)) => Ordering::Less,
+            (None, Some(_)) => Ordering::Less,
             (Some(_), None) => Ordering::Greater,
             _ => Ordering::Equal,
         }
@@ -223,13 +226,18 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
 /// A new type wrapper for [`ValidPoolTransaction`]
 ///
 /// This sorts transactions by their distance.
+///
+/// `Queued` transactions are transactions that are currently blocked by other parked (basefee,
+/// queued) or missing transactions.
+///
+/// The primary order function for is always compares via the timestamp when the transaction was
+/// created
 pub struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(QueuedOrd);
 
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
-    fn cmp(&self, _other: &Self) -> Ordering {
-        // TODO ideally compare by distance here.
-        Ordering::Equal
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.timestamp.cmp(&self.timestamp)
     }
 }
