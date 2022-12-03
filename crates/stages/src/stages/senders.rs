@@ -114,7 +114,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 #[cfg(test)]
 mod tests {
     use reth_interfaces::{
-        db::models::StoredBlockBody, test_utils::generators::random_block_range,
+        db::models::StoredBlockOmmers, test_utils::generators::random_block_range,
     };
     use reth_primitives::{BlockLocked, BlockNumber, H256};
 
@@ -161,10 +161,11 @@ mod tests {
 
                     let num_hash = (b.number, b.hash()).into();
                     tx.put::<tables::CanonicalHeaders>(b.number, b.hash())?;
-                    tx.put::<tables::BlockBodies>(
-                        num_hash,
-                        StoredBlockBody { base_tx_id, tx_amount, ommers },
-                    )?;
+                    // TODO:
+                    // tx.put::<tables::BlockOmmers>(
+                    //     num_hash,
+                    //     StoredBlockOmmers { base_tx_id, tx_amount, ommers },
+                    // )?;
                     tx.put::<tables::CumulativeTxCount>(num_hash, base_tx_id + tx_amount)?;
 
                     for body_tx in txs {
@@ -195,7 +196,7 @@ mod tests {
                     }
 
                     let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
-                    let mut body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    let mut body_cursor = tx.cursor::<tables::BlockOmmers>()?;
                     let body_walker = body_cursor.walk((start_block, start_hash).into())?;
 
                     for entry in body_walker {
@@ -245,10 +246,10 @@ mod tests {
         fn get_block_body_entry(
             &self,
             block: BlockNumber,
-        ) -> Result<Option<StoredBlockBody>, TestRunnerError> {
+        ) -> Result<Option<StoredBlockOmmers>, TestRunnerError> {
             let entry = self.db.query(|tx| match tx.get::<tables::CanonicalHeaders>(block)? {
                 Some(hash) => {
-                    let mut body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    let mut body_cursor = tx.cursor::<tables::BlockOmmers>()?;
                     let entry = match body_cursor.seek_exact((block, hash).into())? {
                         Some((_, block)) => Some(block),
                         _ => body_cursor.prev()?.map(|(_, block)| block),

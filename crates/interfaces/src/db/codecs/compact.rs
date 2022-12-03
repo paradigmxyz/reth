@@ -1,5 +1,5 @@
 use crate::db::{
-    models::{accounts::AccountBeforeTx, StoredBlockBody},
+    models::{accounts::AccountBeforeTx, StoredBlockOmmers},
     Compress, Decompress, Error,
 };
 use bytes::Buf;
@@ -34,7 +34,15 @@ macro_rules! impl_compression_for_compact {
     };
 }
 
-impl_compression_for_compact!(Header, Account, Log, Receipt, TxType, StorageEntry, StoredBlockBody);
+impl_compression_for_compact!(
+    Header,
+    Account,
+    Log,
+    Receipt,
+    TxType,
+    StorageEntry,
+    StoredBlockOmmers
+);
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
 impl_compression_for_compact!(CompactU256);
 
