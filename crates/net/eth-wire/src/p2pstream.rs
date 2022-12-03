@@ -549,7 +549,7 @@ impl P2PMessage {
 /// compressed in the `p2p` subprotocol.
 impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        out.put_u8(self.message_id() as u8);
+        (self.message_id() as u8).encode(out);
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
             P2PMessage::Disconnect(msg) => msg.encode(out),
@@ -926,6 +926,7 @@ mod tests {
         let mut hello_encoded = Vec::new();
         hello.encode(&mut hello_encoded);
 
-        assert_eq!(hello_encoded[0], P2PMessageID::Hello as u8);
+        // zero is encoded as 0x80, the empty string code in RLP
+        assert_eq!(hello_encoded[0], EMPTY_STRING_CODE);
     }
 }
