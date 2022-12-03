@@ -13,6 +13,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::trace;
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 pub struct PeersHandle {
@@ -183,6 +184,7 @@ impl PeersManager {
                 node.addr = addr;
             }
             Entry::Vacant(entry) => {
+                trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
                 entry.insert(Peer::new(addr));
             }
         }
@@ -191,6 +193,7 @@ impl PeersManager {
     /// Removes the tracked node from the set.
     pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
         if let Some(entry) = self.peers.remove(&peer_id) {
+            trace!(target : "net::peers",  ?peer_id, "remove discovered node");
             if entry.state.is_connected() {
                 // TODO(mattsse): is this right to disconnect peers?
                 self.connection_info.decr_state(entry.state);
@@ -234,6 +237,9 @@ impl PeersManager {
                 if peer.is_banned() {
                     break
                 }
+
+                trace!(target : "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
+
                 peer.state = PeerConnectionState::Out;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }
             };

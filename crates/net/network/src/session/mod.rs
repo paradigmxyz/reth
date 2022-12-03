@@ -359,6 +359,7 @@ impl SessionManager {
                     target : "net::session",
                     ?session_id,
                     ?remote_addr,
+                    ?error,
                     "disconnected pending session"
                 );
                 self.remove_pending_session(&session_id);
