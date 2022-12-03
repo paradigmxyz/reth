@@ -382,13 +382,31 @@ impl Discv4Service {
     /// own ID in the DHT. This introduces the local node to the other nodes
     /// in the DHT and populates its routing table with the closest proven neighbours.
     ///
-    /// This is equivalent to adding all bootnodes via [`Self::add_node()`].
+    /// This is similar to adding all bootnodes via [`Self::add_node`], but does not fire a
+    /// [`TableUpdate::Added`] event for the given bootnodes. So boot nodes don't appear in the
+    /// update stream, which is usually desirable, since bootnodes should not be connected to.
+    ///
+    /// If adding the configured boodnodes should result in a [`TableUpdate::Added`], see
+    /// [`Self::add_all_nodes`].
     ///
     /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
-        for node in self.config.bootstrap_nodes.clone() {
-            debug!(target : "net::disc",  ?node, "Adding bootstrap node");
-            self.add_node(node);
+        for record in self.config.bootstrap_nodes.clone() {
+            debug!(target : "net::disc",  ?record, "Adding bootstrap node");
+            let key = kad_key(record.id);
+            let entry = NodeEntry { record, last_seen: Instant::now() };
+
+            // insert the boot node in the table
+            let _ = self.kbuckets.insert_or_update(
+                &key,
+                entry,
+                NodeStatus {
+                    state: ConnectionState::Connected,
+                    direction: ConnectionDirection::Outgoing,
+                },
+            );
+
+            self.try_ping(record, PingReason::Normal);
         }
     }
 
@@ -527,6 +545,15 @@ impl Discv4Service {
             res => {
                 debug!(target : "net::disc",?record, ?res,  "failed to insert");
             }
+        }
+    }
+
+    /// Adds all nodes
+    ///
+    /// See [Self::add_node]
+    pub fn add_all_nodes(&mut self, records: impl IntoIterator<Item = NodeRecord>) {
+        for record in records.into_iter() {
+            self.add_node(record);
         }
     }
 
