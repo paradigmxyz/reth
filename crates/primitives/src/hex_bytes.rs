@@ -169,7 +169,7 @@ impl FromStr for Bytes {
             hex::decode(value)
         }
         .map(Into::into)
-        .map_err(|e| ParseBytesError(format!("Invalid hex: {}", e)))
+        .map_err(|e| ParseBytesError(format!("Invalid hex: {e}")))
     }
 }
 
