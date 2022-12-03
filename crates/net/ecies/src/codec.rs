@@ -1,5 +1,5 @@
 use crate::{
-    algorithm::{ECIES, MAX_BODY_SIZE},
+    algorithm::ECIES,
     ECIESError, EgressECIESValue, IngressECIESValue,
 };
 use bytes::BytesMut;
@@ -133,17 +133,6 @@ impl Encoder<EgressECIESValue> for ECIESCodec {
                 Ok(())
             }
             EgressECIESValue::Message(data) => {
-                if data.len() > MAX_BODY_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!(
-                            "body size ({}) exceeds limit ({} bytes)",
-                            data.len(),
-                            MAX_BODY_SIZE
-                        ),
-                    ))
-                }
-
                 self.ecies.write_header(buf, data.len());
                 self.ecies.write_body(buf, &data);
                 Ok(())
