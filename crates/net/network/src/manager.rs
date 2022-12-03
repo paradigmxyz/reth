@@ -113,7 +113,7 @@ where
         let NetworkConfig {
             client,
             secret_key,
-            discovery_v4_config,
+            mut discovery_v4_config,
             discovery_addr,
             listener_addr,
             peers_config,
@@ -121,6 +121,7 @@ where
             genesis_hash,
             block_import,
             network_mode,
+            boot_nodes,
             ..
         } = config;
 
@@ -130,6 +131,8 @@ where
         let incoming = ConnectionListener::bind(listener_addr).await?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
+        // merge configured boot nodes
+        discovery_v4_config.bootstrap_nodes.extend(boot_nodes.clone());
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
