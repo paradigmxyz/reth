@@ -549,7 +549,7 @@ impl P2PMessage {
 /// compressed in the `p2p` subprotocol.
 impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        out.put_u8(self.message_id() as u8);
+        (self.message_id() as u8).encode(out);
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
             P2PMessage::Disconnect(msg) => msg.encode(out),
