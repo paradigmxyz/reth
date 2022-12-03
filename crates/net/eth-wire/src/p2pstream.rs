@@ -926,6 +926,7 @@ mod tests {
         let mut hello_encoded = Vec::new();
         hello.encode(&mut hello_encoded);
 
-        assert_eq!(hello_encoded[0], P2PMessageID::Hello as u8);
+        // zero is encoded as 0x80, the empty string code in RLP
+        assert_eq!(hello_encoded[0], EMPTY_STRING_CODE);
     }
 }
