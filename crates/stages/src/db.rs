@@ -90,12 +90,6 @@ where
         self.tx.take();
     }
 
-    /// Get exact or previous value from the database
-    pub(crate) fn get_exact_or_prev<T: Table>(&self, key: T::Key) -> PairResult<T> {
-        let mut cursor = self.cursor::<T>()?;
-        Ok(cursor.seek_exact(key)?.or(cursor.prev()?))
-    }
-
     /// Query [tables::CanonicalHeaders] table for block hash by block number
     pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
         let hash = self

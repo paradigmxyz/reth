@@ -58,14 +58,6 @@ impl TestStageDB {
         f(&self.inner())
     }
 
-    /// Check if the table is empty
-    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, db::Error> {
-        self.query(|tx| {
-            let last = tx.cursor::<T>()?.last()?;
-            Ok(last.is_none())
-        })
-    }
-
     /// Map a collection of values and store them in the database.
     /// This function commits the transaction before exiting.
     ///
@@ -73,6 +65,7 @@ impl TestStageDB {
     /// let db = StageTestDB::default();
     /// db.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
+    #[allow(dead_code)]
     pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), db::Error>
     where
         T: Table,
@@ -96,6 +89,7 @@ impl TestStageDB {
     /// let db = StageTestDB::default();
     /// db.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
+    #[allow(dead_code)]
     pub(crate) fn transform_append<T, S, F>(
         &self,
         values: &[S],
