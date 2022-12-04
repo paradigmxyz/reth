@@ -46,8 +46,9 @@ const BODIES: StageId = StageId("Bodies");
 /// This stage expects that the genesis has been inserted into the appropriate tables:
 ///
 /// - The header tables (see [`HeaderStage`][crate::stages::headers::HeaderStage])
-/// - The various indexes (e.g. [`TotalTxIndex`][crate::stages::tx_index::TxIndex])
 /// - The [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers] table
+/// - The [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount] table
+/// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
@@ -98,7 +99,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Cursors used to write bodies and transactions
         let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
-        let mut cum_tx_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
+        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
 
         // Get cumulative transaction count for the previous progress block.
         // The count is used as the index for the first transaction
@@ -138,7 +139,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             // Write block
             let key = (block_number, header_hash).into();
-            cum_tx_cursor.append(key, first_tx_id + block.body.len() as u64)?;
+            tx_count_cursor.append(key, first_tx_id + block.body.len() as u64)?;
             ommers_cursor.append(
                 key,
                 StoredBlockOmmers {
@@ -170,19 +171,19 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let mut cum_tx_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
+        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
         let mut block_ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
 
-        let mut entry = cum_tx_cursor.last()?;
+        let mut entry = tx_count_cursor.last()?;
         while let Some((key, count)) = entry {
             if key.number() <= input.unwind_to {
                 break
             }
 
             // First delete the current and find the previous cum tx count value
-            cum_tx_cursor.delete_current()?;
-            entry = cum_tx_cursor.prev()?;
+            tx_count_cursor.delete_current()?;
+            entry = tx_count_cursor.prev()?;
 
             if block_ommers_cursor.seek_exact(key)?.is_some() {
                 block_ommers_cursor.delete_current()?;
@@ -569,10 +570,10 @@ mod tests {
                             .last()?
                             .map(|(_, v)| v)
                             .unwrap_or_default();
-                        let cum_tx_count = last_count + progress.body.len() as u64;
-                        tx.put::<tables::CumulativeTxCount>(key, cum_tx_count)?;
+                        let tx_count = last_count + progress.body.len() as u64;
+                        tx.put::<tables::CumulativeTxCount>(key, tx_count)?;
                         tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
-                        (last_count..cum_tx_count).try_for_each(|idx| {
+                        (last_count..tx_count).try_for_each(|idx| {
                             tx.put::<tables::Transactions>(idx, random_signed_tx())
                         })
                     })?;

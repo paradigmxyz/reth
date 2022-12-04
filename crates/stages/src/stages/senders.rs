@@ -114,7 +114,8 @@ impl<DB: Database> Stage<DB> for SendersStage {
 #[cfg(test)]
 mod tests {
     use reth_interfaces::{
-        db::models::StoredBlockOmmers, test_utils::generators::random_block_range,
+        db::models::NumTransactions,
+        test_utils::generators::{random_block_range, random_signed_tx},
     };
     use reth_primitives::{BlockLocked, BlockNumber, H256};
 
@@ -155,20 +156,21 @@ mod tests {
             self.db.commit(|tx| {
                 let mut base_tx_id = 0;
                 blocks.iter().try_for_each(|b| {
-                    let ommers = b.ommers.iter().map(|o| o.clone().unseal()).collect::<Vec<_>>();
                     let txs = b.body.clone();
                     let tx_amount = txs.len() as u64;
 
                     let num_hash = (b.number, b.hash()).into();
                     tx.put::<tables::CanonicalHeaders>(b.number, b.hash())?;
-                    // TODO:
-                    // tx.put::<tables::BlockOmmers>(
-                    //     num_hash,
-                    //     StoredBlockOmmers { base_tx_id, tx_amount, ommers },
-                    // )?;
                     tx.put::<tables::CumulativeTxCount>(num_hash, base_tx_id + tx_amount)?;
 
                     for body_tx in txs {
+                        // Insert senders for previous stage progress
+                        if b.number == stage_progress {
+                            tx.put::<tables::TxSenders>(
+                                base_tx_id,
+                                body_tx.recover_signer().expect("failed to recover sender"),
+                            )?;
+                        }
                         tx.put::<tables::Transactions>(base_tx_id, body_tx)?;
                         base_tx_id += 1;
                     }
@@ -195,13 +197,17 @@ mod tests {
                         return Ok(())
                     }
 
-                    let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
-                    let mut body_cursor = tx.cursor::<tables::BlockOmmers>()?;
-                    let body_walker = body_cursor.walk((start_block, start_hash).into())?;
+                    let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
 
-                    for entry in body_walker {
-                        let (_, body) = entry?;
-                        for tx_id in body.base_tx_id..body.base_tx_id + body.tx_amount {
+                    let last_block = start_block - 1;
+                    let last_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
+                    let mut last_tx_count = tx_count_cursor
+                        .seek_exact((last_block, last_hash).into())?
+                        .map(|(_, v)| v)
+                        .unwrap_or_default();
+
+                    while let Some((_, count)) = tx_count_cursor.next()? {
+                        for tx_id in last_tx_count..count {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");
@@ -209,12 +215,13 @@ mod tests {
                                 transaction.recover_signer().expect("failed to recover signer");
                             assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);
                         }
+                        last_tx_count = count;
                     }
 
                     Ok(())
                 })?;
             } else {
-                self.check_no_transaction_by_block(input.stage_progress.unwrap_or_default())?;
+                self.check_no_senders_by_block(input.stage_progress.unwrap_or_default())?;
             }
 
             Ok(())
@@ -223,36 +230,37 @@ mod tests {
 
     impl UnwindStageTestRunner for SendersTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            self.check_no_transaction_by_block(input.unwind_to)
+            self.check_no_senders_by_block(input.unwind_to)
         }
     }
 
     impl SendersTestRunner {
-        fn check_no_transaction_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            match self.get_block_body_entry(block)? {
-                Some(body) => {
-                    let last_index = body.base_tx_id + body.tx_amount;
+        fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+            match self.get_tx_count_entry(block)? {
+                Some(count) => {
+                    let last_index = count - 1;
                     self.db.check_no_entry_above::<tables::TxSenders, _>(last_index, |key| key)?;
                 }
                 None => {
                     assert!(self.db.table_is_empty::<tables::TxSenders>()?);
                 }
             };
+
             Ok(())
         }
 
         /// Get the block body entry at block number. If it doesn't exist,
         /// fallback to the previous entry.
-        fn get_block_body_entry(
+        fn get_tx_count_entry(
             &self,
             block: BlockNumber,
-        ) -> Result<Option<StoredBlockOmmers>, TestRunnerError> {
+        ) -> Result<Option<NumTransactions>, TestRunnerError> {
             let entry = self.db.query(|tx| match tx.get::<tables::CanonicalHeaders>(block)? {
                 Some(hash) => {
-                    let mut body_cursor = tx.cursor::<tables::BlockOmmers>()?;
-                    let entry = match body_cursor.seek_exact((block, hash).into())? {
+                    let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
+                    let entry = match tx_count_cursor.seek_exact((block, hash).into())? {
                         Some((_, block)) => Some(block),
-                        _ => body_cursor.prev()?.map(|(_, block)| block),
+                        _ => tx_count_cursor.prev()?.map(|(_, block)| block),
                     };
                     Ok(entry)
                 }
