@@ -114,8 +114,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 #[cfg(test)]
 mod tests {
     use reth_interfaces::{
-        db::models::NumTransactions,
-        test_utils::generators::{random_block_range, random_signed_tx},
+        db::models::NumTransactions, test_utils::generators::random_block_range,
     };
     use reth_primitives::{BlockLocked, BlockNumber, H256};
 
