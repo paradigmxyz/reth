@@ -118,7 +118,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut last_tx_count = if last_block == 0 {
             0u64
         } else {
-            // headers_barch is not empty,
+            // headers_batch is not empty,
             let parent_hash = headers_batch[0].parent_hash;
 
             let (_, tx_cnt) = cumulative_tx_count

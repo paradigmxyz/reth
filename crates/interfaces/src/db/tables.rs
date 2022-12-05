@@ -211,7 +211,7 @@ table!(
 
 dupsort!(
     /// Stores the state of an account before a certain transaction changed it.
-    /// Change on state can be: account is created, selfdestructed,touched while empty
+    /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed (balance,nonce). 
     AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
 
