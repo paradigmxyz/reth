@@ -101,10 +101,8 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
         let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
 
-        // Get cumulative transaction count for the previous progress block.
-        // The count is used as the index for the first transaction
-        let key = db.get_block_numhash(previous_block)?;
-        let mut first_tx_id = db.get_tx_count(key)?;
+        // Get id for the first transaction in the block
+        let mut first_tx_id = db.get_first_tx_id(starting_block)?;
 
         // Cursor used to look up headers for block pre-validation
         let mut header_cursor = db.cursor::<tables::Headers>()?;

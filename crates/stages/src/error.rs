@@ -1,6 +1,6 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{consensus, db::Error as DbError};
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -75,6 +75,12 @@ pub enum DatabaseIntegrityError {
     TotalDifficulty {
         /// The block number key
         number: BlockNumber,
+    },
+    /// The transaction is missing
+    #[error("Transaction #{id} not found")]
+    Transaction {
+        /// The transaction id
+        id: TxNumber,
     },
 }
 

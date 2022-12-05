@@ -30,7 +30,7 @@ impl Default for TestStageDB {
 
 impl TestStageDB {
     /// Return a database wrapped in [StageDB].
-    fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
+    pub(crate) fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
         StageDB::new(self.db.borrow()).expect("failed to create db container")
     }
 
