@@ -3163,6 +3163,7 @@ dependencies = [
  "generic-array",
  "hex-literal",
  "hmac",
+ "pin-project",
  "rand 0.8.5",
  "reth-primitives",
  "reth-rlp",
