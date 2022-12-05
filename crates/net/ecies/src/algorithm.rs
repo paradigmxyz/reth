@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 use crate::{
+    error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
     util::{hmac_sha256, id2pk, pk2id, sha256},
     ECIESError,
@@ -80,7 +81,7 @@ pub struct ECIES {
 
 fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
     if idx > arr.len() {
-        return Err(ECIESError::OutOfBounds { idx, len: arr.len() })
+        return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into())
     }
     Ok(arr.split_at_mut(idx))
 }
@@ -224,7 +225,7 @@ impl ECIES {
 
         let check_tag = hmac_sha256(mac_key.as_ref(), &[iv, encrypted_data], auth_data);
         if check_tag != tag {
-            return Err(ECIESError::TagCheckFailed)
+            return Err(ECIESErrorImpl::TagCheckFailed.into())
         }
 
         let decrypted_data = encrypted_data;
@@ -302,15 +303,15 @@ impl ECIES {
     fn parse_auth_unencrypted(&mut self, data: &[u8]) -> Result<(), ECIESError> {
         let mut data = Rlp::new(data)?;
 
-        let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESError::InvalidAuthData)?;
+        let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         let signature = RecoverableSignature::from_compact(
             &sigdata[0..64],
             RecoveryId::from_i32(sigdata[64] as i32)?,
         )?;
-        let remote_id = data.get_next()?.ok_or(ECIESError::InvalidAuthData)?;
+        let remote_id = data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         self.remote_id = Some(remote_id);
         self.remote_public_key = Some(id2pk(remote_id)?);
-        self.remote_nonce = Some(data.get_next()?.ok_or(ECIESError::InvalidAuthData)?);
+        self.remote_nonce = Some(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?);
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
         self.remote_ephemeral_public_key = Some(SECP256K1.recover_ecdsa(
@@ -379,8 +380,8 @@ impl ECIES {
     fn parse_ack_unencrypted(&mut self, data: &[u8]) -> Result<(), ECIESError> {
         let mut data = Rlp::new(data)?;
         self.remote_ephemeral_public_key =
-            Some(id2pk(data.get_next()?.ok_or(ECIESError::InvalidAckData)?)?);
-        self.remote_nonce = Some(data.get_next()?.ok_or(ECIESError::InvalidAckData)?);
+            Some(id2pk(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?)?);
+        self.remote_nonce = Some(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?);
 
         self.ephemeral_shared_secret =
             Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));
@@ -475,12 +476,12 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESError::TagCheckFailed)
+            return Err(ECIESErrorImpl::TagCheckFailed.into())
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
         if header.as_slice().len() < 3 {
-            return Err(ECIESError::InvalidHeader)
+            return Err(ECIESErrorImpl::InvalidHeader.into())
         }
 
         let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)?;
@@ -527,7 +528,7 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESError::TagCheckFailed)
+            return Err(ECIESErrorImpl::TagCheckFailed.into())
         }
 
         let size = self.body_size.unwrap();
