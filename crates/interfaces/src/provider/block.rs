@@ -107,8 +107,28 @@ pub struct ChainInfo {
     pub safe_finalized: Option<reth_primitives::BlockNumber>,
 }
 
+/// Get value from [tables::CumulativeTxCount] by block hash
+/// as the table is indexed by NumHash key we are obtaining number from
+/// [tables::HeaderNumbers]
+pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    tx: &TX,
+    block_hash: H256,
+) -> Result<u64> {
+    let block_number = tx
+        .get::<tables::HeaderNumbers>(block_hash)?
+        .ok_or(ProviderError::BlockHashNotExist { block_hash })?;
+
+    let block_num_hash = BlockNumHash((block_number, block_hash));
+
+    tx.get::<tables::CumulativeTxCount>(block_num_hash)?
+        .ok_or_else(|| ProviderError::BlockBodyNotExist { block_num_hash }.into())
+}
+
 /// Fill block to database. Useful for tests.
-/// Check only parent dependency.
+/// Check parent dependency in [tables::HeaderNumbers] and in [tables::CumulativeTxCount] tables.
+/// Inserts blocks data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers],
+/// and transactions data to [tables::TxSenders], [tables::Transactions],
+/// [tables::CumulativeTxCount] and [tables::BlockBodies]
 pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: &BlockLocked,
@@ -119,21 +139,8 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 
-    let start_tx_number = if block.number == 0 {
-        0
-    } else {
-        let parent_hash = block.parent_hash;
-        let parent_number = tx
-            .get::<tables::HeaderNumbers>(parent_hash)?
-            .ok_or(ProviderError::BlockHashNotExist { block_hash: parent_hash })?;
-
-        let parent_num_hash = BlockNumHash((parent_number, parent_hash));
-
-        let parent_body = tx
-            .get::<tables::BlockBodies>(parent_num_hash)?
-            .ok_or(ProviderError::BlockBodyNotExist { block_num_hash: parent_num_hash })?;
-        parent_body.next_block_tx_id()
-    };
+    let start_tx_number =
+        if block.number == 0 { 0 } else { get_cumulative_tx_count_by_hash(tx, block.parent_hash)? };
 
     // insert body
     tx.put::<tables::BlockBodies>(
@@ -145,8 +152,6 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         },
     )?;
 
-    tx.put::<tables::CumulativeTxCount>(block_num_hash, start_tx_number)?;
-
     let mut tx_number = start_tx_number;
     for eth_tx in block.body.iter() {
         let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
@@ -154,6 +159,8 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
         tx_number += 1;
     }
+
+    tx.put::<tables::CumulativeTxCount>(block_num_hash, tx_number)?;
 
     Ok(())
 }

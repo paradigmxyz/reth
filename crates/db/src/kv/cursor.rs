@@ -1,6 +1,6 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use std::marker::PhantomData;
+use std::{borrow::Cow, marker::PhantomData};
 
 use crate::utils::*;
 use reth_interfaces::db::{
@@ -108,11 +108,14 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
         key: T::Key,
         subkey: T::SubKey,
     ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error> {
+        // encode key and decode it after.
+        let key = key.encode().as_ref().to_vec();
+
         let start = self
             .inner
-            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+            .get_both_range(key.as_ref(), subkey.encode().as_ref())
             .map_err(|e| Error::Read(e.into()))?
-            .map(decode_one::<T>);
+            .map(|val| decoder::<T>((Cow::Owned(key), val)));
 
         Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
     }
