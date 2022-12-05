@@ -40,7 +40,7 @@ impl<S> UnauthedEthStream<S> {
 
 impl<S, E> UnauthedEthStream<S>
 where
-    S: Stream<Item = Result<bytes::BytesMut, E>> + Sink<bytes::Bytes, Error = E> + Unpin,
+    S: Stream<Item = Result<BytesMut, E>> + Sink<Bytes, Error = E> + Unpin,
     EthStreamError: From<E>,
 {
     /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
@@ -54,7 +54,8 @@ where
         tracing::trace!("sending eth status ...");
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
-        let mut our_status_bytes = BytesMut::new();
+        // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
+        let mut our_status_bytes = BytesMut::with_capacity(1 + 88);
         ProtocolMessage::from(EthMessage::Status(status)).encode(&mut our_status_bytes);
         let our_status_bytes = our_status_bytes.freeze();
         self.inner.send(our_status_bytes).await?;
@@ -277,7 +278,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
-            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
                 .handshake(status_clone, fork_filter_clone)
                 .await
@@ -288,7 +289,7 @@ mod tests {
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let sink = crate::PassthroughCodec::default().framed(outgoing);
+        let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
         let (_, their_status) =
@@ -307,8 +308,8 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
         let test_msg = EthMessage::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: reth_primitives::H256::random(), number: 5 },
-                BlockHashNumber { hash: reth_primitives::H256::random(), number: 6 },
+                BlockHashNumber { hash: H256::random(), number: 5 },
+                BlockHashNumber { hash: H256::random(), number: 6 },
             ]
             .into(),
         );
@@ -342,8 +343,8 @@ mod tests {
         let server_key = SecretKey::new(&mut rand::thread_rng());
         let test_msg = EthMessage::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: reth_primitives::H256::random(), number: 5 },
-                BlockHashNumber { hash: reth_primitives::H256::random(), number: 6 },
+                BlockHashNumber { hash: H256::random(), number: 5 },
+                BlockHashNumber { hash: H256::random(), number: 6 },
             ]
             .into(),
         );
