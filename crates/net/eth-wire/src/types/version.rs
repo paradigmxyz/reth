@@ -1,8 +1,10 @@
+//! Support for representing the version of the `eth`. [`Capability`].
+
+use crate::capability::Capability;
 use std::str::FromStr;
 use thiserror::Error;
 
-use crate::capability::Capability;
-
+/// Error thrown when failed to parse a valid [`EthVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("Unknown eth protocol version: {0}")]
 pub struct ParseVersionError(String);
