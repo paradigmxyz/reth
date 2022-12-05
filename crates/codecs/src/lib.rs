@@ -282,7 +282,6 @@ impl Compact for bool {
 mod tests {
     use super::*;
     use ethers_core::types::Address;
-    use modular_bitfield::prelude::*;
 
     #[test]
     fn compact_bytes() {
