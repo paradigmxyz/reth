@@ -54,7 +54,7 @@ where
         tracing::trace!("sending eth status ...");
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
-        // <msg id = 1 byte> + <rlp(status) = 88 byte>
+        // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
         let mut our_status_bytes = BytesMut::with_capacity(1 + 88);
         ProtocolMessage::from(EthMessage::Status(status)).encode(&mut our_status_bytes);
         let our_status_bytes = our_status_bytes.freeze();
