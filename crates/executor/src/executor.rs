@@ -1,12 +1,12 @@
 use crate::{
-    revm_wrap::{self, SubState},
+    revm_wrap::{self, to_reth_acc, SubState},
     Config,
 };
 use hashbrown::hash_map::Entry;
 use reth_interfaces::{executor::Error, provider::StateProvider};
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Bloom, Log, Receipt, SealedHeader,
-    TransactionSignedEcRecovered, H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, Header, Log, Receipt, TransactionSignedEcRecovered,
+    H256, U256,
 };
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ExecutionResult,
@@ -20,15 +20,37 @@ pub struct Executor {
     pub config: Config,
 }
 
+/// Contains old/new account change
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum AccountInfoChangeSet {
+    /// Account is newly created.
+    Created {
+        /// Newly created acc
+        new: Account,
+    },
+    /// If account is deleted (selfdestructed) or if we have touched
+    /// a empty account, we would need to remove/destroy it.
+    /// (Look at state clearing [EIP-158](https://eips.ethereum.org/EIPS/eip-158))
+    Destroyed {
+        /// Old account.
+        old: Account,
+    },
+    /// Account is changed.
+    Changed {
+        /// New account after transaction change.
+        new: Account,
+        /// Old account before transaction.
+        old: Account,
+    },
+    /// There is not change in account information (nonce/balance).
+    NoChange,
+}
+
 /// Diff change set that is neede for creating history index and updating current world state.
 #[derive(Debug, Clone)]
 pub struct AccountChangeSet {
-    /// Old and New account.
-    /// If account is deleted (selfdestructed) we would have (Some,None).
-    /// If account is newly created we would have (None,Some).
-    /// If it is only a storage change we would have (None,None)
-    /// If account is changed (balance,nonce) we would have (Some,Some)
-    pub account: (Option<Account>, Option<Account>),
+    /// Old and New account account change.
+    pub account: AccountInfoChangeSet,
     /// Storage containing key -> (OldValue,NewValue). in case that old value is not existing
     /// we can expect to have U256::zero(), same with new value.
     pub storage: BTreeMap<U256, (U256, U256)>,
@@ -67,15 +89,7 @@ pub fn commit_changes<DB: StateProvider>(
             change.insert(
                 address,
                 AccountChangeSet {
-                    account: (
-                        Some(Account {
-                            nonce: db_account.info.nonce,
-                            balance: db_account.info.balance,
-                            bytecode_hash: Some(db_account.info.code_hash), /* TODO none if
-                                                                             * KECCAK_EMPTY */
-                        }),
-                        None,
-                    ),
+                    account: AccountInfoChangeSet::Destroyed { old: to_reth_acc(&db_account.info) },
                     storage: BTreeMap::new(),
                     wipe_storage: true,
                 },
@@ -107,30 +121,33 @@ pub fn commit_changes<DB: StateProvider>(
             // get old account that is going to be overwritten or none if it does not exist
             // and get new account that was just inserted. new account mut ref is used for
             // inserting storage
-            let (old_account, has_change, new_account) = match db.accounts.entry(address) {
+            let (account_info_changeset, new_account) = match db.accounts.entry(address) {
                 Entry::Vacant(entry) => {
                     let entry = entry.insert(Default::default());
                     entry.info = account.info.clone();
-                    (None, true, entry)
+                    // account was not existing, so this means new account is created
+                    (AccountInfoChangeSet::Created { new: to_reth_acc(&entry.info) }, entry)
                 }
                 Entry::Occupied(entry) => {
                     let entry = entry.into_mut();
-                    let (old_account, has_change) =
+
+                    // account is present inside cache but is markes as NotExisting.
+                    let account_changeset =
                         if matches!(entry.account_state, AccountState::NotExisting) {
-                            (None, true)
+                            AccountInfoChangeSet::Created { new: to_reth_acc(&account.info) }
+                        } else if entry.info != account.info {
+                            AccountInfoChangeSet::Changed {
+                                old: to_reth_acc(&entry.info),
+                                new: to_reth_acc(&account.info),
+                            }
                         } else {
-                            (Some(entry.info.clone()), entry.info != account.info)
+                            AccountInfoChangeSet::NoChange
                         };
                     entry.info = account.info.clone();
-                    (old_account, has_change, entry)
+                    (account_changeset, entry)
                 }
             };
-            // cast from revm type to reth type
-            let old_account = old_account.map(|acc| Account {
-                balance: acc.balance,
-                nonce: acc.nonce,
-                bytecode_hash: Some(acc.code_hash), // TODO if KECCAK_EMPTY return None
-            });
+
             let mut wipe_storage = false;
 
             new_account.account_state = if account.storage_cleared {
@@ -153,24 +170,7 @@ pub fn commit_changes<DB: StateProvider>(
             // Insert into change.
             change.insert(
                 address,
-                AccountChangeSet {
-                    account: if has_change {
-                        (
-                            old_account,
-                            Some(new_account).map(|acc| {
-                                Account {
-                                    balance: acc.info.balance,
-                                    nonce: acc.info.nonce,
-                                    bytecode_hash: Some(acc.info.code_hash), // TODO if KECCAK_EMPTY return None
-                                }
-                            }),
-                        )
-                    } else {
-                        (None, None)
-                    },
-                    storage,
-                    wipe_storage,
-                },
+                AccountChangeSet { account: account_info_changeset, storage, wipe_storage },
             );
         }
     }
@@ -193,7 +193,7 @@ pub struct TransactionStatePatch {
 
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
-    header: &SealedHeader,
+    header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
     db: &mut SubState<DB>,
@@ -232,7 +232,7 @@ pub fn verify_receipt<'a>(
 /// Verify block. Execute all transaction and compare results.
 /// Return diff is on transaction granularity. We are returning vector of
 pub fn execute<DB: StateProvider>(
-    header: &SealedHeader,
+    header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
     db: &mut SubState<DB>,
@@ -280,6 +280,8 @@ pub fn execute<DB: StateProvider>(
                 revm::Return::Return |
                 revm::Return::SelfDestruct
         );
+
+        // TODO add handling of other errors
 
         // Add spend gas.
         cumulative_gas_used += gas_used;
@@ -403,13 +405,8 @@ mod tests {
             HashMap::new(),
         );
 
-        let account3_old_info = Account {
-            balance: 0x3635c9adc5dea00000u128.into(),
-            nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let account3_old_info =
+            Account { balance: 0x3635c9adc5dea00000u128.into(), nonce: 0x00, bytecode_hash: None };
 
         db.insert_account(
             H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
@@ -436,45 +433,31 @@ mod tests {
         assert_eq!(patch.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let _account1_info = Account {
-            balance: 0x00.into(),
-            nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let _account1_info = Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
-            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(), /* TODO remove
-                                                                                * 2eth block
-                                                                                * reward */
+            // TODO remove 2eth block reward
+            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
             nonce: 0x00,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
+            bytecode_hash: None,
         };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let account3_info = Account {
-            balance: 0x3635c9adc5de996b46u128.into(),
-            nonce: 0x01,
-            bytecode_hash: Some(H256(hex!(
-                "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-            ))),
-        };
+        let account3_info =
+            Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
 
         assert_eq!(
             patch.state_diff.get(&account1).unwrap().account,
-            (None, None),
+            AccountInfoChangeSet::NoChange,
             "No change to account"
         );
         assert_eq!(
             patch.state_diff.get(&account2).unwrap().account,
-            (None, Some(account2_info)),
+            AccountInfoChangeSet::Created { new: account2_info },
             "New acccount"
         );
         assert_eq!(
             patch.state_diff.get(&account3).unwrap().account,
-            (Some(account3_old_info), Some(account3_info)),
+            AccountInfoChangeSet::Changed { old: account3_old_info, new: account3_info },
             "Change to account state"
         );
 

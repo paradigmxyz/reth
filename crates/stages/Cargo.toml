@@ -8,14 +8,20 @@ readme = "README.md"
 description = "Staged syncing primitives used in reth."
 
 [dependencies]
+# reth libs
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-db = { path = "../db" }
+reth-executor = { path = "../executor" }
+reth-rlp = { path = "../common/rlp" }
+
+#async
+tokio = { version = "1.21.2", features = ["sync"] }
+
 async-trait = "0.1.57"
 thiserror = "1.0.37"
 tracing = "0.1.36"
 tracing-futures = "0.2.5"
-tokio = { version = "1.21.2", features = ["sync"] }
 aquamarine = "0.1.12"
 metrics = "0.20.1"
 futures-util = "0.3.25"

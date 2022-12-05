@@ -151,6 +151,9 @@ table!(
 
 table!(
     /// Stores all smart contract bytecodes.
+    /// There will be multiple accounts that have same bytecode
+    /// So we would need to introduce reference counter.
+    /// This will be small optimization on state.
     Bytecodes => H256 => Bytecode);
 
 dupsort!(
@@ -208,15 +211,20 @@ table!(
 
 dupsort!(
     /// Stores the state of an account before a certain transaction changed it.
+    /// Change on state can be: account is created, selfdestructed, touched while empty
+    /// or changed (balance,nonce). 
     AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
 
 dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
+    /// If [`StorageEntry::value`] is zero, this means storage was not existing
+    /// and needs to be removed. 
     StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
 
 table!(
     /// Stores the transaction sender for each transaction.
-    TxSenders => TxNumber => Address); // Is it necessary? if so, inverted index index so we dont repeat addresses?
+    /// It is needed to speed up execution stage and allows fetching signer without doing transaction signed recovery
+    TxSenders => TxNumber => Address);
 
 table!(
     /// Configuration values.

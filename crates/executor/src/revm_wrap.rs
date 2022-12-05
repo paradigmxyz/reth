@@ -1,7 +1,7 @@
 use reth_interfaces::{provider::StateProvider, Error};
 use reth_primitives::{
-    Header, Transaction, TransactionKind, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxLegacy, H160, H256, KECCAK_EMPTY, U256,
+    Account, Header, Transaction, TransactionKind, TransactionSignedEcRecovered, TxEip1559,
+    TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
 };
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -178,4 +178,18 @@ pub fn is_log_equal(revm_log: &revm::Log, reth_log: &reth_primitives::Log) -> bo
             .iter()
             .zip(reth_log.topics.iter())
             .any(|(revm_topic, reth_topic)| revm_topic != reth_topic)
+}
+
+/// Create reth primitive [Account] from [revm::AccountInfo].
+/// Check if revm bytecode hash is [KECCAK_EMPTY] and put None to reth [Account]
+pub fn to_reth_acc(revm_acc: &revm::AccountInfo) -> Account {
+    Account {
+        balance: revm_acc.balance,
+        nonce: revm_acc.nonce,
+        bytecode_hash: if revm_acc.code_hash == KECCAK_EMPTY {
+            None
+        } else {
+            Some(revm_acc.code_hash)
+        },
+    }
 }
