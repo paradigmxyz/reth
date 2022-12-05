@@ -1,7 +1,8 @@
-use std::fmt::Display;
+//! Disconnect
 
 use bytes::Buf;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
+use std::fmt::Display;
 use thiserror::Error;
 
 /// RLPx disconnect reason.
@@ -21,8 +22,11 @@ pub enum DisconnectReason {
     AlreadyConnected = 0x05,
     /// `p2p` protocol version is incompatible
     IncompatibleP2PProtocolVersion = 0x06,
+    /// Received a null node identity.
     NullNodeIdentity = 0x07,
+    /// Reason when the client is shutting down.
     ClientQuitting = 0x08,
+    /// When the received handshake's identify is different from what is expected.
     UnexpectedHandshakeIdentity = 0x09,
     /// The node is connected to itself
     ConnectedToSelf = 0x0a,
@@ -149,9 +153,8 @@ mod tests {
     };
     use reth_rlp::{Decodable, Encodable};
 
-    #[test]
-    fn disconnect_round_trip() {
-        let all_reasons = vec![
+    fn all_reasons() -> Vec<DisconnectReason> {
+        vec![
             DisconnectReason::DisconnectRequested,
             DisconnectReason::TcpSubsystemError,
             DisconnectReason::ProtocolBreach,
@@ -165,7 +168,12 @@ mod tests {
             DisconnectReason::ConnectedToSelf,
             DisconnectReason::PingTimeout,
             DisconnectReason::SubprotocolSpecific,
-        ];
+        ]
+    }
+
+    #[test]
+    fn disconnect_round_trip() {
+        let all_reasons = all_reasons();
 
         for reason in all_reasons {
             let disconnect = P2PMessage::Disconnect(reason);
@@ -186,21 +194,7 @@ mod tests {
 
     #[test]
     fn disconnect_encoding_length() {
-        let all_reasons = vec![
-            DisconnectReason::DisconnectRequested,
-            DisconnectReason::TcpSubsystemError,
-            DisconnectReason::ProtocolBreach,
-            DisconnectReason::UselessPeer,
-            DisconnectReason::TooManyPeers,
-            DisconnectReason::AlreadyConnected,
-            DisconnectReason::IncompatibleP2PProtocolVersion,
-            DisconnectReason::NullNodeIdentity,
-            DisconnectReason::ClientQuitting,
-            DisconnectReason::UnexpectedHandshakeIdentity,
-            DisconnectReason::ConnectedToSelf,
-            DisconnectReason::PingTimeout,
-            DisconnectReason::SubprotocolSpecific,
-        ];
+        let all_reasons = all_reasons();
 
         for reason in all_reasons {
             let disconnect = P2PMessage::Disconnect(reason);
@@ -232,8 +226,7 @@ mod tests {
         // ensure that the two encodings are equal
         assert_eq!(
             disconnect_expected, disconnect_encoded,
-            "left: {:#x?}, right: {:#x?}",
-            disconnect_expected, disconnect_encoded
+            "left: {disconnect_expected:#x?}, right: {disconnect_encoded:#x?}"
         );
 
         // also ensure that the length is correct
