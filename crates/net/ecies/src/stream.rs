@@ -23,7 +23,9 @@ use tracing::{debug, instrument, trace};
 
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]
+#[pin_project::pin_project]
 pub struct ECIESStream<Io> {
+    #[pin]
     stream: Framed<Io, ECIESCodec>,
     remote_id: PeerId,
 }
@@ -110,7 +112,7 @@ where
     type Item = Result<bytes::BytesMut, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match ready!(Pin::new(&mut self.get_mut().stream).poll_next(cx)) {
+        match ready!(self.project().stream.poll_next(cx)) {
             Some(Ok(IngressECIESValue::Message(body))) => Poll::Ready(Some(Ok(body))),
             Some(other) => Poll::Ready(Some(Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -128,22 +130,20 @@ where
     type Error = io::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_ready(cx)
+        self.project().stream.poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        let this = self.get_mut();
-        Pin::new(&mut this.stream).start_send(EgressECIESValue::Message(item))?;
-
+        self.project().stream.start_send(EgressECIESValue::Message(item))?;
         Ok(())
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+        self.project().stream.poll_flush(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_close(cx)
+        self.project().stream.poll_close(cx)
     }
 }
 
