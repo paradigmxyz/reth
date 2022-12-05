@@ -126,7 +126,7 @@ pub fn get_commulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
 /// Fill block to database. Useful for tests.
 /// Check parent dependency in [tables::HeaderNumbers] and in [tables::CumulativeTxCount] tables.
-/// Inserts blocks data to [tables::CanonicalHeaders],[tables::Headers],[tables::HeaderNumbers],
+/// Inserts blocks data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers],
 /// and transactions data to [tables::TxSenders], [tables::Transactions],
 /// [tables::CumulativeTxCount] and [tables::BlockBodies]
 pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
