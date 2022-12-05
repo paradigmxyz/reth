@@ -6,11 +6,13 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     let flags_ident = format_ident!("{ident}Flags");
+    let mod_flags_ident = format_ident!("{ident}_flags");
+
     let mut field_flags = vec![];
 
     let total_bits = if is_enum {
         field_flags.push(quote! {
-            variant: B8,
+            pub variant: B8,
         });
         8
     } else {
@@ -44,17 +46,26 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
 
     // Generate the flag struct.
     quote! {
-        #[bitfield]
-        #[derive(Clone, Copy, Debug, Default)]
-        struct #flags_ident {
-            #(#field_flags)*
-        }
 
-        impl #flags_ident {
-            fn from(mut buf: &[u8]) -> (Self, &[u8]) {
-                (#flags_ident::from_bytes([
-                    #(#readable_bytes)*
-                ]), buf)
+        pub use #mod_flags_ident::#flags_ident;
+        mod #mod_flags_ident {
+            use bytes::Buf;
+            use modular_bitfield::prelude::*;
+
+            /// Fieldset that facilitates compacting the parent type.
+            #[bitfield]
+            #[derive(Clone, Copy, Debug, Default)]
+            pub struct #flags_ident {
+                #(#field_flags)*
+            }
+
+            impl #flags_ident {
+                /// Deserializes this fieldset and returns it, alongside the original slice in an advanced position.
+                pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+                    (#flags_ident::from_bytes([
+                        #(#readable_bytes)*
+                    ]), buf)
+                }
             }
         }
     }
@@ -82,13 +93,13 @@ fn build_struct_field_flags(
                 total_bits += bitsize;
 
                 field_flags.push(quote! {
-                    #name: #bsize ,
+                    pub #name: #bsize ,
                 });
             } else {
                 let name = format_ident!("{name}");
 
                 field_flags.push(quote! {
-                    #name: bool ,
+                    pub #name: bool ,
                 });
 
                 total_bits += 1;
@@ -120,15 +131,18 @@ fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
 /// Placeholder struct for when there are no bitfields to be added.
 fn placeholder_flag_struct(flags: &Ident) -> TokenStream2 {
     quote! {
+        /// Placeholder struct for when there is no need for a fieldset. Doesn't actually write or read any data.
         #[derive(Debug, Default)]
-        struct #flags {
+        pub struct #flags {
         }
 
         impl #flags {
-            fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+            /// Placeholder: does not read any value.
+            pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
                 (#flags::default(), buf)
             }
-            fn into_bytes(self) -> [u8; 0] {
+            /// Placeholder: returns an empty array.
+            pub fn into_bytes(self) -> [u8; 0] {
                 []
             }
         }
