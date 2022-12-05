@@ -254,9 +254,7 @@ where
                     if let Some(header) = self.earliest_header() {
                         // Proceed to insert. If there is a validation error re-queue
                         // the future.
-                        if let Err(err) = self.validate(header, &parent) {
-                            return Err(err)
-                        }
+                        self.validate(header, &parent)?;
                     } else if parent.hash() != self.forkchoice.head_block_hash {
                         // The buffer is empty and the first header does not match the
                         // tip, requeue the future
