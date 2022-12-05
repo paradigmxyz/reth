@@ -2,8 +2,6 @@ use crate::db::{
     models::{accounts::AccountBeforeTx, StoredBlockBody},
     Compress, Decompress, Error,
 };
-use bytes::Buf;
-use modular_bitfield::prelude::*;
 use reth_codecs::{main_codec, Compact};
 use reth_primitives::*;
 
