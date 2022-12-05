@@ -782,6 +782,14 @@ impl TransactionSignedEcRecovered {
         self.signer
     }
 
+    /// Create [TransactionSignedEcRecovered] from [TransactionSigned] and author of transaction
+    pub fn from_signed_transactions_and_signer(
+        signed_transaction: TransactionSigned,
+        signer: Address,
+    ) -> Self {
+        Self { signed_transaction, signer }
+    }
+
     /// Transform back to [`TransactionSigned`]
     pub fn into_signed(self) -> TransactionSigned {
         self.signed_transaction

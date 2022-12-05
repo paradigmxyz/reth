@@ -115,7 +115,7 @@ fn build_struct_field_flags(
 /// Returns the total number of bytes used by the flags struct.
 fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
     let remaining = 8 - total_bits % 8;
-    let total_bytes = if remaining != 8 {
+    if remaining != 8 {
         let bsize = format_ident!("B{remaining}");
         field_flags.push(quote! {
             #[skip]
@@ -124,8 +124,7 @@ fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
         (total_bits + remaining) / 8
     } else {
         total_bits / 8
-    };
-    total_bytes
+    }
 }
 
 /// Placeholder struct for when there are no bitfields to be added.

@@ -1,6 +1,6 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::{consensus, db::Error as DbError};
-use reth_primitives::{BlockNumber, H256};
+use reth_interfaces::{consensus, db::Error as DbError, executor};
+use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -19,6 +19,15 @@ pub enum StageError {
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]
     Database(#[from] DbError),
+    #[error("Stage encountered a execution error in block {block}: {error}.")]
+    /// The stage encountered a execution error
+    ExecutionError {
+        /// The block that failed execution.
+        block: BlockNumber,
+        /// The underlying execution error.
+        #[source]
+        error: executor::Error,
+    },
     /// The stage encountered a database integrity error.
     #[error("A database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] DatabaseIntegrityError),
@@ -34,6 +43,7 @@ pub enum StageError {
 /// A database integrity error.
 /// The sender stage error
 #[derive(Error, Debug)]
+#[allow(missing_docs)]
 pub enum DatabaseIntegrityError {
     // TODO(onbjerg): What's the difference between this and the one below?
     /// The canonical hash for a block is missing from the database.
@@ -70,6 +80,14 @@ pub enum DatabaseIntegrityError {
         /// The block number key
         number: BlockNumber,
     },
+    #[error("Gap in transaction table. Missing tx number #{missing}.")]
+    TransactionsGap { missing: TxNumber },
+    #[error("Gap in transaction signer table. Missing tx number #{missing}.")]
+    TransactionsSignerGap { missing: TxNumber },
+    #[error("Got to the end of transaction table")]
+    EndOfTransactionTable,
+    #[error("Got to the end of transaction table")]
+    EndOfTransactionSenderTable,
     /// The total difficulty from the block header is missing.
     #[error("Total difficulty not found for block #{number}")]
     TotalDifficulty {

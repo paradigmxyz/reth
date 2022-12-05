@@ -1,8 +1,15 @@
-use crate::Result;
+use crate::{
+    db::{
+        models::{BlockNumHash, StoredBlockBody},
+        tables, DbTx, DbTxMut,
+    },
+    provider::Error as ProviderError,
+    Result,
+};
 use auto_impl::auto_impl;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, BlockHashOrNumber, Header, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, BlockLocked, Header, H256, U256,
 };
 
 /// Client trait for fetching `Header` related data.
@@ -98,4 +105,62 @@ pub struct ChainInfo {
     pub last_finalized: Option<reth_primitives::BlockNumber>,
     /// Safe block
     pub safe_finalized: Option<reth_primitives::BlockNumber>,
+}
+
+/// Get value from [tables::CumulativeTxCount] by block hash
+/// as the table is indexed by NumHash key we are obtaining number from
+/// [tables::HeaderNumbers]
+pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    tx: &TX,
+    block_hash: H256,
+) -> Result<u64> {
+    let block_number = tx
+        .get::<tables::HeaderNumbers>(block_hash)?
+        .ok_or(ProviderError::BlockHashNotExist { block_hash })?;
+
+    let block_num_hash = BlockNumHash((block_number, block_hash));
+
+    tx.get::<tables::CumulativeTxCount>(block_num_hash)?
+        .ok_or_else(|| ProviderError::BlockBodyNotExist { block_num_hash }.into())
+}
+
+/// Fill block to database. Useful for tests.
+/// Check parent dependency in [tables::HeaderNumbers] and in [tables::CumulativeTxCount] tables.
+/// Inserts blocks data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers],
+/// and transactions data to [tables::TxSenders], [tables::Transactions],
+/// [tables::CumulativeTxCount] and [tables::BlockBodies]
+pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    tx: &TX,
+    block: &BlockLocked,
+) -> Result<()> {
+    let block_num_hash = BlockNumHash((block.number, block.hash()));
+    tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
+    // Put header with canonical hashes.
+    tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
+    tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
+
+    let start_tx_number =
+        if block.number == 0 { 0 } else { get_cumulative_tx_count_by_hash(tx, block.parent_hash)? };
+
+    // insert body
+    tx.put::<tables::BlockBodies>(
+        block_num_hash,
+        StoredBlockBody {
+            base_tx_id: start_tx_number,
+            tx_amount: block.body.len() as u64,
+            ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect(),
+        },
+    )?;
+
+    let mut tx_number = start_tx_number;
+    for eth_tx in block.body.iter() {
+        let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
+        tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
+        tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
+        tx_number += 1;
+    }
+
+    tx.put::<tables::CumulativeTxCount>(block_num_hash, tx_number)?;
+
+    Ok(())
 }
