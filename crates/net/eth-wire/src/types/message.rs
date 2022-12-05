@@ -289,7 +289,7 @@ pub enum EthMessageID {
 }
 
 impl Encodable for EthMessageID {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
+    fn encode(&self, out: &mut dyn BufMut) {
         out.put_u8(*self as u8);
     }
     fn length(&self) -> usize {
