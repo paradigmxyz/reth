@@ -1,7 +1,4 @@
-use crate::{
-    algorithm::ECIES,
-    ECIESError, EgressECIESValue, IngressECIESValue,
-};
+use crate::{algorithm::ECIES, ECIESError, EgressECIESValue, IngressECIESValue};
 use bytes::BytesMut;
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
