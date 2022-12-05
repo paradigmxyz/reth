@@ -15,6 +15,7 @@ thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = "0.1.11"
 tokio-util = { version = "0.7.4", features = ["codec"] }
+pin-project = "1.0"
 
 educe = "0.4.19"
 hex = "0.4.3"
