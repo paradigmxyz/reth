@@ -91,7 +91,6 @@ where
     }
 
     /// Get exact or previous value from the database
-    // TODO:
     pub(crate) fn get_exact_or_prev<T: Table>(&self, key: T::Key) -> PairResult<T> {
         let mut cursor = self.cursor::<T>()?;
         Ok(cursor.seek_exact(key)?.or(cursor.prev()?))
