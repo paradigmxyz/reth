@@ -201,6 +201,11 @@ impl<S> P2PStream<S> {
         }
     }
 
+    /// Returns the shared capability for this stream.
+    pub fn shared_capability(&self) -> &SharedCapability {
+        &self.shared_capability
+    }
+
     /// Returns `true` if the connection is about to disconnect.
     pub fn is_disconnecting(&self) -> bool {
         self.disconnecting
@@ -815,8 +820,7 @@ mod tests {
         // ensure that the two encodings are equal
         assert_eq!(
             ping_expected, ping_encoded,
-            "left: {:#x?}, right: {:#x?}",
-            ping_expected, ping_encoded
+            "left: {ping_expected:#x?}, right: {ping_encoded:#x?}"
         );
 
         // also ensure that the length is correct
@@ -852,8 +856,7 @@ mod tests {
         // ensure that the two encodings are equal
         assert_eq!(
             pong_expected, pong_encoded,
-            "left: {:#x?}, right: {:#x?}",
-            pong_expected, pong_encoded
+            "left: {pong_expected:#x?}, right: {pong_encoded:#x?}"
         );
 
         // also ensure that the length is correct

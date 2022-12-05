@@ -57,6 +57,7 @@ pub enum HandshakeError {
 
 /// Errors when sending/receiving p2p messages. These should result in kicking the peer.
 #[derive(thiserror::Error, Debug)]
+#[allow(missing_docs)]
 pub enum P2PStreamError {
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -104,7 +105,8 @@ impl P2PStreamError {
 }
 
 /// Errors when conducting a p2p handshake
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone, Eq, PartialEq)]
+#[allow(missing_docs)]
 pub enum P2PHandshakeError {
     #[error("hello message can only be recv/sent in handshake")]
     HelloNotInHandshake,
