@@ -278,6 +278,12 @@ where
 {
     type Output = Result<Vec<SealedHeader>, DownloadError>;
 
+    /// Linear header download implemented as a [Future]. The downloader
+    /// aggregates all of the header responses in a local buffer until the
+    /// previous head is reached.
+    ///
+    /// Upon encountering an error, the downloader will try to resend the request.
+    /// Returns the error if all of the request retries have been exhausted.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         'outer: loop {
