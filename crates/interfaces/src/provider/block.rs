@@ -110,7 +110,7 @@ pub struct ChainInfo {
 /// Get value from [tables::CumulativeTxCount] by block hash
 /// as the table is indexed by NumHash key we are obtaining number from
 /// [tables::HeaderNumbers]
-pub fn get_commulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block_hash: H256,
 ) -> Result<u64> {
@@ -139,11 +139,8 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 
-    let start_tx_number = if block.number == 0 {
-        0
-    } else {
-        get_commulative_tx_count_by_hash(tx, block.parent_hash)?
-    };
+    let start_tx_number =
+        if block.number == 0 { 0 } else { get_cumulative_tx_count_by_hash(tx, block.parent_hash)? };
 
     // insert body
     tx.put::<tables::BlockBodies>(

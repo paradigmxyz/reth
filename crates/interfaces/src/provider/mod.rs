@@ -4,7 +4,7 @@ mod error;
 mod state;
 
 pub use block::{
-    get_commulative_tx_count_by_hash, insert_canonical_block, BlockProvider, ChainInfo,
+    get_cumulative_tx_count_by_hash, insert_canonical_block, BlockProvider, ChainInfo,
     HeaderProvider,
 };
 pub use db_provider::{self as db, ProviderImpl};

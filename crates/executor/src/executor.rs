@@ -29,8 +29,8 @@ pub enum AccountInfoChangeSet {
         new: Account,
     },
     /// If account is deleted (selfdestructed) or if we have touched
-    /// empty account we would have to remove it from state
-    /// (Look at state clear EIP https://eips.ethereum.org/EIPS/eip-
+    /// a empty account, we would need to remove/destroy it.
+    /// (Look at state clearing [EIP-158](https://eips.ethereum.org/EIPS/eip-158))
     Destroyed {
         /// Old account.
         old: Account,

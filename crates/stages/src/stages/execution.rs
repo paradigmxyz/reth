@@ -78,7 +78,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get header with canonical hashes.
         let mut headers = db_tx.cursor::<tables::Headers>()?;
         // Get bodies (to get tx index) with canonical hashes.
-        let mut commulative_tx_count = db_tx.cursor::<tables::CumulativeTxCount>()?;
+        let mut cumulative_tx_count = db_tx.cursor::<tables::CumulativeTxCount>()?;
         // Get transaction of the block that we are executing.
         let mut tx = db_tx.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -121,7 +121,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             // headers_barch is not empty,
             let parent_hash = headers_batch[0].parent_hash;
 
-            let (_, tx_cnt) = commulative_tx_count
+            let (_, tx_cnt) = cumulative_tx_count
                 .seek_exact(BlockNumHash((last_block, parent_hash)))?
                 .ok_or(DatabaseIntegrityError::CumulativeTxCount {
                     number: last_block,
@@ -130,11 +130,11 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             tx_cnt
         };
 
-        let commulative_tx_count_batch = canonical_batch
+        let cumulative_tx_count_batch = canonical_batch
             .iter()
             .map(|ch_index| {
                 // TODO see if walker next has better performance then seek_exact calls.
-                commulative_tx_count
+                cumulative_tx_count
                     .seek_exact(*ch_index)
                     .map_err(StageError::Database)
                     .and_then(|res| {
@@ -146,17 +146,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             .into()
                         })
                     })
-                    .map(|(_, commulative_tx_count)| {
-                        let ret = (last_tx_count, commulative_tx_count);
-                        last_tx_count = commulative_tx_count;
+                    .map(|(_, cumulative_tx_count)| {
+                        let ret = (last_tx_count, cumulative_tx_count);
+                        last_tx_count = cumulative_tx_count;
                         ret
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_paches = Vec::with_capacity(canonical_batch.len());
-        for (header, body_range) in headers_batch.iter().zip(commulative_tx_count_batch.iter()) {
+        let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
+        for (header, body_range) in headers_batch.iter().zip(cumulative_tx_count_batch.iter()) {
             let start_tx_index = body_range.0;
             let end_tx_index = body_range.1;
             let body_tx_cnt = end_tx_index - start_tx_index;
@@ -203,7 +203,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
 
             // executiong and store output to results
-            block_change_paches.push((
+            block_change_patches.push((
                 reth_executor::executor::execute_and_verify_receipt(
                     header,
                     &recovered_transactions,
@@ -216,7 +216,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // apply changes to plain database.
-        for (results, start_tx_index) in block_change_paches.into_iter() {
+        for (results, start_tx_index) in block_change_patches.into_iter() {
             for (index, result) in results.into_iter().enumerate() {
                 let tx_index = start_tx_index + index as u64;
                 // insert account change set
@@ -347,6 +347,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 })?
         };
 
+        if to_tx_number > from_tx_number {
+            panic!("Parents CumulativeTxCount {to_tx_number} is higer then present block #{unwind_to} TxCount {from_tx_number}")
+        }
         let num_of_tx = (from_tx_number - to_tx_number) as usize;
 
         // if there is no transaction ids, this means blocks were empty and block reward change set
@@ -357,13 +360,13 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
-        let account_chageset_batch = account_changeset
+        let account_changeset_batch = account_changeset
             .walk_dup(to_tx_number, Address::zero())?
             .take(num_of_tx)
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
-        for (_, changeset) in account_chageset_batch.into_iter().rev() {
+        for (_, changeset) in account_changeset_batch.into_iter().rev() {
             db_tx.put::<tables::PlainAccountState>(changeset.address, changeset.info)?;
             // TODO remove account if none when `AccountBeforeTx` get fixed
             // if account.is_none() {
@@ -424,6 +427,8 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
+        // TODO cleanup the setup after https://github.com/foundry-rs/reth/issues/332
+        // is merged as it has similar framework
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut db = StageDB::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
@@ -460,9 +465,9 @@ mod tests {
         db.commit().unwrap();
 
         // execute
-        let o = ExecutionStage.execute(&mut db, input).await.unwrap();
+        let output = ExecutionStage.execute(&mut db, input).await.unwrap();
         db.commit().unwrap();
-        assert_eq!(o, ExecOutput { stage_progress: 1, done: true, reached_tip: true });
+        assert_eq!(output, ExecOutput { stage_progress: 1, done: true, reached_tip: true });
         let tx = db.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
@@ -506,6 +511,9 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execute_unwind() {
+        // TODO cleanup the setup after https://github.com/foundry-rs/reth/issues/332
+        // is merged as it has similar framework
+
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut db = StageDB::new(state_db.as_ref()).unwrap();
         let input = ExecInput {

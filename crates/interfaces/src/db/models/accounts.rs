@@ -13,7 +13,8 @@ use reth_primitives::{Account, Address, TxNumber};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
-/// TODO it should have not existing flag so we should
+/// TODO there should be `not_existing` boolean or Account be made as `Option` to
+/// handle scenario where account was not present before transaction.
 #[main_codec]
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct AccountBeforeTx {
