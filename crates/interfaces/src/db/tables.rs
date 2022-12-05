@@ -128,7 +128,7 @@ table!(
     /// 
     /// Used to collect transactions for the block. e.g. To collect transactions
     /// for block `x` you would need to look at cumulative count at block `x` and 
-    /// at block `x + 1`.
+    /// at block `x - 1`.
     CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
 
 table!(
