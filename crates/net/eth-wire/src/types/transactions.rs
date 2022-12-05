@@ -1,7 +1,6 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 use reth_primitives::{TransactionSigned, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-use thiserror::Error;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
@@ -32,53 +31,6 @@ pub struct PooledTransactions(
     pub Vec<TransactionSigned>,
 );
 
-/// An error that may occur while matching a [`GetPooledTransactions`] request to a
-/// [`PooledTransactions`] response.
-#[derive(Debug, Error)]
-pub enum PooledTransactionsError {
-    /// Thrown if there are transactions that do not match a requested hash.
-    #[error("one or more transactions do not match a requested hash")]
-    UnmatchedTransactions,
-}
-
-impl PooledTransactions {
-    /// Given a list of hashes, split the hashes into those that match a transaction in the
-    /// response, and those that do not.
-    /// Assumes the transactions are in the same order as the request's hashes.
-    pub fn split_transactions_by_hashes<T: Clone + Into<H256>>(
-        &self,
-        hashes: Vec<T>,
-    ) -> Result<(Vec<H256>, Vec<H256>), PooledTransactionsError> {
-        // we need to loop through each transaction, skipping over hashes that we don't have a
-        // transaction for
-        let mut missing_hashes = Vec::new();
-        let mut hash_iter = hashes.iter();
-        let (matched_transactions, unmatched_transactions): (
-            Vec<&TransactionSigned>,
-            Vec<&TransactionSigned>,
-        ) = self.0.iter().partition(|tx| {
-            for hash in &mut hash_iter {
-                let curr_hash = hash.clone().into();
-                if tx.hash() == curr_hash {
-                    return true
-                } else {
-                    missing_hashes.push(curr_hash);
-                }
-            }
-            false
-        });
-
-        // this means we have been sent transactions that we did not request
-        if !unmatched_transactions.is_empty() {
-            return Err(PooledTransactionsError::UnmatchedTransactions)
-        }
-
-        let matched_hashes = matched_transactions.iter().map(|tx| tx.hash()).collect::<Vec<H256>>();
-
-        Ok((matched_hashes, missing_hashes))
-    }
-}
-
 impl From<Vec<TransactionSigned>> for PooledTransactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
         PooledTransactions(txs)
@@ -93,14 +45,13 @@ impl From<PooledTransactions> for Vec<TransactionSigned> {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use hex_literal::hex;
     use reth_primitives::{
         Signature, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
+    use std::str::FromStr;
 
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
