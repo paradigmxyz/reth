@@ -1,5 +1,7 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
-use crate::{codec::ECIESCodec, ECIESError, EgressECIESValue, IngressECIESValue};
+use crate::{
+    codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
+};
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
 use reth_primitives::H512 as PeerId;
@@ -64,7 +66,7 @@ where
         if matches!(msg, Some(IngressECIESValue::Ack)) {
             Ok(Self { stream: transport, remote_id })
         } else {
-            Err(ECIESError::InvalidHandshake { expected: IngressECIESValue::Ack, msg })
+            Err(ECIESErrorImpl::InvalidHandshake { expected: IngressECIESValue::Ack, msg }.into())
         }
     }
 
@@ -81,10 +83,11 @@ where
         let remote_id = match &msg {
             Some(IngressECIESValue::AuthReceive(remote_id)) => *remote_id,
             _ => {
-                return Err(ECIESError::InvalidHandshake {
+                return Err(ECIESErrorImpl::InvalidHandshake {
                     expected: IngressECIESValue::AuthReceive(Default::default()),
                     msg,
-                })
+                }
+                .into())
             }
         };
 
