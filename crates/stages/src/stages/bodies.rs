@@ -137,7 +137,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             // Write block
             let key = (block_number, header_hash).into();
-            tx_count_cursor.append(key, first_tx_id + block.body.len() as u64)?;
+            // Additional +1, increments tx count to allow indexing of ChangeSet that contains block
+            // reward. This can't be added to last transaction ChangeSet as it would
+            // break if block is empty.
+            let this_tx_count = first_tx_id +
+                block.body.len() as u64 +
+                if self.consensus.has_block_reward(block_number) { 1 } else { 0 };
+            tx_count_cursor.append(key, this_tx_count)?;
             ommers_cursor.append(
                 key,
                 StoredBlockOmmers {
@@ -152,6 +158,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             }
 
             highest_block = block_number;
+            first_tx_id = this_tx_count;
         }
 
         // The stage is "done" if:
@@ -189,6 +196,10 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             let prev_count = entry.map(|(_, v)| v).unwrap_or_default();
             for tx_id in prev_count..count {
+                // Block reward introduces gaps in transaction (Last tx number can be the gap)
+                // this is why we are checking if tx exist or not.
+                // NOTE: more performant way is probably to use `prev`/`next` fn. and reduce
+                // count by one if block has block reward.
                 if transaction_cursor.seek_exact(tx_id)?.is_some() {
                     transaction_cursor.delete_current()?;
                 }
@@ -568,7 +579,8 @@ mod tests {
                             .last()?
                             .map(|(_, v)| v)
                             .unwrap_or_default();
-                        let tx_count = last_count + progress.body.len() as u64;
+                        // +1 for block reward,
+                        let tx_count = last_count + progress.body.len() as u64 + 1;
                         tx.put::<tables::CumulativeTxCount>(key, tx_count)?;
                         tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
                         (last_count..tx_count).try_for_each(|idx| {
@@ -620,9 +632,8 @@ mod tests {
                 self.db.insert_headers(std::iter::once(&header))?;
                 self.db.commit(|tx| {
                     let key = (0, GENESIS_HASH).into();
-                    tx.put::<tables::CumulativeTxCount>(key, 1)?;
-                    tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
-                    tx.put::<tables::Transactions>(0, random_signed_tx())
+                    tx.put::<tables::CumulativeTxCount>(key, 0)?;
+                    tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })
                 })?;
 
                 Ok(())
@@ -678,7 +689,9 @@ mod tests {
 
                         // Validate that block trasactions exist
                         let first_tx_id = prev_entry.map(|(_, v)| v).unwrap_or_default();
-                        for tx_id in first_tx_id..count {
+                        // reduce by one for block_reward index
+                        let tx_count = if count == 0 { 0} else {count-1};
+                        for tx_id in first_tx_id..tx_count {
                             assert_matches!(
                                 transaction_cursor.seek_exact(tx_id),
                                 Ok(Some(_)),

@@ -13,7 +13,9 @@ use crate::{
 };
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockLocked, Header, HeadersDirection, SealedHeader, H256, U256};
+use reth_primitives::{
+    BlockLocked, BlockNumber, Header, HeadersDirection, SealedHeader, H256, U256,
+};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     pin::Pin,
@@ -290,5 +292,8 @@ impl Consensus for TestConsensus {
         } else {
             Ok(())
         }
+    }
+    fn has_block_reward(&self, _block_num: BlockNumber) -> bool {
+        true
     }
 }

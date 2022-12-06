@@ -132,6 +132,7 @@ pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: &BlockLocked,
+    has_block_reward: bool,
 ) -> Result<()> {
     let block_num_hash = BlockNumHash((block.number, block.hash()));
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -139,24 +140,28 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 
-    let start_tx_number =
-        if block.number == 0 { 0 } else { get_cumulative_tx_count_by_hash(tx, block.parent_hash)? };
-
     // insert body ommers data
     tx.put::<tables::BlockOmmers>(
         block_num_hash,
         StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
     )?;
 
-    let mut tx_number = start_tx_number;
-    for eth_tx in block.body.iter() {
-        let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
-        tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
-        tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
-        tx_number += 1;
-    }
+    if block.number == 0 {
+        tx.put::<tables::CumulativeTxCount>(block_num_hash, 0)?;
+    } else {
+        let mut tx_number = get_cumulative_tx_count_by_hash(tx, block.parent_hash)?;
 
-    tx.put::<tables::CumulativeTxCount>(block_num_hash, tx_number)?;
+        for eth_tx in block.body.iter() {
+            let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
+            tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
+            tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
+            tx_number += 1;
+        }
+        tx.put::<tables::CumulativeTxCount>(
+            block_num_hash,
+            tx_number + if has_block_reward { 1 } else { 0 },
+        )?;
+    }
 
     Ok(())
 }
