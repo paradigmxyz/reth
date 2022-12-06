@@ -51,49 +51,47 @@ pub const TABLES: [(TableType, &str); 20] = [
 /// Macro to declare all necessary tables.
 macro_rules! table {
     (
-    $(#[$docs:meta])+ $name:ident => $key:ty => $value:ty => $seek:ty) => {
+    $(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty | $seek:ty) => {
         $(#[$docs])+
         ///
         #[doc = concat!("Takes [`", stringify!($key), "`] as a key and returns [`", stringify!($value), "`]")]
         #[derive(Clone, Copy, Debug, Default)]
-        pub struct $name;
+        pub struct $table_name;
 
-        impl $crate::db::table::Table for $name {
-            const NAME: &'static str = $name::const_name();
+        impl $crate::db::table::Table for $table_name {
+            const NAME: &'static str = $table_name::const_name();
             type Key = $key;
             type Value = $value;
         }
 
-        impl $name {
-            #[doc=concat!("Return ", stringify!($name), " as it is present inside the database.")]
+        impl $table_name {
+            #[doc=concat!("Return ", stringify!($table_name), " as it is present inside the database.")]
             pub const fn const_name() -> &'static str {
-                stringify!($name)
-            }
+                stringify!($table_name) }
         }
 
-        impl std::fmt::Display for $name {
+        impl std::fmt::Display for $table_name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", stringify!($name))
-            }
+                write!(f, "{}", stringify!($table_name)) }
         }
     };
-    ($(#[$docs:meta])+ $name:ident => $key:ty => $value:ty) => {
+    ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
         table!(
             $(#[$docs])+
-            $name => $key => $value => $key
+            ( $table_name ) $key | $value | $key
         );
     };
 }
 
 macro_rules! dupsort {
-    ($(#[$docs:meta])+ $name:ident => $key:ty => [$subkey:ty] $value:ty) => {
+    ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | [$subkey:ty] $value:ty) => {
         table!(
             $(#[$docs])+
             ///
             #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
-            $name => $key => $value => $subkey
+            ( $table_name ) $key | $value | $subkey
         );
-        impl DupSort for $name {
+        impl DupSort for $table_name {
             type SubKey = $subkey;
         }
     };
@@ -105,74 +103,88 @@ macro_rules! dupsort {
 
 table!(
     /// Stores the header hashes belonging to the canonical chain.
-    CanonicalHeaders => BlockNumber => HeaderHash);
+    ( CanonicalHeaders ) BlockNumber | HeaderHash
+);
 
 table!(
     /// Stores the total difficulty from a block header.
-    HeaderTD => BlockNumHash => CompactU256);
+    ( HeaderTD ) BlockNumHash | CompactU256
+);
 
 table!(
     /// Stores the block number corresponding to an header.
-    HeaderNumbers => BlockHash => BlockNumber);
+    ( HeaderNumbers ) BlockHash | BlockNumber
+);
 
 table!(
     /// Stores header bodies.
-    Headers => BlockNumHash => Header);
+    ( Headers ) BlockNumHash | Header
+);
 
 table!(
-    /// Stores a pointer to the first transaction in the block, the number of transactions in the block, and the uncles/ommers of the block.
-    /// 
+    /// Stores a pointer to the first transaction in the block, the number of transactions in the
+    /// block, and the uncles/ommers of the block.
+    ///
     /// The transaction IDs point to the [`Transactions`] table.
-    BlockBodies => BlockNumHash => StoredBlockBody);
+    ( BlockBodies ) BlockNumHash | StoredBlockBody
+);
 
 table!(
     /// Stores the maximum [`TxNumber`] from which this particular block starts.
-    CumulativeTxCount => BlockNumHash => NumTransactions); // TODO U256?
+    ( CumulativeTxCount ) BlockNumHash | NumTransactions
+); // TODO U256?
 
 table!(
     /// Stores the transaction body from non canonical transactions.
-    NonCanonicalTransactions => BlockNumHashTxNumber => TransactionSigned);
+    ( NonCanonicalTransactions ) BlockNumHashTxNumber | TransactionSigned
+);
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    Transactions => TxNumber => TransactionSigned);
+    ( Transactions ) TxNumber | TransactionSigned
+);
 
 table!(
     /// (Canonical only) Stores transaction receipts.
-    Receipts => TxNumber => Receipt);
+    ( Receipts ) TxNumber | Receipt
+);
 
 table!(
     /// (Canonical only) Stores transaction logs.
-    Logs => TxNumber => Receipt);
+    ( Logs ) TxNumber | Receipt
+);
 
 table!(
     /// Stores the current state of an [`Account`].
-    PlainAccountState => Address => Account);
+    ( PlainAccountState ) Address | Account
+);
 
 table!(
     /// Stores all smart contract bytecodes.
     /// There will be multiple accounts that have same bytecode
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
-    Bytecodes => H256 => Bytecode);
+    ( Bytecodes ) H256 | Bytecode
+);
 
 dupsort!(
     /// Stores the current value of a storage key.
-    PlainStorageState => Address => [H256] StorageEntry);
+    ( PlainStorageState ) Address | [H256] StorageEntry
+);
 
 table!(
     /// Stores the transaction numbers that changed each account.
-    /// 
+    ///
     /// ```
     /// use reth_primitives::{Address, IntegerList};
     /// use reth_interfaces::db::{DbTx, DbTxMut, DbCursorRO, Database, models::ShardedKey, tables::AccountHistory};
     /// use reth_db::{kv::{EnvKind, Env, test_utils}, mdbx::WriteMap};
     /// use std::{str::FromStr,sync::Arc};
-    /// 
+    ///
     /// fn main() {
     ///     let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
     ///     let account = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
-    /// 
+    ///
     ///     // Setup if each shard can only take 1 transaction.
     ///     for i in 1..3 {
     ///         let key = ShardedKey::new(account, i * 100);
@@ -180,8 +192,8 @@ table!(
 
     ///         db.update(|tx| tx.put::<AccountHistory>(key.clone(), list.clone()).expect("")).unwrap();
     ///     }
-    /// 
-    ///     // Is there any transaction after number 150 that changed this account? 
+    ///
+    ///     // Is there any transaction after number 150 that changed this account?
     ///     {
     ///         let tx = db.tx().expect("");
     ///         let mut cursor = tx.cursor::<AccountHistory>().unwrap();
@@ -202,37 +214,45 @@ table!(
     ///     }
     /// }
     /// ```
-    /// 
-    AccountHistory => ShardedKey<Address> => TxNumberList);
+    ///
+    ( AccountHistory ) ShardedKey<Address> | TxNumberList
+);
 
 table!(
     /// Stores pointers to transactions that changed each storage key.
-    StorageHistory => AddressStorageKey => TxNumberList);
+    ( StorageHistory ) AddressStorageKey | TxNumberList
+);
 
 dupsort!(
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
-    /// or changed (balance,nonce). 
-    AccountChangeSet => TxNumber => [Address] AccountBeforeTx);
+    /// or changed (balance,nonce).
+    ( AccountChangeSet ) TxNumber | [Address] AccountBeforeTx
+);
 
 dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
-    /// and needs to be removed. 
-    StorageChangeSet => TxNumberAddress => [H256] StorageEntry);
+    /// and needs to be removed.
+    ( StorageChangeSet ) TxNumberAddress | [H256] StorageEntry
+);
 
 table!(
     /// Stores the transaction sender for each transaction.
-    /// It is needed to speed up execution stage and allows fetching signer without doing transaction signed recovery
-    TxSenders => TxNumber => Address);
+    /// It is needed to speed up execution stage and allows fetching signer without doing
+    /// transaction signed recovery
+    ( TxSenders ) TxNumber | Address
+);
 
 table!(
     /// Configuration values.
-    Config => ConfigKey => ConfigValue);
+    ( Config ) ConfigKey | ConfigValue
+);
 
 table!(
     /// Stores the highest synced block number of each stage.
-    SyncStage => StageId => BlockNumber);
+    ( SyncStage ) StageId | BlockNumber
+);
 
 ///
 /// Alias Types
