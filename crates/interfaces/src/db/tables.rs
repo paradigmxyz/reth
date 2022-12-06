@@ -4,7 +4,7 @@ use crate::db::{
     codecs::CompactU256,
     models::{
         accounts::{AccountBeforeTx, TxNumberAddress},
-        blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockBody},
+        blocks::{BlockNumHash, HeaderHash, NumTransactions, StoredBlockOmmers},
         ShardedKey,
     },
     DupSort,
@@ -29,7 +29,7 @@ pub const TABLES: [(TableType, &str); 20] = [
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
-    (TableType::Table, BlockBodies::const_name()),
+    (TableType::Table, BlockOmmers::const_name()),
     (TableType::Table, CumulativeTxCount::const_name()),
     (TableType::Table, NonCanonicalTransactions::const_name()),
     (TableType::Table, Transactions::const_name()),
@@ -122,15 +122,16 @@ table!(
 );
 
 table!(
-    /// Stores a pointer to the first transaction in the block, the number of transactions in the
-    /// block, and the uncles/ommers of the block.
-    ///
-    /// The transaction IDs point to the [`Transactions`] table.
-    ( BlockBodies ) BlockNumHash | StoredBlockBody
+    /// Stores the uncles/ommers of the block.
+    ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
 );
 
 table!(
     /// Stores the maximum [`TxNumber`] from which this particular block starts.
+    ///
+    /// Used to collect transactions for the block. e.g. To collect transactions
+    /// for block `x` you would need to look at cumulative count at block `x` and
+    /// at block `x - 1`.
     ( CumulativeTxCount ) BlockNumHash | NumTransactions
 ); // TODO U256?
 
