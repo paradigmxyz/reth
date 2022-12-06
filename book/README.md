@@ -12,8 +12,7 @@
 ### Sections
 
 **[Getting Started]()**
-
-To get started with Foundry, install Foundry and set up your first project.
+To get started with Reth, install, configure and sync your node.
 
 **[A Tour Of Reth]()**
 

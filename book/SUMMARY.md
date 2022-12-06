@@ -37,7 +37,6 @@
     - [primitives]()
     - [rlp]()
     - [rlp-derive]()
-    - [fastrlp-derive]()
 - [Misc]()
     - [interfaces]()
     - [tracing]()
@@ -49,5 +48,3 @@
 # Design
 
 - [Goals](./design/goals.md)
-
-# 
