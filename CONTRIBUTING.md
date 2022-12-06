@@ -11,6 +11,8 @@ It should be considered as a guide to help you navigate the process.
 
 The [dev Telegram][dev-tg] is available for any concerns you may have that are not covered in this guide.
 
+If you contribute to this project, your contributions will be made to the project under both Apache 2.0 and the MIT license.
+
 ### Code of Conduct
 
 The Reth project adheres to the [Rust Code of Conduct][rust-coc]. This code of conduct describes the _minimum_ behavior expected from all contributors.
