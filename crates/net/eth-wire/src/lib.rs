@@ -6,9 +6,6 @@
 ))]
 //! Implementation of the `eth` wire protocol.
 
-pub use tokio_util::codec::{
-    LengthDelimitedCodec as PassthroughCodec, LengthDelimitedCodecError as PassthroughCodecError,
-};
 pub mod builder;
 pub mod capability;
 mod disconnect;
@@ -19,6 +16,11 @@ mod pinger;
 pub use builder::*;
 pub mod types;
 pub use types::*;
+
+#[cfg(test)]
+pub use tokio_util::codec::{
+    LengthDelimitedCodec as PassthroughCodec, LengthDelimitedCodecError as PassthroughCodecError,
+};
 
 pub use crate::{
     disconnect::DisconnectReason,
