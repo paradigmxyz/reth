@@ -11,9 +11,9 @@ pub mod capability;
 mod disconnect;
 pub mod error;
 mod ethstream;
+mod hello;
 mod p2pstream;
 mod pinger;
-mod hello;
 pub use builder::*;
 pub mod types;
 pub use types::*;
@@ -25,7 +25,7 @@ pub use tokio_util::codec::{
 
 pub use crate::{
     disconnect::DisconnectReason,
-    hello::HelloMessage,
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
+    hello::HelloMessage,
     p2pstream::{P2PStream, ProtocolVersion, UnauthedP2PStream},
 };

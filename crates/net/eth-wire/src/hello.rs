@@ -1,7 +1,7 @@
-use reth_rlp::{RlpEncodable, RlpDecodable};
-use reth_primitives::PeerId;
 use serde::{Serialize, Deserialize};
 use crate::{capability::Capability, ProtocolVersion};
+use reth_primitives::PeerId;
+use reth_rlp::{RlpDecodable, RlpEncodable};
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
@@ -24,11 +24,14 @@ pub struct HelloMessage {
 #[cfg(test)]
 mod tests {
     use reth_ecies::util::pk2id;
-    use reth_rlp::{Encodable, Decodable, EMPTY_STRING_CODE};
+    use reth_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use secp256k1::{SecretKey, SECP256K1};
 
-    use crate::{p2pstream::{P2PMessage, P2PMessageID}, ProtocolVersion, capability::Capability, EthVersion, HelloMessage};
-
+    use crate::{
+        capability::Capability,
+        p2pstream::{P2PMessage, P2PMessageID},
+        EthVersion, HelloMessage, ProtocolVersion,
+    };
 
     #[test]
     fn test_pong_snappy_encoding_parity() {

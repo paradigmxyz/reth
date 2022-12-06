@@ -2,10 +2,7 @@
 //! messages.
 
 use crate::{
-    capability::Capability,
-    p2pstream::ProtocolVersion,
-    hello::HelloMessage,
-    EthVersion, Status,
+    capability::Capability, hello::HelloMessage, p2pstream::ProtocolVersion, EthVersion, Status,
 };
 use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 
