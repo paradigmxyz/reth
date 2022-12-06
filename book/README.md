@@ -11,7 +11,7 @@
 
 ### Sections
 
-**[Getting Started](getting-started/installation.md)**
+**[Getting Started]()**
 
 To get started with Foundry, install Foundry and set up your first project.
 

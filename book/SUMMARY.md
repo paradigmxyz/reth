@@ -2,11 +2,11 @@
 
 # Getting Started
 
-- [Installation](./getting-started/installation.md)
-- [First Steps with Reth](./getting-started/)
+- [Installation]()
+- [First Steps with Reth]()
 <!-- An overview of all the flags, how they work and how to configure the node   -->
-- [Configuring The Node](./getting-started/)
-- [Running Reth](./getting-started/)
+- [Configuring The Node]()
+- [Running Reth]()
 
 # A Tour Of Reth
 
