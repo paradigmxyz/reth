@@ -1,6 +1,4 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
-use bytes::Buf;
-use modular_bitfield::prelude::*;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 

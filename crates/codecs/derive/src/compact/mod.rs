@@ -205,25 +205,33 @@ mod tests {
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
-            #[bitfield]
-            #[derive(Clone, Copy, Debug, Default)]
-            struct TestStructFlags {
-                f_u64_len: B4,
-                f_u256_len: B6,
-                f_bool_t_len: B1,
-                f_bool_f_len: B1,
-                f_option_none_len: B1,
-                f_option_some_len: B1,
-                f_option_some_u64_len: B1,
-                #[skip]
-                unused: B1,
-            }
-            impl TestStructFlags {
-                fn from(mut buf: &[u8]) -> (Self, &[u8]) {
-                    (
-                        TestStructFlags::from_bytes([buf.get_u8(), buf.get_u8(),]),
-                        buf
-                    )
+            pub use TestStruct_flags::TestStructFlags;
+            mod TestStruct_flags {
+                use bytes::Buf;
+                use modular_bitfield::prelude::*;
+
+                #[doc=r" Fieldset that facilitates compacting the parent type."]
+                #[bitfield]
+                #[derive(Clone, Copy, Debug, Default)]
+                pub struct TestStructFlags {
+                    pub f_u64_len: B4,
+                    pub f_u256_len: B6,
+                    pub f_bool_t_len: B1,
+                    pub f_bool_f_len: B1,
+                    pub f_option_none_len: B1,
+                    pub f_option_some_len: B1,
+                    pub f_option_some_u64_len: B1,
+                    #[skip]
+                    unused: B1,
+                }
+                impl TestStructFlags {
+                    #[doc=r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
+                    pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+                        (
+                            TestStructFlags::from_bytes([buf.get_u8(), buf.get_u8(),]),
+                            buf
+                        )
+                    }
                 }
             }
             #[cfg(test)]

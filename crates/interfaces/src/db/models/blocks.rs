@@ -21,11 +21,18 @@ pub type NumTransactions = u64;
 ///
 /// It is stored as the headers of the block's uncles.
 /// tx_amount)`.
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[main_codec]
 pub struct StoredBlockOmmers {
     /// The block headers of this block's uncles.
     pub ommers: Vec<Header>,
+}
+
+impl StoredBlockBody {
+    /// Return next block tx id.
+    pub fn next_block_tx_id(&self) -> TxNumber {
+        self.base_tx_id + self.tx_amount
+    }
 }
 
 /// Hash of the block header. Value for [`CanonicalHeaders`]

@@ -1,3 +1,5 @@
+//! All capability related types
+
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use bytes::{BufMut, Bytes};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
@@ -121,6 +123,7 @@ impl Decodable for Capabilities {
 
 /// This represents a shared capability, its version, and its offset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
 pub enum SharedCapability {
     /// The `eth` capability.
     Eth { version: EthVersion, offset: u8 },
@@ -139,7 +142,7 @@ impl SharedCapability {
     }
 
     /// Returns the name of the capability.
-    pub(crate) fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         match self {
             SharedCapability::Eth { .. } => "eth",
             SharedCapability::UnknownCapability { name, .. } => name,
@@ -147,7 +150,7 @@ impl SharedCapability {
     }
 
     /// Returns the version of the capability.
-    pub(crate) fn version(&self) -> u8 {
+    pub fn version(&self) -> u8 {
         match self {
             SharedCapability::Eth { version, .. } => *version as u8,
             SharedCapability::UnknownCapability { version, .. } => *version,
@@ -155,7 +158,7 @@ impl SharedCapability {
     }
 
     /// Returns the message ID offset of the current capability.
-    pub(crate) fn offset(&self) -> u8 {
+    pub fn offset(&self) -> u8 {
         match self {
             SharedCapability::Eth { offset, .. } => *offset,
             SharedCapability::UnknownCapability { offset, .. } => *offset,
@@ -163,7 +166,7 @@ impl SharedCapability {
     }
 
     /// Returns the number of protocol messages supported by this capability.
-    pub(crate) fn num_messages(&self) -> Result<u8, SharedCapabilityError> {
+    pub fn num_messages(&self) -> Result<u8, SharedCapabilityError> {
         match self {
             SharedCapability::Eth { version, .. } => Ok(version.total_messages()),
             _ => Err(SharedCapabilityError::UnknownCapability),

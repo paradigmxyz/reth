@@ -1,7 +1,4 @@
-use crate::{
-    algorithm::{ECIES, MAX_BODY_SIZE},
-    ECIESError, EgressECIESValue, IngressECIESValue,
-};
+use crate::{algorithm::ECIES, ECIESError, EgressECIESValue, IngressECIESValue};
 use bytes::BytesMut;
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
@@ -133,17 +130,6 @@ impl Encoder<EgressECIESValue> for ECIESCodec {
                 Ok(())
             }
             EgressECIESValue::Message(data) => {
-                if data.len() > MAX_BODY_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!(
-                            "body size ({}) exceeds limit ({} bytes)",
-                            data.len(),
-                            MAX_BODY_SIZE
-                        ),
-                    ))
-                }
-
                 self.ecies.write_header(buf, data.len());
                 self.ecies.write_body(buf, &data);
                 Ok(())

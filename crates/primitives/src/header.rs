@@ -2,9 +2,8 @@ use crate::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockHash, BlockNumber, Bloom, H160, H256, U256,
 };
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
-use modular_bitfield::prelude::*;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use std::ops::Deref;
@@ -266,6 +265,11 @@ impl SealedHeader {
     /// Return header/block hash.
     pub fn hash(&self) -> BlockHash {
         self.hash
+    }
+
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> (BlockNumber, BlockHash) {
+        (self.number, self.hash)
     }
 }
 

@@ -5,7 +5,10 @@ use reth_interfaces::{
         error::{RequestError, RequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{validate_header_download, HeaderBatchDownload, HeaderDownloader},
+            downloader::{
+                validate_header_download, HeaderBatchDownload, HeaderDownloadStream,
+                HeaderDownloader,
+            },
             error::DownloadError,
         },
         traits::BatchDownload,
@@ -15,6 +18,7 @@ use reth_primitives::{HeadersDirection, SealedHeader, H256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     borrow::Borrow,
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -59,16 +63,11 @@ where
     }
 
     fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_> {
-        Box::pin(HeadersDownload {
-            head,
-            forkchoice,
-            buffered: vec![],
-            request: Default::default(),
-            consensus: Arc::clone(&self.consensus),
-            request_retries: self.request_retries,
-            batch_size: self.batch_size,
-            client: Arc::clone(&self.client),
-        })
+        Box::pin(self.new_download(head, forkchoice))
+    }
+
+    fn stream(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderDownloadStream {
+        Box::pin(self.new_download(head, forkchoice))
     }
 }
 
@@ -80,6 +79,26 @@ impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
             batch_size: self.batch_size,
             request_timeout: self.request_timeout,
             request_retries: self.request_retries,
+        }
+    }
+}
+
+impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
+    fn new_download(
+        &self,
+        head: SealedHeader,
+        forkchoice: ForkchoiceState,
+    ) -> HeadersDownload<C, H> {
+        HeadersDownload {
+            head,
+            forkchoice,
+            buffered: VecDeque::default(),
+            request: Default::default(),
+            consensus: Arc::clone(&self.consensus),
+            request_retries: self.request_retries,
+            batch_size: self.batch_size,
+            client: Arc::clone(&self.client),
+            done: false,
         }
     }
 }
@@ -121,7 +140,7 @@ pub struct HeadersDownload<C, H> {
     head: SealedHeader,
     forkchoice: ForkchoiceState,
     /// Buffered results
-    buffered: Vec<SealedHeader>,
+    buffered: VecDeque<SealedHeader>,
     /// Contains the request that's currently in progress.
     ///
     /// TODO(mattsse): this could be converted into a `FuturesOrdered` where batching is done via
@@ -135,6 +154,9 @@ pub struct HeadersDownload<C, H> {
     batch_size: u64,
     /// The number of retries for downloading
     request_retries: usize,
+    /// The flag indicating whether the downloader has finished
+    /// or the retries have been exhausted
+    done: bool,
 }
 
 impl<C, H> HeadersDownload<C, H>
@@ -142,11 +164,17 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    /// Returns the start hash for a new request.
-    fn request_start(&self) -> H256 {
-        self.buffered.last().map_or(self.forkchoice.head_block_hash, |h| h.parent_hash)
+    /// Returns the first header from the vector of buffered headers
+    fn earliest_header(&self) -> Option<&SealedHeader> {
+        self.buffered.back()
     }
 
+    /// Returns the start hash for a new request.
+    fn request_start(&self) -> H256 {
+        self.earliest_header().map_or(self.forkchoice.head_block_hash, |h| h.parent_hash)
+    }
+
+    /// Get the headers request to dispatch
     fn headers_request(&self) -> HeadersRequest {
         HeadersRequest {
             start: self.request_start().into(),
@@ -155,7 +183,30 @@ where
         }
     }
 
-    /// Tries to fuse the future with a new request
+    /// Insert the header into buffer
+    fn push_header_into_buffer(&mut self, header: SealedHeader) {
+        self.buffered.push_back(header);
+    }
+
+    /// Get a current future or instantiate a new one
+    fn get_or_init_fut(&mut self) -> Option<HeadersRequestFuture> {
+        match self.request.take() {
+            None if !self.done => {
+                // queue in the first request
+                let client = Arc::clone(&self.client);
+                let req = self.headers_request();
+                Some(HeadersRequestFuture {
+                    request: req.clone(),
+                    fut: Box::pin(async move { client.get_headers(req).await }),
+                    retries: 0,
+                    max_retries: self.request_retries,
+                })
+            }
+            fut => fut,
+        }
+    }
+
+    /// Tries to fuse the future with a new request.
     ///
     /// Returns an `Err` if the request exhausted all retries
     fn try_fuse_request_fut(&self, fut: &mut HeadersRequestFuture) -> Result<(), ()> {
@@ -176,6 +227,48 @@ where
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
+
+    fn process_header_response(
+        &mut self,
+        response: Result<BlockHeaders, RequestError>,
+    ) -> Result<(), DownloadError> {
+        match response {
+            Ok(res) => {
+                let mut headers = res.0;
+                headers.sort_unstable_by_key(|h| h.number);
+
+                if headers.is_empty() {
+                    return Err(RequestError::BadResponse.into())
+                }
+
+                // Iterate headers in reverse
+                for parent in headers.into_iter().rev() {
+                    let parent = parent.seal();
+
+                    if self.head.hash() == parent.hash() {
+                        // We've reached the target, stop buffering headers
+                        self.done = true;
+                        break
+                    }
+
+                    if let Some(header) = self.earliest_header() {
+                        // Proceed to insert. If there is a validation error re-queue
+                        // the future.
+                        self.validate(header, &parent)?;
+                    } else if parent.hash() != self.forkchoice.head_block_hash {
+                        // The buffer is empty and the first header does not match the
+                        // tip, requeue the future
+                        return Err(RequestError::BadResponse.into())
+                    }
+
+                    // Record new parent
+                    self.push_header_into_buffer(parent);
+                }
+                Ok(())
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
 }
 
 impl<C, H> Future for HeadersDownload<C, H>
@@ -185,84 +278,30 @@ where
 {
     type Output = Result<Vec<SealedHeader>, DownloadError>;
 
+    /// Linear header download implemented as a [Future]. The downloader
+    /// aggregates all of the header responses in a local buffer until the
+    /// previous head is reached.
+    ///
+    /// Upon encountering an error, the downloader will try to resend the request.
+    /// Returns the error if all of the request retries have been exhausted.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-
         'outer: loop {
-            let mut fut = match this.request.take() {
-                Some(fut) => fut,
-                None => {
-                    // queue in the first request
-                    let client = Arc::clone(&this.client);
-                    let req = this.headers_request();
-                    HeadersRequestFuture {
-                        request: req.clone(),
-                        fut: Box::pin(async move { client.get_headers(req).await }),
-                        retries: 0,
-                        max_retries: this.request_retries,
-                    }
+            // Safe to unwrap, because the future is `done`
+            // only upon returning the result
+            let mut fut = this.get_or_init_fut().expect("fut exists; qed");
+            let response = ready!(fut.poll_unpin(cx));
+            if let Err(err) = this.process_header_response(response) {
+                if this.try_fuse_request_fut(&mut fut).is_err() {
+                    this.done = true;
+                    return Poll::Ready(Err(err))
                 }
-            };
+                this.request = Some(fut);
+                continue 'outer
+            }
 
-            match ready!(fut.poll_unpin(cx)) {
-                Ok(resp) => {
-                    let mut headers = resp.0;
-                    headers.sort_unstable_by_key(|h| h.number);
-
-                    if headers.is_empty() {
-                        if this.try_fuse_request_fut(&mut fut).is_err() {
-                            return Poll::Ready(Err(RequestError::BadResponse.into()))
-                        } else {
-                            this.request = Some(fut);
-                            continue
-                        }
-                    }
-
-                    // Iterate headers in reverse
-                    for parent in headers.into_iter().rev() {
-                        let parent = parent.seal();
-
-                        if this.head.hash() == parent.hash() {
-                            // We've reached the target
-                            let headers =
-                                std::mem::take(&mut this.buffered).into_iter().rev().collect();
-                            return Poll::Ready(Ok(headers))
-                        }
-
-                        if let Some(header) = this.buffered.last() {
-                            match this.validate(header, &parent) {
-                                Ok(_) => {
-                                    // record new parent
-                                    this.buffered.push(parent);
-                                }
-                                Err(err) => {
-                                    if this.try_fuse_request_fut(&mut fut).is_err() {
-                                        return Poll::Ready(Err(err))
-                                    }
-                                    this.request = Some(fut);
-                                    continue 'outer
-                                }
-                            }
-                        } else {
-                            // The buffer is empty and the first header does not match the tip,
-                            // discard
-                            if parent.hash() != this.forkchoice.head_block_hash {
-                                if this.try_fuse_request_fut(&mut fut).is_err() {
-                                    return Poll::Ready(Err(RequestError::BadResponse.into()))
-                                }
-                                this.request = Some(fut);
-                                continue 'outer
-                            }
-                            this.buffered.push(parent);
-                        }
-                    }
-                }
-                Err(err) => {
-                    if this.try_fuse_request_fut(&mut fut).is_err() {
-                        return Poll::Ready(Err(DownloadError::RequestError(err)))
-                    }
-                    this.request = Some(fut);
-                }
+            if this.done {
+                return Poll::Ready(Ok(std::mem::take(&mut this.buffered).into()))
             }
         }
     }
@@ -275,8 +314,50 @@ where
 {
     type Item = Result<SealedHeader, DownloadError>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
+    /// Linear header downloader implemented as a [Stream]. The downloader sends header
+    /// requests until the head is reached and buffers the responses. If the request future
+    /// is still pending, the downloader will return a buffered header if any is available.
+    ///
+    /// Internally, the stream is terminated if the `done` flag has been set and there are no
+    /// more headers available in the buffer.
+    ///
+    /// Upon encountering an error, the downloader will attempt to retry the failed request.
+    /// If the number of retries is exhausted, the downloader will stream an error, set the `done`
+    /// flag to true and clear the buffered headers, thus resulting in stream termination.
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        'outer: loop {
+            if let Some(mut fut) = this.get_or_init_fut() {
+                if let Poll::Ready(result) = fut.poll_unpin(cx) {
+                    if let Err(err) = this.process_header_response(result) {
+                        if this.try_fuse_request_fut(&mut fut).is_err() {
+                            // We exhausted all of the retries. Stream must terminate
+                            this.done = true;
+                            this.buffered.clear();
+                            return Poll::Ready(Some(Err(err)))
+                        }
+                        this.request = Some(fut);
+                        continue 'outer
+                    }
+                }
+            }
+
+            if !this.done && this.buffered.len() > 1 {
+                if let Some(header) = this.buffered.pop_front() {
+                    // Stream buffered header
+                    return Poll::Ready(Some(Ok(header)))
+                }
+            } else if this.done {
+                if let Some(header) = this.buffered.pop_front() {
+                    // Stream buffered header
+                    return Poll::Ready(Some(Ok(header)))
+                } else {
+                    // Polling finished, we've reached the target
+                    return Poll::Ready(None)
+                }
+            }
+        }
     }
 }
 
@@ -350,6 +431,7 @@ impl LinearDownloadBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::TryStreamExt;
     use once_cell::sync::Lazy;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
@@ -428,8 +510,52 @@ mod tests {
         let result = downloader.download(p3, fork).await;
         let headers = result.unwrap();
         assert_eq!(headers.len(), 3);
-        assert_eq!(headers[0], p2);
+        assert_eq!(headers[0], p0);
         assert_eq!(headers[1], p1);
-        assert_eq!(headers[2], p0);
+        assert_eq!(headers[2], p2);
+    }
+
+    #[tokio::test]
+    async fn download_empty_stream() {
+        let client = Arc::new(TestHeadersClient::default());
+        let downloader =
+            LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
+
+        let result = downloader
+            .stream(SealedHeader::default(), ForkchoiceState::default())
+            .try_collect::<Vec<_>>()
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn download_stream() {
+        let client = Arc::new(TestHeadersClient::default());
+        let downloader = LinearDownloadBuilder::default()
+            .batch_size(3)
+            .build(CONSENSUS.clone(), Arc::clone(&client));
+
+        let p3 = SealedHeader::default();
+        let p2 = child_header(&p3);
+        let p1 = child_header(&p2);
+        let p0 = child_header(&p1);
+
+        client
+            .extend(vec![
+                p0.as_ref().clone(),
+                p1.as_ref().clone(),
+                p2.as_ref().clone(),
+                p3.as_ref().clone(),
+            ])
+            .await;
+
+        let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
+
+        let result = downloader.stream(p3, fork).try_collect::<Vec<_>>().await;
+        let headers = result.unwrap();
+        assert_eq!(headers.len(), 3);
+        assert_eq!(headers[0], p0);
+        assert_eq!(headers[1], p1);
+        assert_eq!(headers[2], p2);
     }
 }

@@ -3,7 +3,6 @@ pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use ethers_core::utils::keccak256;
-use modular_bitfield::prelude::*;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
@@ -781,6 +780,14 @@ impl TransactionSignedEcRecovered {
     /// Signer of transaction recovered from signature
     pub fn signer(&self) -> Address {
         self.signer
+    }
+
+    /// Create [TransactionSignedEcRecovered] from [TransactionSigned] and author of transaction
+    pub fn from_signed_transactions_and_signer(
+        signed_transaction: TransactionSigned,
+        signer: Address,
+    ) -> Self {
+        Self { signed_transaction, signer }
     }
 
     /// Transform back to [`TransactionSigned`]
