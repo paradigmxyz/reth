@@ -266,6 +266,11 @@ impl SealedHeader {
     pub fn hash(&self) -> BlockHash {
         self.hash
     }
+
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> (BlockNumber, BlockHash) {
+        (self.number, self.hash)
+    }
 }
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
