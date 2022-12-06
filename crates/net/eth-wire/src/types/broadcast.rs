@@ -1,10 +1,11 @@
 //! Types for broadcasting new data.
 use reth_primitives::{Header, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 
 /// This informs peers of new blocks that have appeared on the network.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize)]
 pub struct NewBlockHashes(
     /// New block hashes and the block number for each blockhash.
     /// Clients should request blocks using a [`GetBlockBodies`](crate::GetBlockBodies) message.
@@ -26,7 +27,7 @@ impl NewBlockHashes {
 }
 
 /// A block hash _and_ a block number.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct BlockHashNumber {
     /// The block hash
     pub hash: H256,
