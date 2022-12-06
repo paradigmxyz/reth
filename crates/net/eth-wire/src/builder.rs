@@ -3,7 +3,8 @@
 
 use crate::{
     capability::Capability,
-    p2pstream::{HelloMessage, ProtocolVersion},
+    p2pstream::ProtocolVersion,
+    hello::HelloMessage,
     EthVersion, Status,
 };
 use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
