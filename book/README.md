@@ -17,4 +17,4 @@ To get started with Foundry, install Foundry and set up your first project.
 
 **[A Tour Of Reth]()**
 
-This section will take a deep dive into the innerworkings of Reth. 
+This section will take a deep dive into the inner workings of Reth. 
