@@ -1,6 +1,6 @@
 use crate::{
     db::{
-        models::{BlockNumHash, StoredBlockBody},
+        models::{BlockNumHash, StoredBlockOmmers},
         tables, DbTx, DbTxMut,
     },
     provider::Error as ProviderError,
@@ -142,14 +142,10 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     let start_tx_number =
         if block.number == 0 { 0 } else { get_cumulative_tx_count_by_hash(tx, block.parent_hash)? };
 
-    // insert body
-    tx.put::<tables::BlockBodies>(
+    // insert body ommers data
+    tx.put::<tables::BlockOmmers>(
         block_num_hash,
-        StoredBlockBody {
-            base_tx_id: start_tx_number,
-            tx_amount: block.body.len() as u64,
-            ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect(),
-        },
+        StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
     )?;
 
     let mut tx_number = start_tx_number;
