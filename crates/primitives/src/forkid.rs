@@ -8,6 +8,7 @@ use crate::{BlockNumber, H256};
 use crc::crc32;
 use maplit::btreemap;
 use reth_rlp::*;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::{Add, AddAssign},
@@ -25,6 +26,8 @@ use thiserror::Error;
     RlpEncodableWrapper,
     RlpDecodableWrapper,
     RlpMaxEncodedLen,
+    Serialize,
+    Deserialize,
 )]
 pub struct ForkHash(pub [u8; 4]);
 
@@ -51,7 +54,19 @@ impl Add<BlockNumber> for ForkHash {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, RlpMaxEncodedLen)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    RlpEncodable,
+    RlpDecodable,
+    RlpMaxEncodedLen,
+    Serialize,
+    Deserialize,
+)]
 pub struct ForkId {
     /// CRC32 checksum of the all fork blocks from genesis.
     pub hash: ForkHash,
