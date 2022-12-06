@@ -2,6 +2,7 @@ use crate::{
     db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use futures_util::StreamExt;
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     db::{models::blocks::BlockNumHash, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut},
@@ -36,6 +37,8 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     pub consensus: Arc<C>,
     /// Downloader client implementation
     pub client: Arc<H>,
+    /// The minimum number of block headers to commit at once
+    pub commit_threshold: usize,
 }
 
 #[async_trait::async_trait]
@@ -74,33 +77,43 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
             }
         }
 
+        let mut current_progress = stage_progress;
+        let mut stream =
+            self.downloader.stream(head.clone(), forkchoice.clone()).chunks(self.commit_threshold);
+
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
-        // TODO: add batching
-        let headers = match self.downloader.download(head.clone(), forkchoice.clone()).await {
-            Ok(res) => {
-                // Perform basic response validation
-                self.validate_header_response(&res, head, forkchoice)?;
-                res
+        while let Some(headers) = stream.next().await {
+            match headers.into_iter().collect::<Result<Vec<_>, _>>() {
+                Ok(res) => {
+                    // Perform basic response validation
+                    self.validate_header_response(&res)?;
+                    let write_progress =
+                        self.write_headers::<DB>(db, res).await?.unwrap_or_default();
+                    current_progress = current_progress.max(write_progress);
+                }
+                Err(e) => match e {
+                    DownloadError::Timeout => {
+                        warn!("No response for header request");
+                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
+                    }
+                    DownloadError::HeaderValidation { hash, error } => {
+                        warn!("Validation error for header {hash}: {error}");
+                        return Err(StageError::Validation { block: stage_progress, error })
+                    }
+                    error => {
+                        warn!("Unexpected error occurred: {error}");
+                        return Err(StageError::Download(error.to_string()))
+                    }
+                },
             }
-            Err(e) => match e {
-                DownloadError::Timeout => {
-                    warn!("No response for header request");
-                    return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
-                }
-                DownloadError::HeaderValidation { hash, error } => {
-                    warn!("Validation error for header {hash}: {error}");
-                    return Err(StageError::Validation { block: stage_progress, error })
-                }
-                error => {
-                    warn!("Unexpected error occurred: {error}");
-                    return Err(StageError::Download(error.to_string()))
-                }
-            },
-        };
-        let stage_progress = self.write_headers::<DB>(db, headers).await?.unwrap_or(stage_progress);
-        Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+        }
+
+        // Write total difficulty values after all headers have been inserted
+        self.write_td::<DB>(db, &head)?;
+
+        Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })
     }
 
     /// Unwind the stage.
@@ -146,25 +159,13 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     }
 
     /// Perform basic header response validation
-    fn validate_header_response(
-        &self,
-        headers: &[SealedHeader],
-        head: SealedHeader,
-        forkchoice: ForkchoiceState,
-    ) -> Result<(), StageError> {
-        // The response must include at least head and tip
-        if headers.len() < 2 {
-            return Err(StageError::Download("Not enough headers".to_owned()))
-        }
-
-        let mut headers_iter = headers.iter().rev().peekable();
-        if headers_iter.peek().unwrap().hash() != forkchoice.head_block_hash {
-            return Err(StageError::Download("Response must end with tip".to_owned()))
-        }
-
+    fn validate_header_response(&self, headers: &[SealedHeader]) -> Result<(), StageError> {
+        let mut headers_iter = headers.iter().peekable();
         while let Some(header) = headers_iter.next() {
-            ensure_parent(header, headers_iter.peek().unwrap_or(&&head))
-                .map_err(|err| StageError::Download(err.to_string()))?;
+            if let Some(parent) = headers_iter.peek() {
+                ensure_parent(header, parent)
+                    .map_err(|err| StageError::Download(err.to_string()))?;
+            }
         }
 
         Ok(())
@@ -178,13 +179,11 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     ) -> Result<Option<BlockNumber>, StageError> {
         let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
         let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
-        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
-        let mut td: U256 = cursor_td.last()?.map(|(_, v)| v).unwrap().into();
 
         let mut latest = None;
         // Since the headers were returned in descending order,
         // iterate them in the reverse order
-        for header in headers.into_iter() {
+        for header in headers.into_iter().rev() {
             if header.number == 0 {
                 continue
             }
@@ -194,16 +193,40 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
             let header = header.unseal();
             latest = Some(header.number);
 
-            td += header.difficulty;
-
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
             db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
-            cursor_header.append(key, header)?;
-            cursor_canonical.append(key.number(), key.hash())?;
-            cursor_td.append(key, td.into())?;
+            cursor_header.insert(key, header)?;
+            cursor_canonical.insert(key.number(), key.hash())?;
         }
 
         Ok(latest)
+    }
+
+    /// Iterate over inserted headers and write td entries
+    fn write_td<DB: Database>(
+        &self,
+        db: &StageDB<'_, DB>,
+        head: &SealedHeader,
+    ) -> Result<(), StageError> {
+        // Acquire cursor over total difficulty table
+        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
+
+        // Get latest total difficulty
+        let last_entry = cursor_td
+            .seek_exact(head.num_hash().into())?
+            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: head.number })?;
+        let mut td: U256 = last_entry.1.into();
+
+        // Start at first inserted block during this iteration
+        let start_key = db.get_block_numhash(head.number + 1)?;
+
+        // Walk over newly inserted headers, update & insert td
+        for entry in db.cursor::<tables::Headers>()?.walk(start_key)? {
+            let (key, header) = entry?;
+            td += header.difficulty;
+            cursor_td.append(key, td.into())?;
+        }
+        Ok(())
     }
 }
 
@@ -262,7 +285,7 @@ mod tests {
 
     /// Check that unexpected download errors are caught
     #[tokio::test]
-    async fn executed_download_error() {
+    async fn execute_download_error() {
         let mut runner = HeadersTestRunner::default();
         let (stage_progress, previous_stage) = (1000, 1200);
         let input = ExecInput {
@@ -363,6 +386,7 @@ mod tests {
                     consensus: self.consensus.clone(),
                     client: self.client.clone(),
                     downloader: self.downloader.clone(),
+                    commit_threshold: 100,
                 }
             }
         }

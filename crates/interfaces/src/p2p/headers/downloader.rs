@@ -4,6 +4,7 @@ use crate::{
     p2p::{headers::error::DownloadError, traits::BatchDownload},
 };
 
+use futures::Stream;
 use reth_primitives::SealedHeader;
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{pin::Pin, time::Duration};
@@ -19,6 +20,10 @@ pub type HeaderBatchDownload<'a> = Pin<
             + 'a,
     >,
 >;
+
+/// A stream for downloading headers.
+pub type HeaderDownloadStream =
+    Pin<Box<dyn Stream<Item = Result<SealedHeader, DownloadError>> + Send>>;
 
 /// A downloader capable of fetching block headers.
 ///
@@ -44,6 +49,9 @@ pub trait HeaderDownloader: Sync + Send + Unpin {
 
     /// Download the headers
     fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_>;
+
+    /// Stream the headers
+    fn stream(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderDownloadStream;
 
     /// Validate whether the header is valid in relation to it's parent
     ///
