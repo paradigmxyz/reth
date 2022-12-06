@@ -9,35 +9,23 @@ use crate::{
 };
 use bytes::Bytes;
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, H256};
+use reth_primitives::{BlockHash, BlockNumber, Header, H256};
 use serde::{Deserialize, Serialize};
 
-/// Total chain number of transactions. Key for [`CumulativeTxCount`].
+/// Total chain number of transactions. Value for [`CumulativeTxCount`].
+///
+/// Used for collecting transactions for a block.
 pub type NumTransactions = u64;
 
-/// The storage representation of a block body.
+/// The storage representation of a block ommers.
 ///
-/// A block body is stored as a pointer to the first transaction in the block (`base_tx_id`), a
-/// count of how many transactions are in the block, and the headers of the block's uncles.
-///
-/// The [TxNumber]s for all the transactions in the block are `base_tx_id..(base_tx_id +
+/// It is stored as the headers of the block's uncles.
 /// tx_amount)`.
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[main_codec]
-pub struct StoredBlockBody {
-    /// The ID of the first transaction in the block.
-    pub base_tx_id: TxNumber,
-    /// The number of transactions in the block.
-    pub tx_amount: u64,
+pub struct StoredBlockOmmers {
     /// The block headers of this block's uncles.
     pub ommers: Vec<Header>,
-}
-
-impl StoredBlockBody {
-    /// Return next block tx id.
-    pub fn next_block_tx_id(&self) -> TxNumber {
-        self.base_tx_id + self.tx_amount
-    }
 }
 
 /// Hash of the block header. Value for [`CanonicalHeaders`]

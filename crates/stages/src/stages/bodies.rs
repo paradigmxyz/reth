@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use reth_interfaces::{
     consensus::Consensus,
     db::{
-        models::StoredBlockBody, tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx,
+        models::StoredBlockOmmers, tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx,
         DbTxMut,
     },
     p2p::bodies::downloader::BodyDownloader,
@@ -38,16 +38,17 @@ const BODIES: StageId = StageId("Bodies");
 ///
 /// The bodies are processed and data is inserted into these tables:
 ///
-/// - [`BlockBodies`][reth_interfaces::db::tables::BlockBodies]
+/// - [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers]
 /// - [`Transactions`][reth_interfaces::db::tables::Transactions]
 ///
 /// # Genesis
 ///
 /// This stage expects that the genesis has been inserted into the appropriate tables:
 ///
-/// - The header tables (see [HeadersStage][crate::stages::headers::HeadersStage])
-/// - The various indexes (e.g. [TotalTxIndex][crate::stages::tx_index::TxIndex])
-/// - The [`BlockBodies`][reth_interfaces::db::tables::BlockBodies] table
+/// - The header tables (see [`HeaderStage`][crate::stages::headers::HeaderStage])
+/// - The [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers] table
+/// - The [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount] table
+/// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
@@ -96,12 +97,12 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let bodies_to_download = self.bodies_to_download::<DB>(db, starting_block, target)?;
 
         // Cursors used to write bodies and transactions
-        let mut bodies_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
-        let mut base_tx_id = bodies_cursor
-            .last()?
-            .map(|(_, body)| body.base_tx_id + body.tx_amount)
-            .ok_or(DatabaseIntegrityError::BlockBody { number: starting_block })?;
+        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
+
+        // Get id for the first transaction in the block
+        let mut first_tx_id = db.get_first_tx_id(starting_block)?;
 
         // Cursor used to look up headers for block pre-validation
         let mut header_cursor = db.cursor::<tables::Headers>()?;
@@ -135,19 +136,19 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                 .map_err(|err| StageError::Validation { block: block_number, error: err })?;
 
             // Write block
-            bodies_cursor.append(
-                (block_number, header_hash).into(),
-                StoredBlockBody {
-                    base_tx_id,
-                    tx_amount: block.body.len() as u64,
+            let key = (block_number, header_hash).into();
+            tx_count_cursor.append(key, first_tx_id + block.body.len() as u64)?;
+            ommers_cursor.append(
+                key,
+                StoredBlockOmmers {
                     ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
                 },
             )?;
 
             // Write transactions
             for transaction in block.body {
-                tx_cursor.append(base_tx_id, transaction)?;
-                base_tx_id += 1;
+                tx_cursor.append(first_tx_id, transaction)?;
+                first_tx_id += 1;
             }
 
             highest_block = block_number;
@@ -168,24 +169,30 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let mut block_body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
+        let mut block_ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
 
-        let mut entry = block_body_cursor.last()?;
-        while let Some((key, body)) = entry {
+        let mut entry = tx_count_cursor.last()?;
+        while let Some((key, count)) = entry {
             if key.number() <= input.unwind_to {
                 break
             }
 
-            for num in 0..body.tx_amount {
-                let tx_id = body.base_tx_id + num;
+            // First delete the current and find the previous cum tx count value
+            tx_count_cursor.delete_current()?;
+            entry = tx_count_cursor.prev()?;
+
+            if block_ommers_cursor.seek_exact(key)?.is_some() {
+                block_ommers_cursor.delete_current()?;
+            }
+
+            let prev_count = entry.map(|(_, v)| v).unwrap_or_default();
+            for tx_id in prev_count..count {
                 if transaction_cursor.seek_exact(tx_id)?.is_some() {
                     transaction_cursor.delete_current()?;
                 }
             }
-
-            block_body_cursor.delete_current()?;
-            entry = block_body_cursor.prev()?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -395,7 +402,9 @@ mod tests {
             Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress == previous_stage
         );
         let stage_progress = output.unwrap().stage_progress;
-        runner.validate_db_blocks(stage_progress).expect("Written block data invalid");
+        runner
+            .validate_db_blocks(input.stage_progress.unwrap_or_default(), stage_progress)
+            .expect("Written block data invalid");
 
         // Delete a transaction
         runner
@@ -459,7 +468,10 @@ mod tests {
         use assert_matches::assert_matches;
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
-            db::{models::StoredBlockBody, tables, DbCursorRO, DbTx, DbTxMut},
+            db::{
+                models::{BlockNumHash, NumTransactions, StoredBlockOmmers},
+                tables, DbCursorRO, DbTx, DbTxMut,
+            },
             p2p::{
                 bodies::{
                     client::BodiesClient,
@@ -467,7 +479,10 @@ mod tests {
                 },
                 error::RequestResult,
             },
-            test_utils::{generators::random_block_range, TestConsensus},
+            test_utils::{
+                generators::{random_block_range, random_signed_tx},
+                TestConsensus,
+            },
         };
         use reth_primitives::{BlockLocked, BlockNumber, Header, SealedHeader, H256};
         use std::{collections::HashMap, sync::Arc};
@@ -539,11 +554,28 @@ mod tests {
             type Seed = Vec<BlockLocked>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+                self.insert_genesis()?;
                 let start = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage_progress() + 1;
                 let blocks = random_block_range(start..end, GENESIS_HASH);
-                self.insert_genesis()?;
                 self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
+                if let Some(progress) = blocks.first() {
+                    // Insert last progress data
+                    self.db.commit(|tx| {
+                        let key = (progress.number, progress.hash()).into();
+                        let last_count = tx
+                            .cursor::<tables::CumulativeTxCount>()?
+                            .last()?
+                            .map(|(_, v)| v)
+                            .unwrap_or_default();
+                        let tx_count = last_count + progress.body.len() as u64;
+                        tx.put::<tables::CumulativeTxCount>(key, tx_count)?;
+                        tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
+                        (last_count..tx_count).try_for_each(|idx| {
+                            tx.put::<tables::Transactions>(idx, random_signed_tx())
+                        })
+                    })?;
+                }
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
                 Ok(blocks)
             }
@@ -557,17 +589,20 @@ mod tests {
                     Some(output) => output.stage_progress,
                     None => input.stage_progress.unwrap_or_default(),
                 };
-                self.validate_db_blocks(highest_block)
+                self.validate_db_blocks(highest_block, highest_block)
             }
         }
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
+                self.db.check_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
                     key.number()
                 })?;
-                if let Some(last_body) = self.last_body() {
-                    let last_tx_id = last_body.base_tx_id + last_body.tx_amount;
+                self.db.check_no_entry_above::<tables::CumulativeTxCount, _>(
+                    input.unwind_to,
+                    |key| key.number(),
+                )?;
+                if let Some(last_tx_id) = self.last_count() {
                     self.db
                         .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
                 }
@@ -584,19 +619,19 @@ mod tests {
                 let header = SealedHeader::new(Header::default(), GENESIS_HASH);
                 self.db.insert_headers(std::iter::once(&header))?;
                 self.db.commit(|tx| {
-                    tx.put::<tables::BlockBodies>(
-                        (0, GENESIS_HASH).into(),
-                        StoredBlockBody { base_tx_id: 0, tx_amount: 0, ommers: vec![] },
-                    )
+                    let key = (0, GENESIS_HASH).into();
+                    tx.put::<tables::CumulativeTxCount>(key, 1)?;
+                    tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
+                    tx.put::<tables::Transactions>(0, random_signed_tx())
                 })?;
 
                 Ok(())
             }
 
-            /// Retrieve the last body from the database
-            pub(crate) fn last_body(&self) -> Option<StoredBlockBody> {
+            /// Retrieve the last tx count from the database
+            pub(crate) fn last_count(&self) -> Option<NumTransactions> {
                 self.db
-                    .query(|tx| Ok(tx.cursor::<tables::BlockBodies>()?.last()?.map(|e| e.1)))
+                    .query(|tx| Ok(tx.cursor::<tables::CumulativeTxCount>()?.last()?.map(|e| e.1)))
                     .ok()
                     .flatten()
             }
@@ -604,34 +639,55 @@ mod tests {
             /// Validate that the inserted block data is valid
             pub(crate) fn validate_db_blocks(
                 &self,
+                prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
-                    let mut block_body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    // Acquire cursors on body related tables
+                    let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
+                    let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
                     let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
 
-                    let mut entry = block_body_cursor.first()?;
-                    let mut prev_max_tx_id = 0;
-                    while let Some((key, body)) = entry {
+                    let first_tx_count_key = match tx_count_cursor.first()? {
+                        Some((key, _)) => key,
+                        None => return Ok(()),
+                    };
+                    let mut walker = tx_count_cursor.walk(first_tx_count_key)?.peekable();
+
+                    let mut prev_entry: Option<(BlockNumHash, NumTransactions)> = None;
+                    while let Some(entry) = walker.next() {
+                        let (key, count) = entry?;
+
+                        // Validate sequentiality only after prev progress,
+                        // since the data before is mocked and can contain gaps
+                        if key.number() > prev_progress {
+                            if let Some((prev_key, _)) = prev_entry {
+                                assert_eq!(prev_key.number() + 1, key.number(), "Tx count entries must be sequential");
+                            }
+                        }
+
+                        // Validate that the current entry is below or equals to the highest allowed block
                         assert!(
                             key.number() <= highest_block,
                             "We wrote a block body outside of our synced range. Found block with number {}, highest block according to stage is {}",
                             key.number(), highest_block
                         );
 
-                        assert!(prev_max_tx_id == body.base_tx_id, "Transaction IDs are malformed.");
-                        for num in 0..body.tx_amount {
-                            let tx_id = body.base_tx_id + num;
+                        // Validate that ommers exist
+                        assert_matches!(ommers_cursor.seek_exact(key), Ok(Some(_)), "Block ommers are missing");
+
+                        // Validate that block trasactions exist
+                        let first_tx_id = prev_entry.map(|(_, v)| v).unwrap_or_default();
+                        for tx_id in first_tx_id..count {
                             assert_matches!(
                                 transaction_cursor.seek_exact(tx_id),
                                 Ok(Some(_)),
                                 "A transaction is missing."
                             );
                         }
-                        prev_max_tx_id = body.base_tx_id + body.tx_amount;
-                        entry = block_body_cursor.next()?;
-                    }
 
+                        prev_entry = Some((key, count));
+                    }
                     Ok(())
                 })?;
                 Ok(())

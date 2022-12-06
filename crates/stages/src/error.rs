@@ -94,6 +94,12 @@ pub enum DatabaseIntegrityError {
         /// The block number key
         number: BlockNumber,
     },
+    /// The transaction is missing
+    #[error("Transaction #{id} not found")]
+    Transaction {
+        /// The transaction id
+        id: TxNumber,
+    },
 }
 
 /// A pipeline execution error.

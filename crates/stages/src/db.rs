@@ -3,12 +3,11 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use reth_db::kv::cursor::PairResult;
 use reth_interfaces::db::{
     models::{BlockNumHash, NumTransactions},
     tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table,
 };
-use reth_primitives::{BlockHash, BlockNumber};
+use reth_primitives::{BlockHash, BlockNumber, TxNumber};
 
 use crate::{DatabaseIntegrityError, StageError};
 
@@ -90,12 +89,6 @@ where
         self.tx.take();
     }
 
-    /// Get exact or previous value from the database
-    pub(crate) fn get_exact_or_prev<T: Table>(&self, key: T::Key) -> PairResult<T> {
-        let mut cursor = self.cursor::<T>()?;
-        Ok(cursor.seek_exact(key)?.or(cursor.prev()?))
-    }
-
     /// Query [tables::CanonicalHeaders] table for block hash by block number
     pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
         let hash = self
@@ -119,6 +112,70 @@ where
             DatabaseIntegrityError::CumulativeTxCount { number: key.number(), hash: key.hash() },
         )?;
         Ok(count)
+    }
+
+    /// Get id for the first **potential** transaction in a block by looking up
+    /// the cumulative transaction count at the previous block.
+    ///
+    /// This function does not care whether the block is empty.
+    pub(crate) fn get_first_tx_id(&self, block: BlockNumber) -> Result<TxNumber, StageError> {
+        // Handle genesis block
+        if block == 0 {
+            return Ok(0)
+        }
+
+        let prev_key = self.get_block_numhash(block - 1)?;
+        self.get_tx_count(prev_key)
+    }
+
+    /// Get id of the last transaction in the block.
+    /// Returns [None] if the block is empty.
+    ///
+    /// The blocks must exist in the database.
+    #[allow(dead_code)]
+    pub(crate) fn get_last_tx_id(
+        &self,
+        block: BlockNumber,
+    ) -> Result<Option<TxNumber>, StageError> {
+        let key = self.get_block_numhash(block)?;
+
+        let mut cursor = self.cursor::<tables::CumulativeTxCount>()?;
+        let (_, tx_count) =
+            cursor.seek_exact(key)?.ok_or(DatabaseIntegrityError::CumulativeTxCount {
+                number: key.number(),
+                hash: key.hash(),
+            })?;
+
+        let is_empty = {
+            if block != 0 {
+                let (_, prev_tx_count) =
+                    cursor.prev()?.ok_or(DatabaseIntegrityError::CumulativeTxCount {
+                        number: key.number() + 1,
+                        hash: self.get_block_hash(key.number() + 1)?,
+                    })?;
+                tx_count != prev_tx_count
+            } else {
+                tx_count == 0
+            }
+        };
+
+        Ok(if !is_empty { Some(tx_count - 1) } else { None })
+    }
+
+    /// Get id of the latest transaction observed before a given block (inclusive).
+    /// Returns error if there are no transactions in the database.
+    pub(crate) fn get_latest_tx_id(
+        &self,
+        up_to_block: BlockNumber,
+    ) -> Result<TxNumber, StageError> {
+        let key = self.get_block_numhash(up_to_block)?;
+        let tx_count = self.get_tx_count(key)?;
+        if tx_count != 0 {
+            Ok(tx_count - 1)
+        } else {
+            // No transactions in the database
+            Err(DatabaseIntegrityError::Transaction { id: 0 }.into())
+        }
     }
 
     /// Unwind table by some number key

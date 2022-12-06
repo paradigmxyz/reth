@@ -30,7 +30,7 @@ impl Default for TestStageDB {
 
 impl TestStageDB {
     /// Return a database wrapped in [StageDB].
-    fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
+    pub(crate) fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
         StageDB::new(self.db.borrow()).expect("failed to create db container")
     }
 
@@ -73,6 +73,7 @@ impl TestStageDB {
     /// let db = StageTestDB::default();
     /// db.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
+    #[allow(dead_code)]
     pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), db::Error>
     where
         T: Table,
@@ -96,6 +97,7 @@ impl TestStageDB {
     /// let db = StageTestDB::default();
     /// db.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
+    #[allow(dead_code)]
     pub(crate) fn transform_append<T, S, F>(
         &self,
         values: &[S],
