@@ -1,0 +1,19 @@
+[book]
+authors = [""]
+language = "en"
+multilingual = false
+src = "src"
+title = "Reth Book"
+description = "A book on all things Reth"
+
+[output.html]
+git-repository-url = "https://github.com/foundry-rs/reth"
+edit-url-template = ""
+default-theme = "ayu"
+cname = ""
+no-section-label = true
+additional-css = [""]
+
+[output.html.fold]
+enable = true
+level = 1
