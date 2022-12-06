@@ -7,6 +7,7 @@ use super::{
 use crate::SharedTransactions;
 use bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
+use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, sync::Arc};
 
 /// An `eth` protocol message, containing a message ID and payload.
@@ -139,7 +140,7 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 ///
 ///  The newer `eth/66` is an efficiency upgrade on top of `eth/65`, introducing a request id to
 ///  correlate request-response message pairs. This allows for request multiplexing.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EthMessage {
     /// Status is required for the protocol handshake
     Status(Status),
