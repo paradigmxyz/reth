@@ -2,7 +2,7 @@
 
 use bytes::Buf;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
 

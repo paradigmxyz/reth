@@ -3,7 +3,7 @@
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use bytes::{BufMut, Bytes};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 /// A Capability message consisting of the message-id and the payload
