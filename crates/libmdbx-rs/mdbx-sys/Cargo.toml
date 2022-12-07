@@ -4,7 +4,7 @@ version = "0.12.1-0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Rust bindings for libmdbx with good licence."
-repository = "https://github.com/foundry-rs/reth"
+repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [lib]

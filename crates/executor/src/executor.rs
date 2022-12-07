@@ -315,7 +315,7 @@ pub fn execute<DB: StateProvider>(
     }
 
     // TODO add validator block reward. Currently not added.
-    // https://github.com/foundry-rs/reth/issues/237
+    // https://github.com/paradigmxyz/reth/issues/237
 
     Ok(transaction_patch)
 }

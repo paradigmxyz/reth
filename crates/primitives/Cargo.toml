@@ -3,7 +3,7 @@ name = "reth-primitives"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/foundry-rs/reth"
+repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 description = "Commonly used types in reth."
 
@@ -56,5 +56,5 @@ hex-literal = "0.3"
 test-fuzz = "3.0.4"
 
 # necessary so we don't hit a "undeclared 'std'": 
-# https://github.com/foundry-rs/reth/pull/177#discussion_r1021172198 
+# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
 secp256k1 = "0.24.0"

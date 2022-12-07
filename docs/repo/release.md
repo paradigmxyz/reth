@@ -2,7 +2,7 @@
 
 1. Update the version in `Cargo.toml`
 2. Update the changelog[^1]
-    - Check that all issues marked https://github.com/foundry-rs/reth/labels/M-changelog have been added to the changelog
+    - Check that all issues marked https://github.com/paradigmxyz/reth/labels/M-changelog have been added to the changelog
     - Move the "Unreleased" section in the changelog under a new header with the new version, and fix up the links in the bottom of the file
 3. Ensure tests and lints pass
 4. Commit the new changelog and version bump

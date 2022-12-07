@@ -427,7 +427,7 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
-        // TODO cleanup the setup after https://github.com/foundry-rs/reth/issues/332
+        // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut db = StageDB::new(state_db.as_ref()).unwrap();
@@ -511,7 +511,7 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execute_unwind() {
-        // TODO cleanup the setup after https://github.com/foundry-rs/reth/issues/332
+        // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
 
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
