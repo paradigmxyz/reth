@@ -480,11 +480,8 @@ mod tests {
         let account1_info =
             Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: Some(code_hash) };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        let account2_info = Account {
-            balance: (0x1bc16d674ece94bau128).into(),
-            nonce: 0x00,
-            bytecode_hash: None,
-        };
+        let account2_info =
+            Account { balance: (0x1bc16d674ece94bau128).into(), nonce: 0x00, bytecode_hash: None };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let account3_info =
             Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
