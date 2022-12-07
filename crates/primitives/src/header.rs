@@ -6,6 +6,7 @@ use bytes::{BufMut, BytesMut};
 use ethers_core::{types::H64, utils::keccak256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Block header
@@ -279,7 +280,7 @@ impl SealedHeader {
 /// [`HeadersDirection::Falling`] block numbers for `reverse == false`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.
     #[default]

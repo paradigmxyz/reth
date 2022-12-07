@@ -1,5 +1,6 @@
 use crate::{Header, SealedHeader, TransactionSigned, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Ethereum full block.
@@ -46,7 +47,7 @@ impl Deref for BlockLocked {
 }
 
 /// Either a block hash _or_ a block number
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockHashOrNumber {
     /// A block hash
     Hash(H256),

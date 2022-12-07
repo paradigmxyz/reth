@@ -2,7 +2,7 @@ use crate::{EthVersion, StatusBuilder};
 
 use reth_primitives::{Chain, ForkId, Hardfork, H256, MAINNET_GENESIS, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same

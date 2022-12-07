@@ -1,7 +1,7 @@
 use crate::U256;
 use ethers_core::types::{ParseChainError, U64};
 use reth_rlp::{Decodable, Encodable};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
 /// Either a named or chain id or the actual id value
