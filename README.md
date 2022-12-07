@@ -1,6 +1,6 @@
 # <h1 align="center"> reth 🏗️🚧 </h1>
 
-**Blazing-fast implementation of the Ethereum protocol**
+**Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
 
 ![](./assets/reth.jpg)
 
