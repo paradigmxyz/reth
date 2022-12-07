@@ -481,7 +481,6 @@ mod tests {
             Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: Some(code_hash) };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
-            // TODO remove 2eth block reward
             balance: (0x1bc16d674ece94bau128).into(),
             nonce: 0x00,
             bytecode_hash: None,

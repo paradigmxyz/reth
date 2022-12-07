@@ -372,7 +372,7 @@ pub fn execute<DB: StateProvider>(
     let beneficiary =
         evm.db.unwrap().basic(header.beneficiary).map_err(|_| Error::ProviderError)?;
 
-    // NOTO: Related to Ethereum reward change for other network this is probably going to be moved
+    // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
     // to config.
     let block_reward = match header.number {
         n if n >= config.spec_upgrades.paris => None,
@@ -518,7 +518,7 @@ mod tests {
         let _account1_info = Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
-            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
+            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(), // decrease for block reward
             nonce: 0x00,
             bytecode_hash: None,
         };
@@ -544,7 +544,8 @@ mod tests {
 
         // check block rewards changeset
         let mut block_rewarded_acc_info = account2_info;
-        block_rewarded_acc_info.balance += 0x1bc16d674ec80000u128.into(); // Block 2eth rewards
+        // add Blocks 2 eth reward
+        block_rewarded_acc_info.balance += 0x1bc16d674ec80000u128.into(); 
         assert_eq!(
             out.block_reward,
             Some(BTreeMap::from([(
