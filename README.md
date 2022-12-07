@@ -2,6 +2,8 @@
 
 **Blazing-fast implementation of the Ethereum protocol**
 
+![](./assets/reth.jpg)
+
 *The project is still work in progress, see the [disclaimer below](#-warning-under-construction-).*
 
 [![CI status](https://github.com/foundry-rs/reth/workflows/ci/badge.svg)][gh-ci]
