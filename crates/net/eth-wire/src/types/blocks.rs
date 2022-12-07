@@ -3,6 +3,7 @@
 use super::RawBlockBody;
 use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use serde::{Deserialize, Serialize};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -13,7 +14,9 @@ use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrap
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -32,7 +35,9 @@ pub struct GetBlockHeaders {
 }
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct BlockHeaders(
     /// The requested headers.
     pub Vec<Header>,
@@ -45,7 +50,9 @@ impl From<Vec<Header>> for BlockHeaders {
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<H256>,
@@ -59,7 +66,7 @@ impl From<Vec<H256>> for GetBlockBodies {
 
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct BlockBody {
     /// Transactions in the block
     pub transactions: Vec<TransactionSigned>,
@@ -80,7 +87,9 @@ impl BlockBody {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
     pub Vec<BlockBody>,

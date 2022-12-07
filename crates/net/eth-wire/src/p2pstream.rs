@@ -10,6 +10,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::H512 as PeerId;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
     io,
@@ -523,7 +524,7 @@ pub fn set_capability_offsets(
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
     Hello(HelloMessage),
@@ -655,7 +656,7 @@ impl TryFrom<u8> for P2PMessageID {
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.
     pub protocol_version: ProtocolVersion,
@@ -671,7 +672,7 @@ pub struct HelloMessage {
 }
 
 /// RLPx `p2p` protocol version
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,
