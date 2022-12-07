@@ -3,10 +3,11 @@
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use bytes::{BufMut, Bytes};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 /// A Capability message consisting of the message-id and the payload
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RawCapabilityMessage {
     /// Identifier of the message.
     pub id: usize,
@@ -16,7 +17,7 @@ pub struct RawCapabilityMessage {
 
 /// Various protocol related event types bubbled up from a session that need to be handled by the
 /// network.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum CapabilityMessage {
     /// Eth sub-protocol message.
     Eth(EthMessage),
@@ -25,7 +26,7 @@ pub enum CapabilityMessage {
 }
 
 /// A message indicating a supported capability and capability version.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct Capability {
     /// The name of the subprotocol
     pub name: SmolStr,

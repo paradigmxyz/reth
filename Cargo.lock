@@ -1234,8 +1234,8 @@ dependencies = [
 
 [[package]]
 name = "ethers-core"
-version = "1.0.0"
-source = "git+https://github.com/gakonst/ethers-rs#c17c0c3c956f12d205a5ede3176599d8a30ca739"
+version = "1.0.2"
+source = "git+https://github.com/gakonst/ethers-rs#a88d2d03e3340a4f9dd39fae9dfe094750db13d5"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -3193,6 +3193,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "secp256k1",
+ "serde",
  "smol_str",
  "snap",
  "thiserror",
@@ -4034,6 +4035,9 @@ name = "smol_str"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7475118a28b7e3a2e157ce0131ba8c5526ea96e90ee601d9f6bb2e286a35ab44"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "snap"

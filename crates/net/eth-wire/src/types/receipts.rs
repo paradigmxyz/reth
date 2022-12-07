@@ -1,9 +1,12 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 use reth_primitives::{Receipt, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use serde::{Deserialize, Serialize};
 
 /// A request for transaction receipts from the given block hashes.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
     pub Vec<H256>,
@@ -11,7 +14,9 @@ pub struct GetReceipts(
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
     pub Vec<Vec<Receipt>>,

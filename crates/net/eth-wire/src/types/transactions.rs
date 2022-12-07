@@ -1,9 +1,12 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 use reth_primitives::{TransactionSigned, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use serde::{Deserialize, Serialize};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
     pub Vec<H256>,
@@ -25,7 +28,9 @@ where
 /// as the request's hashes. Hashes may be skipped, and the client should ensure that each body
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+)]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
     pub Vec<TransactionSigned>,

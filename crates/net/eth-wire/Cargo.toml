@@ -11,6 +11,7 @@ readme = "README.md"
 bytes = { version = "1.1" }
 hex = "0.4"
 thiserror = "1"
+serde = "1"
 
 # reth
 reth-primitives = { path = "../../primitives" }
@@ -25,7 +26,7 @@ tokio-stream = "0.1.11"
 pin-project = "1.0"
 tracing = "0.1.37"
 snap = "1.0.5"
-smol_str = { version = "0.1", default-features = false }
+smol_str = { version = "0.1", features = ["serde"] }
 
 [dev-dependencies]
 reth-ecies = { path = "../ecies" }
