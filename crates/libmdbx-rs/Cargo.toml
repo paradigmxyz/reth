@@ -4,7 +4,7 @@ version = "0.1.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Idiomatic and safe MDBX wrapper with good licence"
-repository = "https://github.com/foundry-rs/reth"
+repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [lib]

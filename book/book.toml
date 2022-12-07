@@ -7,7 +7,7 @@ title = "Reth Book"
 description = "A book on all things Reth"
 
 [output.html]
-git-repository-url = "https://github.com/foundry-rs/reth"
+git-repository-url = "https://github.com/paradigmxyz/reth"
 edit-url-template = ""
 default-theme = "ayu"
 cname = ""

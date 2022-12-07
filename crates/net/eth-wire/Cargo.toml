@@ -4,7 +4,7 @@ description = "Impements the eth/64 and eth/65 P2P protocols"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/foundry-rs/reth"
+repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]

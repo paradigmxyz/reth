@@ -4,7 +4,7 @@ version = "0.1.1"
 license = "Apache-2.0"
 edition = "2021"
 description = "Procedural macros for reth-rlp"
-repository = "https://github.com/foundry-rs/reth"
+repository = "https://github.com/paradigmxyz/reth"
 
 [lib]
 proc-macro = true

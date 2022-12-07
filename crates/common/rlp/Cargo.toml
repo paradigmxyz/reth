@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2021"
 license = "Apache-2.0"
 description = "Fast RLP serialization library"
-repository = "https://github.com/foundry-rs/reth"
+repository = "https://github.com/paradigmxyz/reth"
 
 [dependencies]
 arrayvec = { version = "0.7", default-features = false }
