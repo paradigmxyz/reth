@@ -1,16 +1,16 @@
 //! Connection tests
 
-use enr::EnrPublicKey;
 use super::testnet::Testnet;
+use enr::EnrPublicKey;
 use ethers_core::utils::Geth;
-use ethers_providers::{Http, Provider, Middleware};
+use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
 use reth_provider::test_utils::TestApi;
 use reth_primitives::PeerId;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, sync::Arc, net::SocketAddr};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -86,13 +86,11 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn test_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-    let config =
-        NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).build();
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -111,11 +109,20 @@ async fn test_connect_with_single_geth() {
 
     println!("geth endpoint: {}", geth_endpoint);
     let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
-    let peer_id: PeerId = provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+    let peer_id: PeerId =
+        provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
     handle.add_peer(peer_id, geth_socket);
 
-    while let Some(ev) = events.next().await {
-        dbg!(ev);
+    // check for a sessionestablished event as the first event
+    if let Some(ev) = events.next().await {
+        if let NetworkEvent::SessionEstablished { peer_id: incoming_peer_id, .. } = ev {
+            assert_eq!(incoming_peer_id, peer_id);
+        } else {
+            panic!(
+                "unexpected disconnect event, could not establish a session with geth: {:?}",
+                ev
+            );
+        }
     }
 }
