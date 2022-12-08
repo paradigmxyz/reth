@@ -7,7 +7,7 @@ use crate::{
 use futures::Stream;
 use reth_primitives::SealedHeader;
 use reth_rpc_types::engine::ForkchoiceState;
-use std::{pin::Pin, time::Duration};
+use std::pin::Pin;
 
 /// A Future for downloading a batch of headers.
 pub type HeaderBatchDownload<'a> = Pin<
@@ -37,9 +37,6 @@ pub trait HeaderDownloader: Sync + Send + Unpin {
 
     /// The Client used to download the headers
     type Client: HeadersClient;
-
-    /// The request timeout duration
-    fn timeout(&self) -> Duration;
 
     /// The consensus engine
     fn consensus(&self) -> &Self::Consensus;
