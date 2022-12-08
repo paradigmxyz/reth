@@ -201,9 +201,9 @@ impl Transaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     pub fn kind(&self) -> &TransactionKind {
         match self {
-            Transaction::Legacy(TxLegacy { to, .. }) |
-            Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) => to,
+            Transaction::Legacy(TxLegacy { to, .. })
+            | Transaction::Eip2930(TxEip2930 { to, .. })
+            | Transaction::Eip1559(TxEip1559 { to, .. }) => to,
         }
     }
 
@@ -237,17 +237,17 @@ impl Transaction {
     /// Get the gas limit of the transaction.
     pub fn gas_limit(&self) -> u64 {
         match self {
-            Transaction::Legacy(TxLegacy { gas_limit, .. }) |
-            Transaction::Eip2930(TxEip2930 { gas_limit, .. }) |
-            Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
+            Transaction::Legacy(TxLegacy { gas_limit, .. })
+            | Transaction::Eip2930(TxEip2930 { gas_limit, .. })
+            | Transaction::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit,
         }
     }
 
     /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price
     pub fn max_fee_per_gas(&self) -> u128 {
         match self {
-            Transaction::Legacy(TxLegacy { gas_price, .. }) |
-            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Transaction::Legacy(TxLegacy { gas_price, .. })
+            | Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
             Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
         }
     }
@@ -539,6 +539,12 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
+impl From<TransactionSignedEcRecovered> for TransactionSigned {
+    fn from(recovered: TransactionSignedEcRecovered) -> Self {
+        recovered.signed_transaction
+    }
+}
+
 impl Encodable for TransactionSigned {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, true);
@@ -572,7 +578,7 @@ impl Decodable for TransactionSigned {
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
             if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"));
             }
 
             // decode common fields

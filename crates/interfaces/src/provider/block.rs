@@ -65,7 +65,7 @@ pub trait BlockProvider: Send + Sync {
             BlockId::Hash(hash) => Ok(Some(hash)),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumber::Latest) {
-                    return Ok(Some(self.chain_info()?.best_hash))
+                    return Ok(Some(self.chain_info()?.best_hash));
                 }
                 self.convert_block_number(num)?
                     .map(|num| self.block_hash(num.into()))
@@ -154,7 +154,7 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         for eth_tx in block.body.iter() {
             let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
             tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
-            tx.put::<tables::Transactions>(tx_number, rec_tx.as_ref().clone())?;
+            tx.put::<tables::Transactions>(tx_number, rec_tx.into())?;
             tx_number += 1;
         }
         tx.put::<tables::CumulativeTxCount>(
