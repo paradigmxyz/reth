@@ -1,9 +1,11 @@
 //! Transaction wrapper for libmdbx-sys.
 
 use super::cursor::Cursor;
-use crate::utils::decode_one;
-use reth_interfaces::db::{
-    Compress, DbTx, DbTxGAT, DbTxMut, DbTxMutGAT, DupSort, Encode, Error, Table,
+use crate::{
+    table::{Compress, DupSort, Encode, Table},
+    tables::utils::decode_one,
+    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
+    Error,
 };
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use std::marker::PhantomData;

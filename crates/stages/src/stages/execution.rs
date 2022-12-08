@@ -423,10 +423,7 @@ mod tests {
     use std::ops::Deref;
 
     use super::*;
-    use reth_db::{
-        mdbx::{test_utils::create_test_db, EnvKind},
-        mdbx::WriteMap,
-    };
+    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_interfaces::provider::insert_canonical_block;
     use reth_primitives::{hex_literal::hex, keccak256, Account, BlockLocked, H160, U256};
     use reth_rlp::Decodable;

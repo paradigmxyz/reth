@@ -10,6 +10,7 @@ readme = "README.md"
 # reth 
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
+reth-provider = { path = "../storage/provider" }
 reth-rlp = {path = "../common/rlp"}
 
 # common

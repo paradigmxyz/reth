@@ -37,8 +37,8 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason,
 };
-use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{PeerId, H256};
+use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
     pin::Pin,

@@ -1,4 +1,4 @@
-use crate::{Header, SealedHeader, TransactionSigned, H256};
+use crate::{BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;

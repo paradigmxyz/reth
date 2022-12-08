@@ -365,10 +365,7 @@ impl<DB: Database> QueuedStage<DB> {
 mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
-    use reth_db::{
-        mdbx::{test_utils, Env, EnvKind},
-        mdbx::{self, WriteMap},
-    };
+    use reth_db::mdbx::{self, test_utils, Env, EnvKind, WriteMap};
     use reth_interfaces::consensus;
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};

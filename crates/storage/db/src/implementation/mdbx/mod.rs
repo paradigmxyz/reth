@@ -1,10 +1,10 @@
 //! Module that interacts with MDBX.
-//! 
 
-use crate::utils::default_page_size;
-use reth_interfaces::db::{
+use crate::{
+    database::{Database, DatabaseGAT},
     tables::{TableType, TABLES},
-    Database, DatabaseGAT, Error,
+    utils::default_page_size,
+    Error,
 };
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
@@ -139,16 +139,13 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::{test_utils, Env, EnvKind};
-    use reth_interfaces::{
-        db::{
-            self,
-            models::ShardedKey,
-            tables::{
-                AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
-            },
-            Database, DbCursorRO, DbCursorRW, DbDupCursorRO, DbTx, DbTxMut,
-        },
-        provider::{ProviderImpl, StateProviderFactory},
+    use crate::{
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+        database::Database,
+        models::ShardedKey,
+        tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
+        transaction::{DbTx, DbTxMut},
+        Error,
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
@@ -262,7 +259,7 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
-        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(db::Error::Write(4294936497)));
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(4294936497)));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
     }
 
@@ -283,7 +280,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
         cursor.seek_exact(1).unwrap();
-        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(db::Error::Write(4294936878)));
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(4294936878)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
     }
 
@@ -396,12 +393,5 @@ mod tests {
             let list200: IntegerList = vec![200u64].into();
             assert_eq!(list200, list);
         }
-    }
-
-    #[test]
-    fn common_history_provider() {
-        let db = test_utils::create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ProviderImpl::new(db);
-        let _ = provider.latest();
     }
 }

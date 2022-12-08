@@ -2,10 +2,12 @@
 
 use std::{borrow::Cow, marker::PhantomData};
 
-use crate::utils::*;
-use reth_interfaces::db::{
-    Compress, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupSort, DupWalker, Encode,
-    Error, Table, Walker,
+use crate::{
+    common::*,
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
+    table::{Compress, DupSort, Encode, Table},
+    tables::utils::*,
+    Error,
 };
 use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
 
@@ -41,27 +43,27 @@ macro_rules! decode {
 }
 
 impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T> {
-    fn first(&mut self) -> reth_interfaces::db::PairResult<T> {
+    fn first(&mut self) -> PairResult<T> {
         decode!(self.inner.first())
     }
 
-    fn seek_exact(&mut self, key: <T as Table>::Key) -> reth_interfaces::db::PairResult<T> {
+    fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
         decode!(self.inner.set_key(key.encode().as_ref()))
     }
 
-    fn next(&mut self) -> reth_interfaces::db::PairResult<T> {
+    fn next(&mut self) -> PairResult<T> {
         decode!(self.inner.next())
     }
 
-    fn prev(&mut self) -> reth_interfaces::db::PairResult<T> {
+    fn prev(&mut self) -> PairResult<T> {
         decode!(self.inner.prev())
     }
 
-    fn last(&mut self) -> reth_interfaces::db::PairResult<T> {
+    fn last(&mut self) -> PairResult<T> {
         decode!(self.inner.last())
     }
 
-    fn current(&mut self) -> reth_interfaces::db::PairResult<T> {
+    fn current(&mut self) -> PairResult<T> {
         decode!(self.inner.get_current())
     }
 
@@ -83,7 +85,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
 }
 
 impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
-    fn seek(&mut self, key: <T as DupSort>::SubKey) -> reth_interfaces::db::PairResult<T> {
+    fn seek(&mut self, key: <T as DupSort>::SubKey) -> PairResult<T> {
         decode!(self.inner.set_range(key.encode().as_ref()))
     }
 

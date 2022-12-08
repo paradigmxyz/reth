@@ -8,9 +8,9 @@ macro_rules! impl_criterion_encoding_benchmark {
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
                     let encoded_size =
-                        reth_interfaces::db::codecs::fuzz::IntegerList::encode_and_decode(
-                            black_box(reth_primitives::IntegerList::default()),
-                        )
+                        reth_db::tables::codecs::fuzz::IntegerList::encode_and_decode(black_box(
+                            reth_primitives::IntegerList::default(),
+                        ))
                         .0;
 
                     if size == 0 {

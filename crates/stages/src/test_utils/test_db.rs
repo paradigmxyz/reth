@@ -1,7 +1,4 @@
-use reth_db::{
-    mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
-    mdbx::{WriteMap, RW},
-};
+use reth_db::mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind, WriteMap, RW};
 use reth_interfaces::db::{
     self, models::BlockNumHash, tables, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
 };
