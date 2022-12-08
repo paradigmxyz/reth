@@ -22,6 +22,7 @@ members = [
     "crates/primitives",
     "crates/stages",
     "crates/tracing",
+    "crates/tasks",
     "crates/transaction-pool",
     "crates/db",
     "crates/libmdbx-rs",
