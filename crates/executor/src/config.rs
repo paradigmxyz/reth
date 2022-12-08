@@ -2,6 +2,13 @@
 
 use reth_primitives::{BlockNumber, U256};
 
+/// Two ethereum worth of wei
+pub const WEI_2ETH: u128 = 2000000000000000000u128;
+/// Three ethereum worth of wei
+pub const WEI_3ETH: u128 = 3000000000000000000u128;
+/// Five ethereum worth of wei
+pub const WEI_5ETH: u128 = 5000000000000000000u128;
+
 /// Configuration for executor
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -71,48 +78,48 @@ impl SpecUpgrades {
     }
 
     /// New homestead enabled spec
-    pub fn new_test_homestead() -> Self {
+    pub fn new_homestead_activated() -> Self {
         Self { homestead: 0, ..Self::new_ethereum() }
     }
 
     /// New tangerine enabled spec
-    pub fn new_test_tangerine_whistle() -> Self {
-        Self { tangerine_whistle: 0, ..Self::new_test_homestead() }
+    pub fn new_tangerine_whistle_activated() -> Self {
+        Self { tangerine_whistle: 0, ..Self::new_homestead_activated() }
     }
 
     /// New spurious_dragon enabled spec
-    pub fn new_test_spurious_dragon() -> Self {
-        Self { spurious_dragon: 0, ..Self::new_test_tangerine_whistle() }
+    pub fn new_spurious_dragon_activated() -> Self {
+        Self { spurious_dragon: 0, ..Self::new_tangerine_whistle_activated() }
     }
 
     /// New byzantium enabled spec
-    pub fn new_test_byzantium() -> Self {
-        Self { byzantium: 0, ..Self::new_test_spurious_dragon() }
+    pub fn new_byzantium_activated() -> Self {
+        Self { byzantium: 0, ..Self::new_spurious_dragon_activated() }
     }
 
     /// New petersburg enabled spec
-    pub fn new_test_petersburg() -> Self {
-        Self { petersburg: 0, ..Self::new_test_byzantium() }
+    pub fn new_petersburg_activated() -> Self {
+        Self { petersburg: 0, ..Self::new_byzantium_activated() }
     }
 
     /// New istanbul enabled spec
-    pub fn new_test_istanbul() -> Self {
-        Self { istanbul: 0, ..Self::new_test_petersburg() }
+    pub fn new_istanbul_activated() -> Self {
+        Self { istanbul: 0, ..Self::new_petersburg_activated() }
     }
 
     /// New berlin enabled spec
-    pub fn new_test_berlin() -> Self {
-        Self { berlin: 0, ..Self::new_test_istanbul() }
+    pub fn new_berlin_activated() -> Self {
+        Self { berlin: 0, ..Self::new_istanbul_activated() }
     }
 
     /// New london enabled spec
-    pub fn new_test_london() -> Self {
-        Self { london: 0, ..Self::new_test_berlin() }
+    pub fn new_london_activated() -> Self {
+        Self { london: 0, ..Self::new_berlin_activated() }
     }
 
     /// New paris enabled spec
-    pub fn new_test_paris() -> Self {
-        Self { paris: 0, ..Self::new_test_london() }
+    pub fn new_paris_activated() -> Self {
+        Self { paris: 0, ..Self::new_london_activated() }
     }
 
     /// return revm_spec from spec configuration.

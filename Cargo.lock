@@ -3214,6 +3214,7 @@ dependencies = [
  "hashbrown 0.13.1",
  "plain_hasher",
  "reth-consensus",
+ "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-rlp",

@@ -31,3 +31,7 @@ hash-db = "0.15"
 rlp = { version = "0.5", default-features = false }
 # replace with tiny-keccak (it is faster hasher)
 sha3 = { version = "0.10", default-features = false }
+
+
+[dev-dependencies]
+reth-db = { path = "../db", features = ["test-utils"]}
