@@ -46,12 +46,7 @@ pub struct StateFetcher {
 
 impl StateFetcher {
     /// Invoked when connected to a new peer.
-    pub(crate) fn new_connected_peer(
-        &mut self,
-        peer_id: PeerId,
-        best_hash: H256,
-        best_number: u64,
-    ) {
+    pub(crate) fn new_active_peer(&mut self, peer_id: PeerId, best_hash: H256, best_number: u64) {
         self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
     }
 
