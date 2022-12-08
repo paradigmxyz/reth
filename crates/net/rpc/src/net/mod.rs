@@ -26,10 +26,10 @@ impl NetApiServer for NetApi {
     }
 
     fn peer_count(&self) -> Result<PeerCount> {
-        Ok(PeerCount::Number(self.network.num_connected_peers() as u32))
+        Ok(PeerCount::Hex(self.network.num_connected_peers().into()))
     }
 
     fn is_listening(&self) -> Result<bool> {
-        todo!()
+        Ok(true)
     }
 }
