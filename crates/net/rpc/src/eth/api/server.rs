@@ -1,7 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
-//! implementation for handling RPC requests for he `eth_` namespace.
+//! Handles RPC requests for he `eth_` namespace.
 
-use crate::{eth::EthApi, result::ToRpcResult};
+use crate::{eth::api::EthApi, result::ToRpcResult};
 use jsonrpsee::core::RpcResult as Result;
 use reth_interfaces::provider::{BlockProvider, StateProviderFactory};
 use reth_primitives::{
