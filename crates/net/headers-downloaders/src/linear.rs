@@ -35,8 +35,6 @@ pub struct LinearDownloader<C, H> {
     client: Arc<H>,
     /// The batch size per one request
     pub batch_size: u64,
-    /// A single request timeout
-    pub request_timeout: Duration,
     /// The number of retries for downloading
     pub request_retries: usize,
 }
@@ -48,11 +46,6 @@ where
 {
     type Consensus = C;
     type Client = H;
-
-    /// The request timeout
-    fn timeout(&self) -> Duration {
-        self.request_timeout
-    }
 
     fn consensus(&self) -> &Self::Consensus {
         self.consensus.borrow()
@@ -77,7 +70,6 @@ impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
             consensus: Arc::clone(&self.consensus),
             client: Arc::clone(&self.client),
             batch_size: self.batch_size,
-            request_timeout: self.request_timeout,
             request_retries: self.request_retries,
         }
     }
@@ -422,7 +414,6 @@ impl LinearDownloadBuilder {
             consensus,
             client,
             batch_size: self.batch_size,
-            request_timeout: self.request_timeout,
             request_retries: self.request_retries,
         }
     }
