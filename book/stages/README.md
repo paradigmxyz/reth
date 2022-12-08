@@ -61,7 +61,7 @@ pub struct SealedHeader {
 }
 ```
 
-Each `SealedHeader` is then validated to ensure that it has the proper parent, where each header is then written to the database proceeding validation. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the db changes are unwound and the stage is resumed from the most recent valid state.
+Each `SealedHeader` is then validated to ensure that it has the proper parent. Following successful header validation each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the db changes are unwound and the stage is resumed from the most recent valid state.
 
 This process continues until all of the headers have been downloaded and and written to the database. Finally, the total difficulty of the chain's head is updated and the function returns `Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })`, signaling that the header sync has completed successfuly. 
 
