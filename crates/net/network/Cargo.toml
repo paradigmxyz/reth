@@ -53,5 +53,6 @@ reth-tracing = { path = "../../tracing" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 enr = { git = "https://github.com/sigp/enr", features = ["serde", "rust-secp256k1"] }
+hex = "0.4"
 
 

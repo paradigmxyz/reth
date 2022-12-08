@@ -109,15 +109,22 @@ async fn test_connect_with_single_geth() {
 
     println!("geth endpoint: {}", geth_endpoint);
     let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
-    let peer_id: PeerId =
+
+    // get the peer id we should be expecting
+    let geth_peer_id: PeerId =
         provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
-    handle.add_peer(peer_id, geth_socket);
+    // this is a bit long - is there a better way to get the peerid
+
+    // force geth to dial us, making geth an inbound peer
+    let our_peer_id = handle.peer_id();
+    let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), geth_socket);
+    provider.add_peer(our_enode).await.unwrap();
 
     // check for a sessionestablished event as the first event
     if let Some(ev) = events.next().await {
         if let NetworkEvent::SessionEstablished { peer_id: incoming_peer_id, .. } = ev {
-            assert_eq!(incoming_peer_id, peer_id);
+            assert_eq!(incoming_peer_id, geth_peer_id);
         } else {
             panic!(
                 "unexpected disconnect event, could not establish a session with geth: {:?}",
