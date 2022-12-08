@@ -24,7 +24,6 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
-    time::Duration,
 };
 use tokio::sync::{watch, Mutex};
 
@@ -58,10 +57,6 @@ impl TestHeaderDownloader {
 impl HeaderDownloader for TestHeaderDownloader {
     type Consensus = TestConsensus;
     type Client = TestHeadersClient;
-
-    fn timeout(&self) -> Duration {
-        Duration::from_millis(1000)
-    }
 
     fn consensus(&self) -> &Self::Consensus {
         &self.consensus
