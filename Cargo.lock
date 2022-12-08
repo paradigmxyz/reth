@@ -3423,6 +3423,7 @@ dependencies = [
  "hex",
  "jsonrpsee",
  "reth-interfaces",
+ "reth-network",
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-types",
