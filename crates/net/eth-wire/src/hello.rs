@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
 use crate::{capability::Capability, ProtocolVersion};
 use reth_primitives::PeerId;
 use reth_rlp::{RlpDecodable, RlpEncodable};
+use serde::{Deserialize, Serialize};
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol

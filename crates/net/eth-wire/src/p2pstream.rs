@@ -8,8 +8,8 @@ use crate::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use serde::{Deserialize, Serialize};
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_STRING_CODE};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
     io,
