@@ -414,7 +414,7 @@ mod tests {
 
     use crate::{config::SpecUpgrades, revm_wrap::State};
     use reth_db::{
-        kv::{test_utils, Env, EnvKind},
+        mdbx::{test_utils, Env, EnvKind},
         mdbx::WriteMap,
     };
     use reth_interfaces::{

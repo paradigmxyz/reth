@@ -11,7 +11,6 @@ description = "Staged syncing primitives used in reth."
 # reth libs
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
-reth-db = { path = "../db" }
 reth-executor = { path = "../executor" }
 reth-rlp = { path = "../common/rlp" }
 
@@ -29,7 +28,7 @@ itertools = "0.10.5"
 rayon = "1.6.0"
 
 [dev-dependencies]
-reth-db = { path = "../db", features = ["test-utils"] }
+reth-db = { path = "../storage/db", features = ["test-utils","mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-bodies-downloaders = { path = "../net/bodies-downloaders" }
 # TODO(onbjerg): We only need this for [BlockBody]

@@ -9,9 +9,9 @@ description = "Staged syncing primitives used in reth."
 
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
-reth-interfaces = { path = "../interfaces" }
-reth-libmdbx = { path = "../libmdbx-rs" }
+reth-primitives = { path = "../../primitives" }
+reth-interfaces = { path = "../../interfaces" }
+reth-libmdbx = { path = "../libmdbx-rs", optional = true }
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
@@ -32,12 +32,14 @@ criterion = "0.4.0"
 iai = "0.1.1"
 tokio = { version = "1.21.2", features = ["full"] }
 
-reth-interfaces = { path = "../interfaces",features=["bench"] }
+reth-interfaces = { path = "../../interfaces",features=["bench"] }
 async-trait = "0.1.58"
 
 [features]
+default = ["mdbx"]
 test-utils = ["tempfile"]
 bench-postcard = ["bench"]
+mdbx = ["reth-libmdbx"]
 bench = []
 
 [[bench]]

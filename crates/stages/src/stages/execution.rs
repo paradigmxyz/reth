@@ -424,7 +424,7 @@ mod tests {
 
     use super::*;
     use reth_db::{
-        kv::{test_utils::create_test_db, EnvKind},
+        mdbx::{test_utils::create_test_db, EnvKind},
         mdbx::WriteMap,
     };
     use reth_interfaces::provider::insert_canonical_block;

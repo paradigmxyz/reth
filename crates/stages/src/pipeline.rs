@@ -366,7 +366,7 @@ mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
     use reth_db::{
-        kv::{test_utils, Env, EnvKind},
+        mdbx::{test_utils, Env, EnvKind},
         mdbx::{self, WriteMap},
     };
     use reth_interfaces::consensus;

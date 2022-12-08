@@ -1,6 +1,7 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use crate::{kv::cursor::Cursor, utils::decode_one};
+use super::cursor::Cursor;
+use crate::utils::decode_one;
 use reth_interfaces::db::{
     Compress, DbTx, DbTxGAT, DbTxMut, DbTxMutGAT, DupSort, Encode, Error, Table,
 };

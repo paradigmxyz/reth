@@ -4,7 +4,7 @@ This crate allows to easily configure different codecs for different purposes (b
 
 Examples:
 
-- [`Header` struct](../primitives/src/header.rs)
+- [`Header` struct](../../primitives/src/header.rs)
 - [DB usage](../db/src/kv/codecs/scale.rs)
 
 ### Features

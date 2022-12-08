@@ -1,5 +1,5 @@
 use reth_db::{
-    kv::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
+    mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
     mdbx::{WriteMap, RW},
 };
 use reth_interfaces::db::{
