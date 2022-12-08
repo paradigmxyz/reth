@@ -13,6 +13,6 @@
 
 mod eth;
 
-pub use eth::EthApi;
+pub use eth::{EthApi, EthPubSub};
 
 pub(crate) mod result;
