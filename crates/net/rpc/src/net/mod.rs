@@ -15,7 +15,7 @@ pub struct NetApi {
 
 impl std::fmt::Debug for NetApi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NetApi").finish_non_exhaustive()
+        f.debug_struct("NetApi").field("network_id", &self.network_id).finish_non_exhaustive()
     }
 }
 
