@@ -86,6 +86,7 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn test_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -99,12 +100,17 @@ async fn test_connect_with_single_geth() {
     tokio::task::spawn(network);
 
     // instantiate geth and add ourselves as a peer
-    let geth = Geth::new().disable_discovery().spawn();
+    let geth = Geth::new().disable_discovery();
+
+    // TODO: remove, blocked on ethers-rs#1933
+    let geth = geth.p2p_port(30305).spawn();
+
     let geth_p2p_port = geth.p2p_port().unwrap();
-    let geth_socket = SocketAddr::from(([127, 0, 0, 1], geth_p2p_port));
-    let geth_endpoint = geth_socket.to_string();
+    let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
+    let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
+
     println!("geth endpoint: {}", geth_endpoint);
-    let provider = Provider::<Http>::try_from(format!("http://localhost:{}", geth_p2p_port)).unwrap();
+    let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
     let peer_id: PeerId = provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
     handle.add_peer(peer_id, geth_socket);

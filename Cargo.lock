@@ -1274,7 +1274,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#c4e09f261eca7a9e210d70cf11865e452b613cd7"
+source = "git+https://github.com/gakonst/ethers-rs#92e726921a4bd5d6555178d174b600bbd8d49049"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1299,7 +1299,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#c4e09f261eca7a9e210d70cf11865e452b613cd7"
+source = "git+https://github.com/gakonst/ethers-rs#92e726921a4bd5d6555178d174b600bbd8d49049"
 dependencies = [
  "async-trait",
  "auto_impl",
