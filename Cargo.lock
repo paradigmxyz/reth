@@ -3481,6 +3481,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-tasks"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "tokio",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
 name = "reth-tracing"
 version = "0.1.0"
 dependencies = [
