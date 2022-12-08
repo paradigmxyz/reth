@@ -366,3 +366,26 @@ pub(crate) enum BlockResponseOutcome {
     /// How to handle a bad response and the reputation change to apply.
     BadResponse(PeerId, ReputationChangeKind),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::poll_fn;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_poll_fetcher() {
+        let mut fetcher = StateFetcher::default();
+
+        poll_fn(move |cx| {
+            assert!(fetcher.poll(cx).is_pending());
+            let (tx, _rx) = oneshot::channel();
+            fetcher
+                .queued_requests
+                .push_back(DownloadRequest::GetBlockBodies { request: vec![], response: tx });
+            assert!(fetcher.poll(cx).is_pending());
+
+            Poll::Ready(())
+        })
+        .await;
+    }
+}
