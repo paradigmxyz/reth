@@ -42,6 +42,11 @@ pub struct SpecUpgrades {
 }
 
 impl SpecUpgrades {
+    /// After merge/peric block reward was removed from execution layer.
+    pub fn has_block_reward(&self, block_num: BlockNumber) -> bool {
+        block_num <= self.paris
+    }
+
     /// Ethereum mainnet spec
     pub fn new_ethereum() -> Self {
         Self {
@@ -63,6 +68,51 @@ impl SpecUpgrades {
             paris: 15537394, // TheMerge,
             shanghai: u64::MAX,
         }
+    }
+
+    /// New homestead enabled spec
+    pub fn new_test_homestead() -> Self {
+        Self { homestead: 0, ..Self::new_ethereum() }
+    }
+
+    /// New tangerine enabled spec
+    pub fn new_test_tangerine_whistle() -> Self {
+        Self { tangerine_whistle: 0, ..Self::new_test_homestead() }
+    }
+
+    /// New spurious_dragon enabled spec
+    pub fn new_test_spurious_dragon() -> Self {
+        Self { spurious_dragon: 0, ..Self::new_test_tangerine_whistle() }
+    }
+
+    /// New byzantium enabled spec
+    pub fn new_test_byzantium() -> Self {
+        Self { byzantium: 0, ..Self::new_test_spurious_dragon() }
+    }
+
+    /// New petersburg enabled spec
+    pub fn new_test_petersburg() -> Self {
+        Self { petersburg: 0, ..Self::new_test_byzantium() }
+    }
+
+    /// New istanbul enabled spec
+    pub fn new_test_istanbul() -> Self {
+        Self { istanbul: 0, ..Self::new_test_petersburg() }
+    }
+
+    /// New berlin enabled spec
+    pub fn new_test_berlin() -> Self {
+        Self { berlin: 0, ..Self::new_test_istanbul() }
+    }
+
+    /// New london enabled spec
+    pub fn new_test_london() -> Self {
+        Self { london: 0, ..Self::new_test_berlin() }
+    }
+
+    /// New paris enabled spec
+    pub fn new_test_paris() -> Self {
+        Self { paris: 0, ..Self::new_test_london() }
     }
 
     /// return revm_spec from spec configuration.

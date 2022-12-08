@@ -2,7 +2,7 @@
 
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockLocked, SealedHeader, H256};
+use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, H256};
 use tokio::sync::watch;
 
 /// Ethereum consensus
@@ -46,5 +46,9 @@ impl Consensus for EthConsensus {
 
     fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error> {
         verification::validate_block_standalone(block)
+    }
+
+    fn has_block_reward(&self, block_num: BlockNumber) -> bool {
+        block_num <= self.config.paris_hard_fork_block
     }
 }
