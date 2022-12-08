@@ -50,8 +50,7 @@ pub const TABLES: [(TableType, &str); 20] = [
 #[macro_export]
 /// Macro to declare all necessary tables.
 macro_rules! table {
-    (
-    $(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty | $seek:ty) => {
+    ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
         $(#[$docs])+
         ///
         #[doc = concat!("Takes [`", stringify!($key), "`] as a key and returns [`", stringify!($value), "`]")]
@@ -75,12 +74,6 @@ macro_rules! table {
                 write!(f, "{}", stringify!($table_name)) }
         }
     };
-    ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
-        table!(
-            $(#[$docs])+
-            ( $table_name ) $key | $value | $key
-        );
-    };
 }
 
 macro_rules! dupsort {
@@ -89,7 +82,7 @@ macro_rules! dupsort {
             $(#[$docs])+
             ///
             #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
-            ( $table_name ) $key | $value | $subkey
+            ( $table_name ) $key | $value
         );
         impl DupSort for $table_name {
             type SubKey = $subkey;
