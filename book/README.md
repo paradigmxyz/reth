@@ -7,7 +7,7 @@
 
 > 📖 **Contributing**
 >
-> You can contribute to this book on [GitHub]().
+> You can contribute to this book on [GitHub][gh-book].
 
 ### Sections
 
@@ -17,3 +17,5 @@ To get started with Reth, install, configure and sync your node.
 **[A Tour Of Reth]()**
 
 This section will take a deep dive into the inner workings of Reth. 
+
+[gh-book]: https://github.com/paradigmxyz/reth/tree/main/book
