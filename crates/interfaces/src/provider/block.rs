@@ -65,7 +65,7 @@ pub trait BlockProvider: Send + Sync {
             BlockId::Hash(hash) => Ok(Some(hash)),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumber::Latest) {
-                    return Ok(Some(self.chain_info()?.best_hash));
+                    return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
                     .map(|num| self.block_hash(num.into()))

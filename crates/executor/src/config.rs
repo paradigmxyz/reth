@@ -3,11 +3,11 @@
 use reth_primitives::{BlockNumber, U256};
 
 /// Two ethereum worth of wei
-pub const WEI_2ETH : u128 = 2000000000000000000u128;
+pub const WEI_2ETH: u128 = 2000000000000000000u128;
 /// Three ethereum worth of wei
-pub const WEI_3ETH : u128 = 3000000000000000000u128;
+pub const WEI_3ETH: u128 = 3000000000000000000u128;
 /// Five ethereum worth of wei
-pub const WEI_5ETH : u128 = 5000000000000000000u128;
+pub const WEI_5ETH: u128 = 5000000000000000000u128;
 
 /// Configuration for executor
 #[derive(Debug, Clone)]
