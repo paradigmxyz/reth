@@ -21,7 +21,7 @@ pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     pub address: Address,
     /// Account state before the transaction.
-    pub info: Account,
+    pub info: Option<Account>,
 }
 
 /// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]

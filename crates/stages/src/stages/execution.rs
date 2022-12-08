@@ -4,13 +4,13 @@ use crate::{
 };
 use reth_executor::{
     config::SpecUpgrades,
-    executor::{AccountChangeSet, AccountInfoChangeSet},
+    executor::AccountChangeSet,
     revm_wrap::{State, SubState},
     Config,
 };
 use reth_interfaces::{
     db::{
-        models::{AccountBeforeTx, BlockNumHash, TxNumberAddress},
+        models::{BlockNumHash, TxNumberAddress},
         tables, Database, DbCursorRO, DbCursorRW, DbDupCursorRO, DbTx, DbTxMut,
     },
     provider::db::StateProviderImplRefLatest,
@@ -48,7 +48,15 @@ const EXECUTION: StageId = StageId("Execution");
 /// [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
-pub struct ExecutionStage;
+pub struct ExecutionStage {
+    config: Config,
+}
+
+impl Default for ExecutionStage {
+    fn default() -> Self {
+        Self { config: Config { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() } }
+    }
+}
 
 /// Specify batch sizes of block in execution
 /// TODO make this as config
@@ -115,7 +123,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             .collect::<Result<Vec<_>, _>>()?;
 
         // get last tx count so that we can know amount of transaction in the block.
-        let mut last_tx_count = if last_block == 0 {
+        let mut last_tx_index = if last_block == 0 {
             0u64
         } else {
             // headers_batch is not empty,
@@ -130,7 +138,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             tx_cnt
         };
 
-        let cumulative_tx_count_batch = canonical_batch
+        let tx_index_ranges = canonical_batch
             .iter()
             .map(|ch_index| {
                 // TODO see if walker next has better performance then seek_exact calls.
@@ -147,8 +155,16 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         })
                     })
                     .map(|(_, cumulative_tx_count)| {
-                        let ret = (last_tx_count, cumulative_tx_count);
-                        last_tx_count = cumulative_tx_count;
+                        let ret = if self.config.spec_upgrades.has_block_reward(ch_index.number()) {
+                            // if there is block reward, cumulative tx count needs to remove block
+                            // reward index. It is okay ty subtract it, as
+                            // block reward index is calculated in the block stage.
+                            (last_tx_index, cumulative_tx_count - 1, Some(cumulative_tx_count - 1))
+                        } else {
+                            // if there is no block reward we just need to use tx_count
+                            (last_tx_index, cumulative_tx_count, None)
+                        };
+                        last_tx_index = cumulative_tx_count;
                         ret
                     })
             })
@@ -156,15 +172,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body_range) in headers_batch.iter().zip(cumulative_tx_count_batch.iter()) {
-            let start_tx_index = body_range.0;
-            let end_tx_index = body_range.1;
+        for (header, (start_tx_index, end_tx_index, block_reward_index)) in
+            headers_batch.iter().zip(tx_index_ranges.iter())
+        {
             let body_tx_cnt = end_tx_index - start_tx_index;
             // iterate over all transactions
-            let mut tx_walker = tx.walk(start_tx_index)?;
+            let mut tx_walker = tx.walk(*start_tx_index)?;
             let mut transactions = Vec::with_capacity(body_tx_cnt as usize);
             // get next N transactions.
-            for index in start_tx_index..end_tx_index {
+            for index in *start_tx_index..*end_tx_index {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
@@ -174,9 +190,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
 
             // take signers
-            let mut tx_sender_walker = tx_sender.walk(start_tx_index)?;
+            let mut tx_sender_walker = tx_sender.walk(*start_tx_index)?;
             let mut signers = Vec::with_capacity(body_tx_cnt as usize);
-            for index in start_tx_index..end_tx_index {
+            for index in *start_tx_index..*end_tx_index {
                 let (tx_index, tx) = tx_sender_walker
                     .next()
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
@@ -197,7 +213,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 .collect();
 
             // for now use default eth config
-            let config = Config { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() };
 
             let mut state_provider =
                 SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
@@ -207,48 +222,26 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 reth_executor::executor::execute_and_verify_receipt(
                     header,
                     &recovered_transactions,
-                    &config,
+                    &self.config,
                     &mut state_provider,
                 )
                 .map_err(|error| StageError::ExecutionError { block: header.number, error })?,
                 start_tx_index,
+                block_reward_index,
             ));
         }
 
         // apply changes to plain database.
-        for (results, start_tx_index) in block_change_patches.into_iter() {
-            for (index, result) in results.into_iter().enumerate() {
+        for (results, start_tx_index, block_reward_index) in block_change_patches.into_iter() {
+            // insert state change set
+            for (index, result) in results.changeset.into_iter().enumerate() {
                 let tx_index = start_tx_index + index as u64;
-                // insert account change set
                 for (address, AccountChangeSet { account, wipe_storage, storage }) in
                     result.state_diff.into_iter()
                 {
-                    match account {
-                        AccountInfoChangeSet::Changed { old, new } => {
-                            // insert old account in AccountChangeSet
-                            // check for old != new was already done
-                            db_tx.put::<tables::AccountChangeSet>(
-                                tx_index,
-                                AccountBeforeTx { address, info: old },
-                            )?;
-                            db_tx.put::<tables::PlainAccountState>(address, new)?;
-                        }
-                        AccountInfoChangeSet::Created { new } => {
-                            // TODO put None accounts inside changeset when `AccountBeforeTx` get
-                            // fixed
-                            db_tx.put::<tables::PlainAccountState>(address, new)?;
-                        }
-                        AccountInfoChangeSet::Destroyed { old } => {
-                            db_tx.delete::<tables::PlainAccountState>(address, None)?;
-                            db_tx.put::<tables::AccountChangeSet>(
-                                tx_index,
-                                AccountBeforeTx { address, info: old },
-                            )?;
-                        }
-                        AccountInfoChangeSet::NoChange => {
-                            // do nothing storage account didn't change
-                        }
-                    }
+                    // apply account change to db. Updates AccountChangeSet and PlainAccountState
+                    // tables.
+                    account.apply_to_db(address, tx_index, db_tx)?;
 
                     // wipe storage
                     if wipe_storage {
@@ -291,6 +284,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
                     // NOTE: bytecode bytes are not inserted in change set and it stand in saparate
                     // table
+                }
+            }
+
+            // If there is block reward we will add account changeset to db
+            if let Some(block_reward_changeset) = results.block_reward {
+                // we are sure that block reward index is present.
+                let block_reward_index = block_reward_index.unwrap();
+                for (address, changeset) in block_reward_changeset.into_iter() {
+                    changeset.apply_to_db(address, block_reward_index, db_tx)?;
                 }
             }
         }
@@ -362,22 +364,24 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Check if walk and walk_dup would do the same thing
         let account_changeset_batch = account_changeset
             .walk_dup(to_tx_number, Address::zero())?
-            .take(num_of_tx)
+            .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= from_tx_number))
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            db_tx.put::<tables::PlainAccountState>(changeset.address, changeset.info)?;
-            // TODO remove account if none when `AccountBeforeTx` get fixed
-            // if account.is_none() {
-            // delete account from plain state. Storage will be cleaned it is own way.
-            //}
+            if let Some(account_info) = changeset.info {
+                db_tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+            } else {
+                db_tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+            }
         }
 
-        // get all batches for account change
+        // get all batches for storage change
         let storage_chageset_batch = storage_changeset
             .walk_dup(TxNumberAddress((to_tx_number, Address::zero())), H256::zero())?
-            .take(num_of_tx)
+            .take_while(|item| {
+                item.as_ref().map_or(false, |(TxNumberAddress((num, _)), _)| *num <= from_tx_number)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
@@ -440,8 +444,8 @@ mod tests {
         let genesis = BlockLocked::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = BlockLocked::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(db.deref_mut(), &genesis).unwrap();
-        insert_canonical_block(db.deref_mut(), &block).unwrap();
+        insert_canonical_block(db.deref_mut(), &genesis, true).unwrap();
+        insert_canonical_block(db.deref_mut(), &block, true).unwrap();
         db.commit().unwrap();
 
         // insert pre state
@@ -465,7 +469,9 @@ mod tests {
         db.commit().unwrap();
 
         // execute
-        let output = ExecutionStage.execute(&mut db, input).await.unwrap();
+        let mut execution_stage = ExecutionStage::default();
+        execution_stage.config.spec_upgrades = SpecUpgrades::new_test_berlin();
+        let output = execution_stage.execute(&mut db, input).await.unwrap();
         db.commit().unwrap();
         assert_eq!(output, ExecOutput { stage_progress: 1, done: true, reached_tip: true });
         let tx = db.deref_mut();
@@ -474,12 +480,8 @@ mod tests {
         let account1_info =
             Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: Some(code_hash) };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        let account2_info = Account {
-            // TODO remove 2eth block reward
-            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(),
-            nonce: 0x00,
-            bytecode_hash: None,
-        };
+        let account2_info =
+            Account { balance: (0x1bc16d674ece94bau128).into(), nonce: 0x00, bytecode_hash: None };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let account3_info =
             Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
@@ -525,8 +527,8 @@ mod tests {
         let genesis = BlockLocked::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = BlockLocked::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(db.deref_mut(), &genesis).unwrap();
-        insert_canonical_block(db.deref_mut(), &block).unwrap();
+        insert_canonical_block(db.deref_mut(), &genesis, true).unwrap();
+        insert_canonical_block(db.deref_mut(), &block, true).unwrap();
         db.commit().unwrap();
 
         // variables
@@ -546,10 +548,13 @@ mod tests {
         db.commit().unwrap();
 
         // execute
-        let _ = ExecutionStage.execute(&mut db, input).await.unwrap();
+
+        let mut execution_stage = ExecutionStage::default();
+        execution_stage.config.spec_upgrades = SpecUpgrades::new_test_berlin();
+        let _ = execution_stage.execute(&mut db, input).await.unwrap();
         db.commit().unwrap();
 
-        let o = ExecutionStage
+        let o = ExecutionStage::default()
             .unwind(&mut db, UnwindInput { stage_progress: 1, unwind_to: 0, bad_block: None })
             .await
             .unwrap();
@@ -569,12 +574,11 @@ mod tests {
             "Post changed of a account"
         );
 
-        // TODO check this after Option is added to tables::
-        // let acc3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        // assert_eq!(
-        //     tx.get::<tables::PlainAccountState>(acc3),
-        //     Ok(Some(Account { balance: 0.into(), nonce: 0, bytecode_hash: Some(KECCAK_EMPTY) })),
-        //     "Post changed of a account"
-        // );
+        let miner_acc = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
+        assert_eq!(
+            tx.get::<tables::PlainAccountState>(miner_acc),
+            Ok(None),
+            "Third account should be unwinded"
+        );
     }
 }

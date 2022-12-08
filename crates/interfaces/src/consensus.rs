@@ -25,6 +25,13 @@ pub trait Consensus: Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error>;
+
+    /// After the Merge (aka Paris) block rewards became obsolete.
+    /// This flag is needed as reth change set is indexed of transaction granularity
+    /// (change set is indexed per transaction) we are introducing one additional index for block
+    /// reward This in essence would introduce gaps in [Transaction] table
+    /// More on it [here](https://github.com/foundry-rs/reth/issues/237)
+    fn has_block_reward(&self, block_num: BlockNumber) -> bool;
 }
 
 /// Consensus Errors
