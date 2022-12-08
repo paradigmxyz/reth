@@ -539,6 +539,12 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
+impl From<TransactionSignedEcRecovered> for TransactionSigned {
+    fn from(recovered: TransactionSignedEcRecovered) -> Self {
+        recovered.signed_transaction
+    }
+}
+
 impl Encodable for TransactionSigned {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, true);

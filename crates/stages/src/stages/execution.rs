@@ -157,7 +157,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .map(|(_, cumulative_tx_count)| {
                         let ret = if self.config.spec_upgrades.has_block_reward(ch_index.number()) {
                             // if there is block reward, cumulative tx count needs to remove block
-                            // reward index. It is okay ty subtract it, as
+                            // reward index. It is okay to subtract it, as
                             // block reward index is calculated in the block stage.
                             (last_tx_index, cumulative_tx_count - 1, Some(cumulative_tx_count - 1))
                         } else {
@@ -288,6 +288,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
 
             // If there is block reward we will add account changeset to db
+            // TODO add apply_block_reward_changeset to db tx fn which maybe takes an option.
             if let Some(block_reward_changeset) = results.block_reward {
                 // we are sure that block reward index is present.
                 let block_reward_index = block_reward_index.unwrap();
@@ -369,6 +370,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
+            // TODO refactor in db fn called tx.aplly_account_changeset
             if let Some(account_info) = changeset.info {
                 db_tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
             } else {
@@ -470,7 +472,7 @@ mod tests {
 
         // execute
         let mut execution_stage = ExecutionStage::default();
-        execution_stage.config.spec_upgrades = SpecUpgrades::new_test_berlin();
+        execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
         let output = execution_stage.execute(&mut db, input).await.unwrap();
         db.commit().unwrap();
         assert_eq!(output, ExecOutput { stage_progress: 1, done: true, reached_tip: true });
@@ -550,7 +552,7 @@ mod tests {
         // execute
 
         let mut execution_stage = ExecutionStage::default();
-        execution_stage.config.spec_upgrades = SpecUpgrades::new_test_berlin();
+        execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
         let _ = execution_stage.execute(&mut db, input).await.unwrap();
         db.commit().unwrap();
 

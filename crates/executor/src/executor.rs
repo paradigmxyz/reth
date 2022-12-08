@@ -1,4 +1,5 @@
 use crate::{
+    config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
     revm_wrap::{self, to_reth_acc, SubState},
     Config,
 };
@@ -108,7 +109,8 @@ pub struct AccountChangeSet {
 pub struct ExecutionResult {
     /// Transaction changeest contraining [Receipt], changed [Accounts][Account] and Storages.
     pub changeset: Vec<TransactionChangeSet>,
-    /// Block reward if present. It represent
+    /// Block reward if present. It represent changeset for block reward slot in
+    /// [tables::AccountChangeSet] .
     pub block_reward: Option<BTreeMap<Address, AccountInfoChangeSet>>,
 }
 
@@ -368,17 +370,20 @@ pub fn execute<DB: StateProvider>(
         return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
     }
 
-    // it is okay to unwrap the db. It is set at the start of the function.
-    let beneficiary =
-        evm.db.unwrap().basic(header.beneficiary).map_err(|_| Error::ProviderError)?;
+    // it is okay to unwrap the db.
+    let beneficiary = evm
+        .db
+        .expect("It is set at the start of the function")
+        .basic(header.beneficiary)
+        .map_err(|_| Error::ProviderError)?;
 
     // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
     // to config.
     let block_reward = match header.number {
         n if n >= config.spec_upgrades.paris => None,
-        n if n >= config.spec_upgrades.petersburg => Some(0x1bc16d674ec80000u128),
-        n if n >= config.spec_upgrades.byzantium => Some(0x29a2241af62c0000u128),
-        _ => Some(0x4563918244f40000u128),
+        n if n >= config.spec_upgrades.petersburg => Some(WEI_2ETH),
+        n if n >= config.spec_upgrades.byzantium => Some(WEI_3ETH),
+        _ => Some(WEI_5ETH),
     }
     .map(|reward| {
         // add block reward to beneficiary/miner
@@ -405,10 +410,17 @@ pub fn execute<DB: StateProvider>(
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     use crate::{config::SpecUpgrades, revm_wrap::State};
-    use reth_interfaces::provider::{AccountProvider, StateProvider};
+    use reth_db::{
+        kv::{test_utils, Env, EnvKind},
+        mdbx::WriteMap,
+    };
+    use reth_interfaces::{
+        db::{Database, DbTx},
+        provider::{AccountProvider, StateProvider},
+    };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Address, BlockLocked, Bytes, StorageKey, H160, H256,
         U256,
@@ -499,7 +511,7 @@ mod tests {
 
         let mut config = Config::new_ethereum();
         // make it berlin fork
-        config.spec_upgrades = SpecUpgrades::new_test_berlin();
+        config.spec_upgrades = SpecUpgrades::new_berlin_activated();
 
         let mut db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
@@ -564,6 +576,44 @@ mod tests {
             storage.get(&1.into()),
             Some(&(0.into(), 2.into())),
             "Storage change from 0 to 2 on slot 1"
+        );
+    }
+
+    #[test]
+    fn apply_account_info_changeset() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let address = H160::zero();
+        let tx_num = 0;
+        let acc1 = Account { balance: 1.into(), nonce: 2, bytecode_hash: Some(H256::zero()) };
+        let acc2 = Account { balance: 3.into(), nonce: 4, bytecode_hash: Some(H256::zero()) };
+
+        let tx = db.tx_mut().unwrap();
+
+        // check Changed changeset
+        AccountInfoChangeSet::Changed { new: acc1, old: acc2 }
+            .apply_to_db(address, tx_num, &tx)
+            .unwrap();
+        assert_eq!(
+            tx.get::<tables::AccountChangeSet>(tx_num),
+            Ok(Some(AccountBeforeTx { address, info: Some(acc2) }))
+        );
+        assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
+
+        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(address, tx_num, &tx).unwrap();
+        assert_eq!(
+            tx.get::<tables::AccountChangeSet>(tx_num),
+            Ok(Some(AccountBeforeTx { address, info: None }))
+        );
+        assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
+
+        // delete old value, as it is dupsorted
+        tx.delete::<tables::AccountChangeSet>(tx_num, None).unwrap();
+
+        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(address, tx_num, &tx).unwrap();
+        assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(None));
+        assert_eq!(
+            tx.get::<tables::AccountChangeSet>(tx_num),
+            Ok(Some(AccountBeforeTx { address, info: Some(acc2) }))
         );
     }
 }
