@@ -41,12 +41,13 @@ criterion = "0.4.0"
 iai = "0.1.1"
 tokio = { version = "1.21.2", features = ["full"] }
 arbitrary = { version = "1.1.7", features = ["derive"]}
+reth-db = { path = ".", features = ["test-utils","bench"]}
 
 reth-interfaces = { path = "../../interfaces",features=["bench"] }
 async-trait = "0.1.58"
 
 [features]
-default = ["mdbx","bench"]
+default = ["mdbx"]
 test-utils = ["tempfile"]
 bench-postcard = ["bench"]
 mdbx = ["reth-libmdbx"]

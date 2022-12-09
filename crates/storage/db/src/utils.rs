@@ -1,12 +1,5 @@
 //! Utils crate for `db`.
 
-use crate::{
-    table::{Decode, Decompress, Table},
-    Error,
-};
-use bytes::Bytes;
-use std::borrow::Cow;
-
 /// Returns the default page size that can be used in this OS.
 pub(crate) fn default_page_size() -> usize {
     let os_page_size = page_size::get();

@@ -2,7 +2,7 @@ use crate::{
     db::StageDB, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
     StageId, UnwindInput,
 };
-use reth_interfaces::db::{Database, DbTx};
+use reth_db::{database::Database, transaction::DbTx};
 use reth_primitives::BlockNumber;
 use std::{
     fmt::{Debug, Formatter},

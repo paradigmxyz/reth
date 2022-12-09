@@ -3,7 +3,6 @@
 use std::{borrow::Cow, marker::PhantomData};
 
 use crate::{
-    common::*,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,

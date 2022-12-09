@@ -3,7 +3,13 @@ use crate::{
 };
 use itertools::Itertools;
 use rayon::prelude::*;
-use reth_interfaces::db::{self, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut};
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    Error as DbError,
+};
 use reth_primitives::TxNumber;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -79,7 +85,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 
         // Iterate over transactions in chunks
         for chunk in &entries.chunks(self.batch_size) {
-            let transactions = chunk.collect::<Result<Vec<_>, db::Error>>()?;
+            let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
             // Recover signers for the chunk in parallel
             let recovered = transactions
                 .into_par_iter()
