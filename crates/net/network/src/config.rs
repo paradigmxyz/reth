@@ -5,6 +5,7 @@ use crate::{
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{Chain, ForkId, H256};
+use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -40,6 +41,8 @@ pub struct NetworkConfig<C> {
     pub block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
+    /// The executor to use for spawning tasks.
+    pub executor: Option<TaskExecutor>,
 }
 
 // === impl NetworkConfig ===
@@ -98,6 +101,8 @@ pub struct NetworkConfigBuilder<C> {
     block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     network_mode: NetworkMode,
+    /// The executor to use for spawning tasks.
+    executor: Option<TaskExecutor>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -119,7 +124,14 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash: Default::default(),
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
+            executor: None,
         }
+    }
+
+    /// Sets the executor to use for spawning tasks.
+    pub fn executor(mut self, executor: TaskExecutor) -> Self {
+        self.executor = Some(executor);
+        self
     }
 
     /// Sets a custom config for how sessions are handled.
@@ -180,6 +192,7 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash,
             block_import,
             network_mode,
+            executor,
         } = self;
         NetworkConfig {
             client,
@@ -199,6 +212,7 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash,
             block_import,
             network_mode,
+            executor,
         }
     }
 }
