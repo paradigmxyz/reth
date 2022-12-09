@@ -432,7 +432,7 @@ impl SessionManager {
                     }
                 }
             }
-            PendingSessionEvent::BlacklistConnectionError {
+            PendingSessionEvent::BlacklistConnection {
                 remote_addr,
                 session_id,
                 peer_id,
@@ -734,11 +734,19 @@ async fn authenticate_stream(
 
     if blacklisted_peer_ids.contains(&their_hello.id) || blacklisted_ip.contains(&remote_addr.ip())
     {
-        return PendingSessionEvent::BlacklistConnectionError {
-            remote_addr,
-            session_id,
-            peer_id: their_hello.id,
-            direction,
+        return match p2p_stream.disconnect(DisconnectReason::DisconnectRequested).await {
+            Ok(_) => PendingSessionEvent::BlacklistConnection {
+                remote_addr,
+                session_id,
+                peer_id: their_hello.id,
+                direction,
+            },
+            Err(err) => PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(err.into()),
+            },
         }
     }
     // if the hello handshake was successful we can try status handshake
@@ -754,7 +762,6 @@ async fn authenticate_stream(
             }
         }
     };
-
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
