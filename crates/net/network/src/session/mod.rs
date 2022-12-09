@@ -23,9 +23,9 @@ use reth_eth_wire::{
 use reth_primitives::{ForkFilter, Hardfork, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -93,6 +93,10 @@ pub(crate) struct SessionManager {
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
+    /// blacklisted peer ids
+    blacklisted_peers: Arc<HashSet<PeerId>>,
+    /// blacklisted ips
+    blacklisted_ips: Arc<HashSet<IpAddr>>,
 }
 
 // === impl SessionManager ===
@@ -128,6 +132,8 @@ impl SessionManager {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
+            blacklisted_ips: config.blacklisted_ips.into(),
+            blacklisted_peers: config.blacklisted_peer_ids.into(),
         }
     }
 
@@ -177,6 +183,8 @@ impl SessionManager {
             self.hello.clone(),
             self.status,
             self.fork_filter.clone(),
+            self.blacklisted_peers.clone(),
+            self.blacklisted_ips.clone(),
         ));
 
         let handle =
@@ -201,6 +209,8 @@ impl SessionManager {
             self.hello.clone(),
             self.status,
             self.fork_filter.clone(),
+            self.blacklisted_peers.clone(),
+            self.blacklisted_ips.clone(),
         ));
 
         let handle = PendingSessionHandle {
@@ -422,6 +432,17 @@ impl SessionManager {
                     }
                 }
             }
+            PendingSessionEvent::BlacklistConnectionError { remote_addr, session_id, peer_id } => {
+                trace!(
+                    target : "net::session",
+                    ?session_id,
+                    ?remote_addr,
+                    ?peer_id,
+                    "blacklisted attempted connection"
+                );
+
+                Poll::Ready(SessionEvent::Disconnected { peer_id, remote_addr })
+            }
         }
     }
 }
@@ -517,6 +538,8 @@ pub(crate) async fn start_pending_incoming_session(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
+    blacklisted_peer_ids: Arc<HashSet<PeerId>>,
+    blacklisted_ip: Arc<HashSet<IpAddr>>,
 ) {
     authenticate(
         disconnect_rx,
@@ -529,6 +552,8 @@ pub(crate) async fn start_pending_incoming_session(
         hello,
         status,
         fork_filter,
+        blacklisted_peer_ids,
+        blacklisted_ip,
     )
     .await
 }
@@ -546,6 +571,8 @@ async fn start_pending_outbound_session(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
+    blacklisted_peer_ids: Arc<HashSet<PeerId>>,
+    blacklisted_ip: Arc<HashSet<IpAddr>>,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => stream,
@@ -572,6 +599,8 @@ async fn start_pending_outbound_session(
         hello,
         status,
         fork_filter,
+        blacklisted_peer_ids,
+        blacklisted_ip,
     )
     .await
 }
@@ -589,6 +618,8 @@ async fn authenticate(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
+    blacklisted_peer_ids: Arc<HashSet<PeerId>>,
+    blacklisted_ip: Arc<HashSet<IpAddr>>,
 ) {
     let stream = match direction {
         Direction::Incoming => match ECIESStream::incoming(stream, secret_key).await {
@@ -632,6 +663,8 @@ async fn authenticate(
         hello,
         status,
         fork_filter,
+        blacklisted_peer_ids,
+        blacklisted_ip,
     )
     .boxed();
 
@@ -664,6 +697,8 @@ async fn authenticate_stream(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
+    blacklisted_peer_ids: Arc<HashSet<PeerId>>,
+    blacklisted_ip: Arc<HashSet<IpAddr>>,
 ) -> PendingSessionEvent {
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
@@ -678,6 +713,14 @@ async fn authenticate_stream(
         }
     };
 
+    if blacklisted_peer_ids.contains(&their_hello.id) || blacklisted_ip.contains(&remote_addr.ip())
+    {
+        return PendingSessionEvent::BlacklistConnectionError {
+            remote_addr,
+            session_id,
+            peer_id: their_hello.id,
+        }
+    }
     // if the hello handshake was successful we can try status handshake
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {

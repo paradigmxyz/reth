@@ -4,10 +4,11 @@ use crate::{
     session::SessionsConfig,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, ForkId, H256};
+use reth_primitives::{Chain, ForkId, PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 
@@ -98,6 +99,10 @@ pub struct NetworkConfigBuilder<C> {
     block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     network_mode: NetworkMode,
+    /// blacklisted ips
+    pub blacklisted_ips: HashSet<IpAddr>,
+    /// blacklisted encodes
+    pub blacklisted_peer_idss: HashSet<PeerId>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -119,7 +124,19 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash: Default::default(),
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
+            blacklisted_peer_idss: Default::default(),
+            blacklisted_ips: Default::default(),
         }
+    }
+
+    pub fn blacklisted_peer_idss(mut self, encodes: HashSet<PeerId>) -> Self {
+        self.blacklisted_peer_idss = encodes;
+        self
+    }
+
+    pub fn blacklisted_ips(mut self, ips: HashSet<IpAddr>) -> Self {
+        self.blacklisted_ips = ips;
+        self
     }
 
     /// Sets a custom config for how sessions are handled.
@@ -180,6 +197,7 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash,
             block_import,
             network_mode,
+            ..
         } = self;
         NetworkConfig {
             client,

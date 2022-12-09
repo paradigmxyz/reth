@@ -479,7 +479,7 @@ mod tests {
     };
     use reth_primitives::{ForkFilter, Hardfork};
     use secp256k1::{SecretKey, SECP256K1};
-    use std::time::Duration;
+    use std::{collections::HashSet, time::Duration};
     use tokio::net::TcpListener;
 
     /// Returns a testing `HelloMessage` and new secretkey
@@ -559,6 +559,8 @@ mod tests {
                 self.hello.clone(),
                 self.status,
                 self.fork_filter.clone(),
+                Arc::new(HashSet::default()),
+                Arc::new(HashSet::default()),
             ));
 
             let mut stream = ReceiverStream::new(pending_sessions_rx);
