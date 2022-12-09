@@ -7,6 +7,7 @@ on:
 env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
+  GETH_BUILD: 1.10.26-e5eb32ac
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -26,6 +27,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+
+      - name: Install geth
+        run: |
+            mkdir -p "$HOME/bin"
+            wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
+            tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+            mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
+            chmod u+x "$HOME/bin/geth"
+            export PATH=$HOME/bin:$PATH
+            geth version
 
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
@@ -59,7 +70,7 @@ jobs:
           args: cargo-test-fuzz afl
 
       - name: Run fuzz tests
-        run: | 
+        run: |
           ./.github/scripts/fuzz.sh reth-primitives
           ./.github/scripts/fuzz.sh reth-db
           ./.github/scripts/fuzz.sh reth-interfaces
