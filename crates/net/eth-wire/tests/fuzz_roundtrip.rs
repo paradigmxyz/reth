@@ -20,14 +20,14 @@ where
     assert_eq!(thing, decoded, "expected: {thing:?}, got: {decoded:?}");
 }
 
-/// Takes as input a type and testname, using the type as the type being fuzzed.
+/// Creates a fuzz test for a rlp encodable and decodable type.
 macro_rules! fuzz_type_and_name {
-    ( $x:ty, $testname:ident) => {
+    ( $x:ty, $fuzzname:ident) => {
         /// Fuzzes the round-trip encoding of the type.
         #[cfg(test)]
         #[allow(dead_code)]
         #[test_fuzz]
-        fn $testname(thing: $x) {
+        fn $fuzzname(thing: $x) {
             roundtrip_encoding::<$x>(thing)
         }
     };
