@@ -93,7 +93,9 @@ async fn test_incoming_connect_with_single_geth() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
     let reth_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
-    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).listener_addr(reth_socket).build();
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        .listener_addr(reth_socket)
+        .build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -136,7 +138,9 @@ async fn test_outgoing_connect_with_single_geth() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
     let reth_socket = SocketAddr::new([127, 0, 0, 1].into(), 30304);
-    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).listener_addr(reth_socket).build();
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        .listener_addr(reth_socket)
+        .build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
