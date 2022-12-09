@@ -1,5 +1,7 @@
 //! Connection tests
 
+use crate::NetworkEventStream;
+
 use super::testnet::Testnet;
 use enr::EnrPublicKey;
 use ethers_core::utils::Geth;
@@ -94,14 +96,13 @@ async fn test_connect_with_single_geth() {
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
-    let mut events = handle.event_listener();
     tokio::task::spawn(network);
 
     // instantiate geth and add ourselves as a peer
     let geth = Geth::new().disable_discovery();
 
-    // TODO: remove, blocked on ethers-rs#1933
-    let geth = geth.p2p_port(30305).spawn();
+    // TODO: remove, p2p_port blocked on ethers-rs#1933
+    let geth = geth.p2p_port(30305).disable_discovery().spawn();
 
     let geth_p2p_port = geth.p2p_port().unwrap();
     let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
@@ -121,15 +122,11 @@ async fn test_connect_with_single_geth() {
     let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), geth_socket);
     provider.add_peer(our_enode).await.unwrap();
 
-    // check for a sessionestablished event as the first event
-    if let Some(ev) = events.next().await {
-        if let NetworkEvent::SessionEstablished { peer_id: incoming_peer_id, .. } = ev {
-            assert_eq!(incoming_peer_id, geth_peer_id);
-        } else {
-            panic!(
-                "unexpected disconnect event, could not establish a session with geth: {:?}",
-                ev
-            );
-        }
-    }
+    // create networkeventstream to get the next session established event easily
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    // check for a sessionestablished event
+    let incoming_peer_id = event_stream.next_session_established().await.unwrap();
+    assert_eq!(incoming_peer_id, geth_peer_id);
 }
