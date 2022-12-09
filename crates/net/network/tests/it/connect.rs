@@ -88,7 +88,7 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_connect_with_single_geth() {
+async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -121,6 +121,46 @@ async fn test_connect_with_single_geth() {
     let our_peer_id = handle.peer_id();
     let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), geth_socket);
     provider.add_peer(our_enode).await.unwrap();
+
+    // create networkeventstream to get the next session established event easily
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    // check for a sessionestablished event
+    let incoming_peer_id = event_stream.next_session_established().await.unwrap();
+    assert_eq!(incoming_peer_id, geth_peer_id);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_outgoing_connect_with_single_geth() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).build();
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // instantiate geth and add ourselves as a peer
+    let geth = Geth::new().disable_discovery();
+
+    // TODO: remove, p2p_port blocked on ethers-rs#1933
+    let geth = geth.p2p_port(30305).disable_discovery().spawn();
+
+    let geth_p2p_port = geth.p2p_port().unwrap();
+    let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
+    let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
+
+    println!("geth endpoint: {}", geth_endpoint);
+    let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
+
+    // get the peer id we should be expecting
+    let geth_peer_id: PeerId =
+        provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+
+    // add geth as a peer then wait for a `SessionEstablished` event
+    handle.add_peer(geth_peer_id, geth_socket);
 
     // create networkeventstream to get the next session established event easily
     let events = handle.event_listener();
