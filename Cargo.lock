@@ -1274,7 +1274,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#92e726921a4bd5d6555178d174b600bbd8d49049"
+source = "git+https://github.com/gakonst/ethers-rs#ea10f4b4dff471c1611eef45ce035524a9a7b550"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1299,7 +1299,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#92e726921a4bd5d6555178d174b600bbd8d49049"
+source = "git+https://github.com/gakonst/ethers-rs#ea10f4b4dff471c1611eef45ce035524a9a7b550"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -3504,6 +3504,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
