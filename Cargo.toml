@@ -26,6 +26,7 @@ members = [
     "crates/storage/libmdbx-rs/mdbx-sys",
     "crates/storage/provider",
     "crates/tracing",
+    "crates/tasks",
     "crates/transaction-pool",
 ]
 default-members = ["bin/reth"]

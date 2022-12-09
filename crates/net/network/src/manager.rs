@@ -188,7 +188,7 @@ where
 
     /// How many peers we're currently connected to.
     pub fn num_connected_peers(&self) -> usize {
-        self.swarm.state().num_connected_peers()
+        self.swarm.state().num_active_peers()
     }
 
     /// Returns the [`PeerId`] used in the network.
