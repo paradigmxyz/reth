@@ -92,7 +92,8 @@ async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).build();
+    let reth_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).listener_addr(reth_socket).build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -100,10 +101,7 @@ async fn test_incoming_connect_with_single_geth() {
 
     // instantiate geth and add ourselves as a peer
     let temp_dir = tempfile::tempdir().unwrap().into_path();
-    let geth = Geth::new().data_dir(temp_dir).disable_discovery();
-
-    // TODO: remove, p2p_port blocked on ethers-rs#1933
-    let geth = geth.p2p_port(30304).disable_discovery().spawn();
+    let geth = Geth::new().data_dir(temp_dir).disable_discovery().spawn();
 
     let geth_p2p_port = geth.p2p_port().unwrap();
     let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
@@ -137,18 +135,16 @@ async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).build();
+    let reth_socket = SocketAddr::new([127, 0, 0, 1].into(), 30304);
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).listener_addr(reth_socket).build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
     tokio::task::spawn(network);
 
     // instantiate geth and add ourselves as a peer
-    let geth = Geth::new().disable_discovery();
-
-    // TODO: remove, p2p_port blocked on ethers-rs#1933
     let temp_dir = tempfile::tempdir().unwrap().into_path();
-    let geth = geth.p2p_port(30305).disable_discovery().data_dir(temp_dir).spawn();
+    let geth = Geth::new().disable_discovery().data_dir(temp_dir).spawn();
 
     let geth_p2p_port = geth.p2p_port().unwrap();
     let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
