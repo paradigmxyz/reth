@@ -180,7 +180,6 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash,
             block_import,
             network_mode,
-            ..
         } = self;
         NetworkConfig {
             client,
