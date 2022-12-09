@@ -1,7 +1,7 @@
 //! Round-trip encoding fuzzing for the `eth-wire` crate.
 use std::fmt::Debug;
 
-use reth_eth_wire::HelloMessage;
+use reth_eth_wire::{DisconnectReason, HelloMessage};
 use reth_rlp::{Decodable, Encodable};
 use serde::Serialize;
 use test_fuzz::test_fuzz;
@@ -10,7 +10,6 @@ use test_fuzz::test_fuzz;
 /// [`Decodable`](reth_rlp::Decodable).
 ///
 /// The test will create a random instance of the type, encode it, and then decode it.
-#[test_fuzz]
 fn roundtrip_encoding<T>(thing: T)
 where
     T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq,
@@ -21,8 +20,24 @@ where
     assert_eq!(thing, decoded, "expected: {thing:?}, got: {decoded:?}");
 }
 
-macro_rules! fuzz_type {
-    ( $x:ty ) => {};
+/// Takes as input a type and testname, using the type as the type being fuzzed.
+macro_rules! fuzz_type_and_name {
+    ( $x:ty, $testname:ident) => {
+        /// Fuzzes the round-trip encoding of the type.
+        #[cfg(test)]
+        #[allow(dead_code)]
+        #[test_fuzz]
+        fn $testname(thing: $x) {
+            roundtrip_encoding::<$x>(thing)
+        }
+    };
 }
 
-fuzz_type!(HelloMessage);
+#[allow(non_snake_case)]
+#[cfg(any(test, feature = "bench"))]
+pub mod fuzz_rlp {
+    use super::*;
+
+    fuzz_type_and_name!(HelloMessage, fuzz_HelloMessage);
+    fuzz_type_and_name!(DisconnectReason, fuzz_DisconnectReason);
+}
