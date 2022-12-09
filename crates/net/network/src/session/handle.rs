@@ -86,7 +86,12 @@ pub(crate) enum PendingSessionEvent {
     },
 
     /// a blacklisted address/ blacklisted peer id tryed to connect
-    BlacklistConnectionError { remote_addr: SocketAddr, session_id: SessionId, peer_id: PeerId },
+    BlacklistConnectionError {
+        remote_addr: SocketAddr,
+        session_id: SessionId,
+        peer_id: PeerId,
+        direction: Direction,
+    },
     /// Thrown when unable to establish a [`TcpStream`].
     OutgoingConnectionError {
         remote_addr: SocketAddr,

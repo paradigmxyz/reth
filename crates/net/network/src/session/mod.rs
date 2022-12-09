@@ -432,7 +432,12 @@ impl SessionManager {
                     }
                 }
             }
-            PendingSessionEvent::BlacklistConnectionError { remote_addr, session_id, peer_id } => {
+            PendingSessionEvent::BlacklistConnectionError {
+                remote_addr,
+                session_id,
+                peer_id,
+                direction,
+            } => {
                 trace!(
                     target : "net::session",
                     ?session_id,
@@ -440,8 +445,22 @@ impl SessionManager {
                     ?peer_id,
                     "blacklisted attempted connection"
                 );
-
-                Poll::Ready(SessionEvent::Disconnected { peer_id, remote_addr })
+                self.remove_pending_session(&session_id);
+                match direction {
+                    Direction::Incoming => {
+                        Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                            remote_addr,
+                            error: None,
+                        })
+                    }
+                    Direction::Outgoing(peer_id) => {
+                        Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
+                            remote_addr,
+                            peer_id,
+                            error: None,
+                        })
+                    }
+                }
             }
         }
     }
@@ -719,6 +738,7 @@ async fn authenticate_stream(
             remote_addr,
             session_id,
             peer_id: their_hello.id,
+            direction,
         }
     }
     // if the hello handshake was successful we can try status handshake
