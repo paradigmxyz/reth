@@ -56,11 +56,15 @@ impl SessionsConfig {
         self
     }
 
+    /// any node that tries to connect from an ip that is blacklisted will be
+    /// automatically disconnected
     pub fn with_ip_blacklist(mut self, blacklist: HashSet<IpAddr>) -> Self {
         self.blacklisted_ips = blacklist;
         self
     }
 
+    /// any node that tries to connect from a peer id that is blacklisted will
+    /// automatically be disconnected
     pub fn with_peer_id_blacklist(mut self, blacklist: HashSet<PeerId>) -> Self {
         self.blacklisted_peer_ids = blacklist;
         self

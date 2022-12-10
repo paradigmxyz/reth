@@ -89,7 +89,7 @@ pub(crate) enum PendingSessionEvent {
     BlacklistConnection {
         remote_addr: SocketAddr,
         session_id: SessionId,
-        peer_id: PeerId,
+        peer_id: Option<PeerId>,
         direction: Direction,
     },
     /// Thrown when unable to establish a [`TcpStream`].

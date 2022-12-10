@@ -31,6 +31,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
+    io::AsyncWriteExt,
     net::TcpStream,
     sync::{mpsc, oneshot},
     task::JoinSet,
@@ -629,7 +630,7 @@ async fn start_pending_outbound_session(
 async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
-    stream: TcpStream,
+    mut stream: TcpStream,
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -640,6 +641,26 @@ async fn authenticate(
     blacklisted_peer_ids: Arc<HashSet<PeerId>>,
     blacklisted_ip: Arc<HashSet<IpAddr>>,
 ) {
+    // we know the ip so we can close the stream before auth
+    if blacklisted_ip.contains(&remote_addr.ip()) {
+        let msg = match stream.shutdown().await {
+            Ok(_) => PendingSessionEvent::BlacklistConnection {
+                remote_addr,
+                session_id,
+                peer_id: None,
+                direction,
+            },
+            Err(err) => PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(EthStreamError::Io(err)),
+            },
+        };
+        let _ = events.send(msg).await;
+        return
+    }
+
     let stream = match direction {
         Direction::Incoming => match ECIESStream::incoming(stream, secret_key).await {
             Ok(stream) => stream,
@@ -656,6 +677,24 @@ async fn authenticate(
             }
         },
         Direction::Outgoing(remote_peer_id) => {
+            if blacklisted_peer_ids.contains(&remote_peer_id) {
+                let msg = match stream.shutdown().await {
+                    Ok(_) => PendingSessionEvent::BlacklistConnection {
+                        remote_addr,
+                        session_id,
+                        peer_id: None,
+                        direction,
+                    },
+                    Err(err) => PendingSessionEvent::Disconnected {
+                        remote_addr,
+                        session_id,
+                        direction,
+                        error: Some(EthStreamError::Io(err)),
+                    },
+                };
+                let _ = events.send(msg).await;
+                return
+            }
             match ECIESStream::connect(stream, secret_key, remote_peer_id).await {
                 Ok(stream) => stream,
                 Err(error) => {
@@ -672,8 +711,8 @@ async fn authenticate(
             }
         }
     };
-
     let unauthed = UnauthedP2PStream::new(stream);
+
     let auth = authenticate_stream(
         unauthed,
         session_id,
@@ -683,7 +722,6 @@ async fn authenticate(
         status,
         fork_filter,
         blacklisted_peer_ids,
-        blacklisted_ip,
     )
     .boxed();
 
@@ -717,7 +755,6 @@ async fn authenticate_stream(
     status: Status,
     fork_filter: ForkFilter,
     blacklisted_peer_ids: Arc<HashSet<PeerId>>,
-    blacklisted_ip: Arc<HashSet<IpAddr>>,
 ) -> PendingSessionEvent {
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
@@ -732,13 +769,12 @@ async fn authenticate_stream(
         }
     };
 
-    if blacklisted_peer_ids.contains(&their_hello.id) || blacklisted_ip.contains(&remote_addr.ip())
-    {
+    if blacklisted_peer_ids.contains(&their_hello.id) {
         return match p2p_stream.disconnect(DisconnectReason::DisconnectRequested).await {
             Ok(_) => PendingSessionEvent::BlacklistConnection {
                 remote_addr,
                 session_id,
-                peer_id: their_hello.id,
+                peer_id: Some(their_hello.id),
                 direction,
             },
             Err(err) => PendingSessionEvent::Disconnected {
