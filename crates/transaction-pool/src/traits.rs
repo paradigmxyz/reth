@@ -83,7 +83,7 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Consumer: Block production
     fn remove_invalid(
         &self,
-        tx_hashes: &[TxHash],
+        hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
