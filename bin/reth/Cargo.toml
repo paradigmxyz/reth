@@ -9,7 +9,7 @@ readme = "README.md"
 [dependencies]
 # reth
 reth-primitives = { path = "../../crates/primitives" }
-reth-db = {path = "../../crates/db"}
+reth-db = {path = "../../crates/storage/db", features = ["mdbx"]}
 reth-stages = {path = "../../crates/stages"}
 reth-interfaces = {path = "../../crates/interfaces"}
 reth-transaction-pool = {path = "../../crates/transaction-pool"}

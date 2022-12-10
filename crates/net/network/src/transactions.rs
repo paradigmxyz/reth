@@ -99,7 +99,7 @@ pub struct TransactionsManager<Pool> {
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
-    /// Incoming events from the [`NetworkManager`]
+    /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
 }
 
@@ -107,12 +107,12 @@ pub struct TransactionsManager<Pool> {
 
 impl<Pool> TransactionsManager<Pool>
 where
-    Pool: TransactionPool + Clone,
+    Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     /// Sets up a new instance.
     ///
-    /// Note: This expects an existing [`NetworkManager`] instance.
+    /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
     pub fn new(
         network: NetworkHandle,
         pool: Pool,
@@ -377,7 +377,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<Pool> Future for TransactionsManager<Pool>
 where
-    Pool: TransactionPool + Clone + Unpin,
+    Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     type Output = ();

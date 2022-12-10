@@ -3241,6 +3241,7 @@ dependencies = [
  "eyre",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rlp",
  "thiserror",
  "tokio",
@@ -3254,22 +3255,31 @@ version = "0.1.0"
 name = "reth-db"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "async-trait",
  "bytes",
  "criterion",
  "eyre",
+ "futures",
+ "heapless",
  "iai",
+ "modular-bitfield",
  "page_size",
  "parity-scale-codec",
  "postcard",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-db",
  "reth-interfaces",
  "reth-libmdbx",
  "reth-primitives",
+ "secp256k1",
  "serde",
  "tempfile",
  "test-fuzz",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3364,6 +3374,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rlp",
  "revm",
  "rlp",
@@ -3486,8 +3497,10 @@ dependencies = [
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rlp",
  "reth-rlp-derive",
+ "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
@@ -3542,6 +3555,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-provider"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "async-trait",
+ "auto_impl",
+ "bytes",
+ "futures",
+ "heapless",
+ "hex-literal",
+ "modular-bitfield",
+ "parity-scale-codec",
+ "postcard",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-db",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
+ "secp256k1",
+ "serde",
+ "test-fuzz",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "reth-rlp"
 version = "0.1.2"
 dependencies = [
@@ -3576,6 +3617,7 @@ dependencies = [
  "jsonrpsee",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-api",
  "reth-rpc-types",
  "reth-transaction-pool",
@@ -3623,6 +3665,7 @@ dependencies = [
  "reth-headers-downloaders",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rlp",
  "tempfile",
  "thiserror",

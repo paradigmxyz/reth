@@ -73,6 +73,7 @@ impl Stream for TaskManager {
 }
 
 /// A type that can spawn new tokio tasks
+#[derive(Debug, Clone)]
 pub struct TaskExecutor {
     /// Handle to the tokio runtime this task manager is associated with.
     ///

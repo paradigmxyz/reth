@@ -3,14 +3,14 @@ use crate::{
     UnwindInput, UnwindOutput,
 };
 use futures_util::TryStreamExt;
-use reth_interfaces::{
-    consensus::Consensus,
-    db::{
-        models::StoredBlockOmmers, tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx,
-        DbTxMut,
-    },
-    p2p::bodies::downloader::BodyDownloader,
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::{Database, DatabaseGAT},
+    models::StoredBlockOmmers,
+    tables,
+    transaction::{DbTx, DbTxMut},
 };
+use reth_interfaces::{consensus::Consensus, p2p::bodies::downloader::BodyDownloader};
 use reth_primitives::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockLocked, BlockNumber, SealedHeader, H256,
@@ -477,12 +477,14 @@ mod tests {
             ExecInput, ExecOutput, UnwindInput,
         };
         use assert_matches::assert_matches;
+        use reth_db::{
+            cursor::DbCursorRO,
+            models::{BlockNumHash, NumTransactions, StoredBlockOmmers},
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
-            db::{
-                models::{BlockNumHash, NumTransactions, StoredBlockOmmers},
-                tables, DbCursorRO, DbTx, DbTxMut,
-            },
             p2p::{
                 bodies::{
                     client::BodiesClient,

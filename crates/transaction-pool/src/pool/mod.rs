@@ -81,7 +81,7 @@ use best::BestTransactions;
 pub use events::TransactionEvent;
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash, H256};
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -122,7 +122,7 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(validator: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub(crate) fn new(validator: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
             identifiers: Default::default(),
             validator,
@@ -334,6 +334,20 @@ where
         self.pool.read().best_transactions()
     }
 
+    /// Removes and returns all matching transactions from the pool.
+    pub(crate) fn remove_invalid(
+        &self,
+        hashes: impl IntoIterator<Item = TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let removed = self.pool.write().remove_invalid(hashes);
+
+        let mut listener = self.event_listener.write();
+
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        removed
+    }
+
     /// Removes all transactions that are missing in the pool.
     pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
         let pool = self.pool.read();
@@ -378,6 +392,12 @@ where
     /// Enforces the size limits of pool and returns the discarded transactions if violated.
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
         self.pool.write().discard_worst().into_iter().map(|tx| *tx.hash()).collect()
+    }
+}
+
+impl<V: TransactionValidator, T: TransactionOrdering> fmt::Debug for PoolInner<V, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PoolInner").field("config", &self.config).finish_non_exhaustive()
     }
 }
 

@@ -1,0 +1,45 @@
+[package]
+name = "reth-provider"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "Reth storage provider."
+
+[dependencies]
+reth-codecs = { path = "../codecs" }
+reth-primitives = { path = "../../primitives" }
+reth-interfaces = { path = "../../interfaces" }
+reth-rpc-types = { path = "../../net/rpc-types" }
+reth-db = { path = "../db" }
+async-trait = "0.1.57"
+thiserror = "1.0.37"
+auto_impl = "1.0"
+tokio = { version = "1.21.2", features = ["sync"] }
+bytes = "1.2"
+
+# codecs
+serde = { version = "1.0.*", default-features = false }
+postcard = { version = "1.0.2", features = ["alloc"] }
+heapless = "0.7.16"
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+futures = "0.3.25"
+tokio-stream = "0.1.11"
+rand = "0.8.5"
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
+modular-bitfield = "0.11.2"
+
+[dev-dependencies]
+reth-db = { path = "../db", features = ["test-utils"] }
+test-fuzz = "3.0.4"
+tokio = { version = "1.21.2", features = ["full"] }
+tokio-stream = { version = "0.1.11", features = ["sync"] }
+arbitrary = { version = "1.1.7", features = ["derive"]}
+hex-literal = "0.3"
+secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery", "rand"] }
+
+[features]
+bench = []
+test-utils = ["tokio-stream/sync", "secp256k1"]

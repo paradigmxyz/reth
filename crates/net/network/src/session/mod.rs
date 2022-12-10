@@ -33,7 +33,6 @@ use std::{
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
-    task::JoinSet,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{instrument, trace, warn};
@@ -44,6 +43,7 @@ mod handle;
 use crate::session::config::SessionCounter;
 pub use config::SessionsConfig;
 use reth_ecies::util::pk2id;
+use reth_tasks::TaskExecutor;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -68,10 +68,8 @@ pub(crate) struct SessionManager {
     fork_filter: ForkFilter,
     /// Size of the command buffer per session.
     session_command_buffer: usize,
-    /// All spawned session tasks.
-    ///
-    /// Note: If dropped, the session tasks are aborted.
-    spawned_tasks: JoinSet<()>,
+    /// The executor for spawned tasks.
+    executor: Option<TaskExecutor>,
     /// All pending session that are currently handshaking, exchanging `Hello`s.
     ///
     /// Events produced during the authentication phase are reported to this manager. Once the
@@ -99,7 +97,11 @@ pub(crate) struct SessionManager {
 
 impl SessionManager {
     /// Creates a new empty [`SessionManager`].
-    pub(crate) fn new(secret_key: SecretKey, config: SessionsConfig) -> Self {
+    pub(crate) fn new(
+        secret_key: SecretKey,
+        config: SessionsConfig,
+        executor: Option<TaskExecutor>,
+    ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
 
@@ -121,7 +123,7 @@ impl SessionManager {
             hello,
             fork_filter,
             session_command_buffer: config.session_command_buffer,
-            spawned_tasks: Default::default(),
+            executor,
             pending_sessions: Default::default(),
             active_sessions: Default::default(),
             pending_sessions_tx,
@@ -139,11 +141,15 @@ impl SessionManager {
     }
 
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
-    fn spawn<F>(&mut self, f: F)
+    fn spawn<F>(&self, f: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawned_tasks.spawn(async move { f.await });
+        if let Some(ref executor) = self.executor {
+            executor.spawn(async move { f.await })
+        } else {
+            tokio::task::spawn(async move { f.await });
+        }
     }
 
     /// Invoked on a received status update

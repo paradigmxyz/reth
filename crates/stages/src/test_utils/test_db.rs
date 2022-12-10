@@ -1,9 +1,11 @@
 use reth_db::{
-    kv::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
-    mdbx::{WriteMap, RW},
-};
-use reth_interfaces::db::{
-    self, models::BlockNumHash, tables, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
+    cursor::{DbCursorRO, DbCursorRW},
+    mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind, WriteMap, RW},
+    models::BlockNumHash,
+    table::Table,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedHeader, U256};
 use std::{borrow::Borrow, sync::Arc};
@@ -40,9 +42,9 @@ impl TestStageDB {
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub(crate) fn commit<F>(&self, f: F) -> Result<(), db::Error>
+    pub(crate) fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), db::Error>,
+        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
         let mut db = self.inner();
         f(&mut db)?;
@@ -51,15 +53,15 @@ impl TestStageDB {
     }
 
     /// Invoke a callback with a read transaction
-    pub(crate) fn query<F, R>(&self, f: F) -> Result<R, db::Error>
+    pub(crate) fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, db::Error>,
+        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
     {
         f(&self.inner())
     }
 
     /// Check if the table is empty
-    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, db::Error> {
+    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
         self.query(|tx| {
             let last = tx.cursor::<T>()?.last()?;
             Ok(last.is_none())
@@ -74,7 +76,7 @@ impl TestStageDB {
     /// db.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), db::Error>
+    pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
     where
         T: Table,
         S: Clone,
@@ -102,7 +104,7 @@ impl TestStageDB {
         &self,
         values: &[S],
         mut transform: F,
-    ) -> Result<(), db::Error>
+    ) -> Result<(), DbError>
     where
         T: Table,
         <T as Table>::Value: Clone,
@@ -126,7 +128,7 @@ impl TestStageDB {
         &self,
         num: u64,
         mut selector: F,
-    ) -> Result<(), db::Error>
+    ) -> Result<(), DbError>
     where
         T: Table,
         F: FnMut(T::Key) -> BlockNumber,
@@ -146,7 +148,7 @@ impl TestStageDB {
         &self,
         num: u64,
         mut selector: F,
-    ) -> Result<(), db::Error>
+    ) -> Result<(), DbError>
     where
         T: Table,
         F: FnMut(T::Value) -> BlockNumber,
@@ -162,7 +164,7 @@ impl TestStageDB {
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
-    pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
+    pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {

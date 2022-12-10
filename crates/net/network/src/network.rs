@@ -109,13 +109,14 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Sends a message to the [`NetworkManager`] to add a peer to the known set
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
+    /// set
     pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
         let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::AddPeerAddress(peer, addr));
     }
 
-    /// Sends a message to the [`NetworkManager`] to disconnect an existing connection to the given
-    /// peer.
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer.
     pub fn disconnect_peer(&self, peer: PeerId) {
         self.send_message(NetworkHandleMessage::DisconnectPeer(peer))
     }

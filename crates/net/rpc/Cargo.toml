@@ -14,6 +14,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-types = { path = "../rpc-types" }
+reth-provider = { path = "../../storage/provider"}
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 # rpc
