@@ -287,7 +287,7 @@ namespace mdbx {
 // To enable all kinds of an compiler optimizations we use a byte-like type
 // that don't presumes aliases for pointers as does the `char` type and its
 // derivatives/typedefs.
-// Please see todo4recovery://erased_by_github/libmdbx/issues/263
+// Please see https://web.archive.org/web/https://github.com/erthink/libmdbx/issues/263
 // for reasoning of the use of `char8_t` type and switching to `__restrict__`.
 using byte = char8_t;
 #else
@@ -3177,6 +3177,7 @@ public:
     /// \brief Returns the minimal values size in bytes for specified values
     /// mode.
     static inline size_t value_min(value_mode) noexcept;
+
     /// \brief Returns the maximal value size in bytes for specified page size
     /// and database flags.
     static inline size_t value_max(intptr_t pagesize, MDBX_db_flags_t flags);
@@ -3189,6 +3190,35 @@ public:
     /// \brief Returns the maximal value size in bytes for specified page size
     /// and values mode.
     static inline size_t value_max(const env &, value_mode);
+
+    /// \brief Returns maximal size of key-value pair to fit in a single page
+    /// for specified size and database flags.
+    static inline size_t pairsize4page_max(intptr_t pagesize,
+                                           MDBX_db_flags_t flags);
+    /// \brief Returns maximal size of key-value pair to fit in a single page
+    /// for specified page size and values mode.
+    static inline size_t pairsize4page_max(intptr_t pagesize, value_mode);
+    /// \brief Returns maximal size of key-value pair to fit in a single page
+    /// for given environment and database flags.
+    static inline size_t pairsize4page_max(const env &, MDBX_db_flags_t flags);
+    /// \brief Returns maximal size of key-value pair to fit in a single page
+    /// for specified page size and values mode.
+    static inline size_t pairsize4page_max(const env &, value_mode);
+
+    /// \brief Returns maximal data size in bytes to fit in a leaf-page or
+    /// single overflow/large-page for specified size and database flags.
+    static inline size_t valsize4page_max(intptr_t pagesize,
+                                          MDBX_db_flags_t flags);
+    /// \brief Returns maximal data size in bytes to fit in a leaf-page or
+    /// single overflow/large-page for specified page size and values mode.
+    static inline size_t valsize4page_max(intptr_t pagesize, value_mode);
+    /// \brief Returns maximal data size in bytes to fit in a leaf-page or
+    /// single overflow/large-page for given environment and database flags.
+    static inline size_t valsize4page_max(const env &, MDBX_db_flags_t flags);
+    /// \brief Returns maximal data size in bytes to fit in a leaf-page or
+    /// single overflow/large-page for specified page size and values mode.
+    static inline size_t valsize4page_max(const env &, value_mode);
+
     /// \brief Returns the maximal write transaction size (i.e. limit for
     /// summary volume of dirty pages) in bytes for specified page size.
     static inline size_t transaction_size_max(intptr_t pagesize);
@@ -3875,12 +3905,31 @@ public:
 
   //----------------------------------------------------------------------------
 
-  /// \brief Abandon all the operations of the transaction instead of saving
-  /// them.
+  /// \brief Abandon all the operations of the transaction
+  /// instead of saving ones.
   void abort();
 
   /// \brief Commit all the operations of a transaction into the database.
   void commit();
+
+  using commit_latency = MDBX_commit_latency;
+
+  /// \brief Commit all the operations of a transaction into the database
+  /// and collect latency information.
+  void commit(commit_latency *);
+
+  /// \brief Commit all the operations of a transaction into the database
+  /// and collect latency information.
+  void commit(commit_latency &latency) { return commit(&latency); }
+
+  /// \brief Commit all the operations of a transaction into the database
+  /// and return latency information.
+  /// \returns latency information of commit stages.
+  commit_latency commit_get_latency() {
+    commit_latency result;
+    commit(&result);
+    return result;
+  }
 };
 
 /// \brief Unmanaged cursor.
@@ -4861,6 +4910,56 @@ inline size_t env::limits::value_max(const env &env, MDBX_db_flags_t flags) {
 
 inline size_t env::limits::value_max(const env &env, value_mode mode) {
   return value_max(env, MDBX_db_flags_t(mode));
+}
+
+inline size_t env::limits::pairsize4page_max(intptr_t pagesize,
+                                             MDBX_db_flags_t flags) {
+  const intptr_t result = mdbx_limits_pairsize4page_max(pagesize, flags);
+  if (result < 0)
+    MDBX_CXX20_UNLIKELY error::throw_exception(MDBX_EINVAL);
+  return static_cast<size_t>(result);
+}
+
+inline size_t env::limits::pairsize4page_max(intptr_t pagesize,
+                                             value_mode mode) {
+  return pairsize4page_max(pagesize, MDBX_db_flags_t(mode));
+}
+
+inline size_t env::limits::pairsize4page_max(const env &env,
+                                             MDBX_db_flags_t flags) {
+  const intptr_t result = mdbx_env_get_pairsize4page_max(env, flags);
+  if (result < 0)
+    MDBX_CXX20_UNLIKELY error::throw_exception(MDBX_EINVAL);
+  return static_cast<size_t>(result);
+}
+
+inline size_t env::limits::pairsize4page_max(const env &env, value_mode mode) {
+  return pairsize4page_max(env, MDBX_db_flags_t(mode));
+}
+
+inline size_t env::limits::valsize4page_max(intptr_t pagesize,
+                                            MDBX_db_flags_t flags) {
+  const intptr_t result = mdbx_limits_valsize4page_max(pagesize, flags);
+  if (result < 0)
+    MDBX_CXX20_UNLIKELY error::throw_exception(MDBX_EINVAL);
+  return static_cast<size_t>(result);
+}
+
+inline size_t env::limits::valsize4page_max(intptr_t pagesize,
+                                            value_mode mode) {
+  return valsize4page_max(pagesize, MDBX_db_flags_t(mode));
+}
+
+inline size_t env::limits::valsize4page_max(const env &env,
+                                            MDBX_db_flags_t flags) {
+  const intptr_t result = mdbx_env_get_valsize4page_max(env, flags);
+  if (result < 0)
+    MDBX_CXX20_UNLIKELY error::throw_exception(MDBX_EINVAL);
+  return static_cast<size_t>(result);
+}
+
+inline size_t env::limits::valsize4page_max(const env &env, value_mode mode) {
+  return valsize4page_max(env, MDBX_db_flags_t(mode));
 }
 
 inline size_t env::limits::transaction_size_max(intptr_t pagesize) {

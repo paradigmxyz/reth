@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 86a8d6c403a2023fc2df0ab38f71339b78e82f0aa786f480a1cb166c05497134_v0_12_1_0_gb36a07a5
+#define MDBX_BUILD_SOURCERY e17be563de6f6f85e208ded5aacc1387bc0addf6ce5540c99d0d15db2c3e8edd_v0_12_2_0_g9b062cf0
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -149,7 +149,11 @@
 #if (defined(__MINGW__) || defined(__MINGW32__) || defined(__MINGW64__)) &&    \
     !defined(__USE_MINGW_ANSI_STDIO)
 #define __USE_MINGW_ANSI_STDIO 1
-#endif /* __USE_MINGW_ANSI_STDIO */
+#endif /* MinGW */
+
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(UNICODE)
+#define UNICODE
+#endif /* UNICODE */
 
 #include "mdbx.h"
 /*
@@ -216,7 +220,7 @@
 #define SSIZE_MAX INTPTR_MAX
 #endif
 
-#if UINTPTR_MAX > 0xffffFFFFul || ULONG_MAX > 0xffffFFFFul
+#if UINTPTR_MAX > 0xffffFFFFul || ULONG_MAX > 0xffffFFFFul || defined(_WIN64)
 #define MDBX_WORDBITS 64
 #else
 #define MDBX_WORDBITS 32
@@ -389,10 +393,6 @@ __extern_C key_t ftok(const char *, int);
 #elif _WIN32_WINNT < 0x0500
 #error At least 'Windows 2000' API is required for libmdbx.
 #endif /* _WIN32_WINNT */
-#if (defined(__MINGW32__) || defined(__MINGW64__)) &&                          \
-    !defined(__USE_MINGW_ANSI_STDIO)
-#define __USE_MINGW_ANSI_STDIO 1
-#endif /* MinGW */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif /* WIN32_LEAN_AND_MEAN */
@@ -416,8 +416,10 @@ __extern_C key_t ftok(const char *, int);
 #include <sys/ipc.h>
 #include <sys/mman.h>
 #include <sys/param.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/time.h>
 #include <sys/uio.h>
 
 #endif /*---------------------------------------------------------------------*/
@@ -1169,9 +1171,6 @@ static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
 #define vsnprintf _vsnprintf /* ntdll */
 #endif
 
-MDBX_INTERNAL_FUNC size_t osal_mb2w(wchar_t *dst, size_t dst_n, const char *src,
-                                    size_t src_n);
-
 #else /*----------------------------------------------------------------------*/
 
 typedef pthread_t osal_thread_t;
@@ -1202,18 +1201,16 @@ typedef pthread_mutex_t osal_fastmutex_t;
 /*----------------------------------------------------------------------------*/
 /* OS abstraction layer stuff */
 
+MDBX_INTERNAL_VAR unsigned sys_pagesize;
+MDBX_MAYBE_UNUSED MDBX_INTERNAL_VAR unsigned sys_allocation_granularity;
+
 /* Get the size of a memory page for the system.
  * This is the basic size that the platform's memory manager uses, and is
  * fundamental to the use of memory-mapped files. */
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __inline size_t
 osal_syspagesize(void) {
-#if defined(_WIN32) || defined(_WIN64)
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
-  return si.dwPageSize;
-#else
-  return sysconf(_SC_PAGE_SIZE);
-#endif
+  assert(sys_pagesize > 0 && (sys_pagesize & (sys_pagesize - 1)) == 0);
+  return sys_pagesize;
 }
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -1252,7 +1249,139 @@ typedef union osal_srwlock {
 } osal_srwlock_t;
 #endif /* Windows */
 
+#ifndef MDBX_HAVE_PWRITEV
+#if defined(_WIN32) || defined(_WIN64)
+
+#define MDBX_HAVE_PWRITEV 0
+
+#elif defined(__ANDROID_API__)
+
+#if __ANDROID_API__ < 24
+#define MDBX_HAVE_PWRITEV 0
+#else
+#define MDBX_HAVE_PWRITEV 1
+#endif
+
+#elif defined(__APPLE__) || defined(__MACH__) || defined(_DARWIN_C_SOURCE)
+
+#if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && defined(MAC_OS_VERSION_11_0) &&  \
+    MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_VERSION_11_0
+/* FIXME: add checks for IOS versions, etc */
+#define MDBX_HAVE_PWRITEV 1
+#else
+#define MDBX_HAVE_PWRITEV 0
+#endif
+
+#elif defined(_SC_IOV_MAX) || (defined(IOV_MAX) && IOV_MAX > 1)
+#define MDBX_HAVE_PWRITEV 1
+#else
+#define MDBX_HAVE_PWRITEV 0
+#endif
+#endif /* MDBX_HAVE_PWRITEV */
+
+typedef struct ior_item {
+#if defined(_WIN32) || defined(_WIN64)
+  OVERLAPPED ov;
+#define ior_svg_gap4terminator 1
+#define ior_sgv_element FILE_SEGMENT_ELEMENT
+#else
+  size_t offset;
+#if MDBX_HAVE_PWRITEV
+  size_t sgvcnt;
+#define ior_svg_gap4terminator 0
+#define ior_sgv_element struct iovec
+#endif /* MDBX_HAVE_PWRITEV */
+#endif /* !Windows */
+  union {
+    MDBX_val single;
+#if defined(ior_sgv_element)
+    ior_sgv_element sgv[1 + ior_svg_gap4terminator];
+#endif /* ior_sgv_element */
+  };
+} ior_item_t;
+
+typedef struct osal_ioring {
+  unsigned slots_left;
+  unsigned allocated;
+#if defined(_WIN32) || defined(_WIN64)
+#define IOR_DIRECT 1
+#define IOR_OVERLAPPED 2
+#define IOR_STATE_LOCKED 1
+  unsigned pagesize;
+  unsigned last_sgvcnt;
+  size_t last_bytes;
+  uint8_t flags, state, pagesize_ln2;
+  unsigned event_stack;
+  HANDLE *event_pool;
+  volatile LONG async_waiting;
+  volatile LONG async_completed;
+  HANDLE async_done;
+
+#define ior_last_sgvcnt(ior, item) (ior)->last_sgvcnt
+#define ior_last_bytes(ior, item) (ior)->last_bytes
+#elif MDBX_HAVE_PWRITEV
+  unsigned last_bytes;
+#define ior_last_sgvcnt(ior, item) (item)->sgvcnt
+#define ior_last_bytes(ior, item) (ior)->last_bytes
+#else
+#define ior_last_sgvcnt(ior, item) (1)
+#define ior_last_bytes(ior, item) (item)->single.iov_len
+#endif /* !Windows */
+  mdbx_filehandle_t fd;
+  ior_item_t *last;
+  ior_item_t *pool;
+  char *boundary;
+} osal_ioring_t;
+
 #ifndef __cplusplus
+
+/* Actually this is not ioring for now, but on the way. */
+MDBX_INTERNAL_FUNC int osal_ioring_create(osal_ioring_t *,
+#if defined(_WIN32) || defined(_WIN64)
+                                          uint8_t flags,
+#endif /* Windows */
+                                          mdbx_filehandle_t fd);
+MDBX_INTERNAL_FUNC int osal_ioring_resize(osal_ioring_t *, size_t items);
+MDBX_INTERNAL_FUNC void osal_ioring_destroy(osal_ioring_t *);
+MDBX_INTERNAL_FUNC void osal_ioring_reset(osal_ioring_t *);
+MDBX_INTERNAL_FUNC int osal_ioring_add(osal_ioring_t *ctx, const size_t offset,
+                                       void *data, const size_t bytes);
+typedef struct osal_ioring_write_result {
+  int err;
+  unsigned wops;
+} osal_ioring_write_result_t;
+MDBX_INTERNAL_FUNC osal_ioring_write_result_t
+osal_ioring_write(osal_ioring_t *ior);
+
+typedef struct iov_ctx iov_ctx_t;
+MDBX_INTERNAL_FUNC void osal_ioring_walk(
+    osal_ioring_t *ior, iov_ctx_t *ctx,
+    void (*callback)(iov_ctx_t *ctx, size_t offset, void *data, size_t bytes));
+
+MDBX_MAYBE_UNUSED static inline unsigned
+osal_ioring_left(const osal_ioring_t *ior) {
+  return ior->slots_left;
+}
+
+MDBX_MAYBE_UNUSED static inline unsigned
+osal_ioring_used(const osal_ioring_t *ior) {
+  return ior->allocated - ior->slots_left;
+}
+
+MDBX_MAYBE_UNUSED static inline int
+osal_ioring_reserve(osal_ioring_t *ior, size_t items, size_t bytes) {
+  items = (items > 32) ? items : 32;
+#if defined(_WIN32) || defined(_WIN64)
+  const size_t npages = bytes >> ior->pagesize_ln2;
+  items = (items > npages) ? items : npages;
+#else
+  (void)bytes;
+#endif
+  items = (items < 65536) ? items : 65536;
+  if (likely(ior->allocated >= items))
+    return MDBX_SUCCESS;
+  return osal_ioring_resize(ior, items);
+}
 
 /*----------------------------------------------------------------------------*/
 /* libc compatibility stuff */
@@ -1279,10 +1408,53 @@ MDBX_MAYBE_UNUSED MDBX_INTERNAL_FUNC void osal_jitter(bool tiny);
 MDBX_MAYBE_UNUSED static __inline void jitter4testing(bool tiny);
 
 /* max bytes to write in one call */
-#if defined(_WIN32) || defined(_WIN64)
-#define MAX_WRITE UINT32_C(0x01000000)
+#if defined(_WIN64)
+#define MAX_WRITE UINT32_C(0x10000000)
+#elif defined(_WIN32)
+#define MAX_WRITE UINT32_C(0x04000000)
 #else
-#define MAX_WRITE UINT32_C(0x3fff0000)
+#define MAX_WRITE UINT32_C(0x3f000000)
+
+#if defined(F_GETLK64) && defined(F_SETLK64) && defined(F_SETLKW64) &&         \
+    !defined(__ANDROID_API__)
+#define MDBX_F_SETLK F_SETLK64
+#define MDBX_F_SETLKW F_SETLKW64
+#define MDBX_F_GETLK F_GETLK64
+#if (__GLIBC_PREREQ(2, 28) &&                                                  \
+     (defined(__USE_LARGEFILE64) || defined(__LARGEFILE64_SOURCE) ||           \
+      defined(_USE_LARGEFILE64) || defined(_LARGEFILE64_SOURCE))) ||           \
+    defined(fcntl64)
+#define MDBX_FCNTL fcntl64
+#else
+#define MDBX_FCNTL fcntl
+#endif
+#define MDBX_STRUCT_FLOCK struct flock64
+#ifndef OFF_T_MAX
+#define OFF_T_MAX UINT64_C(0x7fffFFFFfff00000)
+#endif /* OFF_T_MAX */
+#else
+#define MDBX_F_SETLK F_SETLK
+#define MDBX_F_SETLKW F_SETLKW
+#define MDBX_F_GETLK F_GETLK
+#define MDBX_FCNTL fcntl
+#define MDBX_STRUCT_FLOCK struct flock
+#endif /* MDBX_F_SETLK, MDBX_F_SETLKW, MDBX_F_GETLK */
+
+#if defined(F_OFD_SETLK64) && defined(F_OFD_SETLKW64) &&                       \
+    defined(F_OFD_GETLK64) && !defined(__ANDROID_API__)
+#define MDBX_F_OFD_SETLK F_OFD_SETLK64
+#define MDBX_F_OFD_SETLKW F_OFD_SETLKW64
+#define MDBX_F_OFD_GETLK F_OFD_GETLK64
+#else
+#define MDBX_F_OFD_SETLK F_OFD_SETLK
+#define MDBX_F_OFD_SETLKW F_OFD_SETLKW
+#define MDBX_F_OFD_GETLK F_OFD_GETLK
+#ifndef OFF_T_MAX
+#define OFF_T_MAX                                                              \
+  (((sizeof(off_t) > 4) ? INT64_MAX : INT32_MAX) & ~(size_t)0xFffff)
+#endif /* OFF_T_MAX */
+#endif /* MDBX_F_OFD_SETLK64, MDBX_F_OFD_SETLKW64, MDBX_F_OFD_GETLK64 */
+
 #endif
 
 #if defined(__linux__) || defined(__gnu_linux__)
@@ -1325,8 +1497,7 @@ MDBX_INTERNAL_FUNC int osal_fastmutex_release(osal_fastmutex_t *fastmutex);
 MDBX_INTERNAL_FUNC int osal_fastmutex_destroy(osal_fastmutex_t *fastmutex);
 
 MDBX_INTERNAL_FUNC int osal_pwritev(mdbx_filehandle_t fd, struct iovec *iov,
-                                    int iovcnt, uint64_t offset,
-                                    size_t expected_written);
+                                    size_t sgvcnt, uint64_t offset);
 MDBX_INTERNAL_FUNC int osal_pread(mdbx_filehandle_t fd, void *buf, size_t count,
                                   uint64_t offset);
 MDBX_INTERNAL_FUNC int osal_pwrite(mdbx_filehandle_t fd, const void *buf,
@@ -1354,12 +1525,16 @@ MDBX_INTERNAL_FUNC int osal_fseek(mdbx_filehandle_t fd, uint64_t pos);
 MDBX_INTERNAL_FUNC int osal_filesize(mdbx_filehandle_t fd, uint64_t *length);
 
 enum osal_openfile_purpose {
-  MDBX_OPEN_DXB_READ = 0,
-  MDBX_OPEN_DXB_LAZY = 1,
-  MDBX_OPEN_DXB_DSYNC = 2,
-  MDBX_OPEN_LCK = 3,
-  MDBX_OPEN_COPY = 4,
-  MDBX_OPEN_DELETE = 5
+  MDBX_OPEN_DXB_READ,
+  MDBX_OPEN_DXB_LAZY,
+  MDBX_OPEN_DXB_DSYNC,
+#if defined(_WIN32) || defined(_WIN64)
+  MDBX_OPEN_DXB_OVERLAPPED,
+  MDBX_OPEN_DXB_OVERLAPPED_DIRECT,
+#endif /* Windows */
+  MDBX_OPEN_LCK,
+  MDBX_OPEN_COPY,
+  MDBX_OPEN_DELETE
 };
 
 MDBX_INTERNAL_FUNC int osal_openfile(const enum osal_openfile_purpose purpose,
@@ -1393,7 +1568,7 @@ osal_suspend_threads_before_remap(MDBX_env *env, mdbx_handle_array_t **array);
 MDBX_INTERNAL_FUNC int
 osal_resume_threads_after_remap(mdbx_handle_array_t *array);
 #endif /* Windows */
-MDBX_INTERNAL_FUNC int osal_msync(osal_mmap_t *map, size_t offset,
+MDBX_INTERNAL_FUNC int osal_msync(const osal_mmap_t *map, size_t offset,
                                   size_t length,
                                   enum osal_syncmode_bits mode_bits);
 MDBX_INTERNAL_FUNC int osal_check_fs_rdonly(mdbx_filehandle_t handle,
@@ -1436,8 +1611,15 @@ osal_pthread_mutex_lock(pthread_mutex_t *mutex) {
 #endif /* !Windows */
 
 MDBX_INTERNAL_FUNC uint64_t osal_monotime(void);
+MDBX_INTERNAL_FUNC uint64_t osal_cputime(size_t *optional_page_faults);
 MDBX_INTERNAL_FUNC uint64_t osal_16dot16_to_monotime(uint32_t seconds_16dot16);
 MDBX_INTERNAL_FUNC uint32_t osal_monotime_to_16dot16(uint64_t monotime);
+
+MDBX_MAYBE_UNUSED static inline uint32_t
+osal_monotime_to_16dot16_noUnderflow(uint64_t monotime) {
+  uint32_t seconds_16dot16 = osal_monotime_to_16dot16(monotime);
+  return seconds_16dot16 ? seconds_16dot16 : /* fix underflow */ (monotime > 0);
+}
 
 MDBX_INTERNAL_FUNC bin128_t osal_bootid(void);
 /*----------------------------------------------------------------------------*/
@@ -1547,6 +1729,9 @@ MDBX_INTERNAL_FUNC int osal_rpid_clear(MDBX_env *env);
 MDBX_INTERNAL_FUNC int osal_rpid_check(MDBX_env *env, uint32_t pid);
 
 #if defined(_WIN32) || defined(_WIN64)
+
+MDBX_INTERNAL_FUNC size_t osal_mb2w(wchar_t *dst, size_t dst_n, const char *src,
+                                    size_t src_n);
 
 #define OSAL_MB2WIDE(FROM, TO)                                                 \
   do {                                                                         \
@@ -1681,6 +1866,11 @@ MDBX_INTERNAL_VAR MDBX_RegGetValueA mdbx_RegGetValueA;
 
 NTSYSAPI ULONG RtlRandomEx(PULONG Seed);
 
+typedef BOOL(WINAPI *MDBX_SetFileIoOverlappedRange)(HANDLE FileHandle,
+                                                    PUCHAR OverlappedRangeStart,
+                                                    ULONG Length);
+MDBX_INTERNAL_VAR MDBX_SetFileIoOverlappedRange mdbx_SetFileIoOverlappedRange;
+
 #endif /* Windows */
 
 #endif /* !__cplusplus */
@@ -1795,6 +1985,13 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_ENABLE_REFUND must be defined as 0 or 1
 #endif /* MDBX_ENABLE_REFUND */
 
+/** Controls profiling of GC search and updates. */
+#ifndef MDBX_ENABLE_PROFGC
+#define MDBX_ENABLE_PROFGC 0
+#elif !(MDBX_ENABLE_PROFGC == 0 || MDBX_ENABLE_PROFGC == 1)
+#error MDBX_ENABLE_PROFGC must be defined as 0 or 1
+#endif /* MDBX_ENABLE_PROFGC */
+
 /** Controls gathering statistics for page operations. */
 #ifndef MDBX_ENABLE_PGOP_STAT
 #define MDBX_ENABLE_PGOP_STAT 1
@@ -1814,7 +2011,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_ENABLE_BIGFOOT must be defined as 0 or 1
 #endif /* MDBX_ENABLE_BIGFOOT */
 
-/** Controls use of POSIX madvise() hints and friends. */
+/** Controls using of POSIX' madvise() and/or similar hints. */
 #ifndef MDBX_ENABLE_MADVISE
 #define MDBX_ENABLE_MADVISE 1
 #elif !(MDBX_ENABLE_MADVISE == 0 || MDBX_ENABLE_MADVISE == 1)
@@ -1843,23 +2040,22 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_DPL_PREALLOC_FOR_RADIXSORT must be defined as 0 or 1
 #endif /* MDBX_DPL_PREALLOC_FOR_RADIXSORT */
 
-/** Basically, this build-option is for TODO. Guess it should be replaced
- * with MDBX_ENABLE_WRITEMAP_SPILLING with the three variants:
- *  0/OFF = Don't track dirty pages at all and don't spilling ones.
- *          This should be by-default on Linux and may-be other systems
- *          (not sure: Darwin/OSX, FreeBSD, Windows 10) where kernel provides
- *          properly LRU tracking and async writing on-demand.
- *  1/ON  = Lite tracking of dirty pages but with LRU labels and explicit
- *          spilling with msync(MS_ASYNC). */
-#ifndef MDBX_FAKE_SPILL_WRITEMAP
-#if defined(__linux__) || defined(__gnu_linux__)
-#define MDBX_FAKE_SPILL_WRITEMAP 1 /* msync(MS_ASYNC) is no-op on Linux */
+/** Controls dirty pages tracking, spilling and persisting in MDBX_WRITEMAP
+ * mode. 0/OFF = Don't track dirty pages at all, don't spill ones, and use
+ * msync() to persist data. This is by-default on Linux and other systems where
+ * kernel provides properly LRU tracking and effective flushing on-demand. 1/ON
+ * = Tracking of dirty pages but with LRU labels for spilling and explicit
+ * persist ones by write(). This may be reasonable for systems which low
+ * performance of msync() and/or LRU tracking. */
+#ifndef MDBX_AVOID_MSYNC
+#if defined(_WIN32) || defined(_WIN64)
+#define MDBX_AVOID_MSYNC 1
 #else
-#define MDBX_FAKE_SPILL_WRITEMAP 0
+#define MDBX_AVOID_MSYNC 0
 #endif
-#elif !(MDBX_FAKE_SPILL_WRITEMAP == 0 || MDBX_FAKE_SPILL_WRITEMAP == 1)
-#error MDBX_FAKE_SPILL_WRITEMAP must be defined as 0 or 1
-#endif /* MDBX_FAKE_SPILL_WRITEMAP */
+#elif !(MDBX_AVOID_MSYNC == 0 || MDBX_AVOID_MSYNC == 1)
+#error MDBX_AVOID_MSYNC must be defined as 0 or 1
+#endif /* MDBX_AVOID_MSYNC */
 
 /** Controls sort order of internal page number lists.
  * This mostly experimental/advanced option with not for regular MDBX users.
@@ -1916,6 +2112,27 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #ifndef MDBX_HAVE_C11ATOMICS
 #endif /* MDBX_HAVE_C11ATOMICS */
 
+/** If defined then enables use the GCC's `__builtin_cpu_supports()`
+ *  for runtime dispatching depending on the CPU's capabilities. */
+#ifndef MDBX_HAVE_BUILTIN_CPU_SUPPORTS
+#if defined(__APPLE__) || defined(BIONIC)
+/* Never use any modern features on Apple's or Google's OSes
+ * since a lot of troubles with compatibility and/or performance */
+#define MDBX_HAVE_BUILTIN_CPU_SUPPORTS 0
+#elif defined(__e2k__)
+#define MDBX_HAVE_BUILTIN_CPU_SUPPORTS 0
+#elif __has_builtin(__builtin_cpu_supports) ||                                 \
+    defined(__BUILTIN_CPU_SUPPORTS__) ||                                       \
+    (defined(__ia32__) && __GNUC_PREREQ(4, 8) && __GLIBC_PREREQ(2, 23))
+#define MDBX_HAVE_BUILTIN_CPU_SUPPORTS 1
+#else
+#define MDBX_HAVE_BUILTIN_CPU_SUPPORTS 0
+#endif
+#elif !(MDBX_HAVE_BUILTIN_CPU_SUPPORTS == 0 ||                                 \
+        MDBX_HAVE_BUILTIN_CPU_SUPPORTS == 1)
+#error MDBX_HAVE_BUILTIN_CPU_SUPPORTS must be defined as 0 or 1
+#endif /* MDBX_HAVE_BUILTIN_CPU_SUPPORTS */
+
 //------------------------------------------------------------------------------
 
 /** Win32 File Locking API for \ref MDBX_LOCKING */
@@ -1971,7 +2188,10 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 
 /** Advanced: Using POSIX OFD-locks (autodetection by default). */
 #ifndef MDBX_USE_OFDLOCKS
-#if defined(F_OFD_SETLK) && defined(F_OFD_SETLKW) && defined(F_OFD_GETLK) &&   \
+#if ((defined(F_OFD_SETLK) && defined(F_OFD_SETLKW) &&                         \
+      defined(F_OFD_GETLK)) ||                                                 \
+     (defined(F_OFD_SETLK64) && defined(F_OFD_SETLKW64) &&                     \
+      defined(F_OFD_GETLK64))) &&                                              \
     !defined(MDBX_SAFE4QEMU) &&                                                \
     !defined(__sun) /* OFD-lock are broken on Solaris */
 #define MDBX_USE_OFDLOCKS 1
@@ -2057,13 +2277,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #endif /* MDBX_64BIT_ATOMIC */
 
 #ifndef MDBX_64BIT_CAS
-#if defined(ATOMIC_LLONG_LOCK_FREE)
-#if ATOMIC_LLONG_LOCK_FREE > 1
-#define MDBX_64BIT_CAS 1
-#else
-#define MDBX_64BIT_CAS 0
-#endif
-#elif defined(__GCC_ATOMIC_LLONG_LOCK_FREE)
+#if defined(__GCC_ATOMIC_LLONG_LOCK_FREE)
 #if __GCC_ATOMIC_LLONG_LOCK_FREE > 1
 #define MDBX_64BIT_CAS 1
 #else
@@ -2071,6 +2285,12 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #endif
 #elif defined(__CLANG_ATOMIC_LLONG_LOCK_FREE)
 #if __CLANG_ATOMIC_LLONG_LOCK_FREE > 1
+#define MDBX_64BIT_CAS 1
+#else
+#define MDBX_64BIT_CAS 0
+#endif
+#elif defined(ATOMIC_LLONG_LOCK_FREE)
+#if ATOMIC_LLONG_LOCK_FREE > 1
 #define MDBX_64BIT_CAS 1
 #else
 #define MDBX_64BIT_CAS 0
@@ -2309,7 +2529,7 @@ MDBX_MAYBE_UNUSED static __always_inline uint32_t atomic_load32(
 /* FROZEN: The version number for a database's datafile format. */
 #define MDBX_DATA_VERSION 3
 /* The version number for a database's lockfile format. */
-#define MDBX_LOCK_VERSION 4
+#define MDBX_LOCK_VERSION 5
 
 /* handle for the DB used to track free pages. */
 #define FREE_DBI 0
@@ -2513,14 +2733,34 @@ typedef struct MDBX_page {
        : PAGETYPE_WHOLE(p))
 
 /* Size of the page header, excluding dynamic data at the end */
-#define PAGEHDRSZ ((unsigned)offsetof(MDBX_page, mp_ptrs))
+#define PAGEHDRSZ offsetof(MDBX_page, mp_ptrs)
 
 #pragma pack(pop)
 
-#if MDBX_ENABLE_PGOP_STAT
+typedef struct profgc_stat {
+  /* Монотонное время по "настенным часам"
+   * затраченное на чтение и поиск внутри GC */
+  uint64_t rtime_monotonic;
+  /* Монотонное время по "настенным часам" затраченное
+   * на подготовку страниц извлекаемых из GC, включая подкачку с диска. */
+  uint64_t xtime_monotonic;
+  /* Процессорное время в режим пользователя
+   * затраченное на чтение и поиск внутри GC */
+  uint64_t rtime_cpu;
+  /* Количество итераций чтения-поиска внутри GC при выделении страниц */
+  uint32_t rsteps;
+  /* Количество запросов на выделение последовательностей страниц,
+   * т.е. когда запрашивает выделение больше одной страницы */
+  uint32_t xpages;
+  /* Счетчик выполнения по медленному пути (slow path execution count) */
+  uint32_t spe_counter;
+  /* page faults (hard page faults) */
+  uint32_t majflt;
+} profgc_stat_t;
+
 /* Statistics of page operations overall of all (running, completed and aborted)
  * transactions */
-typedef struct {
+typedef struct pgop_stat {
   MDBX_atomic_uint64_t newly;   /* Quantity of a new pages added */
   MDBX_atomic_uint64_t cow;     /* Quantity of pages copied for update */
   MDBX_atomic_uint64_t clone;   /* Quantity of parent's dirty pages clones
@@ -2532,10 +2772,31 @@ typedef struct {
   MDBX_atomic_uint64_t
       wops; /* Number of explicit write operations (not a pages) to a disk */
   MDBX_atomic_uint64_t
-      gcrtime; /* Time spending for reading/searching GC (aka FreeDB). The
-                  unit/scale is platform-depended, see osal_monotime(). */
-} MDBX_pgop_stat_t;
-#endif /* MDBX_ENABLE_PGOP_STAT */
+      msync; /* Number of explicit msync/flush-to-disk operations */
+  MDBX_atomic_uint64_t
+      fsync; /* Number of explicit fsync/flush-to-disk operations */
+
+  /* Статистика для профилирования GC.
+   * Логически эти данные может быть стоит вынести в другую структуру,
+   * но разница будет сугубо косметическая. */
+  struct {
+    /* Затраты на поддержку данных пользователя */
+    profgc_stat_t work;
+    /* Затраты на поддержку и обновления самой GC */
+    profgc_stat_t self;
+    /* Итераций обновления GC,
+     * больше 1 если были повторы/перезапуски */
+    uint32_t wloops;
+    /* Итерации слияния записей GC */
+    uint32_t coalescences;
+    /* Уничтожения steady-точек фиксации в MDBX_UTTERLY_NOSYNC */
+    uint32_t wipes;
+    /* Сбросы данные на диск вне MDBX_UTTERLY_NOSYNC */
+    uint32_t flushes;
+    /* Попытки пнуть тормозящих читателей */
+    uint32_t kicks;
+  } gc_prof;
+} pgop_stat_t;
 
 #if MDBX_LOCKING == MDBX_LOCKING_WIN32FILES
 #define MDBX_CLOCK_SIGN UINT32_C(0xF10C)
@@ -2666,13 +2927,16 @@ typedef struct MDBX_lockinfo {
   /* Marker to distinguish uniqueness of DB/CLK. */
   MDBX_atomic_uint64_t mti_bait_uniqueness;
 
+  /* Paired counter of processes that have mlock()ed part of mmapped DB.
+   * The (mti_mlcnt[0] - mti_mlcnt[1]) > 0 means at least one process
+   * lock at leat one page, so therefore madvise() could return EINVAL. */
+  MDBX_atomic_uint32_t mti_mlcnt[2];
+
   MDBX_ALIGNAS(MDBX_CACHELINE_SIZE) /* cacheline ----------------------------*/
 
-#if MDBX_ENABLE_PGOP_STAT
   /* Statistics of costly ops of all (running, completed and aborted)
    * transactions */
-  MDBX_pgop_stat_t mti_pgop_stat;
-#endif /* MDBX_ENABLE_PGOP_STAT*/
+  pgop_stat_t mti_pgop_stat;
 
   MDBX_ALIGNAS(MDBX_CACHELINE_SIZE) /* cacheline ----------------------------*/
 
@@ -2683,19 +2947,19 @@ typedef struct MDBX_lockinfo {
 
   atomic_txnid_t mti_oldest_reader;
 
-  /* Timestamp of the last steady sync. Value is represented in a suitable
-   * system-dependent form, for example clock_gettime(CLOCK_BOOTTIME) or
-   * clock_gettime(CLOCK_MONOTONIC). */
-  MDBX_atomic_uint64_t mti_sync_timestamp;
+  /* Timestamp of entering an out-of-sync state. Value is represented in a
+   * suitable system-dependent form, for example clock_gettime(CLOCK_BOOTTIME)
+   * or clock_gettime(CLOCK_MONOTONIC). */
+  MDBX_atomic_uint64_t mti_eoos_timestamp;
 
   /* Number un-synced-with-disk pages for auto-sync feature. */
-  atomic_pgno_t mti_unsynced_pages;
-
-  /* Number of page which was discarded last time by madvise(MADV_FREE). */
-  atomic_pgno_t mti_discarded_tail;
+  MDBX_atomic_uint64_t mti_unsynced_pages;
 
   /* Timestamp of the last readers check. */
   MDBX_atomic_uint64_t mti_reader_check_timestamp;
+
+  /* Number of page which was discarded last time by madvise(DONTNEED). */
+  atomic_pgno_t mti_discarded_tail;
 
   /* Shared anchor for tracking readahead edge and enabled/disabled status. */
   pgno_t mti_readahead_anchor;
@@ -2799,7 +3063,7 @@ typedef struct MDBX_dp {
   MDBX_page *ptr;
   pgno_t pgno;
   union {
-    unsigned extra;
+    uint32_t extra;
     __anonymous_struct_extension__ struct {
       unsigned multi : 1;
       unsigned lru : 31;
@@ -2809,10 +3073,10 @@ typedef struct MDBX_dp {
 
 /* An DPL (dirty-page list) is a sorted array of MDBX_DPs. */
 typedef struct MDBX_dpl {
-  unsigned sorted;
-  unsigned length;
-  unsigned pages_including_loose; /* number of pages, but not an entries. */
-  unsigned detent; /* allocated size excluding the MDBX_DPL_RESERVE_GAP */
+  size_t sorted;
+  size_t length;
+  size_t pages_including_loose; /* number of pages, but not an entries. */
+  size_t detent; /* allocated size excluding the MDBX_DPL_RESERVE_GAP */
 #if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
     (!defined(__cplusplus) && defined(_MSC_VER))
   MDBX_dp items[] /* dynamic size with holes at zero and after the last */;
@@ -2831,11 +3095,17 @@ typedef struct MDBX_dpl {
   ((1u << 17) - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(txnid_t))
 
 #define MDBX_PNL_ALLOCLEN(pl) ((pl)[-1])
-#define MDBX_PNL_SIZE(pl) ((pl)[0])
+#define MDBX_PNL_GETSIZE(pl) ((size_t)((pl)[0]))
+#define MDBX_PNL_SETSIZE(pl, size)                                             \
+  do {                                                                         \
+    const size_t __size = size;                                                \
+    assert(__size < INT_MAX);                                                  \
+    (pl)[0] = (pgno_t)__size;                                                  \
+  } while (0)
 #define MDBX_PNL_FIRST(pl) ((pl)[1])
-#define MDBX_PNL_LAST(pl) ((pl)[MDBX_PNL_SIZE(pl)])
+#define MDBX_PNL_LAST(pl) ((pl)[MDBX_PNL_GETSIZE(pl)])
 #define MDBX_PNL_BEGIN(pl) (&(pl)[1])
-#define MDBX_PNL_END(pl) (&(pl)[MDBX_PNL_SIZE(pl) + 1])
+#define MDBX_PNL_END(pl) (&(pl)[MDBX_PNL_GETSIZE(pl) + 1])
 
 #if MDBX_PNL_ASCENDING
 #define MDBX_PNL_LEAST(pl) MDBX_PNL_FIRST(pl)
@@ -2845,8 +3115,8 @@ typedef struct MDBX_dpl {
 #define MDBX_PNL_MOST(pl) MDBX_PNL_FIRST(pl)
 #endif
 
-#define MDBX_PNL_SIZEOF(pl) ((MDBX_PNL_SIZE(pl) + 1) * sizeof(pgno_t))
-#define MDBX_PNL_IS_EMPTY(pl) (MDBX_PNL_SIZE(pl) == 0)
+#define MDBX_PNL_SIZEOF(pl) ((MDBX_PNL_GETSIZE(pl) + 1) * sizeof(pgno_t))
+#define MDBX_PNL_IS_EMPTY(pl) (MDBX_PNL_GETSIZE(pl) == 0)
 
 /*----------------------------------------------------------------------------*/
 /* Internal structures */
@@ -2865,6 +3135,9 @@ typedef struct MDBX_dbx {
 
 typedef struct troika {
   uint8_t fsm, recent, prefer_steady, tail_and_flags;
+#if MDBX_WORDBITS > 32 /* Workaround for false-positives from Valgrind */
+  uint32_t unused_pad;
+#endif
 #define TROIKA_HAVE_STEADY(troika) ((troika)->fsm & 7)
 #define TROIKA_STRICT_VALID(troika) ((troika)->tail_and_flags & 64)
 #define TROIKA_VALID(troika) ((troika)->tail_and_flags & 128)
@@ -2886,9 +3159,13 @@ struct MDBX_txn {
   /* Additional flag for sync_locked() */
 #define MDBX_SHRINK_ALLOWED UINT32_C(0x40000000)
 
+#define MDBX_TXN_UPDATE_GC 0x20 /* GC is being updated */
+#define MDBX_TXN_FROZEN_RE 0x40 /* list of reclaimed-pgno must not altered */
+
 #define TXN_FLAGS                                                              \
   (MDBX_TXN_FINISHED | MDBX_TXN_ERROR | MDBX_TXN_DIRTY | MDBX_TXN_SPILLS |     \
-   MDBX_TXN_HAS_CHILD | MDBX_TXN_INVALID)
+   MDBX_TXN_HAS_CHILD | MDBX_TXN_INVALID | MDBX_TXN_UPDATE_GC |                \
+   MDBX_TXN_FROZEN_RE)
 
 #if (TXN_FLAGS & (MDBX_TXN_RW_BEGIN_FLAGS | MDBX_TXN_RO_BEGIN_FLAGS)) ||       \
     ((MDBX_TXN_RW_BEGIN_FLAGS | MDBX_TXN_RO_BEGIN_FLAGS | TXN_FLAGS) &         \
@@ -2947,18 +3224,18 @@ struct MDBX_txn {
     struct {
       meta_troika_t troika;
       /* In write txns, array of cursors for each DB */
-      pgno_t *reclaimed_pglist; /* Reclaimed GC pages */
-      txnid_t last_reclaimed;   /* ID of last used record */
+      pgno_t *relist;         /* Reclaimed GC pages */
+      txnid_t last_reclaimed; /* ID of last used record */
 #if MDBX_ENABLE_REFUND
       pgno_t loose_refund_wl /* FIXME: describe */;
 #endif /* MDBX_ENABLE_REFUND */
+      /* a sequence to spilling dirty page with LRU policy */
+      unsigned dirtylru;
       /* dirtylist room: Dirty array size - dirty pages visible to this txn.
        * Includes ancestor txns' dirty pages not hidden by other txns'
        * dirty/spilled pages. Thus commit(nested txn) has room to merge
        * dirtylist into mt_parent after freeing hidden mt_parent pages. */
-      unsigned dirtyroom;
-      /* a sequence to spilling dirty page with LRU policy */
-      unsigned dirtylru;
+      size_t dirtyroom;
       /* For write txns: Modified pages. Sorted when not MDBX_WRITEMAP. */
       MDBX_dpl *dirtylist;
       /* The list of reclaimed txns from GC */
@@ -2969,8 +3246,8 @@ struct MDBX_txn {
        * in this transaction, linked through `mp_next`. */
       MDBX_page *loose_pages;
       /* Number of loose pages (tw.loose_pages) */
-      unsigned loose_count;
-      unsigned spill_least_removed;
+      size_t loose_count;
+      size_t spill_least_removed;
       /* The sorted list of dirty pages we temporarily wrote to disk
        * because the dirty list was full. page numbers in here are
        * shifted left by 1, deleted slots have the LSB set. */
@@ -3024,9 +3301,7 @@ struct MDBX_cursor {
 #define C_SUB 0x04         /* Cursor is a sub-cursor */
 #define C_DEL 0x08         /* last op was a cursor_del */
 #define C_UNTRACK 0x10     /* Un-track cursor when closing */
-#define C_RECLAIMING 0x20  /* GC lookup is prohibited */
-#define C_GCFREEZE 0x40    /* reclaimed_pglist must not be updated */
-  uint8_t mc_flags;        /* see mdbx_cursor */
+  uint8_t mc_flags;
 
   /* Cursor checking flags. */
 #define CC_BRANCH 0x01    /* same as P_BRANCH for CHECK_LEAF_TYPE() */
@@ -3037,7 +3312,7 @@ struct MDBX_cursor {
 #define CC_LEAF2 0x20     /* same as P_LEAF2 for CHECK_LEAF_TYPE() */
 #define CC_RETIRING 0x40  /* refs to child pages may be invalid */
 #define CC_PAGECHECK 0x80 /* perform page checking, see MDBX_VALIDATION */
-  uint8_t mc_checking;    /* page checking level */
+  uint8_t mc_checking;
 
   MDBX_page *mc_pg[CURSOR_STACK]; /* stack of pushed pages */
   indx_t mc_ki[CURSOR_STACK];     /* stack of page indices */
@@ -3086,14 +3361,20 @@ struct MDBX_env {
   osal_mmap_t me_dxb_mmap; /* The main data file */
 #define me_map me_dxb_mmap.dxb
 #define me_lazy_fd me_dxb_mmap.fd
-  mdbx_filehandle_t me_dsync_fd;
+#define me_fd4data me_ioring.fd
+  mdbx_filehandle_t me_dsync_fd, me_fd4meta;
+#if defined(_WIN32) || defined(_WIN64)
+  HANDLE me_overlapped_fd, me_data_lock_event;
+#endif                     /* Windows */
   osal_mmap_t me_lck_mmap; /* The lock file */
 #define me_lfd me_lck_mmap.fd
   struct MDBX_lockinfo *me_lck;
 
-  unsigned me_psize;        /* DB page size, initialized from me_os_psize */
-  unsigned me_leaf_nodemax; /* max size of a leaf-node */
-  uint8_t me_psize2log;     /* log2 of DB page size */
+  unsigned me_psize;          /* DB page size, initialized from me_os_psize */
+  unsigned me_leaf_nodemax;   /* max size of a leaf-node */
+  unsigned me_branch_nodemax; /* max size of a branch-node */
+  atomic_pgno_t me_mlocked_pgno;
+  uint8_t me_psize2log; /* log2 of DB page size */
   int8_t me_stuck_meta; /* recovery-only: target meta page or less that zero */
   uint16_t me_merge_threshold,
       me_merge_threshold_gc;  /* pages emptier than this are candidates for
@@ -3165,6 +3446,7 @@ struct MDBX_env {
   unsigned me_dp_reserve_len;
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
+  osal_ioring_t me_ioring;
 
 #if defined(_WIN32) || defined(_WIN64)
   osal_srwlock_t me_remap_guard;
@@ -3190,7 +3472,7 @@ struct MDBX_env {
 #define xMDBX_DEBUG_SPILLING 0
 #endif
 #if xMDBX_DEBUG_SPILLING == 2
-  unsigned debug_dirtied_est, debug_dirtied_act;
+  size_t debug_dirtied_est, debug_dirtied_act;
 #endif /* xMDBX_DEBUG_SPILLING */
 
   /* ------------------------------------------------- stub for lck-less mode */
@@ -3295,10 +3577,22 @@ MDBX_INTERNAL_FUNC void debug_log_va(int level, const char *function, int line,
 #define FATAL(fmt, ...)                                                        \
   debug_log(MDBX_LOG_FATAL, __func__, __LINE__, fmt "\n", __VA_ARGS__);
 
+#if MDBX_DEBUG
+#define ASSERT_FAIL(env, msg, func, line) mdbx_assert_fail(env, msg, func, line)
+#else /* MDBX_DEBUG */
+MDBX_NORETURN __cold void assert_fail(const char *msg, const char *func,
+                                      unsigned line);
+#define ASSERT_FAIL(env, msg, func, line)                                      \
+  do {                                                                         \
+    (void)(env);                                                               \
+    assert_fail(msg, func, line);                                              \
+  } while (0)
+#endif /* MDBX_DEBUG */
+
 #define ENSURE_MSG(env, expr, msg)                                             \
   do {                                                                         \
     if (unlikely(!(expr)))                                                     \
-      mdbx_assert_fail(env, msg, __func__, __LINE__);                          \
+      ASSERT_FAIL(env, msg, __func__, __LINE__);                               \
   } while (0)
 
 #define ENSURE(env, expr) ENSURE_MSG(env, expr, #expr)
@@ -3369,7 +3663,9 @@ MDBX_INTERNAL_FUNC int rthc_alloc(osal_thread_key_t *key, MDBX_reader *begin,
 MDBX_INTERNAL_FUNC void rthc_remove(const osal_thread_key_t key);
 
 MDBX_INTERNAL_FUNC void global_ctor(void);
+MDBX_INTERNAL_FUNC void osal_ctor(void);
 MDBX_INTERNAL_FUNC void global_dtor(void);
+MDBX_INTERNAL_FUNC void osal_dtor(void);
 MDBX_INTERNAL_FUNC void thread_dtor(void *ptr);
 
 #endif /* !__cplusplus */
@@ -3490,12 +3786,12 @@ typedef struct MDBX_node {
 #error "Oops, some flags overlapped or wrong"
 #endif
 
-/* max number of pages to commit in one writev() call */
-#define MDBX_COMMIT_PAGES 64
-#if defined(IOV_MAX) && IOV_MAX < MDBX_COMMIT_PAGES /* sysconf(_SC_IOV_MAX) */
-#undef MDBX_COMMIT_PAGES
-#define MDBX_COMMIT_PAGES IOV_MAX
-#endif
+/* Max length of iov-vector passed to writev() call, used for auxilary writes */
+#define MDBX_AUXILARY_IOV_MAX 64
+#if defined(IOV_MAX) && IOV_MAX < MDBX_AUXILARY_IOV_MAX
+#undef MDBX_AUXILARY_IOV_MAX
+#define MDBX_AUXILARY_IOV_MAX IOV_MAX
+#endif /* MDBX_AUXILARY_IOV_MAX */
 
 /*
  *                /
@@ -3552,20 +3848,24 @@ ceil_powerof2(size_t value, size_t granularity) {
 }
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static unsigned
-log2n_powerof2(size_t value) {
-  assert(value > 0 && value < INT32_MAX && is_powerof2(value));
-  assert((value & -(int32_t)value) == value);
-#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctzl)
-  return __builtin_ctzl(value);
+log2n_powerof2(size_t value_uintptr) {
+  assert(value_uintptr > 0 && value_uintptr < INT32_MAX &&
+         is_powerof2(value_uintptr));
+  assert((value_uintptr & -(intptr_t)value_uintptr) == value_uintptr);
+  const uint32_t value_uint32 = (uint32_t)value_uintptr;
+#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctz)
+  STATIC_ASSERT(sizeof(value_uint32) <= sizeof(unsigned));
+  return __builtin_ctz(value_uint32);
 #elif defined(_MSC_VER)
   unsigned long index;
-  _BitScanForward(&index, (unsigned long)value);
+  STATIC_ASSERT(sizeof(value_uint32) <= sizeof(long));
+  _BitScanForward(&index, value_uint32);
   return index;
 #else
   static const uint8_t debruijn_ctz32[32] = {
       0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
       31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
-  return debruijn_ctz32[(uint32_t)(value * 0x077CB531u) >> 27];
+  return debruijn_ctz32[(uint32_t)(value_uint32 * 0x077CB531ul) >> 27];
 #endif
 }
 
