@@ -85,7 +85,7 @@ pub(crate) enum PendingSessionEvent {
         error: Option<EthStreamError>,
     },
 
-    /// a blacklisted address/ blacklisted peer id tryed to connect
+    /// a blacklisted address/ blacklisted peer id has tried to establish a connection
     BlacklistConnection {
         remote_addr: SocketAddr,
         session_id: SessionId,
