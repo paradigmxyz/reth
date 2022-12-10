@@ -334,6 +334,20 @@ where
         self.pool.read().best_transactions()
     }
 
+    /// Removes and returns all matching transactions from the pool.
+    pub(crate) fn remove_invalid(
+        &self,
+        hashes: impl IntoIterator<Item = TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let removed = self.pool.write().remove_invalid(hashes);
+
+        let mut listener = self.event_listener.write();
+
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        removed
+    }
+
     /// Removes all transactions that are missing in the pool.
     pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
         let pool = self.pool.read();
