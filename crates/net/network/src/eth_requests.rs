@@ -6,11 +6,9 @@ use reth_eth_wire::{
     BlockBodies, BlockBody, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData,
     GetReceipts, NodeData, Receipts,
 };
-use reth_interfaces::{
-    p2p::error::RequestResult,
-    provider::{BlockProvider, HeaderProvider},
-};
+use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_provider::{BlockProvider, HeaderProvider};
 use std::{
     borrow::Borrow,
     future::Future,

@@ -2,20 +2,21 @@ use crate::{
     db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    database::Database,
+    models::{BlockNumHash, TxNumberAddress},
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_executor::{
     config::SpecUpgrades,
     executor::AccountChangeSet,
     revm_wrap::{State, SubState},
     Config,
 };
-use reth_interfaces::{
-    db::{
-        models::{BlockNumHash, TxNumberAddress},
-        tables, Database, DbCursorRO, DbCursorRW, DbDupCursorRO, DbTx, DbTxMut,
-    },
-    provider::db::StateProviderImplRefLatest,
-};
 use reth_primitives::{Address, StorageEntry, TransactionSignedEcRecovered, H256, U256};
+use reth_provider::StateProviderImplRefLatest;
 use std::{fmt::Debug, ops::DerefMut};
 
 const EXECUTION: StageId = StageId("Execution");
@@ -423,12 +424,9 @@ mod tests {
     use std::ops::Deref;
 
     use super::*;
-    use reth_db::{
-        kv::{test_utils::create_test_db, EnvKind},
-        mdbx::WriteMap,
-    };
-    use reth_interfaces::provider::insert_canonical_block;
+    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{hex_literal::hex, keccak256, Account, BlockLocked, H160, U256};
+    use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
 
     #[tokio::test]

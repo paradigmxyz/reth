@@ -14,7 +14,7 @@ reth-rlp = { path = "../common/rlp", features = [
     "derive",
     "ethereum-types",
 ] }
-reth-codecs = { version = "0.1.0", path = "../codecs" }
+reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }

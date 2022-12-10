@@ -14,8 +14,8 @@ use crate::{
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
-use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{PeerId, H256};
+use reth_provider::BlockProvider;
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,

@@ -10,8 +10,8 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
 };
-use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
+use reth_provider::BlockProvider;
 use std::{
     io,
     net::SocketAddr,

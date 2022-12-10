@@ -3,9 +3,14 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use reth_interfaces::db::{
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::{Database, DatabaseGAT},
     models::{BlockNumHash, NumTransactions},
-    tables, Database, DatabaseGAT, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Error, Table,
+    table::Table,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    Error,
 };
 use reth_primitives::{BlockHash, BlockNumber, TxNumber};
 

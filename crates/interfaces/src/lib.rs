@@ -13,10 +13,11 @@ pub mod executor;
 /// Consensus traits.
 pub mod consensus;
 
-/// Database traits.
-pub mod db;
-/// Traits that provide chain access.
+/// Provider error
 pub mod provider;
+
+/// Database error
+pub mod db;
 
 /// P2P traits.
 pub mod p2p;

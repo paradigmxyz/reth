@@ -20,6 +20,7 @@ reth-rlp = { path = "../../common/rlp" }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
 reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
+reth-provider = { path = "../../storage/provider"}
 
 # async/futures
 futures = "0.3"
@@ -47,6 +48,7 @@ secp256k1 = { version = "0.24", features = [
 [dev-dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 
 rand = "0.8"
