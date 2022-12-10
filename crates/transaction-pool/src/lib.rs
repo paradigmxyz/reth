@@ -235,9 +235,9 @@ where
 
     fn remove_invalid(
         &self,
-        _tx_hashes: &[TxHash],
+        hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        todo!()
+        self.pool.remove_invalid(hashes)
     }
 
     fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {

@@ -276,6 +276,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Removes and returns all matching transactions from the pool.
+    pub(crate) fn remove_invalid(
+        &mut self,
+        hashes: impl IntoIterator<Item = TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect()
+    }
+
     /// Remove the transaction from the entire pool.
     ///
     /// This includes the total set of transaction and the subpool it currently resides in.
@@ -289,7 +297,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Remove the transaction from the entire pool via its hash.
     ///
-    /// This includes the total set of transaction and the subpool it currently resides in.
+    /// This includes the total set of transactions and the subpool it currently resides in.
     fn remove_transaction_by_hash(
         &mut self,
         tx_hash: &H256,
