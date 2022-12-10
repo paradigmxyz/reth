@@ -9,6 +9,7 @@ use reth_primitives::{rpc::Address, TxHash, U256};
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
+#[derive(Debug)]
 pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// Transaction successfully validated
     Valid {

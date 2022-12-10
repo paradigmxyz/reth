@@ -11,7 +11,7 @@ type EventBroadcast = UnboundedSender<TransactionEvent>;
 ///
 /// This is essentially a multi-producer, multi-consumer channel where each event is broadcasted to
 /// all active receivers.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct PoolEventBroadcast {
     /// All listeners for certain transaction events.
     broadcasters: HashMap<TxHash, PoolEventBroadcaster>,
