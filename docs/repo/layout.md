@@ -22,9 +22,9 @@ These crates define primitive types or algorithms such as RLP.
 
 These crates are related to the database.
 
-- [`codecs`](../../crates/codecs): Different storage codecs.
-- [`libmdbx-rs`](../../crates/libmdbx-rs): Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
-- [`db`](../../crates/db): Strongly typed database bindings to LibMDBX containing read/write access to Ethereum state and historical data (transactions, blocks etc.)
+- [`codecs`](../../crates/storage/codecs): Different storage codecs.
+- [`libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
+- [`db`](../../crates/storage/db): Strongly typed database bindings to LibMDBX containing read/write access to Ethereum state and historical data (transactions, blocks etc.)
 
 ### Networking
 

@@ -3,8 +3,8 @@
 use super::testnet::Testnet;
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
-use reth_interfaces::test_utils::TestApi;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
+use reth_provider::test_utils::TestApi;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, sync::Arc};
 

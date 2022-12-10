@@ -3,9 +3,15 @@ use crate::{
     UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    models::blocks::BlockNumHash,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    db::{models::blocks::BlockNumHash, tables, Database, DbCursorRO, DbCursorRW, DbTx, DbTxMut},
     p2p::headers::{
         client::HeadersClient,
         downloader::{ensure_parent, HeaderDownloader},
@@ -342,9 +348,9 @@ mod tests {
             },
             ExecInput, ExecOutput, UnwindInput,
         };
+        use reth_db::{models::blocks::BlockNumHash, tables, transaction::DbTx};
         use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
-            db::{models::blocks::BlockNumHash, tables, DbTx},
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},

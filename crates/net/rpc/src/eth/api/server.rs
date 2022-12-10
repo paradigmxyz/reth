@@ -3,11 +3,11 @@
 
 use crate::{eth::api::EthApi, result::ToRpcResult};
 use jsonrpsee::core::RpcResult as Result;
-use reth_interfaces::provider::{BlockProvider, StateProviderFactory};
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
     Address, BlockNumber, Bytes, Transaction, H256, H64, U256, U64,
 };
+use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
