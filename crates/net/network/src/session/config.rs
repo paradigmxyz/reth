@@ -1,9 +1,7 @@
 //! Configuration types for [`SessionsManager`]
 
-use reth_primitives::PeerId;
-
 use crate::session::{Direction, ExceedsSessionLimit};
-use std::{collections::HashSet, net::IpAddr, time::Duration};
+use std::time::Duration;
 
 /// Default request timeout.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(500u64);
@@ -20,10 +18,6 @@ pub struct SessionsConfig {
     pub limits: SessionLimits,
     /// The maximum time we wait for a response from a peer.
     pub request_timeout: Duration,
-    /// blacklisted ips
-    pub blacklisted_ips: HashSet<IpAddr>,
-    /// blacklisted peer ids
-    pub blacklisted_peer_ids: HashSet<PeerId>,
 }
 
 impl Default for SessionsConfig {
@@ -39,8 +33,6 @@ impl Default for SessionsConfig {
             session_event_buffer: 64,
             limits: Default::default(),
             request_timeout: REQUEST_TIMEOUT,
-            blacklisted_ips: Default::default(),
-            blacklisted_peer_ids: Default::default(),
         }
     }
 }
@@ -53,20 +45,6 @@ impl SessionsConfig {
     /// buffer size provides backpressure on the network I/O.
     pub fn with_session_event_buffer(mut self, n: usize) -> Self {
         self.session_event_buffer = n;
-        self
-    }
-
-    /// any node that tries to connect from an ip that is blacklisted will be
-    /// automatically disconnected
-    pub fn with_ip_blacklist(mut self, blacklist: HashSet<IpAddr>) -> Self {
-        self.blacklisted_ips = blacklist;
-        self
-    }
-
-    /// any node that tries to connect from a peer id that is blacklisted will
-    /// automatically be disconnected
-    pub fn with_peer_id_blacklist(mut self, blacklist: HashSet<PeerId>) -> Self {
-        self.blacklisted_peer_ids = blacklist;
         self
     }
 }

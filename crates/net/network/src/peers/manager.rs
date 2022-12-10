@@ -3,8 +3,8 @@ use futures::StreamExt;
 use reth_eth_wire::DisconnectReason;
 use reth_primitives::PeerId;
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
-    net::SocketAddr,
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    net::{IpAddr, SocketAddr},
     task::{Context, Poll},
     time::Duration,
 };
@@ -65,12 +65,15 @@ pub(crate) struct PeersManager {
     reputation_weights: ReputationChangeWeights,
     /// Tracks current slot stats.
     connection_info: ConnectionInfo,
+    /// Tracks unwanted ips/peer ids,
+    ban_list: BanList,
 }
 
 impl PeersManager {
     /// Create a new instance with the given config
     pub(crate) fn new(config: PeersConfig) -> Self {
-        let PeersConfig { refill_slots_interval, connection_info, reputation_weights } = config;
+        let PeersConfig { refill_slots_interval, connection_info, reputation_weights, ban_list } =
+            config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         Self {
             peers: Default::default(),
@@ -83,6 +86,7 @@ impl PeersManager {
                 refill_slots_interval,
             ),
             connection_info,
+            ban_list,
         }
     }
 
@@ -117,6 +121,11 @@ impl PeersManager {
     /// If the reputation of the peer is below the `BANNED_REPUTATION` threshold, a disconnect will
     /// be scheduled.
     pub(crate) fn on_active_inbound_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
+        if self.ban_list.is_banned(&addr.ip(), &peer_id) {
+            self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
+            return
+        }
+
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
@@ -178,6 +187,10 @@ impl PeersManager {
     /// If the peer already exists, then the address will e updated. If the addresses differ, the
     /// old address is returned
     pub(crate) fn add_discovered_node(&mut self, peer_id: PeerId, addr: SocketAddr) {
+        if self.ban_list.is_banned(&addr.ip(), &peer_id) {
+            return
+        }
+
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let node = entry.get_mut();
@@ -429,7 +442,7 @@ pub enum PeerAction {
     /// Disconnect an existing connection.
     Disconnect { peer_id: PeerId, reason: Option<DisconnectReason> },
     /// Disconnect an existing incoming connection, because the peers reputation is below the
-    /// banned threshold.
+    /// banned threshold or is on the [`BanList`]
     DisconnectBannedIncoming {
         /// Peer id of the established connection.
         peer_id: PeerId,
@@ -445,6 +458,8 @@ pub struct PeersConfig {
     pub connection_info: ConnectionInfo,
     /// How to weigh reputation changes
     pub reputation_weights: ReputationChangeWeights,
+    /// Restrictions on PeerIds and Ips
+    pub ban_list: BanList,
 }
 
 impl Default for PeersConfig {
@@ -458,6 +473,24 @@ impl Default for PeersConfig {
                 max_inbound: 30,
             },
             reputation_weights: Default::default(),
+            ban_list: Default::default(),
         }
+    }
+}
+
+/// Configuration for the automatic removal of unwanted peers
+#[derive(Debug, Default)]
+pub struct BanList {
+    /// blacklisted peer ids
+    blacklisted_peers: HashSet<PeerId>,
+    /// blacklisted ips
+    blacklisted_ips: HashSet<IpAddr>,
+}
+
+impl BanList {
+    /// checks the ban list for the given ip address and peer_id and returns true
+    /// if the address is in the ban list
+    pub(self) fn is_banned(&self, ip: &IpAddr, peer_id: &PeerId) -> bool {
+        self.blacklisted_ips.contains(ip) || self.blacklisted_peers.contains(peer_id)
     }
 }
