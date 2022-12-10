@@ -104,23 +104,20 @@ async fn test_incoming_connect_with_single_geth() {
     // instantiate geth and add ourselves as a peer
     let temp_dir = tempfile::tempdir().unwrap().into_path();
     let geth = Geth::new().data_dir(temp_dir).disable_discovery().spawn();
-
-    let geth_p2p_port = geth.p2p_port().unwrap();
-    let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
     let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-    println!("geth endpoint: {}", geth_endpoint);
     let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
 
     // get the peer id we should be expecting
     let geth_peer_id: PeerId =
         provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
-    // this is a bit long - is there a better way to get the peerid
-
     // force geth to dial us, making geth an inbound peer
     let our_peer_id = handle.peer_id();
-    let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), geth_socket);
+    // incoming test - do not mistake reth for geth or else geth will try to dial itself with an
+    // incorrect enode and this will stall!
+    let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), reth_socket);
+
     provider.add_peer(our_enode).await.unwrap();
 
     // create networkeventstream to get the next session established event easily
