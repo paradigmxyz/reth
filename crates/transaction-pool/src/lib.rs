@@ -1,6 +1,11 @@
 #![warn(missing_docs)]
-// unreachable_pub, missing_debug_implementations
-#![deny(unused_must_use, rust_2018_idioms)]
+#![deny(
+    unused_must_use,
+    rust_2018_idioms,
+    unreachable_pub,
+    missing_debug_implementations,
+    rustdoc::broken_intra_doc_links
+)]
 #![doc(test(
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
@@ -105,6 +110,7 @@ mod validate;
 mod test_util;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
+#[derive(Debug)]
 pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
     /// Arc'ed instance of the pool internals
     pool: Arc<PoolInner<V, T>>,

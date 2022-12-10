@@ -386,7 +386,7 @@ impl FromRecoveredTransaction for MockTransaction {
 
 #[derive(Default)]
 pub struct MockTransactionFactory {
-    pub ids: SenderIdentifiers,
+    pub(crate) ids: SenderIdentifiers,
 }
 
 // === impl MockTransactionFactory ===

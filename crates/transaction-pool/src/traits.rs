@@ -172,7 +172,7 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
     Local,
