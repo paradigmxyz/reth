@@ -590,8 +590,6 @@ async fn authenticate(
     status: Status,
     fork_filter: ForkFilter,
 ) {
-    // we know the ip so we can close the stream before auth
-
     let stream = match direction {
         Direction::Incoming => match ECIESStream::incoming(stream, secret_key).await {
             Ok(stream) => stream,
