@@ -4,10 +4,12 @@ use reth_eth_wire::DisconnectReason;
 use reth_primitives::PeerId;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    fmt::Display,
     net::{IpAddr, SocketAddr},
     task::{Context, Poll},
     time::Duration,
 };
+use thiserror::Error;
 use tokio::{
     sync::mpsc,
     time::{Instant, Interval},
@@ -528,9 +530,16 @@ impl BanList {
     }
 }
 
+#[derive(Debug, Error)]
 pub enum InboundConnectionError {
     ExceedsLimit(usize),
     IpBanned,
+}
+
+impl Display for InboundConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
 }
 
 #[cfg(test)]
@@ -557,6 +566,7 @@ mod test {
 
         assert!(peer_manager.peers.is_empty());
     }
+
     #[tokio::test]
     async fn test_on_pending_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
@@ -566,7 +576,15 @@ mod test {
         let mut peer_manager = PeersManager::new(config);
         let a = peer_manager.on_inbound_pending_session(socket_addr.ip());
         // because we have no active peers this should be fine for testings
-        assert!(a.is_err());
+        match a {
+            Ok(_) => panic!(),
+            Err(err) => match err {
+                super::InboundConnectionError::IpBanned {} => {}
+                super::InboundConnectionError::ExceedsLimit { .. } => {
+                    panic!()
+                }
+            },
+        }
     }
 
     #[tokio::test]
@@ -579,7 +597,7 @@ mod test {
         let mut peer_manager = PeersManager::new(config);
         peer_manager.on_active_inbound_session(given_peer_id, socket_addr);
 
-        let Some(PeerAction::DisconnectBannedIncoming { peer_id }) = peer_manager.queued_actions.pop_front() else { panic!()};
+        let Some(PeerAction::DisconnectBannedIncoming { peer_id }) = peer_manager.queued_actions.pop_front() else { panic!() };
 
         assert_eq!(peer_id, given_peer_id)
     }
