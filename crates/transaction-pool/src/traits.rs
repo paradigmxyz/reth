@@ -9,8 +9,11 @@ use tokio::sync::mpsc::Receiver;
 /// This is intended to be used by API-consumers such as RPC that need inject new incoming,
 /// unverified transactions. And by block production that needs to get transactions to execute in a
 /// new block.
+///
+/// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
+/// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[async_trait::async_trait]
-pub trait TransactionPool: Send + Sync + 'static {
+pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
