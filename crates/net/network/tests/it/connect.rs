@@ -105,52 +105,6 @@ async fn test_incoming_node_id_blacklist() {
         provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
     let ban_list = BanList::new(HashSet::from_iter(vec![geth_peer_id]), HashSet::default());
-    session_connect_disconnect_with_config(
-        secret_key,
-        reth_socket,
-        geth_peer_id,
-        ban_list,
-        provider,
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_incoming_ip_blacklist() {
-    reth_tracing::init_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-
-    let reth_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
-
-    // instantiate geth and add ourselves as a peer
-    let temp_dir = tempfile::tempdir().unwrap().into_path();
-    let geth = Geth::new().data_dir(temp_dir).disable_discovery().spawn();
-    let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-    let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
-
-    // get the peer id we should be expecting
-    let geth_peer_id: PeerId =
-        provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
-
-    let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![geth_endpoint.ip()]));
-
-    session_connect_disconnect_with_config(
-        secret_key,
-        reth_socket,
-        geth_peer_id,
-        ban_list,
-        provider,
-    )
-    .await;
-}
-
-async fn session_connect_disconnect_with_config(
-    secret_key: SecretKey,
-    reth_socket: SocketAddr,
-    geth_peer_id: PeerId,
-    ban_list: BanList,
-    provider: Provider<Http>,
-) {
     let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
     let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)

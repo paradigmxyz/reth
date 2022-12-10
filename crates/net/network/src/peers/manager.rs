@@ -97,11 +97,17 @@ impl PeersManager {
 
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
-    /// Returns an Err with the configured limit with the number of accepted incoming connections
-    /// exceeded the configured limit.
-    pub(crate) fn on_inbound_pending_session(&mut self) -> Result<(), usize> {
+    /// returns an error if the inbound ip address is on the ban list or
+    /// we have reached our limit for max inbound connections
+    pub(crate) fn on_inbound_pending_session(
+        &mut self,
+        addr: IpAddr,
+    ) -> Result<(), InboundConnectionError> {
+        if self.ban_list.banned_ip(&addr) {
+            return Err(InboundConnectionError::IpBanned)
+        }
         if !self.connection_info.has_in_capacity() {
-            return Err(self.connection_info.max_inbound)
+            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound))
         }
 
         // keep track of new connection
@@ -121,7 +127,9 @@ impl PeersManager {
     /// If the reputation of the peer is below the `BANNED_REPUTATION` threshold, a disconnect will
     /// be scheduled.
     pub(crate) fn on_active_inbound_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        if self.ban_list.is_banned(&addr.ip(), &peer_id) {
+        // we only need to check the peer id here as the ip address will have been checked at
+        // on_inbound_pending_session
+        if self.ban_list.banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
             return
         }
@@ -184,7 +192,7 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address will e updated. If the addresses differ, the
+    /// If the peer already exists, then the address will be updated. If the addresses differ, the
     /// old address is returned
     pub(crate) fn add_discovered_node(&mut self, peer_id: PeerId, addr: SocketAddr) {
         if self.ban_list.is_banned(&addr.ip(), &peer_id) {
@@ -518,4 +526,9 @@ impl BanList {
     pub(self) fn is_banned(&self, ip: &IpAddr, peer_id: &PeerId) -> bool {
         self.banned_ip(ip) || self.banned_peer(peer_id)
     }
+}
+
+pub enum InboundConnectionError {
+    ExceedsLimit(usize),
+    IpBanned,
 }
