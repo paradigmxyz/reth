@@ -28,7 +28,7 @@ impl<Pool, Client> EthPubSub<Pool, Client> {
 
 impl<Pool, Client> EthPubSubApiServer for EthPubSub<Pool, Client>
 where
-    Pool: TransactionPool + Clone,
+    Pool: TransactionPool + 'static,
     Client: BlockProvider + 'static,
 {
     fn subscribe(
