@@ -107,7 +107,7 @@ pub struct TransactionsManager<Pool> {
 
 impl<Pool> TransactionsManager<Pool>
 where
-    Pool: TransactionPool + Clone,
+    Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     /// Sets up a new instance.
@@ -377,7 +377,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<Pool> Future for TransactionsManager<Pool>
 where
-    Pool: TransactionPool + Clone + Unpin,
+    Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     type Output = ();

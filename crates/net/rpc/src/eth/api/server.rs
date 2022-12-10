@@ -5,7 +5,7 @@ use crate::{eth::api::EthApi, result::ToRpcResult};
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockNumber, Bytes, Transaction, H256, H64, U256, U64,
+    Address, BlockNumber, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -19,7 +19,7 @@ use serde_json::Value;
 #[async_trait::async_trait]
 impl<Pool, Client> EthApiServer for EthApi<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = Transaction> + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
 {
     fn protocol_version(&self) -> Result<U64> {
