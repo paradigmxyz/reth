@@ -91,7 +91,7 @@ pub struct TxPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub fn new(ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub(crate) fn new(ordering: Arc<T>, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering),
@@ -376,7 +376,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// If the current size exceeds the given bounds, the worst transactions are evicted from the
     /// pool and returned.
-    pub fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
         // Helper macro that discards the worst transactions for the pools
@@ -438,11 +438,17 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 }
 
+impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TxPool").field("config", &self.config).finish_non_exhaustive()
+    }
+}
+
 /// Container for _all_ transaction in the pool.
 ///
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
-pub struct AllTransactions<T: PoolTransaction> {
+pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Expected base fee for the pending block.
     pending_basefee: U256,
     /// Minimum base fee required by the protol.
