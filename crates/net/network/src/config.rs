@@ -1,3 +1,5 @@
+//! Network config support
+
 use crate::{
     import::{BlockImport, ProofOfStakeBlockImport},
     peers::PeersConfig,
@@ -11,6 +13,19 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
+
+/// reexports for convenience
+#[doc(hidden)]
+mod __reexport {
+    pub use reth_discv4::bootnodes::*;
+    pub use secp256k1::SecretKey;
+}
+pub use __reexport::*;
+
+/// Convenience function to create a new random [`SecretKey`]
+pub fn rng_secret_key() -> SecretKey {
+    SecretKey::new(&mut rand::thread_rng())
+}
 
 /// All network related initialization settings.
 pub struct NetworkConfig<C> {
@@ -28,7 +43,7 @@ pub struct NetworkConfig<C> {
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
-    /// How to configure the [`SessionManager`]
+    /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
     /// A fork identifier as defined by EIP-2124.
     /// Serves as the chain compatibility identifier.

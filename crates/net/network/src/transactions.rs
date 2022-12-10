@@ -99,7 +99,7 @@ pub struct TransactionsManager<Pool> {
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
-    /// Incoming events from the [`NetworkManager`]
+    /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
 }
 
@@ -112,7 +112,7 @@ where
 {
     /// Sets up a new instance.
     ///
-    /// Note: This expects an existing [`NetworkManager`] instance.
+    /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
     pub fn new(
         network: NetworkHandle,
         pool: Pool,

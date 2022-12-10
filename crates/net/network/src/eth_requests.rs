@@ -54,7 +54,7 @@ pub struct EthRequestHandler<C> {
     #[allow(unused)]
     // TODO use to report spammers
     peers: PeersHandle,
-    /// Incoming request from the [`NetworkManager`].
+    /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
 }
 

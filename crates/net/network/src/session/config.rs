@@ -1,4 +1,4 @@
-//! Configuration types for [`SessionsManager`]
+//! Configuration types for [SessionManager](crate::session::SessionManager).
 
 use crate::session::{Direction, ExceedsSessionLimit};
 use std::time::Duration;
@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Default request timeout.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(500u64);
 
-/// Configuration options when creating a [`SessionsManager`].
+/// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 pub struct SessionsConfig {
     /// Size of the session command buffer (per session task).
     pub session_command_buffer: usize,
