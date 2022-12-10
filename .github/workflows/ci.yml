@@ -36,6 +36,7 @@ jobs:
             mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
             chmod u+x "$HOME/bin/geth"
             export PATH=$HOME/bin:$PATH
+            echo $HOME/bin >> $GITHUB_PATH
             geth version
 
       - name: Install latest nextest release
