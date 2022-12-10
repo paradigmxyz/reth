@@ -478,19 +478,44 @@ impl Default for PeersConfig {
     }
 }
 
+impl PeersConfig {
+    /// A set of peer_ids and ip addr that we want to never connect to
+    pub fn with_ban_list(mut self, ban_list: BanList) -> Self {
+        self.ban_list = ban_list;
+        self
+    }
+}
+
 /// Configuration for the automatic removal of unwanted peers
 #[derive(Debug, Default)]
 pub struct BanList {
-    /// blacklisted peer ids
-    blacklisted_peers: HashSet<PeerId>,
-    /// blacklisted ips
-    blacklisted_ips: HashSet<IpAddr>,
+    /// banned peer ids
+    banned_peers: HashSet<PeerId>,
+    /// banned ips
+    banned_ips: HashSet<IpAddr>,
 }
 
 impl BanList {
+    /// creates a new instance from existing values
+    pub fn new(banned_peers: HashSet<PeerId>, banned_ips: HashSet<IpAddr>) -> Self {
+        Self { banned_ips, banned_peers }
+    }
+
+    /// checks the ban list to see if it contains the given ip
+    #[inline]
+    pub(self) fn banned_ip(&self, ip: &IpAddr) -> bool {
+        self.banned_ips.contains(ip)
+    }
+
+    /// checks the banned list to see if it contains the given peer id
+    #[inline]
+    pub(self) fn banned_peer(&self, peer_id: &PeerId) -> bool {
+        self.banned_peers.contains(peer_id)
+    }
     /// checks the ban list for the given ip address and peer_id and returns true
     /// if the address is in the ban list
+    #[inline]
     pub(self) fn is_banned(&self, ip: &IpAddr, peer_id: &PeerId) -> bool {
-        self.blacklisted_ips.contains(ip) || self.blacklisted_peers.contains(peer_id)
+        self.banned_ip(ip) || self.banned_peer(peer_id)
     }
 }

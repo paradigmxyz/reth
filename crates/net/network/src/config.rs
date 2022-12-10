@@ -122,6 +122,12 @@ impl<C> NetworkConfigBuilder<C> {
         }
     }
 
+    /// set a custom peer config for how peers are handled
+    pub fn peer_config(mut self, config: PeersConfig) -> Self {
+        self.peers_config = Some(config);
+        self
+    }
+
     /// Sets a custom config for how sessions are handled.
     pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
