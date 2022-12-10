@@ -532,3 +532,55 @@ pub enum InboundConnectionError {
     ExceedsLimit(usize),
     IpBanned,
 }
+
+#[cfg(test)]
+mod test {
+    use std::{
+        collections::HashSet,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+    };
+
+    use reth_primitives::{PeerId, H512};
+
+    use crate::{peers::PeerAction, BanList, PeersConfig};
+
+    use super::PeersManager;
+
+    #[tokio::test]
+    async fn test_discovery_ban_list() {
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
+        let socket_addr = SocketAddr::new(ip, 8008);
+        let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![ip]));
+        let config = PeersConfig::default().with_ban_list(ban_list);
+        let mut peer_manager = PeersManager::new(config);
+        peer_manager.add_discovered_node(H512::default(), socket_addr);
+
+        assert!(peer_manager.peers.is_empty());
+    }
+    #[tokio::test]
+    async fn test_on_pending_ban_list() {
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
+        let socket_addr = SocketAddr::new(ip, 8008);
+        let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![ip]));
+        let config = PeersConfig::default().with_ban_list(ban_list);
+        let mut peer_manager = PeersManager::new(config);
+        let a = peer_manager.on_inbound_pending_session(socket_addr.ip());
+        // because we have no active peers this should be fine for testings
+        assert!(a.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_on_active_inbound_ban_list() {
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
+        let socket_addr = SocketAddr::new(ip, 8008);
+        let given_peer_id: PeerId = H512::from_low_u64_ne(123403423412);
+        let ban_list = BanList::new(HashSet::from_iter(vec![given_peer_id]), HashSet::default());
+        let config = PeersConfig::default().with_ban_list(ban_list);
+        let mut peer_manager = PeersManager::new(config);
+        peer_manager.on_active_inbound_session(given_peer_id, socket_addr);
+
+        let Some(PeerAction::DisconnectBannedIncoming { peer_id }) = peer_manager.queued_actions.pop_front() else { panic!()};
+
+        assert_eq!(peer_id, given_peer_id)
+    }
+}
