@@ -5,8 +5,13 @@ use reth_primitives::keccak256;
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
-use std::{fmt, net::{IpAddr, Ipv4Addr, SocketAddr}, num::ParseIntError, str::FromStr};
-use std::fmt::Write;
+use std::{
+    fmt,
+    fmt::Write,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::ParseIntError,
+    str::FromStr,
+};
 use url::{Host, Url};
 
 /// The key type for the table.
