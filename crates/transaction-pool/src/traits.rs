@@ -240,7 +240,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     fn hash(&self) -> &TxHash;
 
     /// The Sender of the transaction.
-    fn sender(&self) -> &Address;
+    fn sender(&self) -> Address;
 
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64;

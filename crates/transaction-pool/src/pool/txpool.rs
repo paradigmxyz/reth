@@ -238,7 +238,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
             }
             Err(InsertErr::ExceededSenderTransactionsCapacity { transaction }) => {
-                Err(PoolError::SpammerExceededCapacity(*transaction.sender(), *transaction.hash()))
+                Err(PoolError::SpammerExceededCapacity(transaction.sender(), *transaction.hash()))
             }
         }
     }

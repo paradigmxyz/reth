@@ -194,7 +194,7 @@ where
     ) -> PoolResult<TxHash> {
         match tx {
             TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
-                let sender_id = self.get_sender_id(*transaction.sender());
+                let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 let tx = ValidPoolTransaction {
