@@ -9,8 +9,8 @@ use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
-use reth_provider::test_utils::TestApi;
 use reth_primitives::PeerId;
+use reth_provider::test_utils::TestApi;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
