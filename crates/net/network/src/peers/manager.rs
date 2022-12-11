@@ -494,6 +494,34 @@ impl PeersConfig {
         self.ban_list = ban_list;
         self
     }
+
+    /// Maximum occupied slots for outbound connections.
+    pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
+        self.connection_info.num_inbound = num_outbound;
+        self
+    }
+
+    /// Maximum occupied slots for inbound connections.
+    pub fn with_max_pending_inbound(mut self, num_inbound: usize) -> Self {
+        self.connection_info.num_inbound = num_inbound;
+        self
+    }
+    /// Maximum allowed outbound connections.
+    pub fn with_max_outbound(mut self, max_outbound: usize) -> Self {
+        self.connection_info.max_outbound = max_outbound;
+        self
+    }
+    /// Maximum allowed inbound connections.
+    pub fn with_max_inbound(mut self, max_inbound: usize) -> Self {
+        self.connection_info.max_inbound = max_inbound;
+        self
+    }
+
+    /// How often to recheck free slots for outbound connections
+    pub fn with_slot_refill_interval(mut self, interval: Duration) -> Self {
+        self.refill_slots_interval = interval;
+        self
+    }
 }
 
 /// Configuration for the automatic removal of unwanted peers
