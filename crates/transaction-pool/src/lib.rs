@@ -84,14 +84,14 @@ pub use crate::{
     ordering::TransactionOrdering,
     traits::{
         BestTransactions, OnNewBlockEvent, PoolTransaction, PropagateKind, PropagatedTransactions,
-        TransactionPool,
+        TransactionOrigin, TransactionPool,
     },
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{
     error::PoolResult,
     pool::PoolInner,
-    traits::{NewTransactionEvent, PoolSize, TransactionOrigin},
+    traits::{NewTransactionEvent, PoolSize},
     validate::ValidPoolTransaction,
 };
 use reth_primitives::{TxHash, U256};
