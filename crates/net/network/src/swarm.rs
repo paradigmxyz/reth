@@ -2,6 +2,7 @@ use crate::{
     fetch::StatusUpdate,
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
+    peers::InboundConnectionError,
     session::{Direction, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
@@ -172,10 +173,20 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
-                if let Err(limit) = self.state_mut().peers_mut().on_inbound_pending_session() {
-                    // We currently don't have additional capacity to establish a session from an
-                    // incoming connection, so we drop the connection.
-                    trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                if let Err(err) =
+                    self.state_mut().peers_mut().on_inbound_pending_session(remote_addr.ip())
+                {
+                    match err {
+                        InboundConnectionError::IpBanned => {
+                            trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
+                        }
+                        InboundConnectionError::ExceedsLimit(limit) => {
+                            // We currently don't have additional capacity to establish a session
+                            // from an incoming connection, so we drop
+                            // the connection.
+                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                        }
+                    }
                     return None
                 }
 

@@ -143,6 +143,12 @@ impl<C> NetworkConfigBuilder<C> {
         }
     }
 
+    /// set a custom peer config for how peers are handled
+    pub fn peer_config(mut self, config: PeersConfig) -> Self {
+        self.peers_config = Some(config);
+        self
+    }
+
     /// Sets the executor to use for spawning tasks.
     pub fn executor(mut self, executor: TaskExecutor) -> Self {
         self.executor = Some(executor);

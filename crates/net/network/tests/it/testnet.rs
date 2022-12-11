@@ -289,6 +289,15 @@ impl NetworkEventStream {
         Self { inner }
     }
 
+    pub async fn next_session_closed(&mut self) -> Option<PeerId> {
+        while let Some(ev) = self.inner.next().await {
+            match ev {
+                NetworkEvent::SessionClosed { peer_id } => return Some(peer_id),
+                NetworkEvent::SessionEstablished { .. } => continue,
+            }
+        }
+        None
+    }
     /// Awaits the next event for an established session
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
