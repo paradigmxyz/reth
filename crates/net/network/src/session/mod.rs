@@ -628,8 +628,8 @@ async fn authenticate(
             }
         }
     };
-
     let unauthed = UnauthedP2PStream::new(stream);
+
     let auth = authenticate_stream(
         unauthed,
         session_id,
@@ -697,7 +697,6 @@ async fn authenticate_stream(
             }
         }
     };
-
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
