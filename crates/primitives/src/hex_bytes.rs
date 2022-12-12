@@ -273,9 +273,16 @@ mod tests {
         let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         let mut buf = Vec::new();
         b.encode(&mut buf);
-
         let expected: Vec<u8> = vec![136, 1, 35, 69, 103, 137, 171, 205, 239];
         assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn test_decodable_decode() {
+        let buf: Vec<u8> = vec![136, 1, 35, 69, 103, 137, 171, 205, 239];
+        let b = Bytes::decode(&mut &buf[..]).unwrap();
+        let expected = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        assert_eq!(b, expected);
     }
 
     #[test]
