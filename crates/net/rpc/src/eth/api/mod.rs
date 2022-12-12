@@ -10,11 +10,22 @@ use std::sync::Arc;
 
 mod server;
 
+/// `Eth` API trait.
+///
+/// Defines core functionality of the `eth` API implementation.
+pub trait EthApiSpec {
+    fn protocol_version(&self) -> U64;
+
+    fn block_number(&self) -> Result<U256>;
+
+    fn chain_id(&self) -> U64;
+}
+
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
-/// These are implemented two-fold: Core functionality is implemented as functions directly on this
-/// type. Additionally, the required server implementations (e.g. [`reth_rpc_api::EthApiServer`])
+/// These are implemented two-fold: Core functionality is implemented as [EthApiSpec]
+/// trait. Additionally, the required server implementations (e.g. [`reth_rpc_api::EthApiServer`])
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
@@ -39,17 +50,28 @@ where
     fn client(&self) -> &Arc<Client> {
         &self.inner.client
     }
+}
 
+impl<Pool, Client> EthApiSpec for EthApi<Pool, Client>
+where
+    Pool: TransactionPool<Transaction = Transaction> + Clone,
+    Client: BlockProvider + StateProviderFactory,
+{
     /// Returns the current ethereum protocol version.
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
-    pub fn protocol_version(&self) -> U64 {
+    fn protocol_version(&self) -> U64 {
         1u64.into()
     }
 
     /// Returns the best block number
-    pub fn block_number(&self) -> Result<U256> {
+    fn block_number(&self) -> Result<U256> {
         Ok(self.client().chain_info()?.best_number.into())
+    }
+
+    /// Returns the chain id
+    fn chain_id(&self) -> U64 {
+        todo!()
     }
 }
 

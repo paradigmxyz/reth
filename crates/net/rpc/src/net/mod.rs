@@ -3,26 +3,28 @@ use reth_network::NetworkHandle;
 use reth_rpc_api::NetApiServer;
 use reth_rpc_types::PeerCount;
 
+use crate::eth::EthApiSpec;
+
 /// `Net` API implementation.
 ///
-/// This type provides the functionality for handling `net_` related requests.
+/// This type provides the functionality for handling `net` related requests.
 pub struct NetApi {
     /// An interface to interact with the network
     network: NetworkHandle,
-    /// The devp2p network ID
-    network_id: String,
+    /// The implementation of `eth` API
+    eth: Box<dyn EthApiSpec + Send + Sync>,
 }
 
 impl std::fmt::Debug for NetApi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NetApi").field("network_id", &self.network_id).finish_non_exhaustive()
+        f.debug_struct("NetApi").finish_non_exhaustive()
     }
 }
 
 /// Net rpc implementation
 impl NetApiServer for NetApi {
     fn version(&self) -> Result<String> {
-        Ok(self.network_id.clone())
+        Ok(self.eth.chain_id())
     }
 
     fn peer_count(&self) -> Result<PeerCount> {
