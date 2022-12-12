@@ -203,9 +203,18 @@ mod tests {
     fn test_from_bytes() {
         let b = bytes::Bytes::from("0123456789abcdef");
         let wrapped_b = Bytes::from(b.clone());
-        let expected_b = Bytes { 0: b };
+        let expected = Bytes { 0: b };
 
-        assert_eq!(wrapped_b, expected_b);
+        assert_eq!(wrapped_b, expected);
+    }
+    
+    #[test]
+    fn test_from_slice() {
+        let arr = [1, 35, 69, 103, 137, 171, 205, 239];
+        let b = Bytes::from(&arr);
+        let expected = Bytes { 0: bytes::Bytes::from(arr.to_vec()) };
+
+        assert_eq!(b, expected);
     }
 
     #[test]
@@ -241,5 +250,31 @@ mod tests {
         let b = Bytes::from(vec.clone());
 
         assert_eq!(b.to_vec(), vec);
+    }
+
+    #[test]
+    fn test_encodable_length_lt_56() {
+        let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        // since the payload length is less than 56, this should give the length 
+        // of the array + 1 = 9
+        assert_eq!(b.length(), 9);
+    }
+
+    #[test]
+    fn test_encodable_length_gt_56() {
+        let b = Bytes::from(vec![255; 57]);
+        // since the payload length is greater than 56, this should give the length 
+        // of the array + (1 + 8 - payload_length.leading_zeros() as usize / 8) = 59
+        assert_eq!(b.length(), 59);
+    }
+
+    #[test]
+    fn test_encodable_encode() {
+        let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        let mut buf = Vec::new();
+        b.encode(&mut buf);
+
+        let expected: Vec<u8> = vec![136, 1, 35, 69, 103, 137, 171, 205, 239];
+        assert_eq!(buf, expected);
     }
 }
