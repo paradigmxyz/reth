@@ -207,7 +207,7 @@ mod tests {
 
         assert_eq!(wrapped_b, expected);
     }
-    
+
     #[test]
     fn test_from_slice() {
         let arr = [1, 35, 69, 103, 137, 171, 205, 239];
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn test_encodable_length_lt_56() {
         let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
-        // since the payload length is less than 56, this should give the length 
+        // since the payload length is less than 56, this should give the length
         // of the array + 1 = 9
         assert_eq!(b.length(), 9);
     }
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn test_encodable_length_gt_56() {
         let b = Bytes::from(vec![255; 57]);
-        // since the payload length is greater than 56, this should give the length 
+        // since the payload length is greater than 56, this should give the length
         // of the array + (1 + 8 - payload_length.leading_zeros() as usize / 8) = 59
         assert_eq!(b.length(), 59);
     }
