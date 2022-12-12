@@ -6,7 +6,10 @@ use reth_rlp::{Decodable, DecodeError, Encodable};
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
+    fmt,
+    fmt::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::ParseIntError,
     str::FromStr,
 };
 use url::{Host, Url};
@@ -82,6 +85,23 @@ impl NodeRecord {
     }
 }
 
+impl fmt::Display for NodeRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("enode://")?;
+        hex::encode(self.id.as_bytes()).fmt(f)?;
+        f.write_char('@')?;
+        self.address.fmt(f)?;
+        f.write_char(':')?;
+        self.tcp_port.fmt(f)?;
+        if self.tcp_port != self.udp_port {
+            f.write_str("?discport=")?;
+            self.udp_port.fmt(f)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Possible error types when parsing a `NodeRecord`
 #[derive(Debug, thiserror::Error)]
 pub enum NodeRecordParseError {
@@ -89,6 +109,8 @@ pub enum NodeRecordParseError {
     InvalidUrl(String),
     #[error("Failed to parse id")]
     InvalidId(String),
+    #[error("Failed to discport query: {0}")]
+    Discport(ParseIntError),
 }
 
 impl FromStr for NodeRecord {
@@ -110,12 +132,25 @@ impl FromStr for NodeRecord {
             .port()
             .ok_or_else(|| NodeRecordParseError::InvalidUrl("no port specified".to_string()))?;
 
+        let udp_port = if let Some(discovery_port) =
+            url.query_pairs().find_map(|(maybe_disc, port)| {
+                if maybe_disc.as_ref() == "discport" {
+                    Some(port)
+                } else {
+                    None
+                }
+            }) {
+            discovery_port.parse::<u16>().map_err(NodeRecordParseError::Discport)?
+        } else {
+            port
+        };
+
         let id = url
             .username()
             .parse::<PeerId>()
             .map_err(|e| NodeRecordParseError::InvalidId(e.to_string()))?;
 
-        Ok(Self { address, id, tcp_port: port, udp_port: port })
+        Ok(Self { address, id, tcp_port: port, udp_port })
     }
 }
 
@@ -215,5 +250,31 @@ mod tests {
             let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
             assert_eq!(record, decoded);
         }
+    }
+
+    #[test]
+    fn test_url_parse() {
+        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let node: NodeRecord = url.parse().unwrap();
+        assert_eq!(node, NodeRecord {
+            address: IpAddr::V4([10,3,58,6].into()),
+            tcp_port: 30303,
+            udp_port: 30301,
+            id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
+        })
+    }
+
+    #[test]
+    fn test_node_display() {
+        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
+        let node: NodeRecord = url.parse().unwrap();
+        assert_eq!(url, &format!("{node}"));
+    }
+
+    #[test]
+    fn test_node_display_discport() {
+        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let node: NodeRecord = url.parse().unwrap();
+        assert_eq!(url, &format!("{node}"));
     }
 }
