@@ -68,7 +68,7 @@ pub enum BlockRequest {
 
 /// Protocol related request messages that expect a response
 #[derive(Debug)]
-#[allow(clippy::enum_variant_names)]
+#[allow(clippy::enum_variant_names, missing_docs)]
 pub enum PeerRequest {
     /// Request Block headers from the peer.
     ///
