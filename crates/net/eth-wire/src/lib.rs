@@ -27,5 +27,5 @@ pub use crate::{
     disconnect::DisconnectReason,
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
     hello::HelloMessage,
-    p2pstream::{P2PStream, ProtocolVersion, UnauthedP2PStream},
+    p2pstream::{P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream},
 };

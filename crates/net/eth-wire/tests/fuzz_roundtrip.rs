@@ -1,7 +1,6 @@
 //! Round-trip encoding fuzzing for the `eth-wire` crate.
 use std::fmt::Debug;
 
-use reth_eth_wire::{DisconnectReason, HelloMessage};
 use reth_rlp::{Decodable, Encodable};
 use serde::Serialize;
 use test_fuzz::test_fuzz;
@@ -37,7 +36,32 @@ macro_rules! fuzz_type_and_name {
 #[cfg(any(test, feature = "bench"))]
 pub mod fuzz_rlp {
     use super::*;
+    use reth_eth_wire::{
+        BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
+        GetPooledTransactions, GetReceipts, HelloMessage, NewBlock, NewBlockHashes,
+        NewPooledTransactionHashes, NodeData, P2PMessage, PooledTransactions, Receipts, Status,
+        Transactions,
+    };
 
+    // p2p subprotocol messages
     fuzz_type_and_name!(HelloMessage, fuzz_HelloMessage);
     fuzz_type_and_name!(DisconnectReason, fuzz_DisconnectReason);
+    fuzz_type_and_name!(P2PMessage, fuzz_P2PMessage);
+
+    // eth subprotocol messages
+    fuzz_type_and_name!(Status, fuzz_Status);
+    fuzz_type_and_name!(NewBlockHashes, fuzz_NewBlockHashes);
+    fuzz_type_and_name!(Transactions, fuzz_Transactions);
+    fuzz_type_and_name!(GetBlockHeaders, fuzz_GetBlockHeaders);
+    fuzz_type_and_name!(BlockHeaders, fuzz_BlockHeaders);
+    fuzz_type_and_name!(GetBlockBodies, fuzz_GetBlockBodies);
+    fuzz_type_and_name!(BlockBodies, fuzz_BlockBodies);
+    fuzz_type_and_name!(NewBlock, fuzz_NewBlock);
+    fuzz_type_and_name!(NewPooledTransactionHashes, fuzz_NewPooledTransactionHashes);
+    fuzz_type_and_name!(GetPooledTransactions, fuzz_GetPooledTransactions);
+    fuzz_type_and_name!(PooledTransactions, fuzz_PooledTransactions);
+    fuzz_type_and_name!(GetNodeData, fuzz_GetNodeData);
+    fuzz_type_and_name!(NodeData, fuzz_NodeData);
+    fuzz_type_and_name!(GetReceipts, fuzz_GetReceipts);
+    fuzz_type_and_name!(Receipts, fuzz_Receipts);
 }

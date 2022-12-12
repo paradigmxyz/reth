@@ -523,7 +523,7 @@ pub fn set_capability_offsets(
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
     Hello(HelloMessage),
