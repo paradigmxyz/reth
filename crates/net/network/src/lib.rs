@@ -58,7 +58,7 @@ mod fetch;
 mod import;
 mod listener;
 mod manager;
-mod message;
+pub mod message;
 mod network;
 pub mod peers;
 mod session;
