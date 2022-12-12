@@ -283,9 +283,11 @@ mod tests {
         let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
         let b = Bytes::from(vec.clone());
         assert_eq!(b, vec);
+        assert_eq!(vec, b);
 
         let wrong_vec = vec![1, 3, 52, 137];
         assert_ne!(b, wrong_vec);
+        assert_ne!(wrong_vec, b);
     }
 
     #[test]
@@ -293,9 +295,11 @@ mod tests {
         let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
         let b = Bytes::from(vec.clone());
         assert_eq!(b, vec[..]);
+        assert_eq!(vec[..], b);
 
         let wrong_vec = vec![1, 3, 52, 137];
         assert_ne!(b, wrong_vec[..]);
+        assert_ne!(wrong_vec[..], b);
     }
 
     #[test]
