@@ -6,7 +6,7 @@ use std::collections::HashMap;
 ///
 /// This assigns a _unique_ `SenderId` for a new `Address`.
 #[derive(Debug, Default)]
-pub struct SenderIdentifiers {
+pub(crate) struct SenderIdentifiers {
     /// The identifier to use next.
     id: u64,
     /// Assigned `SenderId` for an `Address`.
@@ -18,17 +18,17 @@ pub struct SenderIdentifiers {
 impl SenderIdentifiers {
     /// Returns the address for the given identifier.
     #[allow(unused)]
-    pub fn address(&self, id: &SenderId) -> Option<&Address> {
+    pub(crate) fn address(&self, id: &SenderId) -> Option<&Address> {
         self.sender_to_address.get(id)
     }
 
     /// Returns the `SenderId` that belongs to the given address, if it exists
-    pub fn sender_id(&self, addr: &Address) -> Option<SenderId> {
+    pub(crate) fn sender_id(&self, addr: &Address) -> Option<SenderId> {
         self.address_to_id.get(addr).copied()
     }
 
     /// Returns the existing `SendId` or assigns a new one if it's missing
-    pub fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
+    pub(crate) fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
         if let Some(id) = self.sender_id(&addr) {
             return id
         }

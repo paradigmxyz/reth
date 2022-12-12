@@ -1,3 +1,5 @@
+//! Network config support
+
 use crate::{
     import::{BlockImport, ProofOfStakeBlockImport},
     peers::PeersConfig,
@@ -5,11 +7,25 @@ use crate::{
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{Chain, ForkId, H256};
+use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
+
+/// reexports for convenience
+#[doc(hidden)]
+mod __reexport {
+    pub use reth_discv4::bootnodes::*;
+    pub use secp256k1::SecretKey;
+}
+pub use __reexport::*;
+
+/// Convenience function to create a new random [`SecretKey`]
+pub fn rng_secret_key() -> SecretKey {
+    SecretKey::new(&mut rand::thread_rng())
+}
 
 /// All network related initialization settings.
 pub struct NetworkConfig<C> {
@@ -27,7 +43,7 @@ pub struct NetworkConfig<C> {
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
-    /// How to configure the [`SessionManager`]
+    /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
     /// A fork identifier as defined by EIP-2124.
     /// Serves as the chain compatibility identifier.
@@ -40,6 +56,8 @@ pub struct NetworkConfig<C> {
     pub block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
+    /// The executor to use for spawning tasks.
+    pub executor: Option<TaskExecutor>,
 }
 
 // === impl NetworkConfig ===
@@ -98,6 +116,8 @@ pub struct NetworkConfigBuilder<C> {
     block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     network_mode: NetworkMode,
+    /// The executor to use for spawning tasks.
+    executor: Option<TaskExecutor>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -119,7 +139,20 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash: Default::default(),
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
+            executor: None,
         }
+    }
+
+    /// set a custom peer config for how peers are handled
+    pub fn peer_config(mut self, config: PeersConfig) -> Self {
+        self.peers_config = Some(config);
+        self
+    }
+
+    /// Sets the executor to use for spawning tasks.
+    pub fn executor(mut self, executor: TaskExecutor) -> Self {
+        self.executor = Some(executor);
+        self
     }
 
     /// Sets a custom config for how sessions are handled.
@@ -180,6 +213,7 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash,
             block_import,
             network_mode,
+            executor,
         } = self;
         NetworkConfig {
             client,
@@ -199,6 +233,7 @@ impl<C> NetworkConfigBuilder<C> {
             genesis_hash,
             block_import,
             network_mode,
+            executor,
         }
     }
 }

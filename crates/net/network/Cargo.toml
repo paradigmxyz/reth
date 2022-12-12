@@ -18,7 +18,9 @@ reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
 reth-rlp = { path = "../../common/rlp" }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
+reth-provider = { path = "../../storage/provider"}
 
 # async/futures
 futures = "0.3"
@@ -36,7 +38,7 @@ async-trait = "0.1"
 bytes = "1.2"
 either = "1.8"
 linked_hash_set = "0.1"
-
+rand = "0.8"
 secp256k1 = { version = "0.24", features = [
     "global-context",
     "rand-std",
@@ -46,7 +48,12 @@ secp256k1 = { version = "0.24", features = [
 [dev-dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+enr = { git = "https://github.com/sigp/enr", features = ["serde", "rust-secp256k1"] }
+hex = "0.4"
+tempfile = "3.3"
 
-rand = "0.8"
 

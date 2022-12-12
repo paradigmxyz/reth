@@ -4,15 +4,13 @@ use crate::{
     Config,
 };
 use hashbrown::hash_map::Entry;
-use reth_interfaces::{
-    db::{models::AccountBeforeTx, tables, DbTxMut, Error as DbError},
-    executor::Error,
-    provider::StateProvider,
-};
+use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
+use reth_interfaces::executor::Error;
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Bloom, Header, Log, Receipt, TransactionSignedEcRecovered,
     H256, U256,
 };
+use reth_provider::StateProvider;
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database, EVM,
 };
@@ -414,17 +412,15 @@ mod tests {
 
     use crate::{config::SpecUpgrades, revm_wrap::State};
     use reth_db::{
-        kv::{test_utils, Env, EnvKind},
-        mdbx::WriteMap,
-    };
-    use reth_interfaces::{
-        db::{Database, DbTx},
-        provider::{AccountProvider, StateProvider},
+        database::Database,
+        mdbx::{test_utils, Env, EnvKind, WriteMap},
+        transaction::DbTx,
     };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Address, BlockLocked, Bytes, StorageKey, H160, H256,
         U256,
     };
+    use reth_provider::{AccountProvider, StateProvider};
     use reth_rlp::Decodable;
 
     use super::*;

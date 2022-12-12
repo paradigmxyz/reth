@@ -3,6 +3,6 @@
 mod manager;
 mod reputation;
 
-pub(crate) use manager::{PeerAction, PeersManager};
-pub use manager::{PeersConfig, PeersHandle};
+pub use manager::{BanList, PeersConfig, PeersHandle};
+pub(crate) use manager::{InboundConnectionError, PeerAction, PeersManager};
 pub use reputation::{ReputationChangeKind, ReputationChangeWeights};

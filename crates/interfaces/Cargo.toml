@@ -7,7 +7,7 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]
-reth-codecs = { path = "../codecs" }
+reth-codecs = { path = "../storage/codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
 async-trait = "0.1.57"
@@ -32,7 +32,7 @@ secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc",
 modular-bitfield = "0.11.2"
 
 [dev-dependencies]
-reth-db = { path = "../db", features = ["test-utils"] }
+reth-db = { path = "../storage/db", features = ["test-utils"] }
 test-fuzz = "3.0.4"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }

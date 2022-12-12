@@ -1,4 +1,4 @@
-use reth_db::{kv::Env, mdbx::WriteMap};
+use reth_db::mdbx::{Env, WriteMap};
 use std::borrow::Borrow;
 use tokio::sync::oneshot;
 

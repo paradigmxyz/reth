@@ -9,8 +9,11 @@ use tokio::sync::mpsc::Receiver;
 /// This is intended to be used by API-consumers such as RPC that need inject new incoming,
 /// unverified transactions. And by block production that needs to get transactions to execute in a
 /// new block.
+///
+/// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
+/// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[async_trait::async_trait]
-pub trait TransactionPool: Send + Sync + 'static {
+pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
@@ -83,7 +86,7 @@ pub trait TransactionPool: Send + Sync + 'static {
     /// Consumer: Block production
     fn remove_invalid(
         &self,
-        tx_hashes: &[TxHash],
+        hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
@@ -172,7 +175,7 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
     Local,

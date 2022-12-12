@@ -1,7 +1,7 @@
 //! High level network management.
 //!
-//! The [`Network`] contains the state of the network as a whole. It controls how connections are
-//! handled and keeps track of connections to peers.
+//! The [`NetworkManager`] contains the state of the network as a whole. It controls how connections
+//! are handled and keeps track of connections to peers.
 //!
 //! ## Capabilities
 //!
@@ -37,8 +37,8 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason,
 };
-use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{PeerId, H256};
+use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -86,11 +86,13 @@ pub struct NetworkManager<C> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
-    /// All listeners for [`Network`] events.
+    /// All listeners for high level network events.
     event_listeners: NetworkEventListeners,
-    /// Sender half to send events to the [`TransactionsManager`] task, if configured.
+    /// Sender half to send events to the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
     to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
-    /// Sender half to send events to the [`EthRequestHandler`] task, if configured.
+    /// Sender half to send events to the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
@@ -122,6 +124,7 @@ where
             block_import,
             network_mode,
             boot_nodes,
+            executor,
             ..
         } = config;
 
@@ -137,7 +140,7 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let sessions = SessionManager::new(secret_key, sessions_config);
+        let sessions = SessionManager::new(secret_key, sessions_config, executor);
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
@@ -166,12 +169,14 @@ where
         })
     }
 
-    /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
+    /// Sets the dedicated channel for events indented for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
         self.to_transactions_manager = Some(tx);
     }
 
-    /// Sets the dedicated channel for events indented for the [`EthRequestHandler`]
+    /// Sets the dedicated channel for events indented for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
         self.to_eth_request_handler = Some(tx);
     }
@@ -188,7 +193,7 @@ where
 
     /// How many peers we're currently connected to.
     pub fn num_connected_peers(&self) -> usize {
-        self.swarm.state().num_connected_peers()
+        self.swarm.state().num_active_peers()
     }
 
     /// Returns the [`PeerId`] used in the network.
@@ -231,14 +236,16 @@ where
             .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
     }
 
-    /// Sends an event to the [`TransactionsManager`] if configured
+    /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
+    /// configured.
     fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
         if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
         }
     }
 
-    /// Sends an event to the [`EthRequestManager`] if configured
+    /// Sends an event to the [`EthRequestManager`](crate::eth_requests::EthRequestHandler) if
+    /// configured.
     fn delegate_eth_request(&self, event: IncomingEthRequest) {
         if let Some(ref reqs) = self.to_eth_request_handler {
             let _ = reqs.send(event);

@@ -3,10 +3,6 @@
 use futures::{FutureExt, StreamExt};
 use parking_lot::Mutex;
 use pin_project::pin_project;
-use reth_interfaces::{
-    provider::{BlockProvider, ChainInfo, HeaderProvider},
-    test_utils::TestApi,
-};
 use reth_network::{
     error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
     NetworkHandle, NetworkManager,
@@ -15,6 +11,7 @@ use reth_primitives::{
     rpc::{BlockId, BlockNumber},
     Block, BlockHash, Header, PeerId, H256, U256,
 };
+use reth_provider::{test_utils::TestApi, BlockProvider, ChainInfo, HeaderProvider};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -292,6 +289,15 @@ impl NetworkEventStream {
         Self { inner }
     }
 
+    pub async fn next_session_closed(&mut self) -> Option<PeerId> {
+        while let Some(ev) = self.inner.next().await {
+            match ev {
+                NetworkEvent::SessionClosed { peer_id } => return Some(peer_id),
+                NetworkEvent::SessionEstablished { .. } => continue,
+            }
+        }
+        None
+    }
     /// Awaits the next event for an established session
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {

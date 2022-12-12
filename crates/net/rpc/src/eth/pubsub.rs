@@ -1,7 +1,7 @@
 //! `eth_` PubSub RPC handler implementation
 
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
-use reth_interfaces::provider::BlockProvider;
+use reth_provider::BlockProvider;
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::pubsub::{Kind, Params};
 use reth_transaction_pool::TransactionPool;
@@ -28,7 +28,7 @@ impl<Pool, Client> EthPubSub<Pool, Client> {
 
 impl<Pool, Client> EthPubSubApiServer for EthPubSub<Pool, Client>
 where
-    Pool: TransactionPool + Clone,
+    Pool: TransactionPool + 'static,
     Client: BlockProvider + 'static,
 {
     fn subscribe(

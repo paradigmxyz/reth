@@ -1,5 +1,9 @@
 use metrics::counter;
-use reth_interfaces::db::{tables::SyncStage, DbTx, DbTxMut, Error as DbError};
+use reth_db::{
+    tables::SyncStage,
+    transaction::{DbTx, DbTxMut},
+    Error as DbError,
+};
 use reth_primitives::BlockNumber;
 use std::fmt::Display;
 

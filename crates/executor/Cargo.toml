@@ -11,6 +11,8 @@ readme = "README.md"
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../common/rlp" }
+reth-db = { path = "../storage/db" }
+reth-provider = { path = "../storage/provider" }
 reth-consensus = { path = "../consensus" }
 
 revm = "2.3"
@@ -34,4 +36,4 @@ sha3 = { version = "0.10", default-features = false }
 
 
 [dev-dependencies]
-reth-db = { path = "../db", features = ["test-utils"]}
+reth-db = { path = "../storage/db", features = ["test-utils"] }
