@@ -7,7 +7,6 @@ members = [
     "crates/consensus",
     "crates/executor",
     "crates/interfaces",
-    "crates/net/p2p",
     "crates/net/ecies",
     "crates/net/eth-wire",
     "crates/net/discv4",
