@@ -14,7 +14,7 @@
 mod eth;
 mod net;
 
-pub use eth::{EthApi, EthPubSub};
+pub use eth::{EthApi, EthApiSpec, EthPubSub};
 pub use net::NetApi;
 
 pub(crate) mod result;

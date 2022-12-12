@@ -3,6 +3,7 @@
 use reth_interfaces::Result;
 use reth_primitives::{U256, U64};
 use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
@@ -12,10 +13,13 @@ mod server;
 ///
 /// Defines core functionality of the `eth` API implementation.
 pub trait EthApiSpec {
+    /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> U64;
 
+    /// Returns the best block number
     fn block_number(&self) -> Result<U256>;
 
+    /// Returns the chain id
     fn chain_id(&self) -> U64;
 }
 
@@ -52,8 +56,8 @@ where
 
 impl<Pool, Client> EthApiSpec for EthApi<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = Transaction> + Clone,
-    Client: BlockProvider + StateProviderFactory,
+    Pool: TransactionPool<Transaction = Transaction> + Clone + 'static,
+    Client: BlockProvider + StateProviderFactory + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///

@@ -24,7 +24,7 @@ impl std::fmt::Debug for NetApi {
 /// Net rpc implementation
 impl NetApiServer for NetApi {
     fn version(&self) -> Result<String> {
-        Ok(self.eth.chain_id())
+        Ok(self.eth.chain_id().to_string())
     }
 
     fn peer_count(&self) -> Result<PeerCount> {
