@@ -121,6 +121,17 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Install geth
+        run: |
+            mkdir -p "$HOME/bin"
+            wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
+            tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+            mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
+            chmod u+x "$HOME/bin/geth"
+            export PATH=$HOME/bin:$PATH
+            echo $HOME/bin >> $GITHUB_PATH
+            geth version
+
       - name: Collect coverage data
         run: cargo llvm-cov nextest --lcov --output-path lcov.info --locked --workspace --all-features
       - name: Upload coverage data to codecov
