@@ -12,7 +12,7 @@ pub struct NetApi {
     /// An interface to interact with the network
     network: NetworkHandle,
     /// The implementation of `eth` API
-    eth: Box<dyn EthApiSpec + Send + Sync>,
+    eth: Box<dyn EthApiSpec>,
 }
 
 impl std::fmt::Debug for NetApi {

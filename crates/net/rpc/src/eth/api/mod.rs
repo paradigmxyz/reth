@@ -12,7 +12,7 @@ mod server;
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
-pub trait EthApiSpec {
+pub trait EthApiSpec: Send + Sync {
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> U64;
 
