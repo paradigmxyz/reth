@@ -2,7 +2,7 @@
 
 The `stages` lib plays a central role in syncing the node, maintaining state, updating the database and more. The stages involved in the Reth pipeline are the `HeaderStage`, `BodyStage`, `SendersStage`, and `ExecutionStage` (note that this list is non-exhaustive, and more pipeline stages will be added in the near future). Each of these stages are queued up and stored within the Reth pipeline.
 
-Filename: crates/stages/src/pipeline.rs
+[Filename: crates/stages/src/pipeline.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/pipeline.rs#L76)
 ```rust
 pub struct Pipeline<DB: Database> {
     stages: Vec<QueuedStage<DB>>,
@@ -16,7 +16,7 @@ When the node is first started, a new `Pipeline` is initialized and all of the s
 Each stage within the pipeline implements the `Stage` trait which provides function interfaces to get the stage id, execute the stage and unwind the state if there was an issue during the stage execution. 
 
 
-Filename: crates/stages/src/stage.rs
+[Filename: crates/stages/src/stage.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stage.rs#L64)
 ```rust
 #[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
@@ -51,7 +51,7 @@ The `HeadersStage` is responsible for syncing the block headers, validating the 
 
 Each value yielded from the stream is a `SealedHeader`. 
 
-File: crates/primitives/src/header.rs
+[File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/header.rs#L207)
 ```rust
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
@@ -82,7 +82,7 @@ When the `BodyStage` is looking at the headers to determine which block to downl
 
 Once the `BodyStage` determines which block bodies to fetch, a new `bodies_stream` is created which downloads all of the bodies from the `starting_block`, up until the `target_block` specified. Each time the `bodies_stream` yields a value, a `BlockLocked` is created using the block header, the ommers hash and the newly downloaded block body.
 
-File: crates/primitives/src/block.rs
+[File: crates/primitives/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/block.rs#L26)
 ```rust
 /// Sealed Ethereum full block.
 #[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
@@ -104,7 +104,7 @@ The new block is then pre-validated, checking that the ommers hash and transacti
 
 Following a successful `BodyStage`, the `SenderStage` starts to execute. The `SenderStage` is responsible for recovering the transaction sender for each of the newly added transactions to the database. At the beginning of the execution function, all of the transactions are first retrieved from the database. Then the `SenderStage` goes through each transaction and recovers the signer from the transaction signature and hash. The transaction hash is derived by taking the Keccak 256-bit hash of the RLP encoded transaction bytes. This hash is then passed into the `recover_signer` function.
 
-File: crates/primitives/src/transaction/signature.rs
+[File: crates/primitives/src/transaction/signature.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/transaction/signature.rs#L72)
 ```rust
 
     /// Recover signature from hash.
@@ -131,7 +131,7 @@ Once the transaction signer has been recovered, the signer is then added to the 
 
 Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions and signers are gathered and `reth_executor::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
 
-Filename: crates/stages/src/execution.rs
+[Filename: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L222)
 ```rust
 block_change_patches.push((
     reth_executor::executor::execute_and_verify_receipt(
