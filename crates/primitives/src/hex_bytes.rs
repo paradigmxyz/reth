@@ -200,6 +200,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_from_bytes() {
+        let b = bytes::Bytes::from("0123456789abcdef");
+        let wrapped_b = Bytes::from(b.clone());
+        let expected_b = Bytes { 0: b };
+
+        assert_eq!(wrapped_b, expected_b);
+    }
+
+    #[test]
     fn hex_formatting() {
         let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         let expected = String::from("0x0123456789abcdef");
@@ -224,5 +233,13 @@ mod tests {
         let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         assert_eq!(format!("{:?}", b), "Bytes(0x0123456789abcdef)");
         assert_eq!(format!("{:#?}", b), "Bytes(0x0123456789abcdef)");
+    }
+
+    #[test]
+    fn test_to_vec() {
+        let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
+        let b = Bytes::from(vec.clone());
+
+        assert_eq!(b.to_vec(), vec);
     }
 }
