@@ -277,4 +277,34 @@ mod tests {
         let expected: Vec<u8> = vec![136, 1, 35, 69, 103, 137, 171, 205, 239];
         assert_eq!(buf, expected);
     }
+
+    #[test]
+    fn test_vec_partialeq() {
+        let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
+        let b = Bytes::from(vec.clone());
+        assert_eq!(b, vec);
+
+        let wrong_vec = vec![1, 3, 52, 137];
+        assert_ne!(b, wrong_vec);
+    }
+
+    #[test]
+    fn test_slice_partialeq() {
+        let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
+        let b = Bytes::from(vec.clone());
+        assert_eq!(b, vec[..]);
+
+        let wrong_vec = vec![1, 3, 52, 137];
+        assert_ne!(b, wrong_vec[..]);
+    }
+
+    #[test]
+    fn test_bytes_partialeq() {
+        let b = bytes::Bytes::from("0123456789abcdef");
+        let wrapped_b = Bytes::from(b.clone());
+        assert_eq!(wrapped_b, b);
+
+        let wrong_b = bytes::Bytes::from("0123absd");
+        assert_ne!(wrong_b, b);
+    }
 }
