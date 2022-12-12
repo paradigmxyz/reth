@@ -137,3 +137,44 @@ impl Default for Chain {
         ethers_core::types::Chain::Mainnet.into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_id() {
+        let chain = Chain::Id(1234);
+        assert_eq!(chain.id(), 1234);
+    }
+
+    #[test]
+    fn test_named_id() {
+        let chain = Chain::Named(ethers_core::types::Chain::Goerli);
+        assert_eq!(chain.id(), 5);
+    }
+
+    #[test]
+    fn test_legacy_named_chain() {
+        let chain = Chain::Named(ethers_core::types::Chain::Optimism);
+        assert!(chain.is_legacy());
+    }
+
+    #[test]
+    fn test_not_legacy_named_chain() {
+        let chain = Chain::Named(ethers_core::types::Chain::Mainnet);
+        assert!(!chain.is_legacy());
+    }
+
+    #[test]
+    fn test_not_legacy_id_chain() {
+        let chain = Chain::Id(1234);
+        assert!(!chain.is_legacy());
+    }
+
+    #[test]
+    fn test_display() {
+        let chain = Chain::Named(ethers_core::types::Chain::Mainnet);
+        assert_eq!(format!("{}", chain), "mainnet");
+    }
+}
