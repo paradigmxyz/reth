@@ -16,14 +16,17 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
 
+use super::EthApiSpec;
+
 #[async_trait::async_trait]
 impl<Pool, Client> EthApiServer for EthApi<Pool, Client>
 where
+    Self: EthApiSpec,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
 {
     fn protocol_version(&self) -> Result<U64> {
-        Ok(self.protocol_version())
+        Ok(EthApiSpec::protocol_version(self))
     }
 
     fn syncing(&self) -> Result<SyncStatus> {
@@ -39,7 +42,7 @@ where
     }
 
     fn block_number(&self) -> Result<U256> {
-        self.block_number().with_message("Failed to read block number")
+        EthApiSpec::block_number(self).with_message("Failed to read block number")
     }
 
     async fn chain_id(&self) -> Result<Option<U64>> {
