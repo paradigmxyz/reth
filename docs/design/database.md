@@ -29,11 +29,10 @@ Table design:
 
 ```mermaid
 erDiagram
-TransactionHash ||--o{ Transactions : index
 TransactionHash ||--o{ TxChangeIdIndex : index
-BlockChangeIdIndex ||--o{ ChangeSet : index
+BlockChangeIdIndex ||--o{ ChangeSet : "unique index"
 History ||--o{ ChangeSet : index
-TxChangeIdIndex ||--o{ ChangeSet : index
+TxChangeIdIndex ||--o{ ChangeSet : "unique index"
 Transactions {
     u64 TxNumber "PK"
     Transaction Data
@@ -52,14 +51,14 @@ BlockChangeIdIndex {
 }
 ChangeSet {
     u64 ChangeId "PK"
-    ChangeSet Data 
+    ChangeSet PreviousValues "[Acc1[Balance,Nonce),Acc2(Balance,Nonce)] Previous values"
 }
 History {
     H256 Account "PK"
-    u64 ChangeIdList "[ChangeId,ChangeId,...]"
+    u64 ChangeIdList "[ChangeId,ChangeId,...] Points where account changed"
 }
-EVM ||--o{ History: "Load Account"
-BlockChangeIdIndex ||--o{ EVM : "Use state after block"
-Transactions ||--o{ EVM : "Execute tx"
-TxChangeIdIndex ||--o{ EVM : "Use state after tx"
+EVM ||--o{ History: "Load Account by finding first bigger ChangeId in List, and index it in ChangeSet table"
+BlockChangeIdIndex ||--o{ EVM : "Use state (by block Changeid)"
+TxChangeIdIndex ||--o{ EVM : "Use state (by tx ChangeId)"
+TransactionHash ||--o{ Transactions : index
 ```
