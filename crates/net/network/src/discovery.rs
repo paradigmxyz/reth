@@ -2,7 +2,7 @@
 
 use crate::error::NetworkError;
 use futures::StreamExt;
-use reth_discv4::{Discv4, Discv4Config, NodeRecord, TableUpdate};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, NodeRecord};
 use reth_primitives::PeerId;
 use secp256k1::SecretKey;
 use std::{
@@ -26,7 +26,7 @@ pub struct Discovery {
     /// Handler to interact with the Discovery v4 service
     _discv4: Discv4,
     /// All KAD table updates from the discv4 service.
-    discv4_updates: ReceiverStream<TableUpdate>,
+    discv4_updates: ReceiverStream<DiscoveryUpdate>,
     /// The initial config for the discv4 service
     _dsicv4_config: Discv4Config,
     /// Events buffered until polled.
@@ -71,9 +71,9 @@ impl Discovery {
         self.local_enr.id
     }
 
-    fn on_discv4_update(&mut self, update: TableUpdate) {
+    fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            TableUpdate::Added(node) => {
+            DiscoveryUpdate::Added(node) | DiscoveryUpdate::Discovered(node) => {
                 let id = node.id;
                 let addr = node.tcp_addr();
                 match self.discovered_nodes.entry(id) {
@@ -84,10 +84,10 @@ impl Discovery {
                     }
                 }
             }
-            TableUpdate::Removed(node) => {
+            DiscoveryUpdate::Removed(node) => {
                 self.discovered_nodes.remove(&node);
             }
-            TableUpdate::Batch(updates) => {
+            DiscoveryUpdate::Batch(updates) => {
                 for update in updates {
                     self.on_discv4_update(update);
                 }
