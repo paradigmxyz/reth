@@ -282,10 +282,10 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn sender(&self) -> &Address {
+    fn sender(&self) -> Address {
         match self {
-            MockTransaction::Legacy { sender, .. } => sender,
-            MockTransaction::Eip1559 { sender, .. } => sender,
+            MockTransaction::Legacy { sender, .. } => *sender,
+            MockTransaction::Eip1559 { sender, .. } => *sender,
         }
     }
 
