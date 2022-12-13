@@ -4,6 +4,22 @@ language = "en"
 multilingual = false
 src = "book"
 title = "reth Book"
+description = "A book on all things Reth"
+
+[output.html]
+git-repository-url = "https://github.com/paradigmxyz/reth"
+edit-url-template = ""
+default-theme = "ayu"
+cname = ""
+no-section-label = true
+additional-css = [""]
+
+[output.html.fold]
+enable = true
+level = 1
 
 [build]
 build-dir = "target/book"
+
+[preprocessor.template]
+before = [ "links" ]
