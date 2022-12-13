@@ -10,8 +10,9 @@ readme = "README.md"
 # reth
 reth-primitives = { path = "../../crates/primitives" }
 reth-db = {path = "../../crates/storage/db", features = ["mdbx"]}
+reth-provider = {path = "../../crates/storage/provider" }
 reth-stages = {path = "../../crates/stages"}
-reth-interfaces = {path = "../../crates/interfaces"}
+reth-interfaces = {path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = {path = "../../crates/transaction-pool"}
 reth-consensus = {path = "../../crates/consensus"}
 reth-rpc = {path = "../../crates/net/rpc"}

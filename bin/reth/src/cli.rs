@@ -32,6 +32,7 @@ pub enum Commands {
     /// Runs Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
+    /// DB Debugging utilities
     #[command(name = "db")]
     Db(db::Command),
 }
@@ -48,6 +49,6 @@ struct Cli {
     verbose: u8,
 
     /// Silence all output
-    #[clap(short, long, global = true)]
+    #[clap(long, global = true)]
     silent: bool,
 }
