@@ -244,4 +244,11 @@ mod tests {
 
         assert_eq!(default, expected);
     }
+
+    #[test]
+    fn test_id_chain_encodable_length() {
+        let chain = Chain::Id(1234);
+
+        assert_eq!(chain.length(), 3);
+    }
 }
