@@ -27,6 +27,12 @@
 #cmakedefine01 MDBX_TRUST_RTC
 #endif
 #cmakedefine01 MDBX_DISABLE_VALIDATION
+#cmakedefine01 MDBX_AVOID_MSYNC
+#cmakedefine01 MDBX_ENABLE_REFUND
+#cmakedefine01 MDBX_ENABLE_MADVISE
+#cmakedefine01 MDBX_ENABLE_BIGFOOT
+#cmakedefine01 MDBX_ENABLE_PGOP_STAT
+#cmakedefine01 MDBX_ENABLE_PROFGC
 
 /* Windows */
 #cmakedefine01 MDBX_WITHOUT_MSVC_CRT
