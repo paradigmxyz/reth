@@ -31,4 +31,9 @@ impl<T> WithPeerId<T> {
     pub fn transform<F: From<T>>(self) -> WithPeerId<F> {
         WithPeerId(self.0, self.1.into())
     }
+
+    /// Split the wrapper into [PeerId] and data tuple
+    pub fn split(self) -> (PeerId, T) {
+        (self.0, self.1)
+    }
 }

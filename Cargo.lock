@@ -3285,7 +3285,6 @@ dependencies = [
  "futures",
  "futures-util",
  "once_cell",
- "rand 0.8.5",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
