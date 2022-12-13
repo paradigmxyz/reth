@@ -59,11 +59,7 @@ pub struct EthRequestHandler<C> {
 }
 
 // === impl EthRequestHandler ===
-
-impl<C> EthRequestHandler<C>
-where
-    C: BlockProvider + HeaderProvider,
-{
+impl<C> EthRequestHandler<C> {
     /// Create a new instance
     pub fn new(
         client: Arc<C>,
@@ -72,7 +68,12 @@ where
     ) -> Self {
         Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming) }
     }
+}
 
+impl<C> EthRequestHandler<C>
+where
+    C: BlockProvider + HeaderProvider,
+{
     /// Returns the list of requested heders
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
