@@ -7,8 +7,6 @@ use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
-/// The total difficulty and best block hash are used to identify whether or not the requesting
-/// client should be sent historical blocks for a full blockchain sync.
 ///
 /// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
 /// hash. This information should be treated as untrusted.
