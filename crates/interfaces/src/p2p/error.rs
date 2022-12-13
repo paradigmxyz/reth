@@ -1,7 +1,11 @@
+use reth_primitives::WithPeerId;
 use tokio::sync::{mpsc, oneshot};
 
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;
+
+/// Result with [PeerId]
+pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
 /// Error variants that can happen when sending requests to a session.
 #[derive(Debug, thiserror::Error, Clone)]

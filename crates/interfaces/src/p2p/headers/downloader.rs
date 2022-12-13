@@ -1,58 +1,28 @@
-use super::client::HeadersClient;
 use crate::{
     consensus::Consensus,
-    p2p::{headers::error::DownloadError, traits::BatchDownload},
+    p2p::{
+        downloader::{DownloadStream, Downloader},
+        headers::error::DownloadError,
+    },
 };
 
-use futures::Stream;
 use reth_primitives::SealedHeader;
 use reth_rpc_types::engine::ForkchoiceState;
-use std::pin::Pin;
-
-/// A Future for downloading a batch of headers.
-pub type HeaderBatchDownload<'a> = Pin<
-    Box<
-        dyn BatchDownload<
-                Ok = SealedHeader,
-                Error = DownloadError,
-                Output = Result<Vec<SealedHeader>, DownloadError>,
-            > + Send
-            + 'a,
-    >,
->;
-
-/// A stream for downloading headers.
-pub type HeaderDownloadStream =
-    Pin<Box<dyn Stream<Item = Result<SealedHeader, DownloadError>> + Send>>;
 
 /// A downloader capable of fetching block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeaderDownloader: Sync + Send + Unpin {
-    /// The Consensus used to verify block validity when
-    /// downloading
-    type Consensus: Consensus;
-
-    /// The Client used to download the headers
-    type Client: HeadersClient;
-
-    /// The consensus engine
-    fn consensus(&self) -> &Self::Consensus;
-
-    /// The headers client
-    fn client(&self) -> &Self::Client;
-
-    /// Download the headers
-    fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_>;
-
+pub trait HeaderDownloader: Downloader {
     /// Stream the headers
-    fn stream(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderDownloadStream;
+    fn stream(
+        &self,
+        head: SealedHeader,
+        forkchoice: ForkchoiceState,
+    ) -> DownloadStream<SealedHeader>;
 
     /// Validate whether the header is valid in relation to it's parent
-    ///
-    /// Returns Ok(false) if the
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
         validate_header_download(self.consensus(), header, parent)?;
         Ok(())

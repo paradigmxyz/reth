@@ -33,11 +33,8 @@ rayon = "1.6.0"
 # reth
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
-reth-bodies-downloaders = { path = "../net/bodies-downloaders" }
-
-# TODO(onbjerg): We only need this for [BlockBody]
-reth-eth-wire = { path = "../net/eth-wire" }
-reth-headers-downloaders = { path = "../net/headers-downloaders" }
+reth-downloaders = { path = "../net/downloaders" }
+reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tokio-stream = "0.1.10"
 tempfile = "3.3.0"

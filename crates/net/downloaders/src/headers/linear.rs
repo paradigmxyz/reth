@@ -2,16 +2,13 @@ use futures::{stream::Stream, FutureExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        error::{RequestError, RequestResult},
+        downloader::{DownloadStream, Downloader},
+        error::{PeerRequestResult, RequestError},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{
-                validate_header_download, HeaderBatchDownload, HeaderDownloadStream,
-                HeaderDownloader,
-            },
+            downloader::{validate_header_download, HeaderDownloader},
             error::DownloadError,
         },
-        traits::BatchDownload,
     },
 };
 use reth_primitives::{HeadersDirection, SealedHeader, H256};
@@ -39,10 +36,10 @@ pub struct LinearDownloader<C, H> {
     pub request_retries: usize,
 }
 
-impl<C, H> HeaderDownloader for LinearDownloader<C, H>
+impl<C, H> Downloader for LinearDownloader<C, H>
 where
-    C: Consensus + 'static,
-    H: HeadersClient + 'static,
+    C: Consensus,
+    H: HeadersClient,
 {
     type Consensus = C;
     type Client = H;
@@ -54,12 +51,18 @@ where
     fn client(&self) -> &Self::Client {
         self.client.borrow()
     }
+}
 
-    fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_> {
-        Box::pin(self.new_download(head, forkchoice))
-    }
-
-    fn stream(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderDownloadStream {
+impl<C, H> HeaderDownloader for LinearDownloader<C, H>
+where
+    C: Consensus + 'static,
+    H: HeadersClient + 'static,
+{
+    fn stream(
+        &self,
+        head: SealedHeader,
+        forkchoice: ForkchoiceState,
+    ) -> DownloadStream<SealedHeader> {
         Box::pin(self.new_download(head, forkchoice))
     }
 }
@@ -95,7 +98,7 @@ impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
     }
 }
 
-type HeadersFut = Pin<Box<dyn Future<Output = RequestResult<BlockHeaders>> + Send>>;
+type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
 
 /// A retryable future that returns a list of [`BlockHeaders`] on success.
 struct HeadersRequestFuture {
@@ -119,7 +122,7 @@ impl HeadersRequestFuture {
 }
 
 impl Future for HeadersRequestFuture {
-    type Output = RequestResult<BlockHeaders>;
+    type Output = PeerRequestResult<BlockHeaders>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.get_mut().fut.poll_unpin(cx)
@@ -222,11 +225,11 @@ where
 
     fn process_header_response(
         &mut self,
-        response: Result<BlockHeaders, RequestError>,
+        response: PeerRequestResult<BlockHeaders>,
     ) -> Result<(), DownloadError> {
         match response {
             Ok(res) => {
-                let mut headers = res.0;
+                let mut headers = res.1 .0;
                 headers.sort_unstable_by_key(|h| h.number);
 
                 if headers.is_empty() {
@@ -353,19 +356,6 @@ where
     }
 }
 
-impl<C, H> BatchDownload for HeadersDownload<C, H>
-where
-    C: Consensus + 'static,
-    H: HeadersClient + 'static,
-{
-    type Ok = SealedHeader;
-    type Error = DownloadError;
-
-    fn into_stream_unordered(self) -> Box<dyn Stream<Item = Result<Self::Ok, Self::Error>>> {
-        Box::new(self)
-    }
-}
-
 /// The builder for [LinearDownloader] with
 /// some default settings
 #[derive(Debug)]
@@ -438,12 +428,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_empty() {
+    async fn stream_empty() {
         let client = Arc::new(TestHeadersClient::default());
         let downloader =
             LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
 
-        let result = downloader.download(SealedHeader::default(), ForkchoiceState::default()).await;
+        let result = downloader
+            .stream(SealedHeader::default(), ForkchoiceState::default())
+            .try_collect::<Vec<_>>()
+            .await;
         assert!(result.is_err());
     }
 
@@ -470,7 +463,7 @@ mod tests {
 
         let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
 
-        let result = downloader.download(p0, fork).await;
+        let result = downloader.stream(p0, fork).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert!(headers.is_empty());
     }
@@ -498,7 +491,7 @@ mod tests {
 
         let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
 
-        let result = downloader.download(p3, fork).await;
+        let result = downloader.stream(p3, fork).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert_eq!(headers.len(), 3);
         assert_eq!(headers[0], p0);

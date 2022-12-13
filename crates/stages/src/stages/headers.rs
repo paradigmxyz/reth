@@ -349,7 +349,7 @@ mod tests {
             ExecInput, ExecOutput, UnwindInput,
         };
         use reth_db::{models::blocks::BlockNumHash, tables, transaction::DbTx};
-        use reth_headers_downloaders::linear::{LinearDownloadBuilder, LinearDownloader};
+        use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{

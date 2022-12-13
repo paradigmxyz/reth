@@ -5,10 +5,13 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Implements body downloader algorithms.
+//! Implements the downloader algorithms.
 
-/// A naive concurrent downloader.
-pub mod concurrent;
+/// The collection of algorithms for downloading block bodies.
+pub mod bodies;
+
+/// The collection of alhgorithms for downloading block headers.
+pub mod headers;
 
 #[cfg(test)]
 mod test_utils;
