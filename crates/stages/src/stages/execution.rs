@@ -209,7 +209,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 .into_iter()
                 .zip(signers.into_iter())
                 .map(|(tx, signer)| {
-                    TransactionSignedEcRecovered::from_signed_transactions_and_signer(tx, signer)
+                    TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
                 })
                 .collect();
 
