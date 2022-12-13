@@ -13,6 +13,7 @@ use reth_eth_wire::{
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{Header, PeerId, Receipt, TransactionSigned, H256};
 use std::{
+    fmt,
     sync::Arc,
     task::{ready, Context, Poll},
 };
@@ -253,7 +254,7 @@ impl PeerResponseResult {
 }
 
 /// A Cloneable connection for sending _requests_ directly to the session of a peer.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PeerRequestSender {
     /// id of the remote node.
     pub(crate) peer_id: PeerId,
@@ -272,5 +273,11 @@ impl PeerRequestSender {
     /// Returns the peer id of the remote peer.
     pub fn peer_id(&self) -> &PeerId {
         &self.peer_id
+    }
+}
+
+impl fmt::Debug for PeerRequestSender {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
     }
 }
