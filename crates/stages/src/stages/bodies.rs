@@ -40,6 +40,7 @@ const BODIES: StageId = StageId("Bodies");
 ///
 /// - [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers]
 /// - [`Transactions`][reth_interfaces::db::tables::Transactions]
+/// - [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber]
 ///
 /// # Genesis
 ///
@@ -49,6 +50,7 @@ const BODIES: StageId = StageId("Bodies");
 /// - The [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers] table
 /// - The [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount] table
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
+/// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
@@ -153,6 +155,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             // Write transactions
             for transaction in block.body {
+                // Insert the transaction hash to number mapping
+                db.put::<tables::TxHashNumber>(transaction.hash(), first_tx_id)?;
+                // Append the transaction
                 tx_cursor.append(first_tx_id, transaction)?;
                 first_tx_id += 1;
             }
@@ -179,6 +184,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
         let mut block_ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
+        let mut tx_hash_number_cursor = db.cursor_mut::<tables::TxHashNumber>()?;
 
         let mut entry = tx_count_cursor.last()?;
         while let Some((key, count)) = entry {
@@ -200,8 +206,11 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                 // this is why we are checking if tx exist or not.
                 // NOTE: more performant way is probably to use `prev`/`next` fn. and reduce
                 // count by one if block has block reward.
-                if transaction_cursor.seek_exact(tx_id)?.is_some() {
+                if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
                     transaction_cursor.delete_current()?;
+                    if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
+                        tx_hash_number_cursor.delete_current()?;
+                    }
                 }
             }
         }
@@ -422,8 +431,9 @@ mod tests {
             .db()
             .commit(|tx| {
                 let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
-                tx_cursor.last()?.expect("Could not read last transaction");
+                let (_, transaction) = tx_cursor.last()?.expect("Could not read last transaction");
                 tx_cursor.delete_current()?;
+                tx.delete::<tables::TxHashNumber>(transaction.hash, None)?;
                 Ok(())
             })
             .expect("Could not delete a transaction");
@@ -586,7 +596,9 @@ mod tests {
                         tx.put::<tables::CumulativeTxCount>(key, tx_count)?;
                         tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
                         (last_count..tx_count).try_for_each(|idx| {
-                            tx.put::<tables::Transactions>(idx, random_signed_tx())
+                            let transaction = random_signed_tx();
+                            tx.put::<tables::TxHashNumber>(transaction.hash(), idx)?;
+                            tx.put::<tables::Transactions>(idx, transaction)
                         })
                     })?;
                 }
@@ -619,6 +631,10 @@ mod tests {
                 if let Some(last_tx_id) = self.last_count() {
                     self.db
                         .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
+                    self.db.check_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                        last_tx_id,
+                        |value| value,
+                    )?;
                 }
                 Ok(())
             }
@@ -660,6 +676,7 @@ mod tests {
                     let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
                     let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
                     let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
+                    let mut tx_hash_num_cursor = tx.cursor::<tables::TxHashNumber>()?;
 
                     let first_tx_count_key = match tx_count_cursor.first()? {
                         Some((key, _)) => key,
@@ -692,12 +709,14 @@ mod tests {
                         // Validate that block trasactions exist
                         let first_tx_id = prev_entry.map(|(_, v)| v).unwrap_or_default();
                         // reduce by one for block_reward index
-                        let tx_count = if count == 0 { 0} else {count-1};
+                        let tx_count = if count == 0 { 0 } else { count - 1 };
                         for tx_id in first_tx_id..tx_count {
+                            let tx_entry = transaction_cursor.seek_exact(tx_id)?;
+                            assert!(tx_entry.is_some(), "A transaction is missing.");
                             assert_matches!(
-                                transaction_cursor.seek_exact(tx_id),
+                                tx_hash_num_cursor.seek_exact(tx_entry.unwrap().1.hash),
                                 Ok(Some(_)),
-                                "A transaction is missing."
+                                "A transaction hash to index mapping is missing."
                             );
                         }
 

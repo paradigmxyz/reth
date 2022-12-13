@@ -18,7 +18,7 @@ use crate::{
 };
 use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TxNumber, H256,
+    TransactionSigned, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -31,7 +31,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 20] = [
+pub const TABLES: [(TableType, &str); 21] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -40,6 +40,7 @@ pub const TABLES: [(TableType, &str); 20] = [
     (TableType::Table, CumulativeTxCount::const_name()),
     (TableType::Table, NonCanonicalTransactions::const_name()),
     (TableType::Table, Transactions::const_name()),
+    (TableType::Table, TxHashNumber::const_name()),
     (TableType::Table, Receipts::const_name()),
     (TableType::Table, Logs::const_name()),
     (TableType::Table, PlainAccountState::const_name()),
@@ -143,6 +144,11 @@ table!(
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
     ( Transactions ) TxNumber | TransactionSigned
+);
+
+table!(
+    /// Stores the mapping of the transaction hash to the transaction number.
+    ( TxHashNumber ) TxHash | TxNumber
 );
 
 table!(
