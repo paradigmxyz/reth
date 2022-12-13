@@ -29,7 +29,7 @@ use crate::{
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
-    FetchClient,
+    FetchClient, NetworkBuilder,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -102,6 +102,26 @@ pub struct NetworkManager<C> {
 }
 
 // === impl NetworkManager ===
+impl<C> NetworkManager<C> {
+    /// Sets the dedicated channel for events indented for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
+        self.to_transactions_manager = Some(tx);
+    }
+
+    /// Sets the dedicated channel for events indented for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
+        self.to_eth_request_handler = Some(tx);
+    }
+
+    /// Returns the [`NetworkHandle`] that can be cloned and shared.
+    ///
+    /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
+    pub fn handle(&self) -> &NetworkHandle {
+        &self.handle
+    }
+}
 
 impl<C> NetworkManager<C>
 where
@@ -169,16 +189,45 @@ where
         })
     }
 
-    /// Sets the dedicated channel for events indented for the
-    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
-    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
-        self.to_transactions_manager = Some(tx);
+    /// Create a new [`NetworkManager`] instance and start a [`NetworkBuilder`] to configure all
+    /// components of the network
+    ///
+    /// ```
+    /// use reth_provider::test_utils::TestApi;
+    /// use reth_transaction_pool::TransactionPool;
+    /// use std::sync::Arc;
+    /// use reth_discv4::bootnodes::mainnet_nodes;
+    /// use reth_network::config::rng_secret_key;
+    /// use reth_network::{NetworkConfig, NetworkManager};
+    /// async fn launch<Pool: TransactionPool>(pool: Pool) {
+    ///     // This block provider implementation is used for testing purposes.
+    ///     let client = Arc::new(TestApi::default());
+    ///
+    ///     // The key that's used for encrypting sessions and to identify our node.
+    ///     let local_key = rng_secret_key();
+    ///
+    ///     let config =
+    ///         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+    ///
+    ///     // create the network instance
+    ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
+    ///         .await
+    ///         .unwrap()
+    ///         .transactions(pool)
+    ///         .request_handler(client)
+    ///         .split_with_handle();
+    /// }
+    /// ```
+    pub async fn builder(
+        config: NetworkConfig<C>,
+    ) -> Result<NetworkBuilder<C, (), ()>, NetworkError> {
+        let network = Self::new(config).await?;
+        Ok(network.into_builder())
     }
 
-    /// Sets the dedicated channel for events indented for the
-    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
-    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
-        self.to_eth_request_handler = Some(tx);
+    /// Create a [`NetworkBuilder`] to configure all components of the network
+    pub fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+        NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
@@ -199,13 +248,6 @@ where
     /// Returns the [`PeerId`] used in the network.
     pub fn peer_id(&self) -> &PeerId {
         self.handle.peer_id()
-    }
-
-    /// Returns the [`NetworkHandle`] that can be cloned and shared.
-    ///
-    /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-    pub fn handle(&self) -> &NetworkHandle {
-        &self.handle
     }
 
     /// Returns a new [`PeersHandle`] that can be cloned and shared.
