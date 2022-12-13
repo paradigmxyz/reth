@@ -20,3 +20,7 @@ build-dir = "target/book"
 
 [preprocessor.template]
 before = [ "links" ]
+
+[preprocessor.index]
+
+[preprocessor.links]

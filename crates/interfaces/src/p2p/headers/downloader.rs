@@ -29,6 +29,7 @@ pub type HeaderDownloadStream =
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
+// ANCHOR: trait-HeaderDownloader
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeaderDownloader: Sync + Send + Unpin {
     /// The Consensus used to verify block validity when
@@ -61,6 +62,7 @@ pub trait HeaderDownloader: Sync + Send + Unpin {
         Ok(())
     }
 }
+// ANCHOR_END: trait-HeaderDownloader
 
 /// Validate whether the header is valid in relation to it's parent
 ///
