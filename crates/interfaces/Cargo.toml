@@ -33,7 +33,6 @@ modular-bitfield = "0.11.2"
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
-test-fuzz = "3.0.4"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 arbitrary = { version = "1.1.7", features = ["derive"]}

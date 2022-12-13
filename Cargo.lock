@@ -3422,7 +3422,6 @@ dependencies = [
  "reth-rpc-types",
  "secp256k1",
  "serde",
- "test-fuzz",
  "thiserror",
  "tokio",
  "tokio-stream",

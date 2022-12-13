@@ -80,7 +80,6 @@ jobs:
         run: |
           ./.github/scripts/fuzz.sh reth-primitives
           ./.github/scripts/fuzz.sh reth-db
-          ./.github/scripts/fuzz.sh reth-interfaces
           ./.github/scripts/fuzz.sh reth-eth-wire
           ./.github/scripts/fuzz.sh reth-codecs
 
