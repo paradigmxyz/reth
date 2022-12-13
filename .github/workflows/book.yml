@@ -63,7 +63,7 @@ jobs:
 
   deploy:
     # Only deploy if a push to main
-    if: github.ref_name == main && github.event_name == push
+    if: github.ref_name == 'main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [test, build]
 
