@@ -40,11 +40,12 @@ body:
       render: text
     validations:
       required: false
-  - type: checkboxes
+  - type: dropdown
     id: platform
     attributes:
       label: Platform(s)
       description: What platform(s) did this occur on?
+      multiple: true
       options:
         - Linux (x86)
         - Linux (ARM)
