@@ -987,7 +987,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.1.0"
-source = "git+https://github.com/sigp/discv5#46fb65ce6dfead94bcdd63b7c27c0adfae10e269"
+source = "git+https://github.com/sigp/discv5#d31e62e3a6973d94be7e9d02f812a43e2c9d9749"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -3267,12 +3267,12 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
+ "reth-tracing",
  "secp256k1",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-test",
  "url",
 ]
 
