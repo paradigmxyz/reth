@@ -41,18 +41,14 @@ pub trait Stage<DB: Database>: Send + Sync {
 }
 ```
 
-To get a better idea of what is happening at each part of the pipeline, lets walk through what is going on under the hood within the `execute()` function at each stage, starting with `HeadersStage`.
+To get a better idea of what is happening at each part of the pipeline, lets walk through what is going on under the hood within the `execute()` function at each stage, starting with `HeaderStage`.
 
 <br>
 
-## HeadersStage
+## HeaderStage
 
 <!-- TODO: Cross-link to eth/65 chapter when it's written -->
-The `HeadersStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. This stage relies on the stream to return the headers in descending order staring from the chain tip down to the latest block in the database.
-
-It is worth noting that only in the `HeadersStage` do we start at the chain tip and go backwards, all other stages start from the latest block in the database and work towards the chain tip. The reason for this is to avoid a [long-range attack](https://messari.io/report/long-range-attack). If you begin from the local chain head and download headers in ascending order of block height, you won't know if you're being subjected to a long-range attack until you reach the most recent blocks. Instead, the headers stage begins by getting the chain tip from the Consensus Layer, verifies it, and then walks back by parent hash.
-
-The stream that is established is handled by a struct that implements the `HeaderDownloader` trait.
+The `HeaderStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. The `HeaderStage` contains a `downloader` attribute, which is a type that implements the `HeaderDownloader` trait. The `stream()` method from this trait is used to fetch headers from the network.
 
 [File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/main/crates/interfaces/src/p2p/headers/downloader.rs#L33)
 ```rust
@@ -94,7 +90,8 @@ pub trait HeaderDownloader: Sync + Send + Unpin {
 }
 ```
 
-Each value yielded from the stream is a `SealedHeader`. 
+
+The `HeaderStage` relies on the downloader stream to return the headers in descending order staring from the chain tip down to the latest block in the database. While other stages in the `Pipeline` start from the most recent block in the database up to the chain tip, the `HeaderStage` works in reverse to avoid [long-range attacks](https://messari.io/report/long-range-attack). When a node downloads headers in ascending order, it will not know if it is being subjected to a long-range attack until it reaches the most recent blocks. To combat this, the `HeaderStage` starts by getting the chain tip from the Consensus Layer, verifies the tip, and then walks backwards by the parent hash. Each value yielded from the stream is a `SealedHeader`. 
 
 [File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/header.rs#L207)
 ```rust
@@ -109,9 +106,7 @@ pub struct SealedHeader {
 }
 ```
 
-Each `SealedHeader` is then validated to ensure that it has the proper parent. Note that this is only a basic response validation. It is up to the implementation of the `HeaderDownloader` trait to ensure that `validate` is called in the call stack stemming from `stream`, so that each header is validated according to the consensus specification in order to be yielded from the stream.
-
-After this, each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the db changes are unwound and the stage is resumed from the most recent valid state.
+Each `SealedHeader` is then validated to ensure that it has the proper parent. Note that this is only a basic response validation, and the `HeadderDownloader` uses the `validate` method during the `stream`, so that each header is validated according to the consensus specification before the header is yielded from the stream. After this, each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the changes to the database are unwound and the stage is resumed from the most recent valid state.
 
 This process continues until all of the headers have been downloaded and and written to the database. Finally, the total difficulty of the chain's head is updated and the function returns `Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })`, signaling that the header sync has completed successfully. 
 
@@ -119,7 +114,7 @@ This process continues until all of the headers have been downloaded and and wri
 
 ## BodyStage
 
-Once the `HeadersStage` completes successfully, the `BodyStage` will start execution. The body stage downloads block bodies for all of the new block headers that were stored locally in the database. The `BodyStage` first determines which block bodies to download by checking if the block body has an ommers hash and transaction root. 
+Once the `HeaderStage` completes successfully, the `BodyStage` will start execution. The body stage downloads block bodies for all of the new block headers that were stored locally in the database. The `BodyStage` first determines which block bodies to download by checking if the block body has an ommers hash and transaction root. 
 
 An ommers hash is the Keccak 256-bit hash of the ommers list portion of the block. If you are unfamiliar with ommers blocks, you can [click here to learn more](https://ethereum.org/en/glossary/#ommer). Note that while ommers blocks were important for new blocks created during Ethereum's proof of work chain, Ethereum's proof of stake chain selects exactly one block proposer at a time, causing ommers blocks not to be needed in post-merge Ethereum.
 
