@@ -4,7 +4,7 @@ use crate::message::BlockRequest;
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
-    error::{RequestError, RequestResult},
+    error::{PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
 };
 use reth_primitives::{Header, PeerId, H256, U256};
@@ -25,9 +25,11 @@ pub use client::FetchClient;
 /// peers and sends the response once ready.
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests: HashMap<PeerId, Request<HeadersRequest, RequestResult<Vec<Header>>>>,
+    inflight_headers_requests:
+        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
     /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests: HashMap<PeerId, Request<Vec<H256>, RequestResult<Vec<BlockBody>>>>,
+    inflight_bodies_requests:
+        HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of available peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// Requests queued for processing
@@ -187,7 +189,7 @@ impl StateFetcher {
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         if let Some(resp) = self.inflight_headers_requests.remove(&peer_id) {
-            let _ = resp.response.send(res);
+            let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
         }
 
         if is_error {
@@ -215,7 +217,7 @@ impl StateFetcher {
         res: RequestResult<Vec<BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
         if let Some(resp) = self.inflight_bodies_requests.remove(&peer_id) {
-            let _ = resp.response.send(res);
+            let _ = resp.response.send(res.map(|b| (peer_id, b).into()));
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if peer.state.on_request_finished() {
@@ -325,10 +327,13 @@ pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
-        response: oneshot::Sender<RequestResult<Vec<Header>>>,
+        response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
     },
     /// Download the requested headers and send response through channel
-    GetBlockBodies { request: Vec<H256>, response: oneshot::Sender<RequestResult<Vec<BlockBody>>> },
+    GetBlockBodies {
+        request: Vec<H256>,
+        response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
+    },
 }
 
 // === impl DownloadRequest ===

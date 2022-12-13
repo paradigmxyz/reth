@@ -40,7 +40,7 @@ rand = { version = "0.8", optional = true }
 [dev-dependencies]
 rand = "0.8"
 tokio = { version = "1", features = ["full"] }
-tracing-test = "0.2"
+reth-tracing = { path = "../../tracing" }
 
 [features]
 mock = ["rand"]

@@ -1,4 +1,4 @@
-#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
+#![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
@@ -11,6 +11,7 @@ pub mod capability;
 mod disconnect;
 pub mod error;
 mod ethstream;
+mod hello;
 mod p2pstream;
 mod pinger;
 pub use builder::*;
@@ -25,5 +26,6 @@ pub use tokio_util::codec::{
 pub use crate::{
     disconnect::DisconnectReason,
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
-    p2pstream::{HelloMessage, P2PStream, ProtocolVersion, UnauthedP2PStream},
+    hello::HelloMessage,
+    p2pstream::{P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream},
 };

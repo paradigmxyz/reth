@@ -77,8 +77,8 @@ impl<C: BodiesClient> ConcurrentDownloader<C> {
         block_number: BlockNumber,
         header_hash: H256,
     ) -> RequestResult<(BlockNumber, H256, BlockBody)> {
-        let mut body = self.client.get_block_body(vec![header_hash]).await?;
-        Ok((block_number, header_hash, body.remove(0)))
+        let mut response = self.client.get_block_body(vec![header_hash]).await?;
+        Ok((block_number, header_hash, response.1.remove(0))) // TODO:
     }
 }
 
@@ -86,14 +86,11 @@ impl<C: BodiesClient> ConcurrentDownloader<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        concurrent::ConcurrentDownloader,
-        test_utils::{generate_bodies, TestClient},
-    };
+    use crate::test_utils::{generate_bodies, TestClient};
     use assert_matches::assert_matches;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use reth_interfaces::p2p::{bodies::downloader::BodyDownloader, error::RequestError};
-    use reth_primitives::H256;
+    use reth_primitives::{PeerId, H256};
     use std::{
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -115,9 +112,13 @@ mod tests {
                 // Simulate that the request for this (random) block takes 0-100ms
                 tokio::time::sleep(Duration::from_millis(hash[0].to_low_u64_be() % 100)).await;
 
-                Ok(vec![bodies
-                    .remove(&hash[0])
-                    .expect("Downloader asked for a block it should not ask for")])
+                Ok((
+                    PeerId::default(),
+                    vec![bodies
+                        .remove(&hash[0])
+                        .expect("Downloader asked for a block it should not ask for")],
+                )
+                    .into())
             }
         })));
 
@@ -167,7 +168,11 @@ mod tests {
                         retries_left.fetch_sub(1, Ordering::SeqCst);
                         Err(RequestError::Timeout)
                     } else {
-                        Ok(vec![BlockBody { transactions: vec![], ommers: vec![] }])
+                        Ok((
+                            PeerId::default(),
+                            vec![BlockBody { transactions: vec![], ommers: vec![] }],
+                        )
+                            .into())
                     }
                 }
             })));
@@ -199,7 +204,11 @@ mod tests {
                         retries_left.fetch_sub(1, Ordering::SeqCst);
                         Err(RequestError::Timeout)
                     } else {
-                        Ok(vec![BlockBody { transactions: vec![], ommers: vec![] }])
+                        Ok((
+                            PeerId::default(),
+                            vec![BlockBody { transactions: vec![], ommers: vec![] }],
+                        )
+                            .into())
                     }
                 }
             })))

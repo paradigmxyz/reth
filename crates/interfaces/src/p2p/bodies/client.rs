@@ -1,4 +1,4 @@
-use crate::p2p::error::RequestResult;
+use crate::p2p::error::PeerRequestResult;
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_primitives::H256;
@@ -9,5 +9,5 @@ use std::fmt::Debug;
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: Send + Sync + Debug {
     /// Fetches the block body for the requested block.
-    async fn get_block_body(&self, hash: Vec<H256>) -> RequestResult<Vec<BlockBody>>;
+    async fn get_block_body(&self, hash: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>>;
 }

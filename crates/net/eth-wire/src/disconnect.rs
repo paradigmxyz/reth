@@ -65,6 +65,12 @@ impl Display for DisconnectReason {
     }
 }
 
+impl Default for DisconnectReason {
+    fn default() -> Self {
+        DisconnectReason::DisconnectRequested
+    }
+}
+
 /// This represents an unknown disconnect reason with the given code.
 #[derive(Debug, Clone, Error)]
 #[error("unknown disconnect reason: {0}")]

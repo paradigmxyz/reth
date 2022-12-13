@@ -50,7 +50,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, trace, warn};
 
 pub mod bootnodes;
 pub mod error;
@@ -455,9 +455,8 @@ impl Discv4Service {
     ///
     /// This takes an optional Sender through which all successfully discovered nodes are sent once
     /// the request has finished.
-    #[instrument(skip_all, fields(?target), target = "net::discv4")]
     fn lookup_with(&mut self, target: PeerId, tx: Option<NodeRecordSender>) {
-        trace!("Starting lookup");
+        trace!(target : "net::discv4", ?target, "Starting lookup");
         let key = kad_key(target);
 
         // Start a lookup context with the 16 (MAX_NODES_PER_BUCKET) closest nodes
@@ -473,7 +472,7 @@ impl Discv4Service {
         // From those 16, pick the 3 closest to start the lookup.
         let closest = ctx.closest(ALPHA);
 
-        trace!(num = closest.len(), "Start lookup closest nodes");
+        trace!(target : "net::discv4", ?target, num = closest.len(), "Start lookup closest nodes");
 
         for node in closest {
             self.find_node(&node, ctx.clone());
@@ -526,7 +525,6 @@ impl Discv4Service {
         }
         let key = kad_key(record.id);
         let entry = NodeEntry { record, last_seen: Instant::now() };
-
         match self.kbuckets.insert_or_update(
             &key,
             entry,
@@ -536,7 +534,7 @@ impl Discv4Service {
             },
         ) {
             InsertResult::Inserted => {
-                trace!( target : "net::disc",?record, "inserted new record to table");
+                debug!(target : "net::disc",?record, "inserted new record to table");
                 self.notify(DiscoveryUpdate::Added(record));
             }
             InsertResult::ValueUpdated { .. } | InsertResult::Updated { .. } => {
@@ -547,7 +545,7 @@ impl Discv4Service {
                 self.notify(DiscoveryUpdate::Discovered(record));
             }
             res => {
-                debug!(target : "net::disc",?record, ?res,  "failed to insert");
+                warn!(target : "net::disc",?record, ?res,  "failed to insert");
             }
         }
     }
@@ -1298,7 +1296,6 @@ mod tests {
         bootnodes::mainnet_nodes,
         mock::{create_discv4, create_discv4_with_config},
     };
-    use tracing_test::traced_test;
 
     #[test]
     fn test_local_rotator() {
@@ -1320,7 +1317,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[traced_test]
     async fn test_pending_ping() {
         let (_, mut service) = create_discv4().await;
 
@@ -1335,9 +1331,10 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[traced_test]
     #[ignore]
     async fn test_lookup() {
+        reth_tracing::init_tracing();
+
         let all_nodes = mainnet_nodes();
         let config = Discv4Config::builder().add_boot_nodes(all_nodes).build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1362,8 +1359,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[traced_test]
     async fn test_service_commands() {
+        reth_tracing::init_tracing();
+
         let config = Discv4Config::builder().build();
         let (discv4, mut service) = create_discv4_with_config(config).await;
 

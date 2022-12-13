@@ -8,6 +8,7 @@ env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   GETH_BUILD: 1.10.26-e5eb32ac
+  AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -70,11 +71,16 @@ jobs:
           command: install
           args: cargo-test-fuzz afl
 
+      - name: check for cargo afl
+        run: |
+          cargo install --force afl
+          cargo afl --version
+
       - name: Run fuzz tests
         run: |
           ./.github/scripts/fuzz.sh reth-primitives
           ./.github/scripts/fuzz.sh reth-db
-          ./.github/scripts/fuzz.sh reth-interfaces
+          ./.github/scripts/fuzz.sh reth-eth-wire
           ./.github/scripts/fuzz.sh reth-codecs
 
   lint:

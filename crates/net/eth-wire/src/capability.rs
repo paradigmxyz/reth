@@ -26,7 +26,9 @@ pub enum CapabilityMessage {
 }
 
 /// A message indicating a supported capability and capability version.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
+)]
 pub struct Capability {
     /// The name of the subprotocol
     pub name: SmolStr,

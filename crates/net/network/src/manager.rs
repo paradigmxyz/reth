@@ -505,9 +505,9 @@ where
                         "Session disconnected"
                     );
 
-                    if error.is_some() {
+                    if let Some(ref err) = error {
                         // If the connection was closed due to an error, we report the peer
-                        this.swarm.state_mut().peers_mut().on_connection_dropped(&peer_id);
+                        this.swarm.state_mut().peers_mut().on_connection_dropped(&peer_id, err);
                     } else {
                         // Gracefully disconnected
                         this.swarm.state_mut().peers_mut().on_disconnected(&peer_id);
