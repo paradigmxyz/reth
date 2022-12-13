@@ -69,7 +69,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Returns the address of the sender
-    pub fn sender(&self) -> &Address {
+    pub fn sender(&self) -> Address {
         self.transaction.sender()
     }
 

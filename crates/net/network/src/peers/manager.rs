@@ -121,6 +121,10 @@ impl PeersManager {
     pub(crate) fn on_closed_incoming_pending_session(&mut self) {
         self.connection_info.decr_in()
     }
+    /// Invoked when a pending session was closed.
+    pub(crate) fn on_closed_outgoing_pending_session(&mut self) {
+        self.connection_info.decr_out()
+    }
 
     /// Called when a new _incoming_ active session was established to the given peer.
     ///

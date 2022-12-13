@@ -532,10 +532,9 @@ where
                         ?error,
                         "Outgoing pending session failed"
                     );
-                    this.swarm
-                        .state_mut()
-                        .peers_mut()
-                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                    let swarm = this.swarm.state_mut().peers_mut();
+                    swarm.on_closed_outgoing_pending_session();
+                    swarm.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                     warn!(
