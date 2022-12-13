@@ -3205,22 +3205,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-bodies-downloaders"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "backon",
- "futures-util",
- "once_cell",
- "rand 0.8.5",
- "reth-eth-wire",
- "reth-interfaces",
- "reth-primitives",
- "tokio",
-]
-
-[[package]]
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
@@ -3305,6 +3289,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "backon",
+ "futures",
+ "futures-util",
+ "once_cell",
+ "rand 0.8.5",
+ "reth-eth-wire",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serial_test",
+ "tokio",
+]
+
+[[package]]
 name = "reth-ecies"
 version = "0.1.0"
 dependencies = [
@@ -3381,22 +3384,6 @@ dependencies = [
  "sha3",
  "thiserror",
  "triehash",
-]
-
-[[package]]
-name = "reth-headers-downloaders"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "futures",
- "once_cell",
- "rand 0.8.5",
- "reth-interfaces",
- "reth-primitives",
- "reth-rpc-types",
- "serial_test",
- "tokio",
 ]
 
 [[package]]
@@ -3645,11 +3632,10 @@ dependencies = [
  "metrics",
  "rand 0.8.5",
  "rayon",
- "reth-bodies-downloaders",
  "reth-db",
+ "reth-downloaders",
  "reth-eth-wire",
  "reth-executor",
- "reth-headers-downloaders",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",

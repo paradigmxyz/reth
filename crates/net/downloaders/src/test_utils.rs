@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, error::RequestResult},
+    p2p::{bodies::client::BodiesClient, error::PeerRequestResult},
     test_utils::generators::random_block_range,
 };
 use reth_primitives::{BlockNumber, H256};
@@ -58,9 +58,9 @@ impl<F> TestClient<F> {
 impl<F, Fut> BodiesClient for TestClient<F>
 where
     F: FnMut(Vec<H256>) -> Fut + Send + Sync,
-    Fut: Future<Output = RequestResult<Vec<BlockBody>>> + Send,
+    Fut: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send,
 {
-    async fn get_block_body(&self, hash: Vec<H256>) -> RequestResult<Vec<BlockBody>> {
+    async fn get_block_body(&self, hash: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
         let f = &mut *self.0.lock().await;
         (f)(hash).await
     }
