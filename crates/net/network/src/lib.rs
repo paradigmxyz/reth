@@ -16,7 +16,7 @@
 //!
 //! ## Usage
 //!
-//! ### Configure and launch the network
+//! ### Configure and launch a standalone network
 //!
 //! The [`NetworkConfig`] is used to configure the network.
 //! It requires an instance of [`BlockProvider`](reth_provider::BlockProvider).
@@ -48,7 +48,37 @@
 //!
 //! # }
 //! ```
+//!
+//! ### Configure all components of the Network with the [`NetworkBuilder`]
+//!
+//! ```
+//! use reth_provider::test_utils::TestApi;
+//! use reth_transaction_pool::TransactionPool;
+//! use std::sync::Arc;
+//! use reth_discv4::bootnodes::mainnet_nodes;
+//! use reth_network::config::rng_secret_key;
+//! use reth_network::{NetworkConfig, NetworkManager};
+//! async fn launch<Pool: TransactionPool>(pool: Pool) {
+//!     // This block provider implementation is used for testing purposes.
+//!     let client = Arc::new(TestApi::default());
+//!
+//!     // The key that's used for encrypting sessions and to identify our node.
+//!     let local_key = rng_secret_key();
+//!
+//!     let config =
+//!         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+//!
+//!     // create the network instance
+//!     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
+//!         .await
+//!         .unwrap()
+//!         .transactions(pool)
+//!         .request_handler(client)
+//!         .split_with_handle();
+//! }
+//! ```
 
+mod builder;
 mod cache;
 pub mod config;
 mod discovery;
@@ -66,6 +96,7 @@ mod state;
 mod swarm;
 pub mod transactions;
 
+pub use builder::NetworkBuilder;
 pub use config::NetworkConfig;
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
