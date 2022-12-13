@@ -243,7 +243,8 @@ mod tests {
     use super::UnauthedEthStream;
     use crate::{
         capability::Capability,
-        p2pstream::{HelloMessage, ProtocolVersion, UnauthedP2PStream},
+        hello::HelloMessage,
+        p2pstream::{ProtocolVersion, UnauthedP2PStream},
         types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
         EthStream, PassthroughCodec,
     };

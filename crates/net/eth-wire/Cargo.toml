@@ -29,6 +29,7 @@ snap = "1.0.5"
 smol_str = { version = "0.1", features = ["serde"] }
 
 [dev-dependencies]
+test-fuzz = "3.0.4"
 reth-ecies = { path = "../ecies" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 

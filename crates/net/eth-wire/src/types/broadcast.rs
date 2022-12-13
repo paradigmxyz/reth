@@ -6,7 +6,15 @@ use std::sync::Arc;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct NewBlockHashes(
     /// New block hashes and the block number for each blockhash.
@@ -29,7 +37,9 @@ impl NewBlockHashes {
 }
 
 /// A block hash _and_ a block number.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
+)]
 pub struct BlockHashNumber {
     /// The block hash
     pub hash: H256,
@@ -64,7 +74,9 @@ pub struct RawBlockBody {
 
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
+)]
 pub struct NewBlock {
     /// A new block.
     pub block: RawBlockBody,
@@ -75,7 +87,15 @@ pub struct NewBlock {
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct Transactions(
     /// New transactions for the peer to include in its mempool.
@@ -107,7 +127,15 @@ pub struct SharedTransactions(
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct NewPooledTransactionHashes(
     /// Transaction hashes for new transactions that have appeared on the network.
