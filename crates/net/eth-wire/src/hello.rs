@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
+)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.
     pub protocol_version: ProtocolVersion,

@@ -38,6 +38,9 @@ pub mod fuzz_rlp {
         NewPooledTransactionHashes, NodeData, P2PMessage, PooledTransactions, Receipts, Status,
         Transactions,
     };
+    use reth_primitives::BlockHashOrNumber;
+    use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+    use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
     use crate::roundtrip_encoding;
@@ -45,13 +48,46 @@ pub mod fuzz_rlp {
     // p2p subprotocol messages
     fuzz_type_and_name!(HelloMessage, fuzz_HelloMessage);
     fuzz_type_and_name!(DisconnectReason, fuzz_DisconnectReason);
-    fuzz_type_and_name!(P2PMessage, fuzz_P2PMessage);
 
     // eth subprotocol messages
     fuzz_type_and_name!(Status, fuzz_Status);
     fuzz_type_and_name!(NewBlockHashes, fuzz_NewBlockHashes);
     fuzz_type_and_name!(Transactions, fuzz_Transactions);
-    fuzz_type_and_name!(GetBlockHeaders, fuzz_GetBlockHeaders);
+
+    // GetBlockHeaders implements all the traits required for roundtrip_encoding, so why is this
+    // wrapper type needed?
+    //
+    // While GetBlockHeaders implements all traits needed to work for test-fuzz, it does not have
+    // an obvious Default implementation since BlockHashOrNumber can be either a hash or number,
+    // and the default value of BlockHashOrNumber is not obvious.
+    //
+    // We just provide a default value here so test-fuzz can auto-generate a corpus file for the
+    // type.
+    #[derive(
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Serialize,
+        Deserialize,
+        RlpEncodableWrapper,
+        RlpDecodableWrapper,
+    )]
+    struct GetBlockHeadersWrapper(pub GetBlockHeaders);
+
+    impl Default for GetBlockHeadersWrapper {
+        fn default() -> Self {
+            GetBlockHeadersWrapper(GetBlockHeaders {
+                start_block: BlockHashOrNumber::Number(0),
+                limit: Default::default(),
+                skip: Default::default(),
+                direction: Default::default(),
+            })
+        }
+    }
+
+    fuzz_type_and_name!(GetBlockHeadersWrapper, fuzz_GetBlockHeaders);
+
     fuzz_type_and_name!(BlockHeaders, fuzz_BlockHeaders);
     fuzz_type_and_name!(GetBlockBodies, fuzz_GetBlockBodies);
     fuzz_type_and_name!(BlockBodies, fuzz_BlockBodies);
@@ -63,4 +99,18 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(NodeData, fuzz_NodeData);
     fuzz_type_and_name!(GetReceipts, fuzz_GetReceipts);
     fuzz_type_and_name!(Receipts, fuzz_Receipts);
+
+    // manually test Ping and Pong which are not covered by the above
+
+    /// Tests the round-trip encoding of Ping
+    #[test]
+    fn roundtrip_ping() {
+        roundtrip_encoding::<P2PMessage>(P2PMessage::Ping)
+    }
+
+    /// Tests the round-trip encoding of Pong
+    #[test]
+    fn roundtrip_pong() {
+        roundtrip_encoding::<P2PMessage>(P2PMessage::Pong)
+    }
 }

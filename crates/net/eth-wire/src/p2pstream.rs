@@ -682,6 +682,12 @@ impl Decodable for ProtocolVersion {
     }
 }
 
+impl Default for ProtocolVersion {
+    fn default() -> Self {
+        ProtocolVersion::V5
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

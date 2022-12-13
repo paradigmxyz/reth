@@ -5,7 +5,15 @@ use serde::{Deserialize, Serialize};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
@@ -29,7 +37,15 @@ where
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
