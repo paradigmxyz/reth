@@ -35,6 +35,10 @@ const HEADERS: StageId = StageId("Headers");
 /// - [`Headers`][reth_interfaces::db::tables::Headers]
 /// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
 /// - [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
+///
+/// NOTE: This stage commits the header changes to the database (everything except the changes to
+/// [`HeaderTD`][reth_interfaces::db::tables::HeaderTD] table). The stage does not return the
+/// control flow to the pipeline in order to preserve the context of the chain tip.
 #[derive(Debug)]
 pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers
@@ -43,7 +47,7 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     pub consensus: Arc<C>,
     /// Downloader client implementation
     pub client: Arc<H>,
-    /// The minimum number of block headers to commit at once
+    /// The number of block headers to commit at once
     pub commit_threshold: usize,
 }
 
@@ -97,6 +101,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                     self.validate_header_response(&res)?;
                     let write_progress =
                         self.write_headers::<DB>(db, res).await?.unwrap_or_default();
+                    db.commit()?;
                     current_progress = current_progress.max(write_progress);
                 }
                 Err(e) => match e {
