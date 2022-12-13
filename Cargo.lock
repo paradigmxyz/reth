@@ -3512,20 +3512,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-p2p"
-version = "0.1.0"
-dependencies = [
- "enr 0.7.0 (git+https://github.com/sigp/enr)",
- "secp256k1",
- "serde",
- "serde_derive",
- "tempfile",
- "thiserror",
- "toml",
- "tracing",
-]
-
-[[package]]
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
