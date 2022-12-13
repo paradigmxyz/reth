@@ -124,6 +124,7 @@ impl Encodable for DisconnectReason {
 /// input is snappy compressed.
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        tracing::trace!("Decoding disconnect reason: {}", hex::encode(&buf));
         if buf.len() < 4 {
             return Err(DecodeError::Custom("disconnect reason should have 4 bytes"))
         }
