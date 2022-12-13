@@ -4,7 +4,7 @@ use crate::fetch::{DownloadRequest, StatusUpdate};
 use reth_eth_wire::{BlockBody, BlockHeaders};
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
-    error::{PeerRequestResult, RequestResult},
+    error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{WithPeerId, H256, U256};
