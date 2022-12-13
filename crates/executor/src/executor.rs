@@ -22,34 +22,34 @@ pub struct Executor {
     pub config: Config,
 }
 
-/// Contains old/new account change
+/// Contains old/new account changes
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AccountInfoChangeSet {
-    /// Account is newly created.
+    /// The account is newly created.
     Created {
-        /// Newly created acc
+        /// The newly created account.
         new: Account,
     },
-    /// If account is deleted (selfdestructed) or if we have touched
-    /// a empty account, we would need to remove/destroy it.
+    /// An account was deleted (selfdestructed) or we have touched
+    /// an empty account and we need to remove/destroy it.
     /// (Look at state clearing [EIP-158](https://eips.ethereum.org/EIPS/eip-158))
     Destroyed {
-        /// Old account.
+        /// The account that was destroyed.
         old: Account,
     },
-    /// Account is changed.
+    /// The account was changed.
     Changed {
-        /// New account after transaction change.
+        /// The account after the change.
         new: Account,
-        /// Old account before transaction.
+        /// The account prior to the change.
         old: Account,
     },
-    /// There is not change in account information (nonce/balance).
+    /// Nothing was changed for the account (nonce/balance).
     NoChange,
 }
 
 impl AccountInfoChangeSet {
-    /// Apply account ChangeSet to db tranasction
+    /// Apply the changes from the changeset to a database transaction.
     pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
         self,
         address: Address,
