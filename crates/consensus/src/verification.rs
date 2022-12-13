@@ -125,7 +125,8 @@ pub fn validate_transaction_regarding_header(
     Ok(())
 }
 
-/// Iterate over all transactions, verify them agains each other and agains block.
+/// Iterate over all transactions, verify them agains each other and against the block.
+/// There is no gas check done as [REVM](https://github.com/bluealloy/revm/blob/fd0108381799662098b7ab2c429ea719d6dfbf28/crates/revm/src/evm_impl.rs#L113-L131) already checks that.
 pub fn validate_all_transaction_regarding_block_and_nonces<
     'a,
     Provider: HeaderProvider + AccountProvider,
