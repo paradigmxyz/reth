@@ -149,7 +149,7 @@ impl Stream for MockDiscovery {
             match event {
                 IngressEvent::RecvError(_) => {}
                 IngressEvent::BadPacket(from, err, data) => {
-                    error!( target : "net::disc", ?from, ?err, packet=?hex::encode(&data), "bad packet");
+                    error!( target : "discv4", ?from, ?err, packet=?hex::encode(&data), "bad packet");
                 }
                 IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => match msg {
                     Message::Ping(ping) => {
