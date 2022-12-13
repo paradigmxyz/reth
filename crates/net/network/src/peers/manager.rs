@@ -1,6 +1,9 @@
 use crate::peers::{reputation::BANNED_REPUTATION, ReputationChangeKind, ReputationChangeWeights};
 use futures::StreamExt;
-use reth_eth_wire::DisconnectReason;
+use reth_eth_wire::{
+    error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
+    DisconnectReason,
+};
 use reth_primitives::PeerId;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -121,6 +124,7 @@ impl PeersManager {
     pub(crate) fn on_closed_incoming_pending_session(&mut self) {
         self.connection_info.decr_in()
     }
+
     /// Invoked when a pending session was closed.
     pub(crate) fn on_closed_outgoing_pending_session(&mut self) {
         self.connection_info.decr_out()
@@ -184,16 +188,29 @@ impl PeersManager {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
         }
+
+        self.fill_outbound_slots();
     }
 
     /// Called when a session to a peer was forcefully disconnected.
-    pub(crate) fn on_connection_dropped(&mut self, peer_id: &PeerId) {
-        let reputation_change = self.reputation_weights.change(ReputationChangeKind::Dropped);
-        if let Some(mut peer) = self.peers.get_mut(peer_id) {
+    ///
+    /// Depending on whether the error is fatal, the peer will be removed from the peer set
+    /// otherwise its reputation is slashed.
+    pub(crate) fn on_connection_dropped(&mut self, peer_id: &PeerId, err: &EthStreamError) {
+        if is_fatal_protocol_error(err) {
+            // remove the peer to which we can't establish a connection due to protocol related
+            // issues.
+            if let Some(peer) = self.peers.remove(peer_id) {
+                self.connection_info.decr_state(peer.state);
+            }
+        } else if let Some(mut peer) = self.peers.get_mut(peer_id) {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
+            let reputation_change = self.reputation_weights.change(ReputationChangeKind::Dropped);
             peer.reputation = peer.reputation.saturating_sub(reputation_change.as_i32());
         }
+
+        self.fill_outbound_slots();
     }
 
     /// Called for a newly discovered peer.
@@ -209,12 +226,15 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let node = entry.get_mut();
                 node.addr = addr;
+                return
             }
             Entry::Vacant(entry) => {
                 trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
                 entry.insert(Peer::new(addr));
             }
         }
+
+        self.fill_outbound_slots();
     }
 
     /// Removes the tracked node from the set.
@@ -571,6 +591,26 @@ pub enum InboundConnectionError {
 impl Display for InboundConnectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
+    }
+}
+
+/// Returns true if the error indicates that we'll never be able to establish a connection to that
+/// peer. For example, not matching capabilities or a mismatch in protocols.
+fn is_fatal_protocol_error(err: &EthStreamError) -> bool {
+    match err {
+        EthStreamError::P2PStreamError(err) => {
+            matches!(
+                err,
+                P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities) |
+                    P2PStreamError::UnknownReservedMessageId(_) |
+                    P2PStreamError::EmptyProtocolMessage |
+                    P2PStreamError::ParseVersionError(_) |
+                    P2PStreamError::Disconnected(DisconnectReason::UselessPeer) |
+                    P2PStreamError::MismatchedProtocolVersion { .. }
+            )
+        }
+        EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
+        _ => false,
     }
 }
 
