@@ -12,7 +12,8 @@ pub use storage::{
 
 use reth_db::database::Database;
 
-/// Provider
+/// A provider that fetches data from a database.
+// TODO: ProviderImpl is a bad name
 pub struct ProviderImpl<DB: Database> {
     /// Database
     db: Arc<DB>,
