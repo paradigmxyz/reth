@@ -84,6 +84,7 @@ pub(crate) enum PendingSessionEvent {
         direction: Direction,
         error: Option<EthStreamError>,
     },
+
     /// Thrown when unable to establish a [`TcpStream`].
     OutgoingConnectionError {
         remote_addr: SocketAddr,
