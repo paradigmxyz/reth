@@ -13,7 +13,7 @@ pub struct Pipeline<DB: Database> {
 
 When the node is first started, a new `Pipeline` is initialized and all of the stages are added into `Pipeline.stages`. Then, the `Pipeline::run` function is called, which starts the pipeline, executing all of the stages continuously in an infinite loop. This process syncs the chain, keeping everything up to date with the chain tip. 
 
-Each stage within the pipeline implements the `Stage` trait which provides function interfaces to get the stage id, execute the stage and unwind the state if there was an issue during the stage execution. 
+Each stage within the pipeline implements the `Stage` trait which provides function interfaces to get the stage id, execute the stage and unwind the changes to the database if there was an issue during the stage execution.
 
 
 [Filename: crates/stages/src/stage.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stage.rs#L64)
@@ -47,7 +47,52 @@ To get a better idea of what is happening at each part of the pipeline, lets wal
 
 ## HeadersStage
 
-The `HeadersStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with the most recent block height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. This stage relies on the stream to return the headers in descending order staring from the chain tip down to the latest block in the database.
+<!-- TODO: Cross-link to eth/65 chapter when it's written -->
+The `HeadersStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. This stage relies on the stream to return the headers in descending order staring from the chain tip down to the latest block in the database.
+
+It is worth noting that only in the `HeadersStage` do we start at the chain tip and go backwards, all other stages start from the latest block in the database and work towards the chain tip. The reason for this is to avoid a [long-range attack](https://messari.io/report/long-range-attack). If you begin from the local chain head and download headers in ascending order of block height, you won't know if you're being subjected to a long-range attack until you reach the most recent blocks. Instead, the headers stage begins by getting the chain tip from the Consensus Layer, verifies it, and then walks back by parent hash.
+
+The stream that is established is handled by a struct that implements the `HeaderDownloader` trait.
+
+[File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/main/crates/interfaces/src/p2p/headers/downloader.rs#L33)
+```rust
+/// A downloader capable of fetching block headers.
+///
+/// A downloader represents a distinct strategy for submitting requests to download block headers,
+/// while a [HeadersClient] represents a client capable of fulfilling these requests.
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait HeaderDownloader: Sync + Send + Unpin {
+    /// The Consensus used to verify block validity when
+    /// downloading
+    type Consensus: Consensus;
+
+    /// The Client used to download the headers
+    type Client: HeadersClient;
+
+    /// The request timeout duration
+    fn timeout(&self) -> Duration;
+
+    /// The consensus engine
+    fn consensus(&self) -> &Self::Consensus;
+
+    /// The headers client
+    fn client(&self) -> &Self::Client;
+
+    /// Download the headers
+    fn download(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderBatchDownload<'_>;
+
+    /// Stream the headers
+    fn stream(&self, head: SealedHeader, forkchoice: ForkchoiceState) -> HeaderDownloadStream;
+
+    /// Validate whether the header is valid in relation to it's parent
+    ///
+    /// Returns Ok(false) if the
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
+        validate_header_download(self.consensus(), header, parent)?;
+        Ok(())
+    }
+}
+```
 
 Each value yielded from the stream is a `SealedHeader`. 
 
@@ -64,7 +109,9 @@ pub struct SealedHeader {
 }
 ```
 
-Each `SealedHeader` is then validated to ensure that it has the proper parent. Note that this is only a basic response validation, and a full header validation adhering to the consensus spec occurs in the `downloader`. Following the basic header validation, each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the db changes are unwound and the stage is resumed from the most recent valid state.
+Each `SealedHeader` is then validated to ensure that it has the proper parent. Note that this is only a basic response validation. It is up to the implementation of the `HeaderDownloader` trait to ensure that `validate` is called in the call stack stemming from `stream`, so that each header is validated according to the consensus specification in order to be yielded from the stream.
+
+After this, each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the db changes are unwound and the stage is resumed from the most recent valid state.
 
 This process continues until all of the headers have been downloaded and and written to the database. Finally, the total difficulty of the chain's head is updated and the function returns `Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })`, signaling that the header sync has completed successfully. 
 
@@ -119,7 +166,7 @@ Following a successful `BodyStage`, the `SenderStage` starts to execute. The `Se
     }
 ```
 
-In an [ECDSA (Elliptic Curve Digital Signature Algorithm) signature](), the "r", "s", and "v" values are three pieces of data that are used to mathematically verify the authenticity of a digital signature. ECDSA is a widely used algorithm for generating and verifying digital signatures, and it is often used in cryptocurrencies like Ethereum.
+In an [ECDSA (Elliptic Curve Digital Signature Algorithm) signature](https://wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm), the "r", "s", and "v" values are three pieces of data that are used to mathematically verify the authenticity of a digital signature. ECDSA is a widely used algorithm for generating and verifying digital signatures, and it is often used in cryptocurrencies like Ethereum.
 
 The "r" is the x-coordinate of a point on the elliptic curve that is calculated as part of the signature process. The "s" is the s-value that is calculated during the signature process. It is derived from the private key and the message being signed. Lastly, the "v" is the "recovery value" that is used to recover the public key from the signature, which is derived from the signature and the message that was signed. Together, the "r", "s", and "v" values make up an ECDSA signature, and they are used to verify the authenticity of the signed transaction.
 
@@ -129,7 +176,7 @@ Once the transaction signer has been recovered, the signer is then added to the 
 
 ## ExecutionStage
 
-Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions and signers are gathered and `reth_executor::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
+Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions have their signers attached to them and `reth_executor::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
 
 [Filename: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L222)
 ```rust
@@ -154,7 +201,7 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 
 # Next Chapter
 
-Now that we have covered all of the stages that are currently included in the `Pipeline`, you know how the Reth client stays synced with the chain tip and updates the database with all of the new headers, bodies, senders and state changes. While this chapter provides an overview, on how the pipeline stages work, the following chapter will dive deeper into the database, the networking stack and other exciting corners of the Reth codebase. Feel free to check out any of the codebase mentioned in this chapter and when you are ready, the next chapter will dive into the `database`.
+Now that we have covered all of the stages that are currently included in the `Pipeline`, you know how the Reth client stays synced with the chain tip and updates the database with all of the new headers, bodies, senders and state changes. While this chapter provides an overview on how the pipeline stages work, the following chapters will dive deeper into the database, the networking stack and other exciting corners of the Reth codebase. Feel free to check out any parts of the codebase mentioned in this chapter, and when you are ready, the next chapter will dive into the `database`.
 
 [Next Chapter]()
 
