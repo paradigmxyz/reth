@@ -155,8 +155,10 @@ impl TestStageDB {
     {
         self.query(|tx| {
             let mut cursor = tx.cursor::<T>()?;
-            if let Some((_, value)) = cursor.last()? {
+            let mut entry = cursor.last()?;
+            while let Some((_, value)) = entry {
                 assert!(selector(value) <= num);
+                entry = cursor.prev()?;
             }
             Ok(())
         })
