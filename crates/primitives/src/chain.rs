@@ -173,8 +173,75 @@ mod tests {
     }
 
     #[test]
-    fn test_display() {
+    fn test_display_named_chain() {
         let chain = Chain::Named(ethers_core::types::Chain::Mainnet);
         assert_eq!(format!("{}", chain), "mainnet");
+    }
+
+    #[test]
+    fn test_display_id_chain() {
+        let chain = Chain::Id(1234);
+        assert_eq!(format!("{}", chain), "1234");
+    }
+
+    #[test]
+    fn test_from_u256() {
+        let n = U256::from(1234);
+        let chain = Chain::from(n);
+        let expected = Chain::Id(1234);
+
+        assert_eq!(chain, expected);
+    }
+
+    #[test]
+    fn test_into_u256() {
+        let chain = Chain::Named(ethers_core::types::Chain::Goerli);
+        let n: U256 = chain.into();
+        let expected = U256::from(5);
+
+        assert_eq!(n, expected);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_into_U64() {
+        let chain = Chain::Named(ethers_core::types::Chain::Goerli);
+        let n: U64 = chain.into();
+        let expected = U64::from(5);
+
+        assert_eq!(n, expected);
+    }
+
+    #[test]
+    fn test_from_str_named_chain() {
+        let result = Chain::from_str("mainnet");
+        let expected = Chain::Named(ethers_core::types::Chain::Mainnet);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_from_str_named_chain_error() {
+        let result = Chain::from_str("chain");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_str_id_chain() {
+        let result = Chain::from_str("1234");
+        let expected = Chain::Id(1234);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_default() {
+        let default = Chain::default();
+        let expected = Chain::Named(ethers_core::types::Chain::Mainnet);
+
+        assert_eq!(default, expected);
     }
 }
