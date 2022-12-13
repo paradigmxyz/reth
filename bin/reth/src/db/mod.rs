@@ -76,9 +76,34 @@ impl Command {
         db.create_tables()?;
 
         let mut tool = DbTool::new(&db)?;
-
         match &self.command {
-            Subcommands::Stats { .. } => {}
+            // Ideal behavior:
+            //
+            // This table has this many entries and is this big
+            Subcommands::Stats { .. } => {
+                let env = &tool.db.raw_db().inner;
+                let tx = env.begin_ro_txn()?;
+                for table in tables::TABLES.iter().map(|(_, name)| name) {
+                    let table_db = tx.open_db(Some(table))?;
+                    let stats = tx.db_stat(&table_db)?;
+
+                    // Defaults to 16KB right now but we should
+                    // re-evaluate depending on the DB we end up using
+                    // (e.g. REDB does not have these options as configurable intentionally)
+                    let page_size = stats.page_size() as usize;
+                    let leaf_pages = stats.leaf_pages();
+                    let branch_pages = stats.branch_pages();
+                    let overflow_pages = stats.overflow_pages();
+                    let num_pages = leaf_pages + branch_pages + overflow_pages;
+                    let table_size = page_size * num_pages;
+                    tracing::info!(
+                        "Table {} has {} entries (total size: {} KB)",
+                        table,
+                        stats.entries(),
+                        table_size / 1024
+                    );
+                }
+            }
             Subcommands::Seed { len } => {
                 tool.seed(*len)?;
             }
@@ -106,14 +131,14 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
+        tracing::info!("generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default());
         chain.iter().try_for_each(|block| {
             insert_canonical_block(&*self.db, block, true)?;
             Ok::<_, eyre::Error>(())
         })?;
-
         self.db.commit()?;
-        info!("Database seeded with {len} blocks");
+        info!("Database committed with {len} blocks");
 
         Ok(())
     }
