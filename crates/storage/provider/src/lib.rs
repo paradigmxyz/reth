@@ -7,7 +7,8 @@
 
 //! <reth crate template>
 
-pub mod block;
+mod block;
+
 pub mod db_provider;
 mod state;
 

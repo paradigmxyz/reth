@@ -70,11 +70,9 @@ where
         Ok(Self { db, tx: Some(db.tx_mut()?) })
     }
 
-    // TODO: Temporary addition for exposing MDBX statistics in CLI, this
-    // will be a part of the Database trait once we figure out what the
-    // right abstraction for statistics is.
-    pub fn raw_db(&self) -> &'this DB {
-        &self.db
+    /// Accessor to the internal Database
+    pub fn inner(&self) -> &'this DB {
+        self.db
     }
 
     /// Commit the current inner transaction and open a new one.

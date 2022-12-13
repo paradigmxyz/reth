@@ -1,7 +1,4 @@
 // TODO: Remove
-#![allow(missing_docs)]
-#![allow(unused_variables)]
-
 //! Main db command
 //!
 //! Database debugging tool
@@ -16,13 +13,12 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_interfaces::test_utils::generators::random_block_range;
-use reth_primitives::BlockLocked;
-use reth_provider::block::insert_canonical_block;
-use reth_stages::db::StageDB;
-use std::{path::Path, sync::Arc};
+use reth_provider::insert_canonical_block;
+use reth_stages::StageDB;
+use std::path::Path;
 use tracing::info;
 
-/// Execute Ethereum blockchain tests by specifying path to json files
+/// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// Path to database folder
@@ -36,10 +32,11 @@ pub struct Command {
 const DEFAULT_NUM_ITEMS: &str = "5";
 
 #[derive(Subcommand, Debug)]
+/// `reth db` subcommands
 pub enum Subcommands {
-    Stats {
-        table: Option<String>,
-    },
+    /// Lists all the table names, number of entries, and size in KB
+    Stats,
+    /// Lists the contents of a table
     List(ListArgs),
     /// Seeds the block db with random blocks on top of each other
     Seed {
@@ -50,6 +47,7 @@ pub enum Subcommands {
 }
 
 #[derive(Parser, Debug)]
+/// The arguments for the `reth db list` command
 pub struct ListArgs {
     /// The table name
     table: String, // TODO: Convert to enum
@@ -77,11 +75,10 @@ impl Command {
 
         let mut tool = DbTool::new(&db)?;
         match &self.command {
-            // Ideal behavior:
-            //
-            // This table has this many entries and is this big
+            // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
-                let env = &tool.db.raw_db().inner;
+                // Get the env from MDBX
+                let env = &tool.db.inner().inner;
                 let tx = env.begin_ro_txn()?;
                 for table in tables::TABLES.iter().map(|(_, name)| name) {
                     let table_db = tx.open_db(Some(table))?;

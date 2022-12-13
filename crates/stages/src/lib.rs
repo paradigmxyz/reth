@@ -14,8 +14,8 @@
 //!
 //! - `stage.progress{stage}`: The block number each stage has currently reached.
 
-// TODO: Pull StageDB to storage module
-pub mod db;
+mod db;
+pub use db::StageDB;
 mod error;
 mod id;
 mod pipeline;
