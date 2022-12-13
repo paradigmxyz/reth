@@ -13,7 +13,9 @@
 ##  limitations under the License.
 ##
 
-if(CMAKE_VERSION VERSION_LESS 3.12)
+if(CMAKE_VERSION VERSION_LESS 3.8.2)
+  cmake_minimum_required(VERSION 3.0.2)
+elseif(CMAKE_VERSION VERSION_LESS 3.12)
   cmake_minimum_required(VERSION 3.8.2)
 else()
   cmake_minimum_required(VERSION 3.12)
