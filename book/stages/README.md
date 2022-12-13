@@ -3,7 +3,7 @@
 The `stages` lib plays a central role in syncing the node, maintaining state, updating the database and more. The stages involved in the Reth pipeline are the `HeaderStage`, `BodyStage`, `SendersStage`, and `ExecutionStage` (note that this list is non-exhaustive, and more pipeline stages will be added in the near future). Each of these stages are queued up and stored within the Reth pipeline.
 
 [Filename: crates/stages/src/pipeline.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/pipeline.rs#L76)
-```rust
+```rust ignore
 pub struct Pipeline<DB: Database> {
     stages: Vec<QueuedStage<DB>>,
     max_block: Option<BlockNumber>,
@@ -17,7 +17,7 @@ Each stage within the pipeline implements the `Stage` trait which provides funct
 
 
 [Filename: crates/stages/src/stage.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stage.rs#L64)
-```rust
+```rust ignore
 #[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
@@ -51,7 +51,7 @@ To get a better idea of what is happening at each part of the pipeline, lets wal
 The `HeaderStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. The `HeaderStage` contains a `downloader` attribute, which is a type that implements the `HeaderDownloader` trait. The `stream()` method from this trait is used to fetch headers from the network.
 
 [File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/main/crates/interfaces/src/p2p/headers/downloader.rs#L33)
-```rust
+```rust ignore
 /// A downloader capable of fetching block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
@@ -94,7 +94,7 @@ pub trait HeaderDownloader: Sync + Send + Unpin {
 The `HeaderStage` relies on the downloader stream to return the headers in descending order starting from the chain tip down to the latest block in the database. While other stages in the `Pipeline` start from the most recent block in the database up to the chain tip, the `HeaderStage` works in reverse to avoid [long-range attacks](https://messari.io/report/long-range-attack). When a node downloads headers in ascending order, it will not know if it is being subjected to a long-range attack until it reaches the most recent blocks. To combat this, the `HeaderStage` starts by getting the chain tip from the Consensus Layer, verifies the tip, and then walks backwards by the parent hash. Each value yielded from the stream is a `SealedHeader`. 
 
 [File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/header.rs#L207)
-```rust
+```rust ignore
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -125,7 +125,7 @@ When the `BodyStage` is looking at the headers to determine which block to downl
 Once the `BodyStage` determines which block bodies to fetch, a new `bodies_stream` is created which downloads all of the bodies from the `starting_block`, up until the `target_block` specified. Each time the `bodies_stream` yields a value, a `BlockLocked` is created using the block header, the ommers hash and the newly downloaded block body.
 
 [File: crates/primitives/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/block.rs#L26)
-```rust
+```rust ignore
 /// Sealed Ethereum full block.
 #[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 pub struct BlockLocked {
@@ -147,7 +147,7 @@ The new block is then pre-validated, checking that the ommers hash and transacti
 Following a successful `BodyStage`, the `SenderStage` starts to execute. The `SenderStage` is responsible for recovering the transaction sender for each of the newly added transactions to the database. At the beginning of the execution function, all of the transactions are first retrieved from the database. Then the `SenderStage` goes through each transaction and recovers the signer from the transaction signature and hash. The transaction hash is derived by taking the Keccak 256-bit hash of the RLP encoded transaction bytes. This hash is then passed into the `recover_signer` function.
 
 [File: crates/primitives/src/transaction/signature.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/transaction/signature.rs#L72)
-```rust
+```rust ignore
 
     /// Recover signature from hash.
     pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
@@ -174,7 +174,7 @@ Once the transaction signer has been recovered, the signer is then added to the 
 Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions have their signers attached to them and `reth_executor::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
 
 [Filename: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L222)
-```rust
+```rust ignore
 block_change_patches.push((
     reth_executor::executor::execute_and_verify_receipt(
         header,
