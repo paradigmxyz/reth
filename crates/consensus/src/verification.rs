@@ -342,44 +342,19 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, config)?;
 
-    let mut account_nonces = HashMap::new();
+    // NOTE: depending on the need of the stages, recovery could be done in different place.
+    let transactions = block
+        .body
+        .iter()
+        .map(|tx| tx.try_ecrecovered().ok_or(Error::TransactionSignerRecoveryError))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    for transaction in block.body.iter() {
-        validate_transaction_regarding_header(
-            transaction,
-            config,
-            block.header.number,
-            block.header.base_fee_per_gas,
-        )?;
-
-        // NOTE: depending on the need of the stages, recovery could be done in different place.
-        let recovered =
-            transaction.try_ecrecovered().ok_or(Error::TransactionSignerRecoveryError)?;
-
-        // Get nonce, if there is previous transaction from same sender we need
-        // to take that into account so we are caching nonces.
-        let new_nonce = match account_nonces.entry(recovered.signer()) {
-            Entry::Occupied(mut entry) => {
-                let nonce = entry.get_mut();
-                *nonce += 1;
-                *nonce
-            }
-            Entry::Vacant(entry) => {
-                let account = provider.basic_account(recovered.signer())?.unwrap_or_default();
-                // Signer account shoudn't have bytecode. Presence of bytecode means this is a
-                // smartcontract.
-                if account.has_bytecode() {
-                    return Err(Error::SignerAccountHasBytecode.into())
-                }
-                *entry.insert(account.nonce + 1)
-            }
-        };
-
-        // check nonce
-        if recovered.nonce() != new_nonce {
-            return Err(Error::TransactionNonceNotConsistent.into())
-        }
-    }
+    validate_all_transaction_regarding_block_and_nonces(
+        transactions.iter(),
+        &block.header,
+        provider,
+        config,
+    )?;
     Ok(())
 }
 
