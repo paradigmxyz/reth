@@ -99,6 +99,8 @@ where
             })
         }
 
+        tracing::trace!("Decoding Hello message from peer: {}", hex::encode(&first_message_bytes));
+
         // the u8::decode implementation handles the 0x80 case for P2PMessageID::Hello, and the
         // TryFrom implementation ensures that the message id is known.
         let message_id = u8::decode(&mut &first_message_bytes[..])?;
