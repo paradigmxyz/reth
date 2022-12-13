@@ -8,6 +8,7 @@
 //! <reth crate template>
 
 mod block;
+
 pub mod db_provider;
 mod state;
 

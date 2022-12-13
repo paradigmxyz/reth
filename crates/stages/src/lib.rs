@@ -15,6 +15,7 @@
 //! - `stage.progress{stage}`: The block number each stage has currently reached.
 
 mod db;
+pub use db::StageDB;
 mod error;
 mod id;
 mod pipeline;
