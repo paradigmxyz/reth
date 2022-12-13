@@ -3177,6 +3177,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc",
  "reth-stages",
  "reth-transaction-pool",

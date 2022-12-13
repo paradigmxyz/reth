@@ -70,6 +70,11 @@ where
         Ok(Self { db, tx: Some(db.tx_mut()?) })
     }
 
+    /// Accessor to the internal Database
+    pub fn inner(&self) -> &'this DB {
+        self.db
+    }
+
     /// Commit the current inner transaction and open a new one.
     ///
     /// # Panics
