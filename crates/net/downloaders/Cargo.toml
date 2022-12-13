@@ -1,24 +1,29 @@
 [package]
-name = "reth-bodies-downloaders"
+name = "reth-downloaders"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
-description = "Implementations of various block body downloaders"
+description = "Implementations of various block downloaders"
 
 [dependencies]
-futures-util = "0.3.25"
+# reth
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
+reth-rpc-types = { path = "../rpc-types" }
 reth-eth-wire = { path= "../eth-wire" }
+
+# async
+async-trait = "0.1.58"
+futures = "0.3"
+futures-util = "0.3.25"
+
+# misc
 backon = "0.2.0"
 
 [dev-dependencies]
+reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 assert_matches = "1.5.0"
 once_cell = "1.15.0"
-rand = "0.8.5"
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 tokio = { version = "1.21.2", features = ["full"] }
-async-trait = "0.1.58"
-futures-util = "0.3.25"

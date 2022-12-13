@@ -870,19 +870,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashmap"
-version = "5.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
-dependencies = [
- "cfg-if",
- "hashbrown 0.12.3",
- "lock_api",
- "once_cell",
- "parking_lot_core 0.9.4",
-]
-
-[[package]]
 name = "data-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3205,22 +3192,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-bodies-downloaders"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "backon",
- "futures-util",
- "once_cell",
- "rand 0.8.5",
- "reth-eth-wire",
- "reth-interfaces",
- "reth-primitives",
- "tokio",
-]
-
-[[package]]
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
@@ -3305,6 +3276,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "backon",
+ "futures",
+ "futures-util",
+ "once_cell",
+ "reth-eth-wire",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
+ "tokio",
+]
+
+[[package]]
 name = "reth-ecies"
 version = "0.1.0"
 dependencies = [
@@ -3381,22 +3369,6 @@ dependencies = [
  "sha3",
  "thiserror",
  "triehash",
-]
-
-[[package]]
-name = "reth-headers-downloaders"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "futures",
- "once_cell",
- "rand 0.8.5",
- "reth-interfaces",
- "reth-primitives",
- "reth-rpc-types",
- "serial_test",
- "tokio",
 ]
 
 [[package]]
@@ -3645,11 +3617,10 @@ dependencies = [
  "metrics",
  "rand 0.8.5",
  "rayon",
- "reth-bodies-downloaders",
  "reth-db",
+ "reth-downloaders",
  "reth-eth-wire",
  "reth-executor",
- "reth-headers-downloaders",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -4097,32 +4068,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serial_test"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92761393ee4dc3ff8f4af487bd58f4307c9329bbedea02cac0089ad9c411e153"
-dependencies = [
- "dashmap",
- "futures",
- "lazy_static",
- "log",
- "parking_lot 0.12.1",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6f5d1c3087fb119617cff2966fe3808a80e5eb59a8c1601d5994d66f4346a5"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

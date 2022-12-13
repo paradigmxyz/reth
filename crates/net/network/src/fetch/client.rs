@@ -4,10 +4,10 @@ use crate::fetch::{DownloadRequest, StatusUpdate};
 use reth_eth_wire::{BlockBody, BlockHeaders};
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
-    error::RequestResult,
+    error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
 };
-use reth_primitives::{H256, U256};
+use reth_primitives::{WithPeerId, H256, U256};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Front-end API for fetching data from the network.
@@ -26,16 +26,16 @@ impl HeadersClient for FetchClient {
     }
 
     /// Sends a `GetBlockHeaders` request to an available peer.
-    async fn get_headers(&self, request: HeadersRequest) -> RequestResult<BlockHeaders> {
+    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
         let (response, rx) = oneshot::channel();
         self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response })?;
-        rx.await?.map(BlockHeaders::from)
+        rx.await?.map(WithPeerId::transform)
     }
 }
 
 #[async_trait::async_trait]
 impl BodiesClient for FetchClient {
-    async fn get_block_body(&self, request: Vec<H256>) -> RequestResult<Vec<BlockBody>> {
+    async fn get_block_body(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
         let (response, rx) = oneshot::channel();
         self.request_tx.send(DownloadRequest::GetBlockBodies { request, response })?;
         rx.await?

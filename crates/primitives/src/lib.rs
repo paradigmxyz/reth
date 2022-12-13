@@ -22,6 +22,7 @@ mod hex_bytes;
 mod integer_list;
 mod jsonu256;
 mod log;
+mod peer;
 mod receipt;
 mod storage;
 mod transaction;
@@ -41,6 +42,7 @@ pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
+pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
@@ -68,12 +70,6 @@ pub type ChainId = u64;
 pub type StorageKey = H256;
 /// An account storage value.
 pub type StorageValue = U256;
-
-// TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to
-// prevent misuse
-/// This represents an uncompressed secp256k1 public key.
-/// This encodes the concatenation of the x and y components of the affine point in bytes.
-pub type PeerId = H512;
 
 pub use ethers_core::{
     types as rpc,

@@ -490,7 +490,7 @@ mod tests {
                     client::BodiesClient,
                     downloader::{BodiesStream, BodyDownloader},
                 },
-                error::RequestResult,
+                error::{PeerRequestResult, RequestResult},
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -716,7 +716,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
-            async fn get_block_body(&self, _: Vec<H256>) -> RequestResult<Vec<BlockBody>> {
+            async fn get_block_body(&self, _: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
                 panic!("Noop client should not be called")
             }
         }
