@@ -1325,6 +1325,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn test_lookup() {
         reth_tracing::init_tracing();
 
