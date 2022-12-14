@@ -235,7 +235,7 @@ where
                 headers.sort_unstable_by_key(|h| h.number);
 
                 if headers.is_empty() {
-                    return Err(RequestError::BadResponse.into())
+                    return Err(RequestError::EmptyHeaders.into())
                 }
 
                 // Iterate headers in reverse
@@ -255,7 +255,11 @@ where
                     } else if parent.hash() != self.forkchoice.head_block_hash {
                         // The buffer is empty and the first header does not match the
                         // tip, requeue the future
-                        return Err(RequestError::BadResponse.into())
+                        return Err(RequestError::MismatchedParent(
+                            parent.hash(),
+                            self.forkchoice.head_block_hash,
+                        )
+                        .into())
                     }
 
                     // Record new parent
