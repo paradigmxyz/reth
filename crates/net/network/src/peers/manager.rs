@@ -334,9 +334,9 @@ impl PeersManager {
 /// Tracks stats about connected nodes
 #[derive(Debug)]
 pub struct ConnectionInfo {
-    /// Currently occupied slots for outbound connections.
+    /// Counter for currently occupied slots for active outbound connections.
     num_outbound: usize,
-    /// Currently occupied slots for inbound connections.
+    /// Counter for currently occupied slots for active inbound connections.
     num_inbound: usize,
     /// Maximum allowed outbound connections.
     max_outbound: usize,
@@ -379,6 +379,12 @@ impl ConnectionInfo {
 
     fn decr_in(&mut self) {
         self.num_inbound -= 1;
+    }
+}
+
+impl Default for ConnectionInfo {
+    fn default() -> Self {
+        ConnectionInfo { num_outbound: 0, num_inbound: 0, max_outbound: 100, max_inbound: 30 }
     }
 }
 
@@ -501,12 +507,7 @@ impl Default for PeersConfig {
     fn default() -> Self {
         Self {
             refill_slots_interval: Duration::from_millis(1_000),
-            connection_info: ConnectionInfo {
-                num_outbound: 0,
-                num_inbound: 0,
-                max_outbound: 70,
-                max_inbound: 30,
-            },
+            connection_info: Default::default(),
             reputation_weights: Default::default(),
             ban_list: Default::default(),
         }
@@ -522,7 +523,7 @@ impl PeersConfig {
 
     /// Maximum occupied slots for outbound connections.
     pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
-        self.connection_info.num_inbound = num_outbound;
+        self.connection_info.num_outbound = num_outbound;
         self
     }
 
@@ -624,7 +625,13 @@ mod test {
 
     use reth_primitives::{PeerId, H512};
 
-    use crate::{peers::PeerAction, BanList, PeersConfig};
+    use crate::{
+        peers::{
+            manager::{ConnectionInfo, PeerConnectionState},
+            PeerAction,
+        },
+        BanList, PeersConfig,
+    };
 
     use super::PeersManager;
 
@@ -673,5 +680,43 @@ mod test {
         let Some(PeerAction::DisconnectBannedIncoming { peer_id }) = peer_manager.queued_actions.pop_front() else { panic!() };
 
         assert_eq!(peer_id, given_peer_id)
+    }
+
+    #[test]
+    fn test_connection_limits() {
+        let mut info = ConnectionInfo::default();
+        info.inc_in();
+        assert_eq!(info.num_inbound, 1);
+        assert_eq!(info.num_outbound, 0);
+        assert!(info.has_in_capacity());
+
+        info.decr_in();
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
+
+        info.inc_out();
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 1);
+        assert!(info.has_out_capacity());
+
+        info.decr_out();
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
+    }
+
+    #[test]
+    fn test_connection_peer_state() {
+        let mut info = ConnectionInfo::default();
+        info.inc_in();
+
+        info.decr_state(PeerConnectionState::In);
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
+
+        info.inc_out();
+
+        info.decr_state(PeerConnectionState::Out);
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
     }
 }
