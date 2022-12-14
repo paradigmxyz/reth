@@ -95,6 +95,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         // in descending order starting from the tip down to
         // the local head (latest block in db)
         while let Some(headers) = stream.next().await {
+            trace!(len = headers.len(), "Received headers");
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
                     // Perform basic response validation
@@ -163,6 +164,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
+            debug!(?forkchoice, "Received fork choice state");
             if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
                 return forkchoice.clone()
             }
