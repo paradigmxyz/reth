@@ -30,6 +30,17 @@ pub enum DownloadError {
         /// The parent hash being evaluated
         parent_hash: H256,
     },
+    /// Received empty response while expecting headers
+    #[error("Received empty header response.")]
+    EmptyResponse,
+    /// Received an invalid tip
+    #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]
+    InvalidTip {
+        /// The hash of the received tip
+        received: H256,
+        /// The hash of the expected tip
+        expected: H256,
+    },
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
