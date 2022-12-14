@@ -51,7 +51,7 @@ pub struct SpecUpgrades {
 impl SpecUpgrades {
     /// After merge/peric block reward was removed from execution layer.
     pub fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        block_num <= self.paris
+        block_num < self.paris
     }
 
     /// Ethereum mainnet spec

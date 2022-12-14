@@ -3383,6 +3383,7 @@ dependencies = [
  "rlp",
  "sha3",
  "thiserror",
+ "tokio",
  "tracing",
  "triehash",
 ]

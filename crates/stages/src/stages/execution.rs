@@ -11,7 +11,7 @@ use reth_db::{
 };
 use reth_executor::{
     config::SpecUpgrades,
-    executor::AccountChangeSet,
+    executor::{AccountChangeSet, ExecutionResult},
     revm_wrap::{State, SubState},
     Config,
 };
@@ -109,7 +109,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
-            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block })
+            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block });
         }
 
         // get headers from canonical numbers
@@ -179,67 +179,86 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, (start_tx_index, end_tx_index, block_reward_index)) in
-            headers_batch.iter().zip(tx_index_ranges.iter())
-        {
-            let num = header.number;
-            tracing::trace!(target: "stages::execution",?num, "Execute block num.");
-            let body_tx_cnt = end_tx_index - start_tx_index;
-            // iterate over all transactions
-            let mut tx_walker = tx.walk(*start_tx_index)?;
-            let mut transactions = Vec::with_capacity(body_tx_cnt as usize);
-            // get next N transactions.
-            for index in *start_tx_index..*end_tx_index {
-                let (tx_index, tx) =
-                    tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
-                if tx_index != index {
-                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
+        let batch_length = canonical_batch.len();
+        let mut execute =
+            || -> Result<Vec<(ExecutionResult, u64, Option<u64>)>, StageError> {
+                let mut block_change_patches = Vec::with_capacity(batch_length);
+                for (header, (start_tx_index, end_tx_index, block_reward_index)) in
+                    headers_batch.iter().zip(tx_index_ranges.into_iter())
+                {
+                    let num = header.number;
+                    tracing::trace!(target: "stages::execution",?num, "Execute block num. and tx_id from:{} to:{}",start_tx_index, end_tx_index);
+                    let body_tx_cnt = end_tx_index - start_tx_index;
+                    // iterate over all transactions
+                    let mut tx_walker = tx.walk(start_tx_index)?;
+                    let mut transactions = Vec::with_capacity(body_tx_cnt as usize);
+                    // get next N transactions.
+                    for index in start_tx_index..end_tx_index {
+                        let (tx_index, tx) = tx_walker
+                            .next()
+                            .ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
+                        if tx_index != index {
+                            return Err(DatabaseIntegrityError::TransactionsGap {
+                                missing: tx_index,
+                            }
+                            .into());
+                        }
+                        transactions.push(tx);
+                    }
+
+                    // take signers
+                    let mut tx_sender_walker = tx_sender.walk(start_tx_index)?;
+                    let mut signers = Vec::with_capacity(body_tx_cnt as usize);
+                    for index in start_tx_index..end_tx_index {
+                        let (tx_index, tx) = tx_sender_walker
+                            .next()
+                            .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
+                        if tx_index != index {
+                            return Err(DatabaseIntegrityError::TransactionsSignerGap {
+                                missing: tx_index,
+                            }
+                            .into());
+                        }
+                        signers.push(tx);
+                    }
+                    // create ecRecovered transaction by matching tx and its signer
+                    let recovered_transactions: Vec<_> = transactions
+                        .into_iter()
+                        .zip(signers.into_iter())
+                        .map(|(tx, signer)| {
+                            TransactionSignedEcRecovered::from_signed_transactions_and_signer(
+                                tx, signer,
+                            )
+                        })
+                        .collect();
+
+                    // for now use default eth config
+
+                    let mut state_provider =
+                        SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
+
+                    // executiong and store output to results
+                    block_change_patches.push((
+                        reth_executor::executor::execute_and_verify_receipt(
+                            header,
+                            &recovered_transactions,
+                            &self.config,
+                            &mut state_provider,
+                        )
+                        .map_err(|error| StageError::ExecutionError {
+                            block: header.number,
+                            error,
+                        })?,
+                        start_tx_index,
+                        block_reward_index,
+                    ));
                 }
-                transactions.push(tx);
-            }
+                Ok(block_change_patches)
+            };
 
-            // take signers
-            let mut tx_sender_walker = tx_sender.walk(*start_tx_index)?;
-            let mut signers = Vec::with_capacity(body_tx_cnt as usize);
-            for index in *start_tx_index..*end_tx_index {
-                let (tx_index, tx) = tx_sender_walker
-                    .next()
-                    .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
-                if tx_index != index {
-                    return Err(
-                        DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
-                    )
-                }
-                signers.push(tx);
-            }
-            // create ecRecovered transaction by matching tx and its signer
-            let recovered_transactions: Vec<_> = transactions
-                .into_iter()
-                .zip(signers.into_iter())
-                .map(|(tx, signer)| {
-                    TransactionSignedEcRecovered::from_signed_transactions_and_signer(tx, signer)
-                })
-                .collect();
+        let t = std::thread::Builder::new().stack_size(50 * 1024 * 1024).spawn(execute).unwrap();
 
-            // for now use default eth config
-
-            let mut state_provider =
-                SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
-
-            // executiong and store output to results
-            block_change_patches.push((
-                reth_executor::executor::execute_and_verify_receipt(
-                    header,
-                    &recovered_transactions,
-                    &self.config,
-                    &mut state_provider,
-                )
-                .map_err(|error| StageError::ExecutionError { block: header.number, error })?,
-                start_tx_index,
-                block_reward_index,
-            ));
-        }
+        let block_change_patches = tokio::task::spawn_blocking(execute).await.unwrap()?;
 
         // apply changes to plain database.
         for (results, start_tx_index, block_reward_index) in block_change_patches.into_iter() {
@@ -368,7 +387,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: unwind_to })
+            return Ok(UnwindOutput { stage_progress: unwind_to });
         }
 
         // get all batches for account change
@@ -409,7 +428,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = account_changeset.last()?;
         while let Some((tx_number, _)) = entry {
             if tx_number < to_tx_number {
-                break
+                break;
             }
             account_changeset.delete_current()?;
             entry = account_changeset.prev()?;
@@ -418,7 +437,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = storage_changeset.last()?;
         while let Some((TxNumberAddress((tx_number, _)), _)) = entry {
             if tx_number < to_tx_number {
-                break
+                break;
             }
             storage_changeset.delete_current()?;
             entry = storage_changeset.prev()?;
