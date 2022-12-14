@@ -209,7 +209,7 @@ where
             return Err(())
         }
         tracing::trace!(
-            target = "downloaders::headers",
+            target : "downloaders::headers",
             "retrying future attempt: {}/{}",
             fut.retries,
             fut.max_retries
@@ -339,7 +339,7 @@ where
                 if let Err(err) = this.process_header_response(result) {
                     if this.try_fuse_request_fut(&mut fut).is_err() {
                         tracing::trace!(
-                            target = "downloaders::headers",
+                            target: "downloaders::headers",
                             "ran out of retries terminating stream"
                         );
                         // We exhausted all of the retries. Stream must terminate
