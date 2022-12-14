@@ -33,7 +33,7 @@ pub fn pk2id(pk: &PublicKey) -> PeerId {
 pub(crate) fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: H512 is used as a PeerId not because it represents a hash, but because 512 bits is
     // enough to represent an uncompressed public key.
-    let mut s = [0_u8; 65];
+    let mut s = [0u8; 65];
     // SECP256K1_TAG_PUBKEY_UNCOMPRESSED = 0x04
     // see: https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211
     s[0] = 4;
