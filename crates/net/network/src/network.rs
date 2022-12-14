@@ -8,6 +8,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_interfaces::p2p::headers::client::StatusUpdater;
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -110,15 +111,6 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Update the status of the node.
-    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
-        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::StatusUpdate(StatusUpdate {
-            height,
-            hash,
-            total_difficulty,
-        }));
-    }
-
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set
     pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
@@ -155,6 +147,17 @@ impl NetworkHandle {
             peer_id,
             msg: SharedTransactions(msg),
         })
+    }
+}
+
+impl StatusUpdater for NetworkHandle {
+    /// Update the status of the node.
+    fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::StatusUpdate(StatusUpdate {
+            height,
+            hash,
+            total_difficulty,
+        }));
     }
 }
 
