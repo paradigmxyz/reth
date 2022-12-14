@@ -24,7 +24,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tracing::trace;
+use tracing::error;
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: usize = 512;
@@ -355,10 +355,11 @@ where
             for (id, peer) in self.active_peers.iter_mut() {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
-                        Poll::Ready(Err(_)) => {
-                            trace!(
+                        Poll::Ready(Err(err)) => {
+                            error!(
                                 target : "net",
                                 ?id,
+                                ?err,
                                 "Request canceled, response channel closed."
                             );
                             disconnect_sessions.push(*id);

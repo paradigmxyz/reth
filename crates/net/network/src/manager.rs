@@ -50,7 +50,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, trace, warn, info};
+use tracing::{error, info, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
