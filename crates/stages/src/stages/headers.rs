@@ -115,8 +115,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        warn!("Unexpected error occurred: {error}");
-                        return Err(StageError::Download(error.to_string()))
+                        warn!(?error, "An unexpected error occurred");
+                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                 },
             }
