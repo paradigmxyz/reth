@@ -8,7 +8,8 @@ use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
-use reth_network::{BanList, NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
+use reth_net_common::ban_list::BanList;
+use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::PeerId;
 use reth_provider::test_utils::TestApi;
 use secp256k1::SecretKey;
@@ -130,7 +131,7 @@ async fn test_incoming_node_id_blacklist() {
     let geth_peer_id: PeerId =
         provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
-    let ban_list = BanList::new(HashSet::from_iter(vec![geth_peer_id]), HashSet::default());
+    let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
     let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
     let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30303);
