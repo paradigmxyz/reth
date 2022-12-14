@@ -1,7 +1,7 @@
 //! Consensus for ethereum network
 
 use crate::{verification, Config};
-use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
+use reth_interfaces::consensus::{BeaconConsensus, Error, ForkchoiceState};
 use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, H256};
 use tokio::sync::watch;
 
@@ -27,7 +27,7 @@ impl EthConsensus {
     }
 }
 
-impl Consensus for EthConsensus {
+impl BeaconConsensus for EthConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }

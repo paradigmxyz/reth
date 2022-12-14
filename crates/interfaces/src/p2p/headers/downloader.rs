@@ -1,5 +1,5 @@
 use crate::{
-    consensus::Consensus,
+    consensus::BeaconConsensus,
     p2p::{
         downloader::{DownloadStream, Downloader},
         headers::error::DownloadError,
@@ -20,7 +20,7 @@ pub trait HeaderDownloader: Downloader {
         &self,
         head: SealedHeader,
         forkchoice: ForkchoiceState,
-    ) -> DownloadStream<SealedHeader>;
+    ) -> DownloadStream<'_, SealedHeader, DownloadError>;
 
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
@@ -32,7 +32,7 @@ pub trait HeaderDownloader: Downloader {
 /// Validate whether the header is valid in relation to it's parent
 ///
 /// Returns Ok(false) if the
-pub fn validate_header_download<C: Consensus>(
+pub fn validate_header_download<C: BeaconConsensus>(
     consensus: &C,
     header: &SealedHeader,
     parent: &SealedHeader,

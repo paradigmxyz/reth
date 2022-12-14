@@ -1,6 +1,6 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, Consensus},
+    consensus::{self, BeaconConsensus},
     p2p::{
         downloader::{DownloadClient, DownloadStream, Downloader},
         error::{PeerRequestResult, RequestError},
@@ -72,7 +72,7 @@ impl HeaderDownloader for TestHeaderDownloader {
         &self,
         _head: SealedHeader,
         _forkchoice: ForkchoiceState,
-    ) -> DownloadStream<SealedHeader> {
+    ) -> DownloadStream<'_, SealedHeader, DownloadError> {
         Box::pin(self.create_download())
     }
 }
@@ -169,7 +169,7 @@ impl TestHeadersClient {
 }
 
 impl DownloadClient for TestHeadersClient {
-    fn penalize(&self, peer_id: PeerId) {
+    fn penalize(&self, _peer_id: PeerId) {
         // noop
     }
 }
@@ -235,7 +235,7 @@ impl TestConsensus {
 }
 
 #[async_trait::async_trait]
-impl Consensus for TestConsensus {
+impl BeaconConsensus for TestConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }

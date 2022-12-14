@@ -1,14 +1,15 @@
-use super::headers::error::DownloadError;
-use crate::consensus::Consensus;
+use crate::consensus::BeaconConsensus;
 use futures::Stream;
 use reth_primitives::PeerId;
 use std::{fmt::Debug, pin::Pin};
 
 /// A stream for downloading response.
-pub type DownloadStream<T> = Pin<Box<dyn Stream<Item = Result<T, DownloadError>> + Send>>;
+pub type DownloadStream<'a, T, E> = Pin<Box<dyn Stream<Item = Result<T, E>> + Send + 'a>>;
 
 /// Generic download client for peer penalization
 pub trait DownloadClient: Send + Sync + Debug {
+    /// Penalize the peer for responding with a message
+    /// that violates validation rules
     fn penalize(&self, peer_id: PeerId);
 }
 
@@ -20,7 +21,7 @@ pub trait Downloader: Send + Sync {
     type Client: DownloadClient;
 
     /// The Consensus used to verify data validity when downloading
-    type Consensus: Consensus;
+    type Consensus: BeaconConsensus;
 
     /// The headers client
     fn client(&self) -> &Self::Client;

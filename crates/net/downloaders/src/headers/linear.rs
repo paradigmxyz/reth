@@ -1,6 +1,6 @@
 use futures::{stream::Stream, FutureExt};
 use reth_interfaces::{
-    consensus::Consensus,
+    consensus::BeaconConsensus,
     p2p::{
         downloader::{DownloadStream, Downloader},
         error::{PeerRequestResult, RequestError},
@@ -19,7 +19,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
     time::Duration,
 };
 
@@ -38,7 +38,7 @@ pub struct LinearDownloader<C, H> {
 
 impl<C, H> Downloader for LinearDownloader<C, H>
 where
-    C: Consensus,
+    C: BeaconConsensus,
     H: HeadersClient,
 {
     type Consensus = C;
@@ -55,19 +55,19 @@ where
 
 impl<C, H> HeaderDownloader for LinearDownloader<C, H>
 where
-    C: Consensus + 'static,
+    C: BeaconConsensus + 'static,
     H: HeadersClient + 'static,
 {
     fn stream(
         &self,
         head: SealedHeader,
         forkchoice: ForkchoiceState,
-    ) -> DownloadStream<SealedHeader> {
+    ) -> DownloadStream<'_, SealedHeader, DownloadError> {
         Box::pin(self.new_download(head, forkchoice))
     }
 }
 
-impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
+impl<C: BeaconConsensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
     fn clone(&self) -> Self {
         Self {
             consensus: Arc::clone(&self.consensus),
@@ -78,7 +78,7 @@ impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
     }
 }
 
-impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
+impl<C: BeaconConsensus, H: HeadersClient> LinearDownloader<C, H> {
     fn new_download(
         &self,
         head: SealedHeader,
@@ -156,7 +156,7 @@ pub struct HeadersDownload<C, H> {
 
 impl<C, H> HeadersDownload<C, H>
 where
-    C: Consensus + 'static,
+    C: BeaconConsensus + 'static,
     H: HeadersClient + 'static,
 {
     /// Returns the first header from the vector of buffered headers
@@ -261,50 +261,16 @@ where
                 }
                 Ok(())
             }
+            // most likely a noop, because this error
+            // would've been handled by the fetcher internally
             Err(err) => Err(err.into()),
-        }
-    }
-}
-
-impl<C, H> Future for HeadersDownload<C, H>
-where
-    C: Consensus + 'static,
-    H: HeadersClient + 'static,
-{
-    type Output = Result<Vec<SealedHeader>, DownloadError>;
-
-    /// Linear header download implemented as a [Future]. The downloader
-    /// aggregates all of the header responses in a local buffer until the
-    /// previous head is reached.
-    ///
-    /// Upon encountering an error, the downloader will try to resend the request.
-    /// Returns the error if all of the request retries have been exhausted.
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        'outer: loop {
-            // Safe to unwrap, because the future is `done`
-            // only upon returning the result
-            let mut fut = this.get_or_init_fut().expect("fut exists; qed");
-            let response = ready!(fut.poll_unpin(cx));
-            if let Err(err) = this.process_header_response(response) {
-                if this.try_fuse_request_fut(&mut fut).is_err() {
-                    this.done = true;
-                    return Poll::Ready(Err(err))
-                }
-                this.request = Some(fut);
-                continue 'outer
-            }
-
-            if this.done {
-                return Poll::Ready(Ok(std::mem::take(&mut this.buffered).into()))
-            }
         }
     }
 }
 
 impl<C, H> Stream for HeadersDownload<C, H>
 where
-    C: Consensus + 'static,
+    C: BeaconConsensus + 'static,
     H: HeadersClient + 'static,
 {
     type Item = Result<SealedHeader, DownloadError>;
@@ -325,7 +291,13 @@ where
         'outer: loop {
             if let Some(mut fut) = this.get_or_init_fut() {
                 if let Poll::Ready(result) = fut.poll_unpin(cx) {
+                    let peer_id = result.as_ref().map(|res| res.peer_id()).ok();
                     if let Err(err) = this.process_header_response(result) {
+                        // Penalize the peer for bad response
+                        if let Some(peer_id) = peer_id {
+                            this.client.penalize(peer_id);
+                        }
+
                         if this.try_fuse_request_fut(&mut fut).is_err() {
                             // We exhausted all of the retries. Stream must terminate
                             this.done = true;
@@ -395,7 +367,7 @@ impl LinearDownloadBuilder {
 
     /// Build [LinearDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<C: Consensus, H: HeadersClient>(
+    pub fn build<C: BeaconConsensus, H: HeadersClient>(
         self,
         consensus: Arc<C>,
         client: Arc<H>,

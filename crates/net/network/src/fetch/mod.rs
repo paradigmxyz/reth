@@ -376,12 +376,15 @@ pub(crate) enum BlockResponseOutcome {
 
 #[cfg(test)]
 mod tests {
+    use crate::{peers::PeersManager, PeersConfig};
+
     use super::*;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
-        let mut fetcher = StateFetcher::default();
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle());
 
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());

@@ -10,10 +10,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{consensus::Consensus, p2p::bodies::downloader::BodyDownloader};
+use reth_interfaces::{consensus::BeaconConsensus, p2p::bodies::downloader::BodyDownloader};
 use reth_primitives::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockLocked, BlockNumber, SealedHeader, H256,
+    BlockNumber, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc};
 use tracing::warn;
@@ -52,7 +52,7 @@ const BODIES: StageId = StageId("Bodies");
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 /// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
 #[derive(Debug)]
-pub struct BodyStage<D: BodyDownloader, C: Consensus> {
+pub struct BodyStage<D: BodyDownloader, C: BeaconConsensus> {
     /// The body downloader.
     pub downloader: Arc<D>,
     /// The consensus engine.
@@ -61,11 +61,11 @@ pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     ///
     /// Smaller batch sizes result in less memory usage, but more disk I/O. Larger batch sizes
     /// result in more memory usage, less disk I/O, and more infrequent checkpoints.
-    pub batch_size: u64,
+    pub commit_threshold: u64,
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
+impl<DB: Database, D: BodyDownloader, C: BeaconConsensus> Stage<DB> for BodyStage<D, C> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         BODIES
@@ -91,7 +91,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let starting_block = previous_block + 1;
 
         // Short circuit in case we already reached the target block
-        let target = previous_stage_progress.min(starting_block + self.batch_size);
+        let target = previous_stage_progress.min(starting_block + self.commit_threshold);
         if target <= previous_block {
             return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
         }
@@ -106,45 +106,22 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Get id for the first transaction in the block
         let mut first_tx_id = db.get_first_tx_id(starting_block)?;
 
-        // Cursor used to look up headers for block pre-validation
-        let mut header_cursor = db.cursor::<tables::Headers>()?;
-
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = previous_block;
-        while let Some((block_number, header_hash, body)) =
+        while let Some(block) =
             bodies_stream.try_next().await.map_err(|err| StageError::Internal(err.into()))?
         {
-            // Fetch the block header for pre-validation
-            let block = BlockLocked {
-                header: SealedHeader::new(
-                    header_cursor
-                        .seek_exact((block_number, header_hash).into())?
-                        .ok_or(DatabaseIntegrityError::Header {
-                            number: block_number,
-                            hash: header_hash,
-                        })?
-                        .1,
-                    header_hash,
-                ),
-                body: body.transactions,
-                ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
-            };
-
-            // Pre-validate the block and unwind if it is invalid
-            self.consensus
-                .pre_validate_block(&block)
-                .map_err(|err| StageError::Validation { block: block_number, error: err })?;
-
+            let block_number = block.number;
             // Write block
-            let key = (block_number, header_hash).into();
+            let key = (block_number, block.hash()).into();
             // Additional +1, increments tx count to allow indexing of ChangeSet that contains block
             // reward. This can't be added to last transaction ChangeSet as it would
             // break if block is empty.
             let this_tx_count = first_tx_id +
                 block.body.len() as u64 +
-                if self.consensus.has_block_reward(block_number) { 1 } else { 0 };
+                if self.consensus.has_block_reward(block.number) { 1 } else { 0 };
             tx_count_cursor.append(key, this_tx_count)?;
             ommers_cursor.append(
                 key,
@@ -219,7 +196,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     }
 }
 
-impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
+impl<D: BodyDownloader, C: BeaconConsensus> BodyStage<D, C> {
     /// Computes a list of `(block_number, header_hash)` for blocks that we need to download bodies
     /// for.
     ///
@@ -229,7 +206,7 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
         tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
         starting_block: BlockNumber,
         target: BlockNumber,
-    ) -> Result<Vec<(BlockNumber, H256)>, StageError> {
+    ) -> Result<Vec<SealedHeader>, StageError> {
         let mut header_cursor = tx.cursor::<tables::Headers>()?;
         let mut header_hashes_cursor = tx.cursor::<tables::CanonicalHeaders>()?;
         let mut walker = header_hashes_cursor
@@ -238,15 +215,16 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
 
         let mut bodies_to_download = Vec::new();
         while let Some(Ok((block_number, header_hash))) = walker.next() {
-            let header = header_cursor
-                .seek_exact((block_number, header_hash).into())?
-                .ok_or(DatabaseIntegrityError::Header { number: block_number, hash: header_hash })?
-                .1;
+            let (_, header) = header_cursor.seek_exact((block_number, header_hash).into())?.ok_or(
+                DatabaseIntegrityError::Header { number: block_number, hash: header_hash },
+            )?;
+
             if header.ommers_hash == EMPTY_LIST_HASH && header.transactions_root == EMPTY_ROOT {
+                // TODO: fix this
                 continue
             }
 
-            bodies_to_download.push((block_number, header_hash));
+            bodies_to_download.push(SealedHeader::new(header, header_hash));
         }
 
         Ok(bodies_to_download)
@@ -496,11 +474,9 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             p2p::{
-                bodies::{
-                    client::BodiesClient,
-                    downloader::{BodiesStream, BodyDownloader},
-                },
-                error::{PeerRequestResult, RequestResult},
+                bodies::{client::BodiesClient, downloader::BodyDownloader},
+                downloader::{DownloadClient, DownloadStream, Downloader},
+                error::{PeerRequestResult, RequestError, RequestResult},
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -567,7 +543,7 @@ mod tests {
                 BodyStage {
                     downloader: Arc::new(TestBodyDownloader::new(self.responses.clone())),
                     consensus: self.consensus.clone(),
-                    batch_size: self.batch_size,
+                    commit_threshold: self.batch_size,
                 }
             }
         }
@@ -733,6 +709,12 @@ mod tests {
         #[derive(Debug)]
         pub(crate) struct NoopClient;
 
+        impl DownloadClient for NoopClient {
+            fn penalize(&self, _: reth_primitives::PeerId) {
+                panic!("Noop client should not be called")
+            }
+        }
+
         #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
             async fn get_block_body(&self, _: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
@@ -753,29 +735,41 @@ mod tests {
             }
         }
 
-        impl BodyDownloader for TestBodyDownloader {
+        impl Downloader for TestBodyDownloader {
             type Client = NoopClient;
+            type Consensus = TestConsensus;
 
             fn client(&self) -> &Self::Client {
                 unreachable!()
             }
 
-            fn bodies_stream<'a, 'b, I>(&'a self, hashes: I) -> BodiesStream<'a>
+            fn consensus(&self) -> &Self::Consensus {
+                unreachable!()
+            }
+        }
+
+        impl BodyDownloader for TestBodyDownloader {
+            fn bodies_stream<'a, 'b, I>(
+                &'a self,
+                hashes: I,
+            ) -> DownloadStream<'a, BlockLocked, RequestError>
             where
-                I: IntoIterator<Item = &'b (BlockNumber, H256)>,
+                I: IntoIterator<Item = &'b SealedHeader>,
                 <I as IntoIterator>::IntoIter: Send + 'b,
                 'b: 'a,
             {
-                Box::pin(futures_util::stream::iter(hashes.into_iter().map(
-                    |(block_number, hash)| {
-                        let result = self
-                            .responses
-                            .get(hash)
-                            .expect("Stage tried downloading a block we do not have.")
-                            .clone()?;
-                        Ok((*block_number, *hash, result))
-                    },
-                )))
+                Box::pin(futures_util::stream::iter(hashes.into_iter().map(|header| {
+                    let result = self
+                        .responses
+                        .get(&header.hash())
+                        .expect("Stage tried downloading a block we do not have.")
+                        .clone()?;
+                    Ok(BlockLocked {
+                        header: header.clone(),
+                        body: result.transactions,
+                        ommers: result.ommers.into_iter().map(|header| header.seal()).collect(),
+                    })
+                })))
             }
         }
     }
