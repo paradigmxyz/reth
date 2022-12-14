@@ -270,6 +270,8 @@ pub struct Discv4Service {
     pending_pings: HashMap<PeerId, PingRequest>,
     /// Currently active FindNode requests
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
+    /// Currently active ENR requests
+    pending_enr_requests: HashMap<PeerId, ENRRequestState>,
     /// Commands listener
     commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     /// All subscribers for table updates
@@ -343,6 +345,7 @@ impl Discv4Service {
             queued_pings: Default::default(),
             pending_pings: Default::default(),
             pending_find_nodes: Default::default(),
+            pending_enr_requests: Default::default(),
             check_timestamps: false,
             commands_rx,
             update_listeners: Vec::with_capacity(1),
@@ -694,6 +697,9 @@ impl Discv4Service {
             }
         }
     }
+
+    /// Handler for incoming `ENRResponse` message
+    // fn on_enr_response(&mut self, msg: ENR)
 
     /// Handler for incoming `Neighbours` messages that are handled if they're responses to
     /// `FindNode` requests
@@ -1229,6 +1235,21 @@ struct FindNodeRequest {
 impl FindNodeRequest {
     fn new(resp: LookupContext) -> Self {
         Self { sent_at: Instant::now(), response_count: 0, answered: false, lookup_context: resp }
+    }
+}
+
+struct ENRRequestState {
+    // Timestamp when the request was sent.
+    sent_at: Instant,
+    // Whether the request has been answered yet.
+    answered: bool,
+}
+
+// === impl ENRRequestState ===
+
+impl ENRRequestState {
+    fn new() -> Self {
+        Self { sent_at: Instant::now(), answered: false }
     }
 }
 

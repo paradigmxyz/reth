@@ -2,6 +2,8 @@
 
 use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use discv5::enr::{CombinedPublicKey, EnrPublicKey, CombinedKey};
+use enr::{k256::ecdsa::{VerifyingKey, SigningKey}, Enr, EnrPublicKey};
 use reth_primitives::{keccak256, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
@@ -220,7 +222,7 @@ impl From<NodeRecord> for NodeEndpoint {
     }
 }
 
-/// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).).
+/// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct FindNode {
     pub id: PeerId,
@@ -232,6 +234,19 @@ pub struct FindNode {
 pub struct Neighbours {
     pub nodes: Vec<NodeRecord>,
     pub expire: u64,
+}
+
+/// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+pub struct ENRRequest {
+    pub expire: u64,
+}
+
+/// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+pub struct ENRResponse {
+    pub request_hash: H256,
+    pub enr: Enr<SigningKey>,
 }
 
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).

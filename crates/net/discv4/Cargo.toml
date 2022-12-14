@@ -22,6 +22,7 @@ secp256k1 = { version = "0.24", features = [
     "rand-std",
     "recovery",
 ] }
+enr = "0.7.0"
 
 # async/futures
 tokio = { version = "1", features = ["io-util", "net", "time"] }
