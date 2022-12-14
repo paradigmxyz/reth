@@ -2,7 +2,7 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadStream, Downloader},
+        downloader::{DownloadClient, DownloadStream, Downloader},
         error::{PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest},
@@ -165,6 +165,12 @@ impl TestHeadersClient {
     pub async fn set_error(&self, err: RequestError) {
         let mut lock = self.error.lock().await;
         lock.replace(err);
+    }
+}
+
+impl DownloadClient for TestHeadersClient {
+    fn penalize(&self, peer_id: PeerId) {
+        // noop
     }
 }
 

@@ -70,6 +70,7 @@ where
         peers_manager: PeersManager,
         genesis_hash: H256,
     ) -> Self {
+        let state_fetcher = StateFetcher::new(peers_manager.handle());
         Self {
             active_peers: Default::default(),
             peers_manager,
@@ -77,7 +78,7 @@ where
             client,
             discovery,
             genesis_hash,
-            state_fetcher: Default::default(),
+            state_fetcher,
         }
     }
 
