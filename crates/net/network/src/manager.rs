@@ -145,6 +145,8 @@ where
             network_mode,
             boot_nodes,
             executor,
+            hello_message,
+            status,
             ..
         } = config;
 
@@ -160,7 +162,8 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let sessions = SessionManager::new(secret_key, sessions_config, executor);
+        let sessions =
+            SessionManager::new(secret_key, sessions_config, executor, status, hello_message);
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);

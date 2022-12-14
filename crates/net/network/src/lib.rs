@@ -97,7 +97,7 @@ mod swarm;
 pub mod transactions;
 
 pub use builder::NetworkBuilder;
-pub use config::NetworkConfig;
+pub use config::{NetworkConfig, NetworkConfigBuilder};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
