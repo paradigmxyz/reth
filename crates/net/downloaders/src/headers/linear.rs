@@ -3,7 +3,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{
         downloader::{DownloadStream, Downloader},
-        error::{PeerRequestResult, RequestError},
+        error::PeerRequestResult,
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader},
