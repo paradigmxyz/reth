@@ -10,12 +10,15 @@ readme = "README.md"
 # reth
 reth-primitives = { path = "../../crates/primitives" }
 reth-db = {path = "../../crates/storage/db", features = ["mdbx"]}
-reth-provider = {path = "../../crates/storage/provider" }
+# TODO: Temporary use of the test-utils feature
+reth-provider = {path = "../../crates/storage/provider", features = ["test-utils"]}
 reth-stages = {path = "../../crates/stages"}
 reth-interfaces = {path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = {path = "../../crates/transaction-pool"}
 reth-consensus = {path = "../../crates/consensus"}
 reth-rpc = {path = "../../crates/net/rpc"}
+reth-network = {path = "../../crates/net/network"}
+reth-downloaders = {path = "../../crates/net/downloaders"}
 
 # tracing
 tracing = "0.1"
@@ -26,7 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shellexpand = "2.1"
 
 eyre = "0.6.8"
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.0", features = ["derive", "cargo"] }
 thiserror = "1.0"
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 serde = "1.0"

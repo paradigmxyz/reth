@@ -50,7 +50,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -145,6 +145,8 @@ where
             network_mode,
             boot_nodes,
             executor,
+            hello_message,
+            status,
             ..
         } = config;
 
@@ -160,7 +162,8 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let sessions = SessionManager::new(secret_key, sessions_config, executor);
+        let sessions =
+            SessionManager::new(secret_key, sessions_config, executor, status, hello_message);
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
@@ -515,7 +518,7 @@ where
                     direction,
                 } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
-                    trace!(
+                    info!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -598,6 +601,11 @@ where
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
                 }
                 SwarmEvent::StatusUpdate(status) => {
+                    trace!(
+                        target : "net",
+                        ?status,
+                        "Status Update received"
+                    );
                     this.swarm.sessions_mut().on_status_update(status.clone())
                 }
             }

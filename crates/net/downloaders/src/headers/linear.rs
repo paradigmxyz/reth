@@ -201,18 +201,6 @@ where
         self.buffered.push_back(header);
     }
 
-    /// Instantiate a new future for header request
-    fn init_fut(&mut self) -> HeadersRequestFuture {
-        let client = Arc::clone(&self.client);
-        let req = self.headers_request();
-        HeadersRequestFuture {
-            request: req.clone(),
-            fut: Box::pin(async move { client.get_headers(req).await }),
-            retries: 0,
-            max_retries: self.request_retries,
-        }
-    }
-
     /// Get a current future or instantiate a new one
     fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
         match self.request.take() {
@@ -238,6 +226,12 @@ where
         if !fut.inc_err() {
             return Err(())
         }
+        tracing::trace!(
+            target : "downloaders::headers",
+            "retrying future attempt: {}/{}",
+            fut.retries,
+            fut.max_retries
+        );
         let req = self.headers_request();
         fut.request = req.clone();
         let client = Arc::clone(&self.client);
@@ -248,11 +242,13 @@ where
     /// Validate whether the header is valid in relation to it's parent
     ///
     /// Returns Ok(false) if the
+    #[allow(clippy::result_large_err)]
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn process_header_response(
         &mut self,
         response: PeerRequestResult<BlockHeaders>,
@@ -263,7 +259,7 @@ where
                 headers.sort_unstable_by_key(|h| h.number);
 
                 if headers.is_empty() {
-                    return Err(RequestError::BadResponse.into())
+                    return Err(DownloadError::EmptyResponse)
                 }
 
                 // Iterate headers in reverse
@@ -283,7 +279,10 @@ where
                     } else if parent.hash() != self.forkchoice.head_block_hash {
                         // The buffer is empty and the first header does not match the
                         // tip, requeue the future
-                        return Err(RequestError::BadResponse.into())
+                        return Err(DownloadError::InvalidTip {
+                            received: parent.hash(),
+                            expected: self.forkchoice.head_block_hash,
+                        })
                     }
 
                     // Record new parent
@@ -338,12 +337,17 @@ where
                             // The buffer has been updated, check if we need
                             // to dispatch another request
                             if !this.has_reached_head() {
-                                this.request = Some(this.init_fut());
+                                // Create a new request
+                                this.request = Some(this.get_or_init_fut());
                             }
                         }
                         Err(err) => {
                             // Response is invalid, attempt to retry
                             if this.try_fuse_request_fut(&mut fut).is_err() {
+                                tracing::trace!(
+                                    target: "downloaders::headers",
+                                    "ran out of retries terminating stream"
+                                );
                                 // We exhausted all of the retries. Stream must terminate
                                 this.buffered.clear();
                                 this.encountered_error = true;

@@ -5,6 +5,7 @@ use crate::{
     message::PeerMessage,
     session::{
         active::ActiveSession,
+        config::SessionCounter,
         handle::{
             ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
             SessionCommand,
@@ -17,11 +18,10 @@ use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    DisconnectReason, HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream,
-    UnauthedP2PStream,
+    DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_primitives::{ForkFilter, Hardfork, PeerId};
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
     future::Future,
@@ -40,9 +40,8 @@ use tracing::{instrument, trace, warn};
 mod active;
 mod config;
 mod handle;
-use crate::session::config::SessionCounter;
 pub use config::SessionsConfig;
-use reth_ecies::util::pk2id;
+
 use reth_tasks::TaskExecutor;
 
 /// Internal identifier for active sessions.
@@ -62,8 +61,8 @@ pub(crate) struct SessionManager {
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
     status: Status,
-    /// THe `Hello` message to send to peers.
-    hello: HelloMessage,
+    /// THe `HelloMessage` message to send to peers.
+    hello_message: HelloMessage,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
     /// Size of the command buffer per session.
@@ -101,18 +100,14 @@ impl SessionManager {
         secret_key: SecretKey,
         config: SessionsConfig,
         executor: Option<TaskExecutor>,
+        status: Status,
+        hello_message: HelloMessage,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
 
-        let pk = secret_key.public_key(SECP256K1);
-        let peer_id = pk2id(&pk);
-
-        // TODO: make sure this is the right place to put these builders - maybe per-Network rather
-        // than per-Session?
-        let hello = HelloBuilder::new(peer_id).build();
-        let status = StatusBuilder::default().build();
-        let fork_filter = Hardfork::Frontier.fork_filter();
+        let hardfork = Hardfork::from(status.forkid.next);
+        let fork_filter = hardfork.fork_filter();
 
         Self {
             next_id: 0,
@@ -120,7 +115,7 @@ impl SessionManager {
             request_timeout: config.request_timeout,
             secret_key,
             status,
-            hello,
+            hello_message,
             fork_filter,
             session_command_buffer: config.session_command_buffer,
             executor,
@@ -180,7 +175,7 @@ impl SessionManager {
             pending_events,
             remote_addr,
             self.secret_key,
-            self.hello.clone(),
+            self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
         ));
@@ -204,7 +199,7 @@ impl SessionManager {
             remote_addr,
             remote_peer_id,
             self.secret_key,
-            self.hello.clone(),
+            self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
         ));
