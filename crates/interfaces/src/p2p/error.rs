@@ -1,4 +1,4 @@
-use reth_primitives::{WithPeerId, H256};
+use reth_primitives::WithPeerId;
 use tokio::sync::{mpsc, oneshot};
 
 /// Result alias for result of a request.
@@ -23,10 +23,6 @@ pub enum RequestError {
     Timeout,
     #[error("Received bad response.")]
     BadResponse,
-    #[error("Received empty headers.")]
-    EmptyHeaders,
-    #[error("Parent hash {0:?} does not match forkchoice head hash {1:?}")]
-    MismatchedParent(H256, H256),
 }
 
 // === impl RequestError ===
