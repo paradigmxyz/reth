@@ -227,14 +227,8 @@ impl TestConsensus {
 }
 
 /// Nil status updater for testing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TestStatusUpdater;
-
-impl Default for TestStatusUpdater {
-    fn default() -> Self {
-        Self
-    }
-}
 
 impl StatusUpdater for TestStatusUpdater {
     fn update_status(&self, _height: u64, _hash: H256, _total_difficulty: reth_primitives::U256) {}
