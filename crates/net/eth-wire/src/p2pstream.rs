@@ -99,7 +99,7 @@ where
             })
         }
 
-        tracing::trace!("Decoding Hello message from peer: {}", hex::encode(&first_message_bytes));
+        tracing::trace!("Decoding first message from peer: {}", hex::encode(&first_message_bytes));
 
         // the u8::decode implementation handles the 0x80 case for P2PMessageID::Hello, and the
         // TryFrom implementation ensures that the message id is known.
@@ -133,6 +133,8 @@ where
             }
         }
 
+        tracing::trace!("Decoding Hello message from peer: {}", hex::encode(&first_message_bytes));
+
         let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..])? {
             P2PMessage::Hello(hello) => Ok(hello),
             msg => {
@@ -141,6 +143,8 @@ where
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
             }
         }?;
+
+        tracing::trace!("Received a valid Hello: {:?}", their_hello);
 
         // TODO: explicitly document that we only support v5.
         if their_hello.protocol_version != ProtocolVersion::V5 {

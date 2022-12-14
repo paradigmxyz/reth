@@ -71,6 +71,8 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }
 
+        tracing::trace!("Decoding first eth message from peer: {}", hex::encode(&their_msg));
+
         let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
@@ -83,6 +85,7 @@ where
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
         match msg.message {
             EthMessage::Status(resp) => {
+                tracing::trace!("Got correctly encoded status message: {:?}", resp);
                 if status.genesis != resp.genesis {
                     return Err(HandshakeError::MismatchedGenesis {
                         expected: status.genesis,
