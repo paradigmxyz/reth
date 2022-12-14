@@ -51,10 +51,10 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
             0 => U256::from(0),
             2 if value.starts_with("0x") => U256::zero(),
             _ if value.starts_with("0x") => U256::from_str(&value[2..]).map_err(|e| {
-                Error::custom(format!("Parsin JsonU256 as hex failed {value}: {e}"))
+                Error::custom(format!("Parsing JsonU256 as hex failed {value}: {e}"))
             })?,
             _ => U256::from_dec_str(value).map_err(|e| {
-                Error::custom(format!("Parsin JsonU256 as decimal failed {value}: {e:?}"))
+                Error::custom(format!("Parsing JsonU256 as decimal failed {value}: {e:?}"))
             })?,
         };
 
