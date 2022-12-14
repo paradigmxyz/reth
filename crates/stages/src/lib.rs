@@ -27,6 +27,7 @@ mod test_utils;
 /// Implementations of stages.
 pub mod stages;
 
+pub use db::StageDB;
 pub use error::*;
 pub use id::*;
 pub use pipeline::*;

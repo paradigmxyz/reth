@@ -9,13 +9,14 @@ readme = "README.md"
 [dependencies]
 # reth
 reth-primitives = { path = "../../crates/primitives" }
-reth-db = {path = "../../crates/storage/db", features = ["mdbx"]}
-reth-provider = {path = "../../crates/storage/provider"}
-reth-stages = {path = "../../crates/stages"}
-reth-interfaces = {path = "../../crates/interfaces"}
-reth-transaction-pool = {path = "../../crates/transaction-pool"}
-reth-consensus = {path = "../../crates/consensus"}
-reth-rpc = {path = "../../crates/net/rpc"}
+reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] } # TODO:
+reth-provider = { path = "../../crates/storage/provider" }
+reth-stages = { path = "../../crates/stages" }
+reth-interfaces = { path = "../../crates/interfaces" }
+reth-transaction-pool = { path = "../../crates/transaction-pool" }
+reth-consensus = { path = "../../crates/consensus" }
+reth-rpc = { path = "../../crates/net/rpc" }
+reth-rlp = { path = "../../crates/common/rlp" }
 
 # tracing
 tracing = "0.1"
