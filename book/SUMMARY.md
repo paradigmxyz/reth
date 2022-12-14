@@ -32,7 +32,7 @@
     - [consensus]()
     - [transaction-pool]()
 - [Staged Sync]()
-    - [stages]()
+    - [stages](./stages/README.md)
 - [Primitives]()
     - [primitives]()
     - [rlp]()
