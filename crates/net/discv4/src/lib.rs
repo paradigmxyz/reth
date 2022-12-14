@@ -560,12 +560,12 @@ impl Discv4Service {
     }
 
     /// Adds the ip to the ban list until the given timestamp.
-    pub fn ban_ip_util(&mut self, ip: IpAddr, until: Instant) {
+    pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
         self.config.ban_list.ban_ip_until(ip, until);
     }
 
     /// Adds the peer to the ban list and bans it until the given timestamp
-    pub fn ban_node_util(&mut self, node_id: PeerId, until: Instant) {
+    pub fn ban_node_until(&mut self, node_id: PeerId, until: Instant) {
         self.remove_node(node_id);
         self.config.ban_list.ban_peer_until(node_id, until);
     }
