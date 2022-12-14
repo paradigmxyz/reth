@@ -96,6 +96,7 @@ where
         self.state_fetcher.client()
     }
 
+    /// Returns sender half of the [`StatusUpdate`] channel.
     pub(crate) fn update_status_tx(&self) -> UnboundedSender<StatusUpdate> {
         self.state_fetcher.update_status_tx()
     }
