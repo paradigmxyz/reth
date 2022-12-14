@@ -187,10 +187,10 @@ impl ECIES {
         );
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &secret_key);
-        let mut key = [0_u8; 32];
+        let mut key = [0u8; 32];
         kdf(x, &[], &mut key);
 
-        let enc_key = H128::from_slice(&key[0..16]);
+        let enc_key = H128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
         let iv = H128::random();
@@ -218,9 +218,9 @@ impl ECIES {
         let tag = H256::from_slice(tag_bytes);
 
         let x = ecdh_x(&public_key, &self.secret_key);
-        let mut key = [0_u8; 32];
+        let mut key = [0u8; 32];
         kdf(x, &[], &mut key);
-        let enc_key = H128::from_slice(&key[0..16]);
+        let enc_key = H128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
         let check_tag = hmac_sha256(mac_key.as_ref(), &[iv, encrypted_data], auth_data);
@@ -246,7 +246,7 @@ impl ECIES {
             )
             .serialize_compact();
 
-        let mut sig_bytes = [0_u8; 65];
+        let mut sig_bytes = [0u8; 65];
         sig_bytes[..64].copy_from_slice(&sig);
         sig_bytes[64] = rec_id.to_i32() as u8;
 
@@ -305,7 +305,7 @@ impl ECIES {
 
         let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         let signature = RecoverableSignature::from_compact(
-            &sigdata[0..64],
+            &sigdata[..64],
             RecoveryId::from_i32(sigdata[64] as i32)?,
         )?;
         let remote_id = data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
@@ -454,10 +454,10 @@ impl ECIES {
     }
 
     pub fn write_header(&mut self, out: &mut BytesMut, size: usize) {
-        let mut buf = [0; 8];
+        let mut buf = [0u8; 8];
         BigEndian::write_uint(&mut buf, size as u64, 3);
-        let mut header = [0_u8; 16];
-        header[0..3].copy_from_slice(&buf[0..3]);
+        let mut header = [0u8; 16];
+        header[..3].copy_from_slice(&buf[..3]);
         header[3..6].copy_from_slice(&[194, 128, 128]);
 
         let mut header = HeaderBytes::from(header);
@@ -576,8 +576,8 @@ mod tests {
         let mut ack = server_ecies.create_ack();
         client_ecies.read_ack(&mut ack).unwrap();
 
-        let server_to_client_data = [0_u8, 1_u8, 2_u8, 3_u8, 4_u8];
-        let client_to_server_data = [5_u8, 6_u8, 7_u8];
+        let server_to_client_data = [0u8, 1u8, 2u8, 3u8, 4u8];
+        let client_to_server_data = [5u8, 6u8, 7u8];
 
         // Test server to client 1
         let mut header = server_ecies.create_header(server_to_client_data.len());
