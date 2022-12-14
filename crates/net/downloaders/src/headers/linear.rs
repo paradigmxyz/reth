@@ -208,7 +208,12 @@ where
         if !fut.inc_err() {
             return Err(())
         }
-        tracing::trace!("retrying future attempt: {}/{}", fut.retries, fut.max_retries);
+        tracing::trace!(
+            target = "downloaders::headers",
+            "retrying future attempt: {}/{}",
+            fut.retries,
+            fut.max_retries
+        );
         let req = self.headers_request();
         fut.request = req.clone();
         let client = Arc::clone(&self.client);
@@ -333,7 +338,10 @@ where
             if let Poll::Ready(result) = fut.poll_unpin(cx) {
                 if let Err(err) = this.process_header_response(result) {
                     if this.try_fuse_request_fut(&mut fut).is_err() {
-                        tracing::trace!("ran out of retries terminating stream");
+                        tracing::trace!(
+                            target = "downloaders::headers",
+                            "ran out of retries terminating stream"
+                        );
                         // We exhausted all of the retries. Stream must terminate
                         this.done = true;
                         this.buffered.clear();
