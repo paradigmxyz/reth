@@ -177,8 +177,6 @@ where
     let (handle, network, _txpool, eth) =
         NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
 
-    handle.peers_handle().add_peer(H512(hex!("c6e7a6a1934fa4bcad9bd448afd490661c6f2186fd07fe68ae76805bedbe0631594ed320f9a420cdcfe8510079135c1496f41a6b9c7c6f452dc7ebd640356f47")), SocketAddr::new(IpAddr::V4(Ipv4Addr::new(15, 204, 197, 5)), 30303));
-
     tokio::task::spawn(network);
     //tokio::task::spawn(txpool);
     tokio::task::spawn(eth);
