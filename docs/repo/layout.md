@@ -2,6 +2,8 @@
 
 This repository contains several Rust crates that implement the different building blocks of an Ethereum node. The high-level structure of the repository is as follows:
 
+[ ![Map of the Reth codebase](reth_layout.jpg "Map of the Reth codebase") ](reth_layout.jpg)
+
 ### Documentation
 
 Contributor documentation is in [`docs`](../../docs) and end-user documentation is in [`book`](../../book).
