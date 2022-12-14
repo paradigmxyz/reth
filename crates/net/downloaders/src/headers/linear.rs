@@ -208,6 +208,12 @@ where
         if !fut.inc_err() {
             return Err(())
         }
+        tracing::trace!(
+            target : "downloaders::headers",
+            "retrying future attempt: {}/{}",
+            fut.retries,
+            fut.max_retries
+        );
         let req = self.headers_request();
         fut.request = req.clone();
         let client = Arc::clone(&self.client);
@@ -235,7 +241,7 @@ where
                 headers.sort_unstable_by_key(|h| h.number);
 
                 if headers.is_empty() {
-                    return Err(RequestError::BadResponse.into())
+                    return Err(RequestError::EmptyHeaders.into())
                 }
 
                 // Iterate headers in reverse
@@ -255,7 +261,11 @@ where
                     } else if parent.hash() != self.forkchoice.head_block_hash {
                         // The buffer is empty and the first header does not match the
                         // tip, requeue the future
-                        return Err(RequestError::BadResponse.into())
+                        return Err(RequestError::MismatchedParent(
+                            parent.hash(),
+                            self.forkchoice.head_block_hash,
+                        )
+                        .into())
                     }
 
                     // Record new parent
@@ -328,6 +338,10 @@ where
             if let Poll::Ready(result) = fut.poll_unpin(cx) {
                 if let Err(err) = this.process_header_response(result) {
                     if this.try_fuse_request_fut(&mut fut).is_err() {
+                        tracing::trace!(
+                            target: "downloaders::headers",
+                            "ran out of retries terminating stream"
+                        );
                         // We exhausted all of the retries. Stream must terminate
                         this.done = true;
                         this.buffered.clear();

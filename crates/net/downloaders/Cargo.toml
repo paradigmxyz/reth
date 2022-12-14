@@ -21,6 +21,7 @@ futures-util = "0.3.25"
 
 # misc
 backon = "0.2.0"
+tracing = "0.1.37"
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

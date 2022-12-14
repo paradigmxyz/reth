@@ -3293,6 +3293,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
