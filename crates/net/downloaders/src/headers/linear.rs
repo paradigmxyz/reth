@@ -347,6 +347,10 @@ where
                         Err(err) => {
                             // Penalize the peer for bad response
                             if let Some(peer_id) = peer_id {
+                                tracing::trace!(
+                                    target: "downloaders::headers",
+                                    "penalizing peer {peer_id} for {err:?}"
+                                );
                                 this.client.penalize(peer_id);
                             }
                             // Response is invalid, attempt to retry
