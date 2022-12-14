@@ -69,6 +69,7 @@ impl Signature {
     }
 
     /// Recover signature from hash.
+    // ANCHOR: fn-recover_signer
     pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
@@ -80,4 +81,5 @@ impl Signature {
         // errors and we care only if recovery is passing or not.
         secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
     }
+    // ANCHOR_END: fn-recover_signer
 }
