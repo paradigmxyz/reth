@@ -7,7 +7,7 @@ use crate::{
     FetchClient,
 };
 use parking_lot::Mutex;
-use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions, Status};
+use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
