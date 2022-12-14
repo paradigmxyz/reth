@@ -41,7 +41,9 @@ mod active;
 mod config;
 mod handle;
 pub use config::SessionsConfig;
+use reth_ecies::ECIESError;
 
+use crate::error::error_merits_discovery_ban;
 use reth_tasks::TaskExecutor;
 
 /// Internal identifier for active sessions.
@@ -368,14 +370,14 @@ impl SessionManager {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
-                            error,
+                            error: error.map(PendingSessionHandshakeError::Eth),
                         })
                     }
                     Direction::Outgoing(peer_id) => {
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
-                            error,
+                            error: error.map(PendingSessionHandshakeError::Eth),
                         })
                     }
                 }
@@ -411,14 +413,14 @@ impl SessionManager {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
-                            error: None,
+                            error: Some(PendingSessionHandshakeError::Ecies(error)),
                         })
                     }
                     Direction::Outgoing(peer_id) => {
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
-                            error: None,
+                            error: Some(PendingSessionHandshakeError::Ecies(error)),
                         })
                     }
                 }
@@ -459,13 +461,16 @@ pub(crate) enum SessionEvent {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },
-    /// Closed an incoming pending session during authentication.
-    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
-    /// Closed an outgoing pending session during authentication.
+    /// Closed an incoming pending session during handshaking.
+    IncomingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        error: Option<PendingSessionHandshakeError>,
+    },
+    /// Closed an outgoing pending session during handshaking.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
         peer_id: PeerId,
-        error: Option<EthStreamError>,
+        error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
@@ -480,6 +485,26 @@ pub(crate) enum SessionEvent {
     },
     /// Active session was gracefully disconnected.
     Disconnected { peer_id: PeerId, remote_addr: SocketAddr },
+}
+
+/// Errors that can occur during handshaking/authenticating the underlying streams.
+#[derive(Debug)]
+pub(crate) enum PendingSessionHandshakeError {
+    Eth(EthStreamError),
+    Ecies(ECIESError),
+}
+
+// === impl PendingSessionHandshakeError ===
+
+impl PendingSessionHandshakeError {
+    /// Returns true if the error indicates that the corresponding peer should be removed from peer
+    /// discover
+    pub(crate) fn merits_discovery_ban(&self) -> bool {
+        match self {
+            PendingSessionHandshakeError::Eth(eth) => error_merits_discovery_ban(eth),
+            PendingSessionHandshakeError::Ecies(_) => true,
+        }
+    }
 }
 
 /// The direction of the connection.
