@@ -325,6 +325,7 @@ impl ECIES {
     }
 
     /// Read and verify an auth message from the input data.
+    #[tracing::instrument(skip_all)]
     pub fn read_auth(&mut self, data: &mut [u8]) -> Result<(), ECIESError> {
         self.remote_init_msg = Some(Bytes::copy_from_slice(data));
         let unencrypted = self.decrypt_message(data)?;
@@ -389,6 +390,7 @@ impl ECIES {
     }
 
     /// Read and verify an ack message from the input data.
+    #[tracing::instrument(skip_all)]
     pub fn read_ack(&mut self, data: &mut [u8]) -> Result<(), ECIESError> {
         self.remote_init_msg = Some(Bytes::copy_from_slice(data));
         let unencrypted = self.decrypt_message(data)?;
