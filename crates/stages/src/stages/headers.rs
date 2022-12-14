@@ -315,8 +315,12 @@ mod tests {
         let tip = headers.last().unwrap();
         runner.consensus.update_tip(tip.hash());
 
+        // These errors are not fatal but hand back control to the pipeline
         let result = rx.await.unwrap();
-        assert_matches!(result, Err(StageError::Download(_)));
+        assert_matches!(
+            result,
+            Ok(ExecOutput { stage_progress: 1000, done: false, reached_tip: false })
+        );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
