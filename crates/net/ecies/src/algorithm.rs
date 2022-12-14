@@ -225,7 +225,7 @@ impl ECIES {
 
         let check_tag = hmac_sha256(mac_key.as_ref(), &[iv, encrypted_data], auth_data);
         if check_tag != tag {
-            return Err(ECIESErrorImpl::TagCheckFailed.into())
+            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into())
         }
 
         let decrypted_data = encrypted_data;
@@ -325,6 +325,7 @@ impl ECIES {
     }
 
     /// Read and verify an auth message from the input data.
+    #[tracing::instrument(skip_all)]
     pub fn read_auth(&mut self, data: &mut [u8]) -> Result<(), ECIESError> {
         self.remote_init_msg = Some(Bytes::copy_from_slice(data));
         let unencrypted = self.decrypt_message(data)?;
@@ -389,6 +390,7 @@ impl ECIES {
     }
 
     /// Read and verify an ack message from the input data.
+    #[tracing::instrument(skip_all)]
     pub fn read_ack(&mut self, data: &mut [u8]) -> Result<(), ECIESError> {
         self.remote_init_msg = Some(Bytes::copy_from_slice(data));
         let unencrypted = self.decrypt_message(data)?;
@@ -476,7 +478,7 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckFailed.into())
+            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into())
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
@@ -528,7 +530,7 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckFailed.into())
+            return Err(ECIESErrorImpl::TagCheckBodyFailed.into())
         }
 
         let size = self.body_size.unwrap();
