@@ -3266,6 +3266,7 @@ dependencies = [
  "hex",
  "public-ip",
  "rand 0.8.5",
+ "reth-net-common",
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
@@ -3451,6 +3452,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-net-common"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-network"
 version = "0.1.0"
 dependencies = [
@@ -3472,6 +3480,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
+ "reth-net-common",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
