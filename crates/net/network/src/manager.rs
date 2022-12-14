@@ -433,7 +433,7 @@ where
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
                     error!(target : "net", "Block propagation is not supported in POS - [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)");
-                    return;
+                    return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -486,7 +486,7 @@ where
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
                     error!("network message channel closed.");
-                    return Poll::Ready(());
+                    return Poll::Ready(())
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
