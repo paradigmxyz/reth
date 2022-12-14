@@ -105,7 +105,7 @@ where
             body: body.transactions,
             ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
         };
-        if let Err(_) = self.consensus.pre_validate_block(&block) {
+        if self.consensus.pre_validate_block(&block).is_err() {
             self.client.penalize(peer_id);
         }
         Ok(block)
