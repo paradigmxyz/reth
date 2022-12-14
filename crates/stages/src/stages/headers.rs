@@ -95,9 +95,10 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         // in descending order starting from the tip down to
         // the local head (latest block in db)
         while let Some(headers) = stream.next().await {
-            trace!(len = headers.len(), "Received headers");
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
+                    info!(len = res.len(), "Received headers");
+
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
                     let write_progress =
@@ -111,12 +112,12 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                         return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        warn!("Validation error for header {hash}: {error}");
+                        error!("Validation error for header {hash}: {error}");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        warn!("Unexpected error occurred: {error}");
-                        return Err(StageError::Download(error.to_string()))
+                        error!(?error, "An unexpected error occurred");
+                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                 },
             }

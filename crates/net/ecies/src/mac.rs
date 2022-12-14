@@ -48,6 +48,6 @@ impl MAC {
     }
 
     pub fn digest(&self) -> H128 {
-        H128::from_slice(&self.hasher.clone().finalize()[0..16])
+        H128::from_slice(&self.hasher.clone().finalize()[..16])
     }
 }
