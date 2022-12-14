@@ -3,7 +3,6 @@ use crate::{
     manager::NetworkEvent,
     message::PeerRequest,
     peers::{PeersHandle, ReputationChangeKind},
-    session::StatusUpdate,
     FetchClient,
 };
 use parking_lot::Mutex;
@@ -104,6 +103,11 @@ impl NetworkHandle {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
+    /// Update the status of the node.
+    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    }
+
     /// Announce a block over devp2p
     ///
     /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
@@ -153,11 +157,7 @@ impl NetworkHandle {
 impl StatusUpdater for NetworkHandle {
     /// Update the status of the node.
     fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
-        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::StatusUpdate(StatusUpdate {
-            height,
-            hash,
-            total_difficulty,
-        }));
+        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
     }
 }
 
@@ -204,5 +204,5 @@ pub(crate) enum NetworkHandleMessage {
     /// Returns the client that can be used to interact with the network.
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
-    StatusUpdate(StatusUpdate),
+    StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
 }

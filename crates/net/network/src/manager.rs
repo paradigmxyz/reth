@@ -456,8 +456,8 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
-            NetworkHandleMessage::StatusUpdate(update) => {
-                self.swarm.sessions_mut().on_status_update(update);
+            NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
+                self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
             }
         }
     }

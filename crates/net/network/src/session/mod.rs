@@ -147,10 +147,10 @@ impl SessionManager {
     }
 
     /// Invoked on a received status update
-    pub(crate) fn on_status_update(&mut self, status: StatusUpdate) {
-        self.status.blockhash = status.hash;
-        self.status.total_difficulty = status.total_difficulty;
-        self.fork_filter.set_head(status.height);
+    pub(crate) fn on_status_update(&mut self, height: u64, hash: H256, total_difficulty: U256) {
+        self.status.blockhash = hash;
+        self.status.total_difficulty = total_difficulty;
+        self.fork_filter.set_head(height);
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -424,14 +424,6 @@ impl SessionManager {
             }
         }
     }
-}
-
-/// A message to update the status.
-#[derive(Debug, Clone)]
-pub(crate) struct StatusUpdate {
-    pub(crate) height: u64,
-    pub(crate) hash: H256,
-    pub(crate) total_difficulty: U256,
 }
 
 /// Events produced by the [`SessionManager`]
