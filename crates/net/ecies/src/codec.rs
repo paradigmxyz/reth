@@ -13,8 +13,8 @@ pub(crate) struct ECIESCodec {
     state: ECIESState,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Current ECIES state of a connection
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ECIESState {
     /// The first stage of the ECIES handshake, where each side of the connection sends an auth
     /// message containing the ephemeral public key, signature of the public key, nonce, and other
