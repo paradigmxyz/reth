@@ -12,7 +12,8 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database, EVM,
+    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
+    Return, EVM,
 };
 use std::collections::BTreeMap;
 
@@ -319,7 +320,10 @@ pub fn execute<DB: StateProvider>(
         revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
 
         // Execute transaction.
-        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = evm.transact();
+        let (revm::ExecutionResult { exit_reason, gas_used, logs, gas_refunded, .. }, state) =
+            evm.transact();
+
+        tracing::trace!(target:"evm","Executing transaction {:?}, gas:{gas_used} refund:{gas_refunded}",transaction.hash());
 
         // Fatal internal error.
         if exit_reason == revm::Return::FatalExternalError {
@@ -327,15 +331,11 @@ pub fn execute<DB: StateProvider>(
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
-        let is_success = matches!(
-            exit_reason,
-            revm::Return::Continue |
-                revm::Return::Stop |
-                revm::Return::Return |
-                revm::Return::SelfDestruct
-        );
-
-        // TODO add handling of other errors
+        let is_success = match exit_reason {
+            revm::return_ok!() => true,
+            revm::return_revert!() => false,
+            e => return Err(Error::EVMError { error_code: e as u32 }),
+        };
 
         // Add spend gas.
         cumulative_gas_used += gas_used;

@@ -143,45 +143,79 @@ pub struct Account {
     pub storage: BTreeMap<JsonU256, JsonU256>,
 }
 
-/// Ethereum blockchain test data State.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+/// Fork Spec
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Deserialize)]
 pub enum ForkSpec {
-    /// Fork EIP150.
-    EIP150,
-    /// Fork EIP158.
-    EIP158,
-    /// Fork Frontier.
+    /// Frontier
     Frontier,
-    /// Fork Homestead.
-    Homestead,
-    /// Fork Byzantium.
-    Byzantium,
-    /// Fork Constantinople.
-    Constantinople,
-    /// Fork ConstantinopleFix.
-    ConstantinopleFix,
-    /// Fork Istanbul.
-    Istanbul,
-    /// Fork EIP158ToByzantiumAt5.
-    EIP158ToByzantiumAt5,
-    /// Fork FrontierToHomesteadAt5.
+    /// Frontier to Homestead
     FrontierToHomesteadAt5,
-    /// Fork HomesteadToDaoAt5.
+    /// Homestead
+    Homestead,
+    /// Homestead to Tangerine
     HomesteadToDaoAt5,
-    /// Fork HomesteadToEIP150At5.
+    /// Homestead to Tangerine
     HomesteadToEIP150At5,
-    /// Fork ByzantiumToConstantinopleAt5.
-    ByzantiumToConstantinopleAt5,
-    /// Fork ByzantiumToConstantinopleFixAt5.
+    /// Tangerine
+    EIP150,
+    /// Spurious Dragon
+    EIP158, // EIP-161: State trie clearing
+    /// Spurious Dragon to Byzantium
+    EIP158ToByzantiumAt5,
+    /// Byzantium
+    Byzantium,
+    /// Byzantium to Constantinople
+    ByzantiumToConstantinopleAt5, // SKIPPED
+    /// Byzantium to Constantinople
     ByzantiumToConstantinopleFixAt5,
-    /// Fork Berlin.
+    /// Constantinople
+    Constantinople, // SKIPPED
+    /// Constantinople fix
+    ConstantinopleFix,
+    /// Instanbul
+    Istanbul,
+    /// Berlin
     Berlin,
-    /// Fork London.
-    London,
-    /// Fork BerlinToLondonAt5.
+    /// Berlin to London
     BerlinToLondonAt5,
-    /// Fork Merge,
+    /// London
+    London,
+    /// Paris aka The Merge
     Merge,
+    /// Merge EOF test
+    #[serde(alias = "Merge+3540+3670")]
+    MergeEOF,
+    /// After Merge Init Code test
+    #[serde(alias = "Merge+3860")]
+    MergeMeterInitCode,
+}
+
+impl From<ForkSpec> for reth_executor::SpecUpgrades {
+    fn from(fork_spec: ForkSpec) -> Self {
+        match fork_spec {
+            ForkSpec::Frontier => Self::new_frontier_activated(),
+            ForkSpec::Homestead | ForkSpec::FrontierToHomesteadAt5 => {
+                Self::new_homestead_activated()
+            }
+            ForkSpec::EIP150 | ForkSpec::HomesteadToDaoAt5 | ForkSpec::HomesteadToEIP150At5 => {
+                Self::new_tangerine_whistle_activated()
+            }
+            ForkSpec::EIP158 => Self::new_spurious_dragon_activated(),
+            ForkSpec::Byzantium |
+            ForkSpec::EIP158ToByzantiumAt5 |
+            ForkSpec::ConstantinopleFix |
+            ForkSpec::ByzantiumToConstantinopleFixAt5 => Self::new_byzantium_activated(),
+            ForkSpec::Istanbul => Self::new_istanbul_activated(),
+            ForkSpec::Berlin => Self::new_berlin_activated(),
+            ForkSpec::London | ForkSpec::BerlinToLondonAt5 => Self::new_london_activated(),
+            ForkSpec::Merge => Self::new_paris_activated(),
+            ForkSpec::MergeEOF => Self::new_paris_activated(),
+            ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
+            ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
+                panic!("Overriden with PETERSBURG")
+            } //_ => panic!("Conversion failed"),
+        }
+    }
 }
 
 /// Json Block test possible engine kind.

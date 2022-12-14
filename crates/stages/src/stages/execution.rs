@@ -59,6 +59,13 @@ impl Default for ExecutionStage {
     }
 }
 
+impl ExecutionStage {
+    /// Create new execution stage with specified config.
+    pub fn new(config: Config) -> Self {
+        Self { config }
+    }
+}
+
 /// Specify batch sizes of block in execution
 /// TODO make this as config
 const BATCH_SIZE: u64 = 1000;
@@ -176,6 +183,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (header, (start_tx_index, end_tx_index, block_reward_index)) in
             headers_batch.iter().zip(tx_index_ranges.iter())
         {
+            let num = header.number;
+            tracing::trace!(target: "stages::execution",?num, "Execute block num.");
             let body_tx_cnt = end_tx_index - start_tx_index;
             // iterate over all transactions
             let mut tx_walker = tx.walk(*start_tx_index)?;

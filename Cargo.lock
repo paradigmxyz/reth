@@ -3188,6 +3188,7 @@ dependencies = [
  "eyre",
  "reth-consensus",
  "reth-db",
+ "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -3382,6 +3383,7 @@ dependencies = [
  "rlp",
  "sha3",
  "thiserror",
+ "tracing",
  "triehash",
 ]
 

@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageDB};
 use std::path::Path;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Run one JSON-encoded Ethereum blockchain test at the specified path.
 pub async fn run_test(path: &Path) -> eyre::Result<()> {
@@ -26,12 +26,12 @@ pub async fn run_test(path: &Path) -> eyre::Result<()> {
         let pre_state = match suite.pre.0 {
             RootOrState::State(state) => state,
             RootOrState::Root(_) => {
-                debug!("Skipping test {name}...");
+                info!("Skipping test {name}...");
                 continue
             }
         };
 
-        debug!("Executing test: {name}");
+        debug!("Executing test: {name} for spec: {:?}", suite.network);
 
         // Create db and acquire transaction
         let db = create_test_rw_db::<WriteMap>();
@@ -76,7 +76,10 @@ pub async fn run_test(path: &Path) -> eyre::Result<()> {
         tx.commit()?;
 
         // Initialize the execution stage
-        let mut stage = ExecutionStage::default(); // TODO: review chain config
+        // Hardcode the chain_id to Ethereums 1.
+        let spec_upgrades = suite.network.into();
+        let mut stage =
+            ExecutionStage::new(reth_executor::Config { chain_id: 1.into(), spec_upgrades });
 
         // Call execution stage
         let input = ExecInput::default(); // TODO:

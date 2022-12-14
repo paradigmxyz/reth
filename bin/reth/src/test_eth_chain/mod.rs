@@ -41,13 +41,13 @@ impl Command {
                     }
                     Err(error) => {
                         num_of_failed += 1;
-                        println!("Test {file:?} failed:\n {error}\n");
+                        tracing::warn!("Test {file:?} failed:\n {error}\n");
                     }
                 }
             }
         }
 
-        println!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
+        tracing::info!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
 
         Ok(())
     }
