@@ -321,7 +321,7 @@ where
                 return Poll::Ready(Some(Ok(header)))
             }
 
-            // We've reached the head, terminate the stream
+            // We've reached the head or encountered an error, terminate the stream
             if this.has_terminated() {
                 return Poll::Ready(None)
             }
