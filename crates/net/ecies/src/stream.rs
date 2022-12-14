@@ -149,12 +149,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::util::pk2id;
     use secp256k1::{rand, SECP256K1};
     use tokio::net::TcpListener;
-
-    use crate::util::pk2id;
-
-    use super::*;
 
     #[tokio::test]
     async fn can_write_and_read() {
