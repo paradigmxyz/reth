@@ -260,6 +260,15 @@ impl<C> NetworkConfigBuilder<C> {
             status,
             hello_message,
         } = self;
+
+        let listener_addr = listener_addr.unwrap_or_else(|| {
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
+        });
+
+        let mut hello_message =
+            hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
+        hello_message.port = listener_addr.port();
+
         NetworkConfig {
             client,
             secret_key,
@@ -268,9 +277,7 @@ impl<C> NetworkConfigBuilder<C> {
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
             }),
-            listener_addr: listener_addr.unwrap_or_else(|| {
-                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
-            }),
+            listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain,
@@ -279,7 +286,7 @@ impl<C> NetworkConfigBuilder<C> {
             network_mode,
             executor,
             status: status.unwrap_or_default(),
-            hello_message: hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build()),
+            hello_message,
         }
     }
 }

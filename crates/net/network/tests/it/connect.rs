@@ -228,7 +228,7 @@ async fn test_outgoing_connect_with_single_geth() {
     let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
     let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-    let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
+    let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
     // get the peer id we should be expecting
     let geth_peer_id: PeerId =
