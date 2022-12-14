@@ -576,7 +576,13 @@ impl Discv4Service {
     pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> H256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target : "discv4",  r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
-        let _ = self.egress.try_send((payload, to));
+        let _ = self.egress.try_send((payload, to)).map_err(|err| {
+            warn!(
+                target : "discv4",
+                %err,
+                "drop outgoing packet",
+            );
+        });
         hash
     }
 
@@ -999,13 +1005,23 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
 pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
+    let send = |event: IngressEvent| async {
+        let _ = tx.send(event).await.map_err(|err| {
+            warn!(
+                target : "discv4",
+                 %err,
+                "failed send incoming packet",
+            )
+        });
+    };
+
     loop {
         let mut buf = [0; MAX_PACKET_SIZE];
         let res = udp.recv_from(&mut buf).await;
         match res {
             Err(err) => {
                 warn!(target : "discv4",  ?err, "Failed to read datagram.");
-                let _ = tx.send(IngressEvent::RecvError(err)).await;
+                send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
                 let packet = &buf[..read];
@@ -1016,13 +1032,11 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                             warn!(target : "discv4", ?remote_addr,  "Received own packet.");
                             continue
                         }
-                        let _ = tx.send(IngressEvent::Packet(remote_addr, packet)).await;
+                        send(IngressEvent::Packet(remote_addr, packet)).await;
                     }
                     Err(err) => {
                         warn!( target : "discv4",  ?err,"Failed to decode packet");
-                        let _ = tx
-                            .send(IngressEvent::BadPacket(remote_addr, err, packet.to_vec()))
-                            .await;
+                        send(IngressEvent::BadPacket(remote_addr, err, packet.to_vec())).await
                     }
                 }
             }
