@@ -1,13 +1,14 @@
 use crate::{
     config::NetworkMode,
+    fetch::StatusUpdate,
     manager::NetworkEvent,
     message::PeerRequest,
     peers::{PeersHandle, ReputationChangeKind},
     FetchClient,
 };
 use parking_lot::Mutex;
-use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_primitives::{PeerId, TransactionSigned, TxHash, H256};
+use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions, Status};
+use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -38,6 +39,7 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
+        status_tx: UnboundedSender<StatusUpdate>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -46,6 +48,7 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
+            status_tx,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -95,6 +98,11 @@ impl NetworkHandle {
     /// Returns the mode of the network, either pow, or pos
     pub fn mode(&self) -> &NetworkMode {
         &self.inner.network_mode
+    }
+
+    /// Update the status of the node.
+    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        let _ = self.inner.status_tx.send(StatusUpdate { height, hash, total_difficulty });
     }
 
     /// Sends a [`NetworkHandleMessage`] to the manager
@@ -161,6 +169,8 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
+    /// Sender half of the message channel for updating the [`Status`](reth_eth_wire::Status)
+    status_tx: UnboundedSender<StatusUpdate>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
