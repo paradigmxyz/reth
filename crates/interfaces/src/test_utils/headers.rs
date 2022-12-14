@@ -5,7 +5,7 @@ use crate::{
         downloader::{DownloadStream, Downloader},
         error::{PeerRequestResult, RequestError},
         headers::{
-            client::{HeadersClient, HeadersRequest},
+            client::{HeadersClient, HeadersRequest, StatusUpdater},
             downloader::HeaderDownloader,
             error::DownloadError,
         },
@@ -224,6 +224,20 @@ impl TestConsensus {
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
     }
+}
+
+/// Nil status updater for testing
+#[derive(Debug, Clone)]
+pub struct TestStatusUpdater;
+
+impl Default for TestStatusUpdater {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl StatusUpdater for TestStatusUpdater {
+    fn update_status(&self, _height: u64, _hash: H256, _total_difficulty: reth_primitives::U256) {}
 }
 
 #[async_trait::async_trait]

@@ -13,12 +13,11 @@ use reth_db::{
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::{
-        client::HeadersClient,
+        client::{HeadersClient, StatusUpdater},
         downloader::{ensure_parent, HeaderDownloader},
         error::DownloadError,
     },
 };
-use reth_network::NetworkHandle;
 use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
@@ -41,7 +40,7 @@ const HEADERS: StageId = StageId("Headers");
 /// [`HeaderTD`][reth_interfaces::db::tables::HeaderTD] table). The stage does not return the
 /// control flow to the pipeline in order to preserve the context of the chain tip.
 #[derive(Debug)]
-pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
+pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
@@ -49,14 +48,14 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     /// Downloader client implementation
     pub client: Arc<H>,
     /// Network handle for updating status
-    pub network_handle: NetworkHandle,
+    pub network_handle: S,
     /// The number of block headers to commit at once
     pub commit_threshold: usize,
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB>
-    for HeaderStage<D, C, H>
+impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> Stage<DB>
+    for HeaderStage<D, C, H, S>
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -149,7 +148,9 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
     }
 }
 
-impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
+impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
+    HeaderStage<D, C, H, S>
+{
     async fn update_head<DB: Database>(
         &self,
         db: &StageDB<'_, DB>,
@@ -366,7 +367,7 @@ mod tests {
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
-                TestConsensus, TestHeaderDownloader, TestHeadersClient,
+                TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
             },
         };
         use reth_primitives::{BlockNumber, SealedHeader, U256};
@@ -376,6 +377,7 @@ mod tests {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
+            network_handle: TestStatusUpdater,
             db: TestStageDB,
         }
 
@@ -387,13 +389,14 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
+                    network_handle: TestStatusUpdater::default(),
                     db: TestStageDB::default(),
                 }
             }
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
+            type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
             fn db(&self) -> &TestStageDB {
                 &self.db
@@ -505,7 +508,13 @@ mod tests {
                 let downloader = Arc::new(
                     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
                 );
-                Self { client, consensus, downloader, db: TestStageDB::default() }
+                Self {
+                    client,
+                    consensus,
+                    downloader,
+                    network_handle: TestStatusUpdater::default(),
+                    db: TestStageDB::default(),
+                }
             }
         }
 
