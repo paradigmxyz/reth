@@ -50,7 +50,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -518,7 +518,7 @@ where
                     direction,
                 } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
-                    trace!(
+                    info!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -601,6 +601,11 @@ where
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
                 }
                 SwarmEvent::StatusUpdate(status) => {
+                    trace!(
+                        target : "net",
+                        ?status,
+                        "Status Update received"
+                    );
                     this.swarm.sessions_mut().on_status_update(status.clone())
                 }
             }

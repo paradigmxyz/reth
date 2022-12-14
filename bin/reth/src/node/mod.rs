@@ -20,7 +20,11 @@ use reth_network::{
 use reth_primitives::{hex_literal::hex, Bytes, Header, H256, U256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
-use std::{path::Path, str::FromStr, sync::Arc};
+use std::{
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+};
 use tracing::{debug, info};
 
 /// Start the client
