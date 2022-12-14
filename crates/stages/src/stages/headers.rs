@@ -11,7 +11,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
-    consensus::{BeaconConsensus, ForkchoiceState},
+    consensus::{Consensus, ForkchoiceState},
     p2p::headers::{
         client::HeadersClient,
         downloader::{ensure_parent, HeaderDownloader},
@@ -40,7 +40,7 @@ const HEADERS: StageId = StageId("Headers");
 /// [`HeaderTD`][reth_interfaces::db::tables::HeaderTD] table). The stage does not return the
 /// control flow to the pipeline in order to preserve the context of the chain tip.
 #[derive(Debug)]
-pub struct HeaderStage<D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> {
+pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
@@ -52,7 +52,7 @@ pub struct HeaderStage<D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> Stage<DB>
+impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB>
     for HeaderStage<D, C, H>
 {
     /// Return the id of the stage
@@ -146,7 +146,7 @@ impl<DB: Database, D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> St
     }
 }
 
-impl<D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> HeaderStage<D, C, H> {
+impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
     async fn update_head<DB: Database>(
         &self,
         db: &StageDB<'_, DB>,

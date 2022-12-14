@@ -1,4 +1,4 @@
-use crate::consensus::BeaconConsensus;
+use crate::consensus::Consensus;
 use futures::Stream;
 use reth_primitives::PeerId;
 use std::{fmt::Debug, pin::Pin};
@@ -21,7 +21,7 @@ pub trait Downloader: Send + Sync {
     type Client: DownloadClient;
 
     /// The Consensus used to verify data validity when downloading
-    type Consensus: BeaconConsensus;
+    type Consensus: Consensus;
 
     /// The headers client
     fn client(&self) -> &Self::Client;

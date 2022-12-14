@@ -1,6 +1,6 @@
 use futures::{stream::Stream, FutureExt};
 use reth_interfaces::{
-    consensus::BeaconConsensus,
+    consensus::Consensus,
     p2p::{
         downloader::{DownloadStream, Downloader},
         error::PeerRequestResult,
@@ -38,7 +38,7 @@ pub struct LinearDownloader<C, H> {
 
 impl<C, H> Downloader for LinearDownloader<C, H>
 where
-    C: BeaconConsensus,
+    C: Consensus,
     H: HeadersClient,
 {
     type Consensus = C;
@@ -55,7 +55,7 @@ where
 
 impl<C, H> HeaderDownloader for LinearDownloader<C, H>
 where
-    C: BeaconConsensus + 'static,
+    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     fn stream(
@@ -67,7 +67,7 @@ where
     }
 }
 
-impl<C: BeaconConsensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
+impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
     fn clone(&self) -> Self {
         Self {
             consensus: Arc::clone(&self.consensus),
@@ -78,7 +78,7 @@ impl<C: BeaconConsensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
     }
 }
 
-impl<C: BeaconConsensus, H: HeadersClient> LinearDownloader<C, H> {
+impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
     fn new_download(
         &self,
         head: SealedHeader,
@@ -155,7 +155,7 @@ pub struct HeadersDownload<C, H> {
 
 impl<C, H> HeadersDownload<C, H>
 where
-    C: BeaconConsensus + 'static,
+    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     /// Returns the first header from the vector of buffered headers
@@ -303,7 +303,7 @@ where
 
 impl<C, H> Stream for HeadersDownload<C, H>
 where
-    C: BeaconConsensus + 'static,
+    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     type Item = Result<SealedHeader, DownloadError>;
@@ -422,7 +422,7 @@ impl LinearDownloadBuilder {
 
     /// Build [LinearDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<C: BeaconConsensus, H: HeadersClient>(
+    pub fn build<C: Consensus, H: HeadersClient>(
         self,
         consensus: Arc<C>,
         client: Arc<H>,

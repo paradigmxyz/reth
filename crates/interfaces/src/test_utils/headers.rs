@@ -1,6 +1,6 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, BeaconConsensus},
+    consensus::{self, Consensus},
     p2p::{
         downloader::{DownloadClient, DownloadStream, Downloader},
         error::{PeerRequestResult, RequestError},
@@ -235,7 +235,7 @@ impl TestConsensus {
 }
 
 #[async_trait::async_trait]
-impl BeaconConsensus for TestConsensus {
+impl Consensus for TestConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }

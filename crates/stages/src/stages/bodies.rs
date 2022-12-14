@@ -10,7 +10,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{consensus::BeaconConsensus, p2p::bodies::downloader::BodyDownloader};
+use reth_interfaces::{consensus::Consensus, p2p::bodies::downloader::BodyDownloader};
 use reth_primitives::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockNumber, SealedHeader,
@@ -52,7 +52,7 @@ const BODIES: StageId = StageId("Bodies");
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 /// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
 #[derive(Debug)]
-pub struct BodyStage<D: BodyDownloader, C: BeaconConsensus> {
+pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
     pub downloader: Arc<D>,
     /// The consensus engine.
@@ -65,7 +65,7 @@ pub struct BodyStage<D: BodyDownloader, C: BeaconConsensus> {
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: BodyDownloader, C: BeaconConsensus> Stage<DB> for BodyStage<D, C> {
+impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         BODIES
@@ -196,7 +196,7 @@ impl<DB: Database, D: BodyDownloader, C: BeaconConsensus> Stage<DB> for BodyStag
     }
 }
 
-impl<D: BodyDownloader, C: BeaconConsensus> BodyStage<D, C> {
+impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
     /// Computes a list of `(block_number, header_hash)` for blocks that we need to download bodies
     /// for.
     ///

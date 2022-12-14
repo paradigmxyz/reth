@@ -1,7 +1,7 @@
 use backon::{ExponentialBackoff, Retryable};
 use futures_util::{stream, StreamExt};
 use reth_interfaces::{
-    consensus::BeaconConsensus,
+    consensus::Consensus as ConsensusTrait,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         downloader::{DownloadStream, Downloader},
@@ -29,7 +29,7 @@ pub struct ConcurrentDownloader<Client, Consensus> {
 impl<Client, Consensus> Downloader for ConcurrentDownloader<Client, Consensus>
 where
     Client: BodiesClient,
-    Consensus: BeaconConsensus,
+    Consensus: ConsensusTrait,
 {
     type Client = Client;
     type Consensus = Consensus;
@@ -46,7 +46,7 @@ where
 impl<Client, Consensus> BodyDownloader for ConcurrentDownloader<Client, Consensus>
 where
     Client: BodiesClient,
-    Consensus: BeaconConsensus,
+    Consensus: ConsensusTrait,
 {
     fn bodies_stream<'a, 'b, I>(
         &'a self,
@@ -71,7 +71,7 @@ where
 impl<Client, Consensus> ConcurrentDownloader<Client, Consensus>
 where
     Client: BodiesClient,
-    Consensus: BeaconConsensus,
+    Consensus: ConsensusTrait,
 {
     /// Create a new concurrent downloader instance.
     pub fn new(client: Arc<Client>, consensus: Arc<Consensus>) -> Self {
