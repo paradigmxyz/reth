@@ -5,7 +5,7 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         downloader::{DownloadStream, Downloader},
-        error::{RequestError, RequestResult},
+        headers::error::DownloadError,
     },
 };
 use reth_primitives::{BlockLocked, SealedHeader};
@@ -51,7 +51,7 @@ where
     fn bodies_stream<'a, 'b, I>(
         &'a self,
         headers: I,
-    ) -> DownloadStream<'a, BlockLocked, RequestError>
+    ) -> DownloadStream<'a, BlockLocked, DownloadError>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,
@@ -61,7 +61,6 @@ where
             stream::iter(headers.into_iter().map(|header| {
                 (|| self.fetch_body(header))
                     .retry(ExponentialBackoff::default().with_max_times(self.retries))
-                    .when(|err| err.is_retryable())
             }))
             .buffered(self.batch_size),
         )
@@ -95,7 +94,7 @@ where
     }
 
     /// Fetch a single block body.
-    async fn fetch_body(&self, header: &SealedHeader) -> RequestResult<BlockLocked> {
+    async fn fetch_body(&self, header: &SealedHeader) -> Result<BlockLocked, DownloadError> {
         let (peer_id, mut response) =
             self.client.get_block_body(vec![header.hash()]).await?.split();
 
@@ -105,10 +104,14 @@ where
             body: body.transactions,
             ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
         };
-        if self.consensus.pre_validate_block(&block).is_err() {
-            self.client.penalize(peer_id);
+
+        match self.consensus.pre_validate_block(&block) {
+            Ok(_) => Ok(block),
+            Err(error) => {
+                self.client.penalize(peer_id);
+                Err(DownloadError::BlockValidation { hash: header.hash(), error })
+            }
         }
-        Ok(block)
     }
 }
 
@@ -195,7 +198,7 @@ mod tests {
 
         assert_matches!(
             downloader.bodies_stream(&[SealedHeader::default()]).next().await,
-            Some(Err(RequestError::ChannelClosed))
+            Some(Err(DownloadError::RequestError(RequestError::ChannelClosed)))
         );
     }
 
@@ -259,7 +262,7 @@ mod tests {
 
         assert_matches!(
             downloader.bodies_stream(&[SealedHeader::default()]).next().await,
-            Some(Err(RequestError::Timeout))
+            Some(Err(DownloadError::RequestError(RequestError::Timeout)))
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 2);
     }

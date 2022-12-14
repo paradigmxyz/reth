@@ -14,6 +14,15 @@ pub enum DownloadError {
         #[source]
         error: consensus::Error,
     },
+    /// Block validation failed
+    #[error("Failed to validate body for header {hash}. Details: {error}.")]
+    BlockValidation {
+        /// Hash of header failing validation
+        hash: H256,
+        /// The details of validation failure
+        #[source]
+        error: consensus::Error,
+    },
     /// Timed out while waiting for request id response.
     #[error("Timed out while getting headers for request.")]
     Timeout,
@@ -44,12 +53,4 @@ pub enum DownloadError {
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
-}
-
-impl DownloadError {
-    /// Returns bool indicating whether this error is retryable or fatal, in the cases
-    /// where the peer responds with no headers, or times out.
-    pub fn is_retryable(&self) -> bool {
-        matches!(self, DownloadError::Timeout { .. })
-    }
 }

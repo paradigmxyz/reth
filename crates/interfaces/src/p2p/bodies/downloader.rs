@@ -1,6 +1,6 @@
 use crate::p2p::{
     downloader::{DownloadStream, Downloader},
-    error::RequestError,
+    headers::error::DownloadError,
 };
 use reth_primitives::{BlockLocked, SealedHeader};
 
@@ -25,7 +25,7 @@ pub trait BodyDownloader: Downloader {
     fn bodies_stream<'a, 'b, I>(
         &'a self,
         headers: I,
-    ) -> DownloadStream<'a, BlockLocked, RequestError>
+    ) -> DownloadStream<'a, BlockLocked, DownloadError>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,

@@ -2,7 +2,7 @@ use crate::{
     db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use futures_util::TryStreamExt;
+use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
@@ -16,7 +16,7 @@ use reth_primitives::{
     BlockNumber, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc};
-use tracing::warn;
+use tracing::{error, warn};
 
 const BODIES: StageId = StageId("Bodies");
 
@@ -110,9 +110,24 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = previous_block;
-        while let Some(block) =
-            bodies_stream.try_next().await.map_err(|err| StageError::Internal(err.into()))?
-        {
+        while let Some(result) = bodies_stream.next().await {
+            let block = match result {
+                Ok(block) => block,
+                Err(err) => {
+                    error!(
+                        "Encountered error downloading block {}. Details: {:?}",
+                        highest_block + 1,
+                        err
+                    );
+                    // Exit the stage early, because
+                    return Ok(ExecOutput {
+                        stage_progress: highest_block,
+                        done: false,
+                        reached_tip: false,
+                    })
+                }
+            };
+
             let block_number = block.number;
             // Write block
             let key = (block_number, block.hash()).into();
@@ -221,6 +236,8 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
 
             if header.ommers_hash == EMPTY_LIST_HASH && header.transactions_root == EMPTY_ROOT {
                 // TODO: fix this
+                // If we indeed move to the new changeset structure let's not forget to add a note
+                // that the gaps issue with the returned empty bodies stream is no longer present
                 continue
             }
 
@@ -239,7 +256,10 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{consensus, p2p::error::RequestError};
+    use reth_interfaces::{
+        consensus,
+        p2p::{error::RequestError, headers::error::DownloadError},
+    };
     use std::collections::HashMap;
     use test_utils::*;
 
@@ -346,21 +366,34 @@ mod tests {
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
-    /// Checks that the stage asks to unwind if pre-validation of the block fails.
+    /// Checks that the stage returns to the pipeline on validation failure.
     #[tokio::test]
     async fn pre_validation_failure() {
         let (stage_progress, previous_stage) = (1, 20);
 
         // Set up test runner
         let mut runner = BodyTestRunner::default();
+
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
         };
-        runner.seed_execution(input).expect("failed to seed execution");
+        let blocks = runner.seed_execution(input).expect("failed to seed execution");
 
         // Fail validation
-        runner.consensus.set_fail_validation(true);
+        let responses = blocks
+            .iter()
+            .map(|b| {
+                (
+                    b.hash(),
+                    Err(DownloadError::BlockValidation {
+                        hash: b.hash(),
+                        error: consensus::Error::BaseFeeMissing,
+                    }),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        runner.set_responses(responses);
 
         // Run the stage
         let rx = runner.execute(input);
@@ -368,7 +401,8 @@ mod tests {
         // Check that the error bubbles up
         assert_matches!(
             rx.await.unwrap(),
-            Err(StageError::Validation { error: consensus::Error::BaseFeeMissing, .. })
+            Ok(ExecOutput { stage_progress: out_stage_progress, done: false, reached_tip: false })
+                if out_stage_progress == stage_progress
         );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
     }
@@ -445,13 +479,20 @@ mod tests {
 
         // overwrite responses
         let header = blocks.last().unwrap();
-        runner.set_responses(HashMap::from([(header.hash(), Err(RequestError::Timeout))]));
+        runner.set_responses(HashMap::from([(
+            header.hash(),
+            Err(DownloadError::RequestError(RequestError::Timeout)),
+        )]));
 
         // Run the stage
         let rx = runner.execute(input);
 
         // Check that the error bubbles up
-        assert_matches!(rx.await.unwrap(), Err(StageError::Internal(_)));
+        assert_matches!(
+            rx.await.unwrap(),
+            Ok(ExecOutput { stage_progress: out_stage_progress, done: false, reached_tip: false })
+                if out_stage_progress == stage_progress
+        );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
     }
 
@@ -476,7 +517,8 @@ mod tests {
             p2p::{
                 bodies::{client::BodiesClient, downloader::BodyDownloader},
                 downloader::{DownloadClient, DownloadStream, Downloader},
-                error::{PeerRequestResult, RequestError, RequestResult},
+                error::PeerRequestResult,
+                headers::error::DownloadError,
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -490,7 +532,9 @@ mod tests {
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
 
         /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &BlockLocked) -> (H256, RequestResult<BlockBody>) {
+        pub(crate) fn body_by_hash(
+            block: &BlockLocked,
+        ) -> (H256, Result<BlockBody, DownloadError>) {
             (
                 block.hash(),
                 Ok(BlockBody {
@@ -503,7 +547,7 @@ mod tests {
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
-            responses: HashMap<H256, RequestResult<BlockBody>>,
+            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
             db: TestStageDB,
             batch_size: u64,
         }
@@ -526,7 +570,7 @@ mod tests {
 
             pub(crate) fn set_responses(
                 &mut self,
-                responses: HashMap<H256, RequestResult<BlockBody>>,
+                responses: HashMap<H256, Result<BlockBody, DownloadError>>,
             ) {
                 self.responses = responses;
             }
@@ -726,11 +770,11 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug, Default, Clone)]
         pub(crate) struct TestBodyDownloader {
-            responses: HashMap<H256, RequestResult<BlockBody>>,
+            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
         }
 
         impl TestBodyDownloader {
-            pub(crate) fn new(responses: HashMap<H256, RequestResult<BlockBody>>) -> Self {
+            pub(crate) fn new(responses: HashMap<H256, Result<BlockBody, DownloadError>>) -> Self {
                 Self { responses }
             }
         }
@@ -752,7 +796,7 @@ mod tests {
             fn bodies_stream<'a, 'b, I>(
                 &'a self,
                 hashes: I,
-            ) -> DownloadStream<'a, BlockLocked, RequestError>
+            ) -> DownloadStream<'a, BlockLocked, DownloadError>
             where
                 I: IntoIterator<Item = &'b SealedHeader>,
                 <I as IntoIterator>::IntoIter: Send + 'b,
