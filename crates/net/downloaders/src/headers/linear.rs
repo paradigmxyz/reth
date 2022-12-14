@@ -218,11 +218,13 @@ where
     /// Validate whether the header is valid in relation to it's parent
     ///
     /// Returns Ok(false) if the
+    #[allow(clippy::result_large_err)]
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn process_header_response(
         &mut self,
         response: PeerRequestResult<BlockHeaders>,

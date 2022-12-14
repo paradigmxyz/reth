@@ -40,7 +40,7 @@ impl Command {
 
         let path = shellexpand::full(&self.db)?.into_owned();
         let expanded_db_path = Path::new(&path);
-        let db = Arc::new(init_db(&expanded_db_path)?);
+        let db = Arc::new(init_db(expanded_db_path)?);
         info!("Database ready");
 
         // TODO: Write genesis info
@@ -115,6 +115,7 @@ fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 }
 
 /// Write the genesis block if it has not already been written
+#[allow(clippy::field_reassign_with_default)]
 fn init_genesis<DB: Database>(db: Arc<DB>) -> Result<(), reth_db::Error> {
     let tx = db.tx_mut()?;
     let has_block = tx.cursor::<tables::CanonicalHeaders>()?.first()?.is_some();
