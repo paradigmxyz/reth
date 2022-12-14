@@ -166,9 +166,6 @@ where
             SessionManager::new(secret_key, sessions_config, executor, status, hello_message);
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
-        // Clone the status updater sender to be able to update status from the network handler
-        let status_tx = state.update_status_tx();
-
         let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
@@ -181,7 +178,6 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
-            status_tx,
         );
 
         Ok(Self {
@@ -460,6 +456,9 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
+            NetworkHandleMessage::StatusUpdate(update) => {
+                self.swarm.sessions_mut().on_status_update(update);
+            }
         }
     }
 }
@@ -603,14 +602,6 @@ where
                         .state_mut()
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
-                }
-                SwarmEvent::StatusUpdate(status) => {
-                    trace!(
-                        target : "net",
-                        ?status,
-                        "Status Update received"
-                    );
-                    this.swarm.sessions_mut().on_status_update(status.clone())
                 }
             }
         }

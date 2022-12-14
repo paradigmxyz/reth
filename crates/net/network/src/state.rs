@@ -3,7 +3,7 @@
 use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher, StatusUpdate},
+    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
@@ -23,7 +23,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 use tracing::error;
 
 /// Cache limit of blocks to keep track of for a single peer.
@@ -94,11 +94,6 @@ where
     /// Returns a new [`FetchClient`]
     pub(crate) fn fetch_client(&self) -> FetchClient {
         self.state_fetcher.client()
-    }
-
-    /// Returns sender half of the [`StatusUpdate`] channel.
-    pub(crate) fn update_status_tx(&self) -> UnboundedSender<StatusUpdate> {
-        self.state_fetcher.update_status_tx()
     }
 
     /// Configured genesis hash.
@@ -345,10 +340,6 @@ where
                     FetchAction::BlockRequest { peer_id, request } => {
                         self.handle_block_request(peer_id, request)
                     }
-                    FetchAction::StatusUpdate(status) => {
-                        // we want to return this directly
-                        return Poll::Ready(StateAction::StatusUpdate(status))
-                    }
                 }
             }
 
@@ -419,8 +410,6 @@ pub(crate) struct ActivePeer {
 
 /// Message variants triggered by the [`State`]
 pub(crate) enum StateAction {
-    /// Received a node status update.
-    StatusUpdate(StatusUpdate),
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
         /// Target of the message

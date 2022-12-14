@@ -18,6 +18,7 @@ use reth_interfaces::{
         error::DownloadError,
     },
 };
+use reth_network::NetworkHandle;
 use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
@@ -47,6 +48,8 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
     pub consensus: Arc<C>,
     /// Downloader client implementation
     pub client: Arc<H>,
+    /// Network handle for updating status
+    pub network_handle: NetworkHandle,
     /// The number of block headers to commit at once
     pub commit_threshold: usize,
 }
@@ -155,7 +158,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let td: U256 = *db
             .get::<tables::HeaderTD>(block_key)?
             .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
-        self.client.update_status(height, block_key.hash(), td);
+        // self.client.update_status(height, block_key.hash(), td);
+        self.network_handle.update_status(height, block_key.hash(), td);
         Ok(())
     }
 
@@ -399,6 +403,7 @@ mod tests {
                     consensus: self.consensus.clone(),
                     client: self.client.clone(),
                     downloader: self.downloader.clone(),
+                    network_handle: self.network_handle.clone(),
                     commit_threshold: 100,
                 }
             }

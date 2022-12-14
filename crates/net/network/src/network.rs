@@ -1,9 +1,9 @@
 use crate::{
     config::NetworkMode,
-    fetch::StatusUpdate,
     manager::NetworkEvent,
     message::PeerRequest,
     peers::{PeersHandle, ReputationChangeKind},
+    session::StatusUpdate,
     FetchClient,
 };
 use parking_lot::Mutex;
@@ -22,7 +22,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NetworkHandle {
     /// The Arc'ed delegate that contains the state.
     inner: Arc<NetworkInner>,
@@ -39,7 +39,6 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
-        status_tx: UnboundedSender<StatusUpdate>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -48,7 +47,6 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
-            status_tx,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -100,11 +98,6 @@ impl NetworkHandle {
         &self.inner.network_mode
     }
 
-    /// Update the status of the node.
-    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
-        let _ = self.inner.status_tx.send(StatusUpdate { height, hash, total_difficulty });
-    }
-
     /// Sends a [`NetworkHandleMessage`] to the manager
     pub(crate) fn send_message(&self, msg: NetworkHandleMessage) {
         let _ = self.inner.to_manager_tx.send(msg);
@@ -115,6 +108,15 @@ impl NetworkHandle {
     /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
     pub fn announce_block(&self, block: NewBlock, hash: H256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
+    }
+
+    /// Update the status of the node.
+    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::StatusUpdate(StatusUpdate {
+            height,
+            hash,
+            total_difficulty,
+        }));
     }
 
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
@@ -156,6 +158,7 @@ impl NetworkHandle {
     }
 }
 
+#[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
@@ -169,8 +172,6 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
-    /// Sender half of the message channel for updating the [`Status`](reth_eth_wire::Status)
-    status_tx: UnboundedSender<StatusUpdate>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
@@ -199,4 +200,6 @@ pub(crate) enum NetworkHandleMessage {
     ReputationChange(PeerId, ReputationChangeKind),
     /// Returns the client that can be used to interact with the network.
     FetchClient(oneshot::Sender<FetchClient>),
+    /// Apply a status update.
+    StatusUpdate(StatusUpdate),
 }
