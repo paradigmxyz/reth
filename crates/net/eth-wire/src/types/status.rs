@@ -91,15 +91,16 @@ impl Debug for Status {
     }
 }
 
+// <https://etherscan.io/block/0>
 impl Default for Status {
     fn default() -> Self {
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
-            total_difficulty: U256::zero(),
+            total_difficulty: 17_179_869_184u64.into(),
             blockhash: MAINNET_GENESIS,
             genesis: MAINNET_GENESIS,
-            forkid: Hardfork::Homestead.fork_id(),
+            forkid: Hardfork::Latest.fork_id(),
         }
     }
 }

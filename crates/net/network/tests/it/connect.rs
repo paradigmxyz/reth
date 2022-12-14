@@ -88,6 +88,34 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_connect_with_builder() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let mut discv4 = Discv4Config::builder();
+    discv4.add_boot_nodes(mainnet_nodes());
+
+    let client = Arc::new(TestApi::default());
+    let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
+    let (handle, network, _, requests) = NetworkManager::new(config)
+        .await
+        .unwrap()
+        .into_builder()
+        .request_handler(client)
+        .split_with_handle();
+
+    let mut events = handle.event_listener();
+
+    tokio::task::spawn(async move {
+        tokio::join!(network, requests);
+    });
+
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
