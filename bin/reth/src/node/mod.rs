@@ -17,7 +17,7 @@ use reth_network::{
     error::NetworkError,
     NetworkConfig, NetworkHandle, NetworkManager,
 };
-use reth_primitives::{hex_literal::hex, Bytes, Header, PeerId, H256, H512, U256};
+use reth_primitives::{hex_literal::hex, Bytes, Header, H256, H512, U256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
 use std::{
