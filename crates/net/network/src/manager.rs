@@ -167,7 +167,7 @@ where
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         // Clone the status updater sender to be able to update status from the network handler
-        let status_tx = state.fetch_client().status_tx.clone();
+        let status_tx = state.update_status_tx();
 
         let swarm = Swarm::new(incoming, sessions, state);
 

@@ -23,7 +23,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::error;
 
 /// Cache limit of blocks to keep track of for a single peer.
@@ -96,6 +96,10 @@ where
         self.state_fetcher.client()
     }
 
+    pub(crate) fn update_status_tx(&self) -> UnboundedSender<StatusUpdate> {
+        self.state_fetcher.update_status_tx()
+    }
+
     /// Configured genesis hash.
     pub fn genesis_hash(&self) -> H256 {
         self.genesis_hash
@@ -160,7 +164,7 @@ where
         for (peer_id, peer) in self.active_peers.iter_mut() {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
-                continue
+                continue;
             }
 
             // Queue a `NewBlock` message for the peer
@@ -180,7 +184,7 @@ where
             }
 
             if count >= num_propagate {
-                break
+                break;
             }
         }
     }
@@ -193,7 +197,7 @@ where
         for (peer_id, peer) in self.active_peers.iter_mut() {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
-                continue
+                continue;
             }
 
             if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
@@ -328,7 +332,7 @@ where
         loop {
             // drain buffered messages
             if let Some(message) = self.queued_messages.pop_front() {
-                return Poll::Ready(message)
+                return Poll::Ready(message);
             }
 
             while let Poll::Ready(discovery) = self.discovery.poll(cx) {
@@ -342,7 +346,7 @@ where
                     }
                     FetchAction::StatusUpdate(status) => {
                         // we want to return this directly
-                        return Poll::Ready(StateAction::StatusUpdate(status))
+                        return Poll::Ready(StateAction::StatusUpdate(status));
                     }
                 }
             }
@@ -389,7 +393,7 @@ where
             }
 
             if self.queued_messages.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
