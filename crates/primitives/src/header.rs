@@ -203,6 +203,7 @@ impl Decodable for Header {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
+// ANCHOR: struct-SealedHeader
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
     /// Locked Header fields.
@@ -210,6 +211,7 @@ pub struct SealedHeader {
     /// Locked Header hash.
     hash: BlockHash,
 }
+// ANCHOR_END: struct-SealedHeader
 
 impl Default for SealedHeader {
     fn default() -> Self {

@@ -218,7 +218,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let mut state_provider =
                 SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
 
-            // executiong and store output to results
+            // execute and store output to results
+            // ANCHOR: snippet-block_change_patches
             block_change_patches.push((
                 reth_executor::executor::execute_and_verify_receipt(
                     header,
@@ -230,6 +231,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 start_tx_index,
                 block_reward_index,
             ));
+            // ANCHOR_END: snippet-block_change_patches
         }
 
         // apply changes to plain database.

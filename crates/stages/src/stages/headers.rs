@@ -97,6 +97,8 @@ impl<DB: Database, D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> St
         while let Some(headers) = stream.next().await {
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
+                    info!(len = res.len(), "Received headers");
+
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
                     let write_progress =
@@ -110,12 +112,12 @@ impl<DB: Database, D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> St
                         return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        warn!("Validation error for header {hash}: {error}");
+                        error!("Validation error for header {hash}: {error}");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        warn!("Unexpected error occurred: {error}");
-                        return Err(StageError::Download(error.to_string()))
+                        error!(?error, "An unexpected error occurred");
+                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                 },
             }
@@ -163,6 +165,7 @@ impl<D: HeaderDownloader, C: BeaconConsensus, H: HeadersClient> HeaderStage<D, C
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
+            debug!(?forkchoice, "Received fork choice state");
             if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
                 return forkchoice.clone()
             }

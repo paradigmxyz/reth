@@ -73,11 +73,13 @@ use state::*;
 ///
 /// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
 /// priorities are unwound first.
+// ANCHOR: struct-Pipeline
 pub struct Pipeline<DB: Database> {
     stages: Vec<QueuedStage<DB>>,
     max_block: Option<BlockNumber>,
     events_sender: MaybeSender<PipelineEvent>,
 }
+// ANCHOR_END: struct-Pipeline
 
 impl<DB: Database> Default for Pipeline<DB> {
     fn default() -> Self {
