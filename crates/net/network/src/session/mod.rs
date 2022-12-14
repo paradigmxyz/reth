@@ -1,7 +1,6 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
 use crate::{
-    fetch::StatusUpdate,
     message::PeerMessage,
     session::{
         active::ActiveSession,
@@ -20,7 +19,7 @@ use reth_eth_wire::{
     error::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{ForkFilter, Hardfork, PeerId};
+use reth_primitives::{ForkFilter, Hardfork, PeerId, H256, U256};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -425,6 +424,14 @@ impl SessionManager {
             }
         }
     }
+}
+
+/// A message to update the status.
+#[derive(Debug, Clone)]
+pub(crate) struct StatusUpdate {
+    pub(crate) height: u64,
+    pub(crate) hash: H256,
+    pub(crate) total_difficulty: U256,
 }
 
 /// Events produced by the [`SessionManager`]

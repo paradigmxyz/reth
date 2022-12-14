@@ -14,7 +14,7 @@ use crate::{
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockLocked, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256, U256,
+    BlockLocked, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -170,8 +170,6 @@ impl TestHeadersClient {
 
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    fn update_status(&self, _height: u64, _hash: H256, _td: U256) {}
-
     async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
         if let Some(err) = &mut *self.error.lock().await {
             return Err(err.clone())
