@@ -12,7 +12,7 @@ Ethereum network support
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../common/rlp" }
+reth-rlp = { path = "../../common/rlp", features = ["enr"] }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
 
 # ethereum

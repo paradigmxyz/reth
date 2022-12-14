@@ -2,8 +2,7 @@
 
 use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use discv5::enr::{CombinedPublicKey, EnrPublicKey, CombinedKey};
-use enr::{k256::ecdsa::{VerifyingKey, SigningKey}, Enr, EnrPublicKey};
+use enr::{k256::ecdsa::SigningKey, Enr};
 use reth_primitives::{keccak256, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
@@ -23,6 +22,8 @@ pub enum MessageId {
     Pong = 2,
     FindNode = 3,
     Neighbours = 4,
+    EnrRequest = 5,
+    EnrResponse = 6,
 }
 
 impl MessageId {
@@ -33,6 +34,8 @@ impl MessageId {
             2 => MessageId::Pong,
             3 => MessageId::FindNode,
             4 => MessageId::Neighbours,
+            5 => MessageId::EnrRequest,
+            6 => MessageId::EnrResponse,
             _ => return Err(msg),
         };
         Ok(msg)
@@ -46,6 +49,8 @@ pub enum Message {
     Pong(Pong),
     FindNode(FindNode),
     Neighbours(Neighbours),
+    EnrRequest(EnrRequest),
+    EnrResponse(EnrResponse),
 }
 
 // === impl Message ===
@@ -58,6 +63,8 @@ impl Message {
             Message::Pong(_) => MessageId::Pong,
             Message::FindNode(_) => MessageId::FindNode,
             Message::Neighbours(_) => MessageId::Neighbours,
+            Message::EnrRequest(_) => MessageId::EnrRequest,
+            Message::EnrResponse(_) => MessageId::EnrResponse,
         }
     }
 
@@ -89,6 +96,14 @@ impl Message {
             }
             Message::Neighbours(message) => {
                 payload.put_u8(4);
+                message.encode(&mut payload);
+            }
+            Message::EnrRequest(message) => {
+                payload.put_u8(5);
+                message.encode(&mut payload);
+            }
+            Message::EnrResponse(message) => {
+                payload.put_u8(6);
                 message.encode(&mut payload);
             }
         }
@@ -148,6 +163,8 @@ impl Message {
             MessageId::Pong => Message::Pong(Pong::decode(payload)?),
             MessageId::FindNode => Message::FindNode(FindNode::decode(payload)?),
             MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
+            MessageId::EnrRequest => Message::EnrRequest(EnrRequest::decode(payload)?),
+            MessageId::EnrResponse => Message::EnrResponse(EnrResponse::decode(payload)?),
         };
 
         Ok(Packet { msg, node_id, hash: header_hash })
@@ -238,13 +255,13 @@ pub struct Neighbours {
 
 /// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
-pub struct ENRRequest {
+pub struct EnrRequest {
     pub expire: u64,
 }
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
-pub struct ENRResponse {
+pub struct EnrResponse {
     pub request_hash: H256,
     pub enr: Enr<SigningKey>,
 }

@@ -30,6 +30,7 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
+use proto::{EnrRequest, EnrResponse};
 use reth_primitives::{PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
@@ -698,8 +699,15 @@ impl Discv4Service {
         }
     }
 
-    /// Handler for incoming `ENRResponse` message
-    // fn on_enr_response(&mut self, msg: ENR)
+    /// Handler for incoming `EnrResponse` message
+    fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, node_id: PeerId) {
+        todo!()
+    }
+
+    /// Handler for incoming `EnrRequest` message
+    fn on_enr_request(&mut self, msg: EnrRequest, remote_addr: SocketAddr, node_id: PeerId) {
+        todo!()
+    }
 
     /// Handler for incoming `Neighbours` messages that are handled if they're responses to
     /// `FindNode` requests
@@ -952,6 +960,14 @@ impl Discv4Service {
                             self.on_neighbours(msg, remote_addr, node_id);
                             Poll::Ready(Discv4Event::Neighbours)
                         }
+                        Message::EnrRequest(msg) => {
+                            self.on_enr_request(msg, remote_addr, node_id);
+                            Poll::Ready(Discv4Event::EnrRequest)
+                        }
+                        Message::EnrResponse(msg) => {
+                            self.on_enr_response(msg, remote_addr, node_id);
+                            Poll::Ready(Discv4Event::EnrResponse)
+                        }
                     }
                 }
             }
@@ -986,6 +1002,10 @@ pub enum Discv4Event {
     FindNode,
     /// A `Neighbours` message was handled.
     Neighbours,
+    /// A `EnrRequest` message was handled.
+    EnrRequest,
+    /// A `EnrResponse` message was handled.
+    EnrResponse,
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket

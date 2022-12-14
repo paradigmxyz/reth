@@ -3,7 +3,6 @@ use arrayvec::ArrayVec;
 use auto_impl::auto_impl;
 use bytes::{BufMut, Bytes, BytesMut};
 use core::borrow::Borrow;
-use enr::{Enr, EnrKey};
 
 fn zeroless_view(v: &impl AsRef<[u8]>) -> &[u8] {
     let v = v.as_ref();
@@ -187,8 +186,11 @@ impl Encodable for smol_str::SmolStr {
 }
 
 #[cfg(feature = "enr")]
-impl<K> Encodable for Enr<K> where K: EnrKey {
-    fn encode(&self,out: &mut dyn BufMut) {
+impl<K> Encodable for enr::Enr<K>
+where
+    K: enr::EnrKey,
+{
+    fn encode(&self, out: &mut dyn BufMut) {
         todo!()
     }
 

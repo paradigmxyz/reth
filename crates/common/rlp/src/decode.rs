@@ -1,6 +1,5 @@
 use crate::types::Header;
 use bytes::{Buf, Bytes, BytesMut};
-use enr::{Enr, EnrKey};
 
 pub trait Decodable: Sized {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError>;
@@ -386,7 +385,10 @@ impl Decodable for smol_str::SmolStr {
 }
 
 #[cfg(feature = "enr")]
-impl<K> Decodable for Enr<K> where K: EnrKey {
+impl<K> Decodable for enr::Enr<K>
+where
+    K: enr::EnrKey,
+{
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         todo!()
     }
