@@ -36,7 +36,7 @@ use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
     io,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     rc::Rc,
     sync::Arc,
@@ -224,7 +224,50 @@ impl Discv4 {
     /// Triggers a new self lookup without expecting a response
     pub fn send_lookup_self(&self) {
         let cmd = Discv4Command::Lookup { node_id: None, tx: None };
-        let _ = self.to_service.try_send(cmd);
+        self.send_to_service(cmd);
+    }
+
+    /// Removes the peer from the table, if it exists.
+    pub fn remove_peer(&self, node_id: PeerId) {
+        let cmd = Discv4Command::Remove(node_id);
+        // we want this message to arrive, so we clone the sender
+        let _ = self.to_service.clone().try_send(cmd);
+    }
+
+    /// Adds the peer and id to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    pub fn ban(&self, node_id: PeerId, ip: IpAddr) {
+        let cmd = Discv4Command::Ban(node_id, ip);
+        // we want this message to arrive, so we clone the sender
+        let _ = self.to_service.clone().try_send(cmd);
+    }
+    /// Adds the ip to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    pub fn ban_ip(&self, ip: IpAddr) {
+        let cmd = Discv4Command::BanIp(ip);
+        // we want this message to arrive, so we clone the sender
+        let _ = self.to_service.clone().try_send(cmd);
+    }
+
+    /// Adds the peer to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    pub fn ban_node(&self, node_id: PeerId) {
+        let cmd = Discv4Command::BanPeer(node_id);
+        // we want this message to arrive, so we clone the sender
+        let _ = self.to_service.clone().try_send(cmd);
+    }
+
+    fn send_to_service(&self, cmd: Discv4Command) {
+        let _ = self.to_service.try_send(cmd).map_err(|err| {
+            warn!(
+                target : "discv4",
+                %err,
+                "dropping command",
+            )
+        });
     }
 
     /// Returns the receiver half of new listener channel that streams [`DiscoveryUpdate`]s.
@@ -505,6 +548,28 @@ impl Discv4Service {
         });
     }
 
+    /// Adds the ip to the ban list indefinitely
+    pub fn ban_ip(&mut self, ip: IpAddr) {
+        self.config.ban_list.ban_ip(ip);
+    }
+
+    /// Adds the peer to the ban list indefinitely.
+    pub fn ban_node(&mut self, node_id: PeerId) {
+        self.remove_node(node_id);
+        self.config.ban_list.ban_peer(node_id);
+    }
+
+    /// Adds the ip to the ban list until the given timestamp.
+    pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
+        self.config.ban_list.ban_ip_until(ip, until);
+    }
+
+    /// Adds the peer to the ban list and bans it until the given timestamp
+    pub fn ban_node_until(&mut self, node_id: PeerId, until: Instant) {
+        self.remove_node(node_id);
+        self.config.ban_list.ban_peer_until(node_id, until);
+    }
+
     /// Removes a `node_id` from the routing table.
     ///
     /// This allows applications, for whatever reason, to remove nodes from the local routing
@@ -740,6 +805,12 @@ impl Discv4Service {
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that where discovered.
         for node in msg.nodes {
+            // prevent banned peers from being added to the context
+            if self.config.ban_list.is_banned(&node.id, &node.address) {
+                trace!(target: "discv4", peer_id=?node.id, ip=?node.address, "ignoring banned record");
+                continue
+            }
+
             let key = kad_key(node.id);
             let distance = our_key.distance(&key);
             ctx.add_node(distance, node);
@@ -915,6 +986,17 @@ impl Discv4Service {
                             let rx = self.update_stream();
                             let _ = tx.send(rx);
                         }
+                        Discv4Command::BanPeer(node_id) => self.ban_node(node_id),
+                        Discv4Command::Remove(node_id) => {
+                            self.remove_node(node_id);
+                        }
+                        Discv4Command::Ban(node_id, ip) => {
+                            self.ban_node(node_id);
+                            self.ban_ip(ip);
+                        }
+                        Discv4Command::BanIp(ip) => {
+                            self.ban_ip(ip);
+                        }
                     }
                 } else {
                     is_done = true;
@@ -1046,6 +1128,10 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 
 /// The commands sent from the frontend to the service
 enum Discv4Command {
+    Ban(PeerId, IpAddr),
+    BanPeer(PeerId),
+    BanIp(IpAddr),
+    Remove(PeerId),
     Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
     Updates(OneshotSender<ReceiverStream<DiscoveryUpdate>>),
 }
