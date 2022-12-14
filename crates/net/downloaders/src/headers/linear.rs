@@ -208,6 +208,10 @@ where
                 // queue in the first request
                 let client = Arc::clone(&self.client);
                 let req = self.headers_request();
+                tracing::trace!(
+                    target: "downloaders::headers",
+                    "requesting headers {req:?}"
+                );
                 HeadersRequestFuture {
                     request: req.clone(),
                     fut: Box::pin(async move { client.get_headers(req).await }),
