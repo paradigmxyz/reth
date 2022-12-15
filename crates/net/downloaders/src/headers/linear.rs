@@ -3,11 +3,10 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{
         downloader::{DownloadStream, Downloader},
-        error::PeerRequestResult,
+        error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader},
-            error::DownloadError,
         },
     },
 };
@@ -62,7 +61,7 @@ where
         &self,
         head: SealedHeader,
         forkchoice: ForkchoiceState,
-    ) -> DownloadStream<SealedHeader> {
+    ) -> DownloadStream<'_, SealedHeader> {
         Box::pin(self.new_download(head, forkchoice))
     }
 }
@@ -208,6 +207,10 @@ where
                 // queue in the first request
                 let client = Arc::clone(&self.client);
                 let req = self.headers_request();
+                tracing::trace!(
+                    target: "downloaders::headers",
+                    "requesting headers {req:?}"
+                );
                 HeadersRequestFuture {
                     request: req.clone(),
                     fut: Box::pin(async move { client.get_headers(req).await }),
@@ -243,7 +246,7 @@ where
     ///
     /// Returns Ok(false) if the
     #[allow(clippy::result_large_err)]
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
@@ -252,7 +255,7 @@ where
     fn process_header_response(
         &mut self,
         response: PeerRequestResult<BlockHeaders>,
-    ) -> Result<(), DownloadError> {
+    ) -> DownloadResult<()> {
         match response {
             Ok(res) => {
                 let mut headers = res.1 .0;
@@ -290,6 +293,8 @@ where
                 }
                 Ok(())
             }
+            // most likely a noop, because this error
+            // would've been handled by the fetcher internally
             Err(err) => Err(err.into()),
         }
     }
@@ -300,7 +305,7 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    type Item = Result<SealedHeader, DownloadError>;
+    type Item = DownloadResult<SealedHeader>;
 
     /// Linear header downloader implemented as a [Stream]. The downloader sends header
     /// requests until the head is reached and buffers the responses. If the request future
@@ -330,6 +335,7 @@ where
             let mut fut = this.get_or_init_fut();
             match fut.poll_unpin(cx) {
                 Poll::Ready(result) => {
+                    let peer_id = result.as_ref().map(|res| res.peer_id()).ok();
                     // Process the response, buffering the headers
                     // in case of successful validation
                     match this.process_header_response(result) {
@@ -342,6 +348,14 @@ where
                             }
                         }
                         Err(err) => {
+                            // Penalize the peer for bad response
+                            if let Some(peer_id) = peer_id {
+                                tracing::trace!(
+                                    target: "downloaders::headers",
+                                    "penalizing peer {peer_id} for {err:?}"
+                                );
+                                this.client.report_bad_message(peer_id);
+                            }
                             // Response is invalid, attempt to retry
                             if this.try_fuse_request_fut(&mut fut).is_err() {
                                 tracing::trace!(

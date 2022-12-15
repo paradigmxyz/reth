@@ -72,9 +72,10 @@ impl Command {
                 BodyStage {
                     downloader: Arc::new(bodies::concurrent::ConcurrentDownloader::new(
                         fetch_client.clone(),
+                        consensus.clone(),
                     )),
                     consensus: consensus.clone(),
-                    batch_size: 100,
+                    commit_threshold: 100,
                 },
                 false,
             )

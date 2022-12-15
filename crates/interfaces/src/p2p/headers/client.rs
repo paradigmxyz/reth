@@ -1,4 +1,4 @@
-use crate::p2p::error::PeerRequestResult;
+use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult};
 use async_trait::async_trait;
 pub use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
@@ -19,7 +19,7 @@ pub struct HeadersRequest {
 /// The block headers downloader client
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeadersClient: Send + Sync + Debug {
+pub trait HeadersClient: DownloadClient {
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
     async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders>;
