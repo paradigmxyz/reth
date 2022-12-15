@@ -1,5 +1,5 @@
 use crate::{
-    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
@@ -68,7 +68,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
     /// starting from the tip
     async fn execute(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let stage_progress = input.stage_progress.unwrap_or_default();
@@ -134,7 +134,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: handle bad block
@@ -153,7 +153,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
 {
     async fn update_head<DB: Database>(
         &self,
-        db: &StageDB<'_, DB>,
+        db: &Transaction<'_, DB>,
         height: BlockNumber,
     ) -> Result<(), StageError> {
         let block_key = db.get_block_numhash(height)?;
@@ -168,7 +168,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     /// Get the head and tip of the range we need to sync
     async fn get_head_and_tip<DB: Database>(
         &self,
-        db: &StageDB<'_, DB>,
+        db: &Transaction<'_, DB>,
         stage_progress: u64,
     ) -> Result<(SealedHeader, H256), StageError> {
         // Create a cursor over canonical header hashes
@@ -237,7 +237,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     /// Write downloaded headers to the database
     async fn write_headers<DB: Database>(
         &self,
-        db: &StageDB<'_, DB>,
+        db: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
         let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
@@ -268,7 +268,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     /// Iterate over inserted headers and write td entries
     fn write_td<DB: Database>(
         &self,
-        db: &StageDB<'_, DB>,
+        db: &Transaction<'_, DB>,
         head: &SealedHeader,
     ) -> Result<(), StageError> {
         // Acquire cursor over total difficulty table
@@ -454,7 +454,7 @@ mod tests {
         use crate::{
             stages::headers::HeaderStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -476,7 +476,7 @@ mod tests {
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
             network_handle: TestStatusUpdater,
-            db: TestStageDB,
+            db: TestTransaction,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -488,7 +488,7 @@ mod tests {
                     consensus: consensus.clone(),
                     downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
                     network_handle: TestStatusUpdater::default(),
-                    db: TestStageDB::default(),
+                    db: TestTransaction::default(),
                 }
             }
         }
@@ -496,7 +496,7 @@ mod tests {
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
-            fn db(&self) -> &TestStageDB {
+            fn db(&self) -> &TestTransaction {
                 &self.db
             }
 
@@ -611,7 +611,7 @@ mod tests {
                     consensus,
                     downloader,
                     network_handle: TestStatusUpdater::default(),
-                    db: TestStageDB::default(),
+                    db: TestTransaction::default(),
                 }
             }
         }

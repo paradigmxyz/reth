@@ -21,19 +21,22 @@ use crate::{DatabaseIntegrityError, StageError};
 // NOTE: This container is needed since `Transaction::commit` takes `mut self`, so methods in
 // the pipeline that just take a reference will not be able to commit their transaction and let
 // the pipeline continue. Is there a better way to do this?
-pub struct StageDB<'this, DB: Database> {
+//
+// TODO: Re-evaluate if this is actually needed, this was introduced as a way to manage the
+// lifetime of the `TXMut` and having a nice API for re-opening a new transaction after `commit`
+pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
     pub(crate) db: &'this DB,
     tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
 }
 
-impl<'a, DB: Database> Debug for StageDB<'a, DB> {
+impl<'a, DB: Database> Debug for Transaction<'a, DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StageDB").finish()
+        f.debug_struct("Transaction").finish()
     }
 }
 
-impl<'a, DB: Database> Deref for StageDB<'a, DB> {
+impl<'a, DB: Database> Deref for Transaction<'a, DB> {
     type Target = <DB as DatabaseGAT<'a>>::TXMut;
 
     /// Dereference as the inner transaction.
@@ -41,25 +44,25 @@ impl<'a, DB: Database> Deref for StageDB<'a, DB> {
     /// # Panics
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
     fn deref(&self) -> &Self::Target {
         self.tx.as_ref().expect("Tried getting a reference to a non-existent transaction")
     }
 }
 
-impl<'a, DB: Database> DerefMut for StageDB<'a, DB> {
+impl<'a, DB: Database> DerefMut for Transaction<'a, DB> {
     /// Dereference as a mutable reference to the inner transaction.
     ///
     /// # Panics
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.tx.as_mut().expect("Tried getting a mutable reference to a non-existent transaction")
     }
 }
 
-impl<'this, DB> StageDB<'this, DB>
+impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
@@ -80,7 +83,7 @@ where
     /// # Panics
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
     pub fn commit(&mut self) -> Result<bool, Error> {
         let success =
             self.tx.take().expect("Tried committing a non-existent transaction").commit()?;

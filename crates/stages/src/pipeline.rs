@@ -1,5 +1,5 @@
 use crate::{
-    db::StageDB, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
+    db::Transaction, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
     StageId, UnwindInput,
 };
 use reth_db::{database::Database, transaction::DbTx};
@@ -224,7 +224,7 @@ impl<DB: Database> Pipeline<DB> {
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut db = StageDB::new(db)?;
+        let mut db = Transaction::new(db)?;
 
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
@@ -296,7 +296,7 @@ impl<DB: Database> QueuedStage<DB> {
         }
 
         loop {
-            let mut db = StageDB::new(db)?;
+            let mut db = Transaction::new(db)?;
 
             let prev_progress = stage_id.get_progress(db.deref())?;
 
@@ -805,7 +805,7 @@ mod tests {
 
             async fn execute(
                 &mut self,
-                _: &mut StageDB<'_, DB>,
+                _: &mut Transaction<'_, DB>,
                 _input: ExecInput,
             ) -> Result<ExecOutput, StageError> {
                 self.exec_outputs
@@ -815,7 +815,7 @@ mod tests {
 
             async fn unwind(
                 &mut self,
-                _: &mut StageDB<'_, DB>,
+                _: &mut Transaction<'_, DB>,
                 _input: UnwindInput,
             ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
                 self.unwind_outputs
