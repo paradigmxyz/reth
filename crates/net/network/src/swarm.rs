@@ -9,6 +9,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
+    Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -132,6 +133,7 @@ where
                     remote_addr,
                     capabilities,
                     messages,
+                    status,
                     direction,
                 })
             }
@@ -325,6 +327,7 @@ pub(crate) enum SwarmEvent {
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
+        status: Status,
         direction: Direction,
     },
     SessionClosed {
