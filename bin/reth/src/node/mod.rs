@@ -1,6 +1,7 @@
 //! Main node command
 //!
 //! Starts the client
+use crate::util::chainspec::Genesis;
 use clap::{crate_version, Parser};
 use reth_consensus::EthConsensus;
 use reth_db::{
@@ -17,16 +18,22 @@ use reth_network::{
     error::NetworkError,
     NetworkConfig, NetworkHandle, NetworkManager,
 };
-use reth_primitives::{hex_literal::hex, Bytes, Header, H256, U256};
+use reth_primitives::{hex_literal::hex, Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
-use std::{path::Path, str::FromStr, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::{debug, info};
+
+// TODO: Move this out somewhere
+const MAINNET_GENESIS: &str = include_str!("../../res/chainspec/mainnet.json");
 
 /// Start the client
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Path to database folder
+    /// The path to the database folder.
     // TODO: This should use dirs-next
     #[arg(long, default_value = "~/.reth/db")]
     db: String,
@@ -38,16 +45,14 @@ impl Command {
     pub async fn execute(&self) -> eyre::Result<()> {
         info!("reth {} starting", crate_version!());
 
-        let path = shellexpand::full(&self.db)?.into_owned();
-        let expanded_db_path = Path::new(&path);
-        let db = Arc::new(init_db(expanded_db_path)?);
-        info!("Database ready");
+        let db_path = PathBuf::from(shellexpand::full(&self.db)?.into_owned());
+        info!("Opening database at {}", db_path.display());
+        let db = Arc::new(init_db(db_path)?);
+        info!("Database open");
 
-        // TODO: Write genesis info
-        // TODO: Here we should parse and validate the chainspec and build consensus/networking
-        // stuff off of that
+        // TODO: More info from chainspec (chain ID etc.)
         let consensus = Arc::new(EthConsensus::new(consensus_config()));
-        init_genesis(db.clone())?;
+        init_genesis(db.clone(), serde_json::from_str(&MAINNET_GENESIS).unwrap())?;
 
         info!("Connecting to p2p");
         let network = start_network(network_config(db.clone())).await?;
@@ -77,7 +82,7 @@ impl Command {
                 },
                 false,
             )
-            .push(SendersStage { batch_size: 1000, commit_threshold: 100 }, false);
+            .push(SendersStage { batch_size: 100, commit_threshold: 1000 }, false);
 
         // Run pipeline
         info!("Starting pipeline");
@@ -116,39 +121,46 @@ fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 
 /// Write the genesis block if it has not already been written
 #[allow(clippy::field_reassign_with_default)]
-fn init_genesis<DB: Database>(db: Arc<DB>) -> Result<(), reth_db::Error> {
+fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<(), reth_db::Error> {
     let tx = db.tx_mut()?;
-    let has_block = tx.cursor::<tables::CanonicalHeaders>()?.first()?.is_some();
-    if has_block {
+    if tx.cursor::<tables::CanonicalHeaders>()?.first()?.is_some() {
         debug!("Genesis already written, skipping.");
         return Ok(())
     }
-
     debug!("Writing genesis block.");
 
-    // TODO: Should be based on a chain spec
-    let mut genesis = Header::default();
-    genesis.gas_limit = 5000;
-    genesis.difficulty = U256::from(0x400000000usize);
-    genesis.nonce = 0x0000000000000042;
-    genesis.extra_data =
-        Bytes::from_str("11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa")
-            .unwrap()
-            .0;
-    genesis.state_root =
-        H256(hex!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544"));
-    let genesis = genesis.seal();
+    // Insert header
+    let header = Header {
+        gas_limit: genesis.gas_limit,
+        difficulty: genesis.difficulty,
+        nonce: genesis.nonce,
+        extra_data: genesis.extra_data.0,
+        state_root: genesis.state_root,
+        timestamp: genesis.timestamp,
+        mix_hash: genesis.mix_hash,
+        beneficiary: genesis.coinbase,
+        ..Default::default()
+    }
+    .seal();
+    tx.put::<tables::CanonicalHeaders>(0, header.hash())?;
+    tx.put::<tables::HeaderNumbers>(header.hash(), 0)?;
+    tx.put::<tables::CumulativeTxCount>((0, header.hash()).into(), 0)?;
+    tx.put::<tables::HeaderTD>((0, header.hash()).into(), genesis.difficulty.into())?;
+    tx.put::<tables::Headers>((0, header.hash()).into(), header.unseal())?;
 
-    // Insert genesis
-    tx.put::<tables::CanonicalHeaders>(genesis.number, genesis.hash())?;
-    tx.put::<tables::Headers>(genesis.num_hash().into(), genesis.as_ref().clone())?;
-    tx.put::<tables::HeaderNumbers>(genesis.hash(), genesis.number)?;
-    tx.put::<tables::CumulativeTxCount>(genesis.num_hash().into(), 0)?;
-    tx.put::<tables::HeaderTD>(genesis.num_hash().into(), genesis.difficulty.into())?;
-    tx.commit()?;
+    // Insert account state
+    for (address, account) in genesis.alloc {
+        tx.put::<tables::PlainAccountState>(
+            address,
+            Account {
+                nonce: account.nonce.unwrap_or_default(),
+                balance: account.balance,
+                bytecode_hash: None,
+            },
+        )?;
+    }
 
-    // TODO: Account balances
-    Ok(())
+    tx.commit().map(|_| ())
 }
 
 // TODO: This should be based on some external config
@@ -173,7 +185,7 @@ where
         NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
 
     tokio::task::spawn(network);
-    //tokio::task::spawn(txpool);
+    // TODO: tokio::task::spawn(txpool);
     tokio::task::spawn(eth);
     Ok(handle)
 }
