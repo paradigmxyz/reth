@@ -67,11 +67,7 @@ impl Downloader for TestHeaderDownloader {
 
 #[async_trait::async_trait]
 impl HeaderDownloader for TestHeaderDownloader {
-    fn stream(
-        &self,
-        _head: SealedHeader,
-        _forkchoice: ForkchoiceState,
-    ) -> DownloadStream<'_, SealedHeader> {
+    fn stream(&self, _head: SealedHeader, _tip: H256) -> DownloadStream<'_, SealedHeader> {
         Box::pin(self.create_download())
     }
 }
