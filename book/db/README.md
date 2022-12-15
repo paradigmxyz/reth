@@ -126,16 +126,46 @@ pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + S
 
 In Rust, traits can have associated types, which are like generics, but they are associated with a trait and can only be used in the context of that trait. 
 
-In the code snippet above, the `DatabaseGAT` trait has two associated types, `TX` and `TXMut`, and requires the `Send` and `Sync` traits to be implemented for all types that are used for `TX` and `TXMut`. The `TX` type gives any type that implements the `DatabaseGAT` trait, read only access to the database, while the `TXMut` give read and write access as well.
+In the code snippet above, the `DatabaseGAT` trait has two associated types, `TX` and `TXMut`, and requires the `Send` and `Sync` traits to be implemented for all types that are used for `TX` and `TXMut`. The `TX` type gives any type that implements the `DatabaseGAT` trait, read only access to the database, while the `TXMut` give read and write access as well. The `Database` trait implements the `DatabaseGAT` trait, meaning that any type that implements the `Database` trait must also implement the `DatabaseGAT` trait. In the same way that the `Database` trait implements the `DatabaseGAT` trait, giving it access to its functions, the `TX` and `TXMut` types implement the `DbTx` and `DbTxMut` traits, respectively. 
 
-The `Database` trait implements the `DatabaseGAT` trait, meaning that any type that implements the `Database` trait must also implement the `DatabaseGAT` trait.
+[File: ]()
+```rust ignore
 
+pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
+    /// Get value
+    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
+    /// Commit for read only transaction will consume and free transaction and allows
+    /// freeing of memory pages
+    fn commit(self) -> Result<bool, Error>;
+    /// Iterate over read only values in table.
+    fn cursor<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error>;
+    /// Iterate over read only values in dup sorted table.
+    fn cursor_dup<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error>;
+}
+
+/// Read write transaction that allows writing to database
+pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
+    /// Put value to database
+    fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
+    /// Delete value from database
+    fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error>;
+    /// Clears database.
+    fn clear<T: Table>(&self) -> Result<(), Error>;
+    /// Cursor mut
+    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
+    /// DupCursor mut.
+    fn cursor_dup_mut<T: DupSort>(
+        &self,
+    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error>;
+}
+```
 
 //TODO: Walk through TX and TXMut, give some examples of where their methods are used within the stages crate.
 
 //TODO: Explore DbTxGAT, Cursor and DupCursor
 
 //TODO: Make a note about how this chapter covers the database and the related traits until a certain point, where the libmdbx section will cover cursors in more detail.
+
 
 <!-- 
 
