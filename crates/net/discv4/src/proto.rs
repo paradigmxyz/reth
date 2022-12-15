@@ -2,7 +2,7 @@
 
 use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use enr::{k256::ecdsa::SigningKey, Enr};
+use enr::Enr;
 use reth_primitives::{keccak256, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
@@ -263,7 +263,7 @@ pub struct EnrRequest {
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrResponse {
     pub request_hash: H256,
-    pub enr: Enr<SigningKey>,
+    pub enr: Enr<SecretKey>,
 }
 
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).

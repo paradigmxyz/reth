@@ -1,4 +1,5 @@
 use crate::node::NodeRecord;
+use bytes::Bytes;
 use discv5::PermitBanList;
 ///! A set of configuration parameters to tune the discovery protocol.
 // This basis of this file has been taken from the discv5 codebase:
@@ -41,6 +42,10 @@ pub struct Discv4Config {
     pub enable_dht_random_walk: bool,
     /// Whether to automatically lookup peers.
     pub enable_lookup: bool,
+    /// Whether to enable EIP-868 extension
+    pub enable_eip868: bool,
+    /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
+    pub additional_eip868_rlp_pairs: Vec<(Vec<u8>, Bytes)>,
 }
 
 impl Discv4Config {
@@ -66,6 +71,8 @@ impl Default for Discv4Config {
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
+            enable_eip868: true,
+            additional_eip868_rlp_pairs: vec![],
         }
     }
 }
@@ -116,6 +123,29 @@ impl Discv4ConfigBuilder {
     /// Whether to automatically lookup
     pub fn enable_lookup(&mut self, enable_lookup: bool) -> &mut Self {
         self.config.enable_lookup = enable_lookup;
+        self
+    }
+
+    /// Whether to enable EIP-868
+    pub fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
+        self.config.enable_eip868 = enable_eip868;
+        self
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_rlp_pair(&mut self, key: impl AsRef<[u8]>, rlp: Bytes) -> &mut Self {
+        self.config.additional_eip868_rlp_pairs.push((key.as_ref().to_vec(), rlp));
+        self
+    }
+
+    /// Extend additional key value pairs to include in the ENR
+    pub fn extend_eip868_rlp_pairs(
+        &mut self,
+        pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, Bytes)>,
+    ) -> &mut Self {
+        for (k, v) in pairs.into_iter() {
+            self.add_eip868_rlp_pair(k, v);
+        }
         self
     }
 

@@ -635,16 +635,15 @@ mod tests {
     #[cfg(feature = "enr")]
     #[test]
     fn decode_enr_rlp() {
+        use enr::{secp256k1::SecretKey, Enr, EnrPublicKey};
         use std::net::Ipv4Addr;
-
-        use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 
         let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
         let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
         let expected_pubkey =
             hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
 
-        let enr = Enr::<SigningKey>::decode(&mut &valid_record[..]).unwrap();
+        let enr = Enr::<SecretKey>::decode(&mut &valid_record[..]).unwrap();
         let pubkey = enr.public_key().encode();
 
         assert_eq!(enr.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
@@ -661,11 +660,10 @@ mod tests {
     #[cfg(feature = "enr")]
     #[test]
     fn encode_decode_enr_rlp() {
+        use enr::{secp256k1::SecretKey, Enr, EnrBuilder, EnrKey, EnrPublicKey};
         use std::net::Ipv4Addr;
 
-        use enr::{k256::ecdsa::SigningKey, Enr, EnrBuilder, EnrKey, EnrPublicKey};
-
-        let key = SigningKey::random(&mut rand::rngs::OsRng);
+        let key = SecretKey::new(&mut rand::rngs::OsRng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
@@ -679,7 +677,7 @@ mod tests {
         let mut encoded = BytesMut::new();
         enr.encode(&mut encoded);
 
-        let decoded_enr = Enr::<SigningKey>::decode(&mut &encoded[..]).unwrap();
+        let decoded_enr = Enr::<SecretKey>::decode(&mut &encoded[..]).unwrap();
 
         assert_eq!(decoded_enr, enr);
 

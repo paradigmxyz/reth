@@ -30,6 +30,7 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
+use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
 use reth_primitives::{PeerId, H256};
 use secp256k1::SecretKey;
@@ -170,19 +171,19 @@ impl Discv4 {
     /// ```
     pub async fn bind(
         local_address: SocketAddr,
-        mut local_enr: NodeRecord,
+        mut local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
     ) -> io::Result<(Self, Discv4Service)> {
         let socket = UdpSocket::bind(local_address).await?;
         let local_addr = socket.local_addr()?;
-        local_enr.udp_port = local_addr.port();
+        local_node_record.udp_port = local_addr.port();
         trace!( target : "discv4",  ?local_addr,"opened UDP socket");
 
         // We don't expect many commands, so the buffer can be quite small here.
         let (to_service, rx) = mpsc::channel(5);
         let service =
-            Discv4Service::new(socket, local_addr, local_enr, secret_key, config, Some(rx));
+            Discv4Service::new(socket, local_addr, local_node_record, secret_key, config, Some(rx));
         let discv4 = Discv4 { local_addr, to_service };
         Ok((discv4, service))
     }
@@ -242,14 +243,10 @@ impl Discv4 {
 pub struct Discv4Service {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
-    /// The ENR sequence of this node.
-    ///
-    /// The sequence number, a 64-bit unsigned integer. Nodes should increase the number whenever
-    /// the record changes and republish the record.
-    enr_seq: u64,
-
+    /// The local ENR for EIP-868 <https://eips.ethereum.org/EIPS/eip-868>
+    local_eip_868_enr: Enr<SecretKey>,
     /// Local ENR of the server.
-    local_enr: NodeRecord,
+    local_node_record: NodeRecord,
     /// The secret key used to sign payloads
     secret_key: SecretKey,
     /// The UDP socket for sending and receiving messages.
@@ -300,7 +297,7 @@ impl Discv4Service {
     pub(crate) fn new(
         socket: UdpSocket,
         local_address: SocketAddr,
-        local_enr: NodeRecord,
+        local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
         commands_rx: Option<mpsc::Receiver<Discv4Command>>,
@@ -315,13 +312,13 @@ impl Discv4Service {
         let mut tasks = JoinSet::<()>::new();
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(async move { receive_loop(udp, ingress_tx, local_enr.id).await });
+        tasks.spawn(async move { receive_loop(udp, ingress_tx, local_node_record.id).await });
 
         let udp = Arc::clone(&socket);
         tasks.spawn(async move { send_loop(udp, egress_rx).await });
 
         let kbuckets = KBucketsTable::new(
-            local_enr.key(),
+            local_node_record.key(),
             Duration::from_secs(60),
             MAX_NODES_PER_BUCKET,
             None,
@@ -340,10 +337,29 @@ impl Discv4Service {
             LookupTargetRotator::local_only()
         };
 
+        // for EIP-868 construct an ENR
+        let local_eip_868_enr = {
+            let mut builder = EnrBuilder::new("v4");
+            builder.ip(local_node_record.address);
+            if local_node_record.address.is_ipv4() {
+                builder.udp4(local_node_record.udp_port);
+                builder.tcp4(local_node_record.tcp_port);
+            } else {
+                builder.udp6(local_node_record.udp_port);
+                builder.tcp6(local_node_record.tcp_port);
+            }
+
+            for (key, val) in config.additional_eip868_rlp_pairs.iter() {
+                builder.add_value_rlp(key, val.clone());
+            }
+
+            builder.build(&secret_key).expect("v4 is set; qed")
+        };
+
         Discv4Service {
             local_address,
-            enr_seq: 0,
-            local_enr,
+            local_eip_868_enr,
+            local_node_record,
             _socket: socket,
             kbuckets,
             secret_key,
@@ -365,6 +381,11 @@ impl Discv4Service {
         }
     }
 
+    /// Returns the current enr sequence
+    fn enr_seq(&self) -> u64 {
+        self.local_eip_868_enr.seq()
+    }
+
     /// Returns the address of the UDP socket
     pub fn local_addr(&self) -> SocketAddr {
         self.local_address
@@ -372,13 +393,13 @@ impl Discv4Service {
 
     /// Returns the ENR of this service.
     pub fn local_enr(&self) -> NodeRecord {
-        self.local_enr
+        self.local_node_record
     }
 
     /// Returns mutable reference to ENR for testing.
     #[cfg(test)]
     pub fn local_enr_mut(&mut self) -> &mut NodeRecord {
-        &mut self.local_enr
+        &mut self.local_node_record
     }
 
     /// Returns true if the given PeerId is currently in the bucket
@@ -442,7 +463,7 @@ impl Discv4Service {
 
     /// Looks up the local node in the DHT.
     pub fn lookup_self(&mut self) {
-        self.lookup(self.local_enr.id)
+        self.lookup(self.local_node_record.id)
     }
 
     /// Looks up the given node in the DHT
@@ -531,7 +552,7 @@ impl Discv4Service {
 
     /// Updates the node entry
     fn update_node(&mut self, record: NodeRecord) {
-        if record.id == self.local_enr.id {
+        if record.id == self.local_node_record.id {
             return
         }
         let key = kad_key(record.id);
@@ -613,7 +634,7 @@ impl Discv4Service {
             to: ping.from,
             echo: hash,
             expire: ping.expire,
-            enr_sq: Some(self.enr_seq),
+            enr_sq: Some(self.enr_seq()),
         });
         self.send_packet(msg, remote_addr);
     }
@@ -644,10 +665,10 @@ impl Discv4Service {
         let remote_addr = node.udp_addr();
         let id = node.id;
         let ping = Ping {
-            from: self.local_enr.into(),
+            from: self.local_node_record.into(),
             to: node.into(),
             expire: self.ping_timeout(),
-            enr_sq: Some(self.enr_seq),
+            enr_sq: Some(self.enr_seq()),
         };
         trace!(target : "discv4",  ?ping, "sending ping");
         let echo_hash = self.send_packet(Message::Ping(ping), remote_addr);
@@ -782,7 +803,7 @@ impl Discv4Service {
             }
         };
 
-        let our_key = kad_key(self.local_enr.id);
+        let our_key = kad_key(self.local_node_record.id);
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that where discovered.
@@ -822,7 +843,7 @@ impl Discv4Service {
 
     /// Returns the current status of the node
     fn node_status(&mut self, node: PeerId, addr: SocketAddr) -> NodeEntryStatus {
-        if node == self.local_enr.id {
+        if node == self.local_node_record.id {
             debug!( target : "discv4",  ?node,"Got an incoming discovery request from self");
             return NodeEntryStatus::IsLocal
         }
@@ -940,7 +961,7 @@ impl Discv4Service {
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
         // trigger self lookup
         if self.config.enable_lookup && self.lookup_interval.poll_tick(cx).is_ready() {
-            let target = self.lookup_rotator.next(&self.local_enr.id);
+            let target = self.lookup_rotator.next(&self.local_node_record.id);
             self.lookup_with(target, None);
         }
 
@@ -961,7 +982,7 @@ impl Discv4Service {
                 if let Some(cmd) = cmd {
                     match cmd {
                         Discv4Command::Lookup { node_id, tx } => {
-                            let node_id = node_id.unwrap_or(self.local_enr.id);
+                            let node_id = node_id.unwrap_or(self.local_node_record.id);
                             self.lookup_with(node_id, tx);
                         }
                         Discv4Command::Updates(tx) => {

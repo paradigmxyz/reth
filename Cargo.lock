@@ -1160,6 +1160,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
+ "secp256k1",
  "serde",
  "sha3",
  "zeroize",
@@ -3558,6 +3559,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "rlp",
+ "secp256k1",
  "smol_str",
 ]
 
