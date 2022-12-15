@@ -16,7 +16,7 @@ use reth_primitives::{
     BlockNumber, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc};
-use tracing::warn;
+use tracing::{error, warn};
 
 const BODIES: StageId = StageId("Bodies");
 
