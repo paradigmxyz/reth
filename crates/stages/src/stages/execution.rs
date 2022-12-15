@@ -1,5 +1,5 @@
 use crate::{
-    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use reth_db::{
@@ -80,7 +80,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Execute the stage
     async fn execute(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let db_tx = db.deref_mut();
@@ -322,7 +322,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let unwind_from = input.stage_progress;
@@ -449,7 +449,7 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut db = StageDB::new(state_db.as_ref()).unwrap();
+        let mut db = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
             previous_stage: None,
             /// The progress of this stage the last time it was executed.
@@ -532,7 +532,7 @@ mod tests {
         // is merged as it has similar framework
 
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut db = StageDB::new(state_db.as_ref()).unwrap();
+        let mut db = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
             previous_stage: None,
             /// The progress of this stage the last time it was executed.
