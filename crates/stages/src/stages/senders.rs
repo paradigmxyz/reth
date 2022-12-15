@@ -28,6 +28,7 @@ pub struct SendersStage {
     pub commit_threshold: u64,
 }
 
+// TODO(onbjerg): Should unwind
 #[derive(Error, Debug)]
 enum SendersStageError {
     #[error("Sender recovery failed for transaction {tx}.")]

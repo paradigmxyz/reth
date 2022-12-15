@@ -21,6 +21,7 @@ pub enum StageError {
     Database(#[from] DbError),
     #[error("Stage encountered a execution error in block {block}: {error}.")]
     /// The stage encountered a execution error
+    // TODO: Probably redundant, should be rolled into `Validation`
     ExecutionError {
         /// The block that failed execution.
         block: BlockNumber,
