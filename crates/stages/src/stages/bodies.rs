@@ -119,7 +119,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                         highest_block + 1,
                         err
                     );
-                    // Exit the stage early, because
+                    // Exit the stage early
                     return Ok(ExecOutput {
                         stage_progress: highest_block,
                         done: false,
