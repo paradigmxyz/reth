@@ -258,7 +258,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::{
         consensus,
-        p2p::{error::RequestError, headers::error::DownloadError},
+        p2p::{downloader::DownloadError, error::RequestError},
     };
     use std::collections::HashMap;
     use test_utils::*;
@@ -516,9 +516,8 @@ mod tests {
         use reth_interfaces::{
             p2p::{
                 bodies::{client::BodiesClient, downloader::BodyDownloader},
-                downloader::{DownloadClient, DownloadStream, Downloader},
+                downloader::{DownloadClient, DownloadResult, DownloadStream, Downloader},
                 error::PeerRequestResult,
-                headers::error::DownloadError,
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -532,9 +531,7 @@ mod tests {
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
 
         /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(
-            block: &BlockLocked,
-        ) -> (H256, Result<BlockBody, DownloadError>) {
+        pub(crate) fn body_by_hash(block: &BlockLocked) -> (H256, DownloadResult<BlockBody>) {
             (
                 block.hash(),
                 Ok(BlockBody {
@@ -547,7 +544,7 @@ mod tests {
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
-            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
+            responses: HashMap<H256, DownloadResult<BlockBody>>,
             db: TestStageDB,
             batch_size: u64,
         }
@@ -570,7 +567,7 @@ mod tests {
 
             pub(crate) fn set_responses(
                 &mut self,
-                responses: HashMap<H256, Result<BlockBody, DownloadError>>,
+                responses: HashMap<H256, DownloadResult<BlockBody>>,
             ) {
                 self.responses = responses;
             }
@@ -770,11 +767,11 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug, Default, Clone)]
         pub(crate) struct TestBodyDownloader {
-            responses: HashMap<H256, Result<BlockBody, DownloadError>>,
+            responses: HashMap<H256, DownloadResult<BlockBody>>,
         }
 
         impl TestBodyDownloader {
-            pub(crate) fn new(responses: HashMap<H256, Result<BlockBody, DownloadError>>) -> Self {
+            pub(crate) fn new(responses: HashMap<H256, DownloadResult<BlockBody>>) -> Self {
                 Self { responses }
             }
         }
@@ -793,10 +790,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn bodies_stream<'a, 'b, I>(
-                &'a self,
-                hashes: I,
-            ) -> DownloadStream<'a, BlockLocked, DownloadError>
+            fn bodies_stream<'a, 'b, I>(&'a self, hashes: I) -> DownloadStream<'a, BlockLocked>
             where
                 I: IntoIterator<Item = &'b SealedHeader>,
                 <I as IntoIterator>::IntoIter: Send + 'b,

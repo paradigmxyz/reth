@@ -12,10 +12,12 @@ use reth_db::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::headers::{
-        client::HeadersClient,
-        downloader::{ensure_parent, HeaderDownloader},
-        error::DownloadError,
+    p2p::{
+        downloader::DownloadError,
+        headers::{
+            client::HeadersClient,
+            downloader::{ensure_parent, HeaderDownloader},
+        },
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader, H256, U256};

@@ -1,7 +1,4 @@
-use crate::p2p::{
-    downloader::{DownloadStream, Downloader},
-    headers::error::DownloadError,
-};
+use crate::p2p::downloader::{DownloadStream, Downloader};
 use reth_primitives::{BlockLocked, SealedHeader};
 
 /// A downloader capable of fetching block bodies from header hashes.
@@ -22,10 +19,7 @@ pub trait BodyDownloader: Downloader {
     ///
     /// It is *not* guaranteed that all the requested bodies are fetched: the downloader may close
     /// the stream before the entire range has been fetched for any reason
-    fn bodies_stream<'a, 'b, I>(
-        &'a self,
-        headers: I,
-    ) -> DownloadStream<'a, BlockLocked, DownloadError>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockLocked>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,

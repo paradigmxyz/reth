@@ -4,8 +4,7 @@ use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
-        downloader::{DownloadStream, Downloader},
-        headers::error::DownloadError,
+        downloader::{DownloadError, DownloadResult, DownloadStream, Downloader},
     },
 };
 use reth_primitives::{BlockLocked, SealedHeader};
@@ -48,10 +47,7 @@ where
     Client: BodiesClient,
     Consensus: ConsensusTrait,
 {
-    fn bodies_stream<'a, 'b, I>(
-        &'a self,
-        headers: I,
-    ) -> DownloadStream<'a, BlockLocked, DownloadError>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockLocked>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,
@@ -94,7 +90,7 @@ where
     }
 
     /// Fetch a single block body.
-    async fn fetch_body(&self, header: &SealedHeader) -> Result<BlockLocked, DownloadError> {
+    async fn fetch_body(&self, header: &SealedHeader) -> DownloadResult<BlockLocked> {
         let (peer_id, mut response) =
             self.client.get_block_body(vec![header.hash()]).await?.split();
 

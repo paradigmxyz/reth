@@ -1,9 +1,6 @@
 use crate::{
     consensus::Consensus,
-    p2p::{
-        downloader::{DownloadStream, Downloader},
-        headers::error::DownloadError,
-    },
+    p2p::downloader::{DownloadError, DownloadResult, DownloadStream, Downloader},
 };
 
 use reth_primitives::SealedHeader;
@@ -21,10 +18,10 @@ pub trait HeaderDownloader: Downloader {
         &self,
         head: SealedHeader,
         forkchoice: ForkchoiceState,
-    ) -> DownloadStream<'_, SealedHeader, DownloadError>;
+    ) -> DownloadStream<'_, SealedHeader>;
 
     /// Validate whether the header is valid in relation to it's parent
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(self.consensus(), header, parent)?;
         Ok(())
     }
@@ -38,7 +35,7 @@ pub fn validate_header_download<C: Consensus>(
     consensus: &C,
     header: &SealedHeader,
     parent: &SealedHeader,
-) -> Result<(), DownloadError> {
+) -> DownloadResult<()> {
     ensure_parent(header, parent)?;
     consensus
         .validate_header(header, parent)
@@ -47,7 +44,7 @@ pub fn validate_header_download<C: Consensus>(
 }
 
 /// Ensures that the given `parent` header is the actual parent of the `header`
-pub fn ensure_parent(header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
+pub fn ensure_parent(header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
     if !(parent.hash() == header.parent_hash && parent.number + 1 == header.number) {
         return Err(DownloadError::MismatchedHeaders {
             header_number: header.number.into(),

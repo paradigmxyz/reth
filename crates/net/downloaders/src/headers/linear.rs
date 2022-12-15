@@ -2,12 +2,11 @@ use futures::{stream::Stream, FutureExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        downloader::{DownloadStream, Downloader},
+        downloader::{DownloadError, DownloadResult, DownloadStream, Downloader},
         error::PeerRequestResult,
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader},
-            error::DownloadError,
         },
     },
 };
@@ -62,7 +61,7 @@ where
         &self,
         head: SealedHeader,
         forkchoice: ForkchoiceState,
-    ) -> DownloadStream<'_, SealedHeader, DownloadError> {
+    ) -> DownloadStream<'_, SealedHeader> {
         Box::pin(self.new_download(head, forkchoice))
     }
 }
@@ -247,7 +246,7 @@ where
     ///
     /// Returns Ok(false) if the
     #[allow(clippy::result_large_err)]
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), DownloadError> {
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(&self.consensus, header, parent)?;
         Ok(())
     }
@@ -256,7 +255,7 @@ where
     fn process_header_response(
         &mut self,
         response: PeerRequestResult<BlockHeaders>,
-    ) -> Result<(), DownloadError> {
+    ) -> DownloadResult<()> {
         match response {
             Ok(res) => {
                 let mut headers = res.1 .0;
@@ -306,7 +305,7 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    type Item = Result<SealedHeader, DownloadError>;
+    type Item = DownloadResult<SealedHeader>;
 
     /// Linear header downloader implemented as a [Stream]. The downloader sends header
     /// requests until the head is reached and buffers the responses. If the request future
