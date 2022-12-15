@@ -204,7 +204,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         let tip = match next_header {
             Some(header) if stage_progress + 1 != header.number => header.parent_hash,
             None => self.next_fork_choice_state(&head.hash()).await.head_block_hash,
-            _ => return Err(StageError::Checkpoint(stage_progress)),
+            _ => return Err(StageError::StageProgress(stage_progress)),
         };
         Ok((head, tip))
     }
@@ -446,7 +446,7 @@ mod tests {
             .expect("failed to write header");
         assert_matches!(
             stage.get_head_and_tip(&db, stage_progress).await,
-            Err(StageError::Checkpoint(progress)) if progress == stage_progress
+            Err(StageError::StageProgress(progress)) if progress == stage_progress
         );
     }
 
