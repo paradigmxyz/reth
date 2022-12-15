@@ -19,7 +19,7 @@ impl<F> Debug for TestBodiesClient<F> {
 }
 
 impl<F: Sync + Send> DownloadClient for TestBodiesClient<F> {
-    fn penalize(&self, _peer_id: reth_primitives::PeerId) {
+    fn report_bad_message(&self, _peer_id: reth_primitives::PeerId) {
         // noop
     }
 }

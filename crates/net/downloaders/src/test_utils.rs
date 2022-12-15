@@ -54,7 +54,7 @@ impl<F> TestBodiesClient<F> {
 }
 
 impl<F: Send + Sync> DownloadClient for TestBodiesClient<F> {
-    fn penalize(&self, _peer_id: PeerId) {
+    fn report_bad_message(&self, _peer_id: PeerId) {
         // noop
     }
 }

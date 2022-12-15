@@ -2,8 +2,8 @@ use futures::{stream::Stream, FutureExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        downloader::{DownloadError, DownloadResult, DownloadStream, Downloader},
-        error::PeerRequestResult,
+        downloader::{DownloadStream, Downloader},
+        error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader},
@@ -354,7 +354,7 @@ where
                                     target: "downloaders::headers",
                                     "penalizing peer {peer_id} for {err:?}"
                                 );
-                                this.client.penalize(peer_id);
+                                this.client.report_bad_message(peer_id);
                             }
                             // Response is invalid, attempt to retry
                             if this.try_fuse_request_fut(&mut fut).is_err() {

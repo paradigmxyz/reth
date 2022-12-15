@@ -26,7 +26,7 @@ pub struct FetchClient {
 }
 
 impl DownloadClient for FetchClient {
-    fn penalize(&self, peer_id: PeerId) {
+    fn report_bad_message(&self, peer_id: PeerId) {
         self.peers_handle.reputation_change(peer_id, ReputationChangeKind::BadMessage);
     }
 }

@@ -258,7 +258,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::{
         consensus,
-        p2p::{downloader::DownloadError, error::RequestError},
+        p2p::error::{DownloadError, RequestError},
     };
     use std::collections::HashMap;
     use test_utils::*;
@@ -516,8 +516,8 @@ mod tests {
         use reth_interfaces::{
             p2p::{
                 bodies::{client::BodiesClient, downloader::BodyDownloader},
-                downloader::{DownloadClient, DownloadResult, DownloadStream, Downloader},
-                error::PeerRequestResult,
+                downloader::{DownloadClient, DownloadStream, Downloader},
+                error::{DownloadResult, PeerRequestResult},
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -751,7 +751,7 @@ mod tests {
         pub(crate) struct NoopClient;
 
         impl DownloadClient for NoopClient {
-            fn penalize(&self, _: reth_primitives::PeerId) {
+            fn report_bad_message(&self, _: reth_primitives::PeerId) {
                 panic!("Noop client should not be called")
             }
         }

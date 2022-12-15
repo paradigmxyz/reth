@@ -4,7 +4,8 @@ use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
-        downloader::{DownloadError, DownloadResult, DownloadStream, Downloader},
+        downloader::{DownloadStream, Downloader},
+        error::{DownloadError, DownloadResult},
     },
 };
 use reth_primitives::{BlockLocked, SealedHeader};
@@ -104,7 +105,7 @@ where
         match self.consensus.pre_validate_block(&block) {
             Ok(_) => Ok(block),
             Err(error) => {
-                self.client.penalize(peer_id);
+                self.client.report_bad_message(peer_id);
                 Err(DownloadError::BlockValidation { hash: header.hash(), error })
             }
         }

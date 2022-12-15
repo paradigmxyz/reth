@@ -1,6 +1,9 @@
 use crate::{
     consensus::Consensus,
-    p2p::downloader::{DownloadError, DownloadResult, DownloadStream, Downloader},
+    p2p::{
+        downloader::{DownloadStream, Downloader},
+        error::{DownloadError, DownloadResult},
+    },
 };
 
 use reth_primitives::SealedHeader;

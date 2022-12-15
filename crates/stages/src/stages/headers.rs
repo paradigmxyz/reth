@@ -13,7 +13,7 @@ use reth_db::{
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
-        downloader::DownloadError,
+        error::DownloadError,
         headers::{
             client::HeadersClient,
             downloader::{ensure_parent, HeaderDownloader},
