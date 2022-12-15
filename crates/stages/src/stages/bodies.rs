@@ -16,7 +16,7 @@ use reth_primitives::{
     BlockNumber, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc};
-use tracing::{error, warn};
+use tracing::warn;
 
 const BODIES: StageId = StageId("Bodies");
 
@@ -111,23 +111,18 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = previous_block;
         while let Some(result) = bodies_stream.next().await {
-            let block = match result {
-                Ok(block) => block,
-                Err(err) => {
-                    error!(
-                        "Encountered error downloading block {}. Details: {:?}",
-                        highest_block + 1,
-                        err
-                    );
-                    // Exit the stage early
-                    return Ok(ExecOutput {
-                        stage_progress: highest_block,
-                        done: false,
-                        reached_tip: false,
-                    })
-                }
+            let Ok(block) = result else {
+                error!(
+                    "Encountered an error downloading block {}: {:?}",
+                    highest_block + 1,
+                    result.unwrap_err()
+                );
+                return Ok(ExecOutput {
+                    stage_progress: highest_block,
+                    done: false,
+                    reached_tip: false,
+                })
             };
-
             let block_number = block.number;
             // Write block
             let key = (block_number, block.hash()).into();

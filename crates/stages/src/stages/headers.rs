@@ -113,7 +113,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 Err(e) => match e {
                     DownloadError::Timeout => {
                         warn!("No response for header request");
-                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
+                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
                         error!("Validation error for header {hash}: {error}");
@@ -121,7 +121,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                     }
                     error => {
                         error!(?error, "An unexpected error occurred");
-                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
+                        return Err(StageError::Recoverable(error.into()))
                     }
                 },
             }
@@ -279,10 +279,8 @@ mod tests {
         let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
         let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 100 })
-        );
+        // TODO: Downcast the internal error and actually check it
+        assert_matches!(result, Err(StageError::Recoverable(_)));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -324,10 +322,7 @@ mod tests {
 
         // These errors are not fatal but hand back control to the pipeline
         let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { stage_progress: 1000, done: false, reached_tip: false })
-        );
+        assert_matches!(result, Err(StageError::Recoverable(_)));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 

@@ -255,7 +255,7 @@ impl<DB: Database> Pipeline<DB> {
                     }
                     Err(err) => {
                         self.events_sender.send(PipelineEvent::Error { stage_id }).await?;
-                        return Err(PipelineError::Stage(StageError::Internal(err)))
+                        return Err(PipelineError::Stage(StageError::Fatal(err)))
                     }
                 }
             }
@@ -287,7 +287,7 @@ impl<DB: Database> QueuedStage<DB> {
     ) -> Result<ControlFlow, PipelineError> {
         let stage_id = self.stage.id();
         if self.require_tip && !state.reached_tip() {
-            info!("Tip not reached, skipping.");
+            warn!(stage = %stage_id, "Tip not reached as required by stage, skipping.");
             state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
             // Stage requires us to reach the tip of the chain first, but we have
@@ -304,7 +304,7 @@ impl<DB: Database> QueuedStage<DB> {
                 .zip(state.max_block)
                 .map_or(false, |(prev_progress, target)| prev_progress >= target);
             if stage_reached_max_block {
-                info!("Stage reached maximum block, skipping.");
+                warn!(stage = %stage_id, "Stage reached maximum block, skipping.");
                 state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
                 // We reached the maximum block, so we skip the stage
@@ -323,7 +323,7 @@ impl<DB: Database> QueuedStage<DB> {
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
-                    debug!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
+                    info!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
                     stage_id.save_progress(db.deref(), stage_progress)?;
 
                     state
@@ -345,7 +345,7 @@ impl<DB: Database> QueuedStage<DB> {
                     state.events_sender.send(PipelineEvent::Error { stage_id }).await?;
 
                     return if let StageError::Validation { block, error } = err {
-                        debug!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error: {error}");
+                        warn!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error: {error}");
 
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the
@@ -354,8 +354,14 @@ impl<DB: Database> QueuedStage<DB> {
                             target: prev_progress.unwrap_or_default(),
                             bad_block: Some(block),
                         })
-                    } else {
+                    } else if err.is_fatal() {
+                        error!(stage = %stage_id, "Stage encountered a fatal error: {err}.");
                         Err(err.into())
+                    } else {
+                        // On other errors we assume they are recoverable if we discard the
+                        // transaction and run the stage again.
+                        warn!(stage = %stage_id, "Stage encountered a non-fatal error: {err}. Retrying");
+                        continue
                     }
                 }
             }
@@ -367,6 +373,7 @@ impl<DB: Database> QueuedStage<DB> {
 mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
+    use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, Env, EnvKind, WriteMap};
     use reth_interfaces::consensus;
     use tokio::sync::mpsc::channel;
@@ -721,6 +728,42 @@ mod tests {
                     result: ExecOutput { stage_progress: 10, reached_tip: true, done: true }
                 },
             ]
+        );
+    }
+
+    /// Checks that the pipeline re-runs stages on non-fatal errors and stops on fatal ones.
+    #[tokio::test]
+    async fn pipeline_error_handling() {
+        // Non-fatal
+        let db = test_utils::create_test_db(EnvKind::RW);
+        let result = Pipeline::<Env<WriteMap>>::new()
+            .push(
+                TestStage::new(StageId("NonFatal"))
+                    .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true, reached_tip: true })),
+                false,
+            )
+            .set_max_block(Some(10))
+            .run(db)
+            .await;
+        assert_matches!(result, Ok(()));
+
+        // Fatal
+        let db = test_utils::create_test_db(EnvKind::RW);
+        let result = Pipeline::<Env<WriteMap>>::new()
+            .push(
+                TestStage::new(StageId("Fatal")).add_exec(Err(StageError::DatabaseIntegrity(
+                    DatabaseIntegrityError::BlockBody { number: 5 },
+                ))),
+                false,
+            )
+            .run(db)
+            .await;
+        assert_matches!(
+            result,
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
+                DatabaseIntegrityError::BlockBody { number: 5 }
+            )))
         );
     }
 
