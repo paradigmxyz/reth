@@ -21,6 +21,9 @@ use crate::{DatabaseIntegrityError, StageError};
 // NOTE: This container is needed since `Transaction::commit` takes `mut self`, so methods in
 // the pipeline that just take a reference will not be able to commit their transaction and let
 // the pipeline continue. Is there a better way to do this?
+//
+// TODO: Re-evaluate if this is actually needed, this was introduced as a way to manage the
+// lifetime of the `TXMut` and having a nice API for re-opening a new transaction after `commit`
 pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
     pub(crate) db: &'this DB,
