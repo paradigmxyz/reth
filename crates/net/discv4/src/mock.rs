@@ -309,7 +309,7 @@ mod tests {
         mockv4.queue_pong(discv_enr.id);
 
         // This sends a ping to the mock service
-        let echo_hash = service.send_ping(mock_enr, PingReason::Normal);
+        let echo_hash = service.send_ping(mock_enr, PingReason::Initial);
 
         // process the mock pong
         let event = mockv4.next().await.unwrap();

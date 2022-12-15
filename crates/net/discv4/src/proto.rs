@@ -3,7 +3,7 @@
 use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enr::Enr;
-use reth_primitives::{keccak256, H256};
+use reth_primitives::{keccak256, ForkId, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
@@ -264,6 +264,18 @@ pub struct EnrRequest {
 pub struct EnrResponse {
     pub request_hash: H256,
     pub enr: Enr<SecretKey>,
+}
+
+// === impl EnrResponse ===
+
+impl EnrResponse {
+    /// Returns the [`ForkId`] if set
+    ///
+    /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
+    pub fn eth_fork_id(&self) -> Option<ForkId> {
+        let mut maybe_fork_id = self.enr.get(b"eth")?;
+        ForkId::decode(&mut maybe_fork_id).ok()
+    }
 }
 
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).

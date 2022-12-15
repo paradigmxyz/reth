@@ -4,8 +4,9 @@
 //! https://github.com/sigp/discv5
 
 use crate::node::NodeRecord;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use reth_net_common::ban_list::BanList;
+use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -65,7 +66,7 @@ impl Default for Discv4Config {
             request_retries: 1,
             ping_interval: Duration::from_secs(300),
             ping_timeout: Duration::from_secs(5),
-            find_node_timeout: Duration::from_secs(2),
+            find_node_timeout: Duration::from_secs(20),
             enr_request_timeout: Duration::from_secs(2),
             neighbours_timeout: Duration::from_secs(30),
             lookup_interval: Duration::from_secs(20),
@@ -133,6 +134,13 @@ impl Discv4ConfigBuilder {
     pub fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
         self
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_pair(&mut self, key: impl AsRef<[u8]>, value: impl Encodable) -> &mut Self {
+        let mut buf = BytesMut::new();
+        value.encode(&mut buf);
+        self.add_eip868_rlp_pair(key, buf.freeze())
     }
 
     /// Add another key value pair to include in the ENR
