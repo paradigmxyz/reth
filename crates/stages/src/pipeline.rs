@@ -373,6 +373,7 @@ impl<DB: Database> QueuedStage<DB> {
 mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
+    use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, Env, EnvKind, WriteMap};
     use reth_interfaces::consensus;
     use tokio::sync::mpsc::channel;
@@ -727,6 +728,42 @@ mod tests {
                     result: ExecOutput { stage_progress: 10, reached_tip: true, done: true }
                 },
             ]
+        );
+    }
+
+    /// Checks that the pipeline re-runs stages on non-fatal errors and stops on fatal ones.
+    #[tokio::test]
+    async fn pipeline_error_handling() {
+        // Non-fatal
+        let db = test_utils::create_test_db(EnvKind::RW);
+        let result = Pipeline::<Env<WriteMap>>::new()
+            .push(
+                TestStage::new(StageId("NonFatal"))
+                    .add_exec(Err(StageError::Internal(Box::new(std::fmt::Error))))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true, reached_tip: true })),
+                false,
+            )
+            .set_max_block(Some(10))
+            .run(db)
+            .await;
+        assert_matches!(result, Ok(()));
+
+        // Fatal
+        let db = test_utils::create_test_db(EnvKind::RW);
+        let result = Pipeline::<Env<WriteMap>>::new()
+            .push(
+                TestStage::new(StageId("Fatal")).add_exec(Err(StageError::DatabaseIntegrity(
+                    DatabaseIntegrityError::BlockBody { number: 5 },
+                ))),
+                false,
+            )
+            .run(db)
+            .await;
+        assert_matches!(
+            result,
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
+                DatabaseIntegrityError::BlockBody { number: 5 }
+            )))
         );
     }
 
