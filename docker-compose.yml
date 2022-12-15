@@ -15,4 +15,4 @@ services:
     build:
       context: .
       dockerfile: ./docker/reth.dockerfile
-    command: ["node"]
+    command: ["node", "--metrics"]
