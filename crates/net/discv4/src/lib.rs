@@ -272,7 +272,7 @@ pub struct Discv4Service {
     /// Currently active FindNode requests
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Currently active ENR requests
-    pending_enr_requests: HashMap<PeerId, ENRRequestState>,
+    pending_enr_requests: HashMap<PeerId, EnrRequestState>,
     /// Commands listener
     commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     /// All subscribers for table updates
@@ -1258,7 +1258,7 @@ impl FindNodeRequest {
     }
 }
 
-struct ENRRequestState {
+struct EnrRequestState {
     // Timestamp when the request was sent.
     sent_at: Instant,
     // Whether the request has been answered yet.
@@ -1267,7 +1267,7 @@ struct ENRRequestState {
 
 // === impl ENRRequestState ===
 
-impl ENRRequestState {
+impl EnrRequestState {
     fn new() -> Self {
         Self { sent_at: Instant::now(), answered: false }
     }
