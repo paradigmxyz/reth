@@ -1,4 +1,6 @@
-use crate::p2p::{bodies::client::BodiesClient, error::RequestResult};
+use crate::p2p::{
+    bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+};
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_primitives::H256;
@@ -16,12 +18,18 @@ impl<F> Debug for TestBodiesClient<F> {
     }
 }
 
+impl<F: Sync + Send> DownloadClient for TestBodiesClient<F> {
+    fn report_bad_message(&self, _peer_id: reth_primitives::PeerId) {
+        // noop
+    }
+}
+
 #[async_trait]
 impl<F> BodiesClient for TestBodiesClient<F>
 where
-    F: Fn(Vec<H256>) -> RequestResult<Vec<BlockBody>> + Send + Sync,
+    F: Fn(Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
-    async fn get_block_body(&self, hashes: Vec<H256>) -> RequestResult<Vec<BlockBody>> {
+    async fn get_block_body(&self, hashes: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
         (self.responder)(hashes)
     }
 }

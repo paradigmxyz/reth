@@ -36,12 +36,12 @@ pub trait DbCursorRO<'tx, T: Table> {
         Self: Sized;
 }
 
-/// Read only curor over DupSort table.
+/// Read only cursor over DupSort table.
 pub trait DbDupCursorRO<'tx, T: DupSort> {
     /// Seeks for a `(key, value)` pair greater or equal than `key`.
     fn seek(&mut self, key: T::SubKey) -> PairResult<T>;
 
-    /// Returns the next `(key, value)` pair of a DUPSORT table.
+    /// Returns the next `(key, value)` pair of a DupSort table.
     fn next_dup(&mut self) -> PairResult<T>;
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
@@ -50,7 +50,7 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T>;
 
-    /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT
+    /// Returns an iterator starting at a key greater or equal than `start_key` of a DupSort
     /// table.
     fn walk_dup<'cursor>(
         &'cursor mut self,

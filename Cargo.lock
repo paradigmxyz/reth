@@ -870,19 +870,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashmap"
-version = "5.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
-dependencies = [
- "cfg-if",
- "hashbrown 0.12.3",
- "lock_api",
- "once_cell",
- "parking_lot_core 0.9.4",
-]
-
-[[package]]
 name = "data-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1000,7 +987,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.1.0"
-source = "git+https://github.com/sigp/discv5#46fb65ce6dfead94bcdd63b7c27c0adfae10e269"
+source = "git+https://github.com/sigp/discv5#d31e62e3a6973d94be7e9d02f812a43e2c9d9749"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -3189,8 +3176,10 @@ dependencies = [
  "rayon",
  "reth-consensus",
  "reth-db",
+ "reth-downloaders",
  "reth-executor",
  "reth-interfaces",
+ "reth-network",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3206,22 +3195,6 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "walkdir",
-]
-
-[[package]]
-name = "reth-bodies-downloaders"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "backon",
- "futures-util",
- "once_cell",
- "rand 0.8.5",
- "reth-eth-wire",
- "reth-interfaces",
- "reth-primitives",
- "tokio",
 ]
 
 [[package]]
@@ -3296,16 +3269,35 @@ dependencies = [
  "hex",
  "public-ip",
  "rand 0.8.5",
+ "reth-net-common",
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
+ "reth-tracing",
  "secp256k1",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-test",
  "url",
+]
+
+[[package]]
+name = "reth-downloaders"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "backon",
+ "futures",
+ "futures-util",
+ "once_cell",
+ "reth-eth-wire",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3357,6 +3349,7 @@ dependencies = [
  "serde",
  "smol_str",
  "snap",
+ "test-fuzz",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3390,22 +3383,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-headers-downloaders"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "futures",
- "once_cell",
- "rand 0.8.5",
- "reth-interfaces",
- "reth-primitives",
- "reth-rpc-types",
- "serial_test",
- "tokio",
-]
-
-[[package]]
 name = "reth-interfaces"
 version = "0.1.0"
 dependencies = [
@@ -3427,7 +3404,6 @@ dependencies = [
  "reth-rpc-types",
  "secp256k1",
  "serde",
- "test-fuzz",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3481,6 +3457,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-net-common"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-network"
 version = "0.1.0"
 dependencies = [
@@ -3502,6 +3485,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
+ "reth-net-common",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3651,12 +3635,12 @@ dependencies = [
  "metrics",
  "rand 0.8.5",
  "rayon",
- "reth-bodies-downloaders",
  "reth-db",
+ "reth-downloaders",
  "reth-eth-wire",
  "reth-executor",
- "reth-headers-downloaders",
  "reth-interfaces",
+ "reth-network",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3968,9 +3952,9 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.24.1"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff55dc09d460954e9ef2fa8a7ced735a964be9981fd50e870b2b3b0705e14964"
+checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "rand 0.8.5",
  "secp256k1-sys",
@@ -4103,32 +4087,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serial_test"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92761393ee4dc3ff8f4af487bd58f4307c9329bbedea02cac0089ad9c411e153"
-dependencies = [
- "dashmap",
- "futures",
- "lazy_static",
- "log",
- "parking_lot 0.12.1",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6f5d1c3087fb119617cff2966fe3808a80e5eb59a8c1601d5994d66f4346a5"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

@@ -70,9 +70,9 @@ where
         Ok(Self { db, tx: Some(db.tx_mut()?) })
     }
 
-    /// Take transaction
-    pub fn take(&mut self) -> Option<<DB as DatabaseGAT<'this>>::TXMut> {
-        self.tx.take()
+    /// Accessor to the internal Database
+    pub fn inner(&self) -> &'this DB {
+        self.db
     }
 
     /// Commit the current inner transaction and open a new one.

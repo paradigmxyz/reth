@@ -36,7 +36,15 @@ pub struct GetBlockHeaders {
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct BlockHeaders(
     /// The requested headers.
@@ -51,7 +59,15 @@ impl From<Vec<Header>> for BlockHeaders {
 
 /// A request for a peer to return block bodies for the given block hashes.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
@@ -66,7 +82,9 @@ impl From<Vec<H256>> for GetBlockBodies {
 
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
+)]
 pub struct BlockBody {
     /// Transactions in the block
     pub transactions: Vec<TransactionSigned>,
@@ -88,7 +106,15 @@ impl BlockBody {
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.

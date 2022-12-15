@@ -353,7 +353,7 @@ named mutexes are used.
 Historically, _libmdbx_ is a deeply revised and extended descendant of the
 [Lightning Memory-Mapped Database](https://en.wikipedia.org/wiki/Lightning_Memory-Mapped_Database).
 At first the development was carried out within the
-[ReOpenLDAP](https://web.archive.org/web/20220414235959/https://github.com/erthink/ReOpenLDAP) project. About a
+[ReOpenLDAP](https://web.archive.org/web/https://github.com/erthink/ReOpenLDAP) project. About a
 year later _libmdbx_ was separated into a standalone project, which was
 [presented at Highload++ 2015
 conference](http://www.highload.ru/2015/abstracts/1831.html).
@@ -435,7 +435,7 @@ unexpected or broken down.
 
 ### Testing
 The amalgamated source code does not contain any tests for or several reasons.
-Please read [the explanation](https://web.archive.org/web/20220414235959/https://github.com/erthink/libmdbx/issues/214#issuecomment-870717981) and don't ask to alter this.
+Please read [the explanation](https://web.archive.org/web/https://github.com/erthink/libmdbx/issues/214#issuecomment-870717981) and don't ask to alter this.
 So for testing _libmdbx_ itself you need a full source code, i.e. the clone of a git repository, there is no option.
 
 The full source code of _libmdbx_ has a [`test` subdirectory](https://gitflic.ru/project/erthink/libmdbx/tree/master/test) with minimalistic test "framework".
@@ -618,7 +618,7 @@ Bindings
 | Rust    | [libmdbx-rs](https://github.com/vorot93/libmdbx-rs)   | [Artem Vorotnikov](https://github.com/vorot93) |
 | Rust    | [mdbx](https://crates.io/crates/mdbx)                 | [gcxfd](https://github.com/gcxfd) |
 | Java    | [mdbxjni](https://github.com/castortech/mdbxjni)      | [Castor Technologies](https://castortech.com/) |
-| Python (draft)  | [python-bindings](https://web.archive.org/web/20220414235959/https://github.com/erthink/libmdbx/commits/python-bindings) branch | [Noel Kuntze](https://github.com/Thermi)
+| Python (draft)  | [python-bindings](https://web.archive.org/web/https://github.com/erthink/libmdbx/commits/python-bindings) branch | [Noel Kuntze](https://github.com/Thermi)
 | .NET (obsolete) | [mdbx.NET](https://github.com/wangjia184/mdbx.NET) | [Jerry Wang](https://github.com/wangjia184) |
 
 <!-- section-end -->

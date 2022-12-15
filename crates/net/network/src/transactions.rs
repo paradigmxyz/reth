@@ -103,13 +103,7 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
 }
 
-// === impl TransactionsManager ===
-
-impl<Pool> TransactionsManager<Pool>
-where
-    Pool: TransactionPool + 'static,
-    <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
-{
+impl<Pool: TransactionPool> TransactionsManager<Pool> {
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -138,7 +132,15 @@ where
             transaction_events: UnboundedReceiverStream::new(from_network),
         }
     }
+}
 
+// === impl TransactionsManager ===
+
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+    <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
+{
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle {
         TransactionsHandle { manager_tx: self.command_tx.clone() }

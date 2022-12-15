@@ -2,7 +2,7 @@
 .\" Copyright 2012-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_COPY 1 "2022-08-24" "MDBX 0.12.1"
+.TH MDBX_COPY 1 "2022-11-11" "MDBX 0.12.2"
 .SH NAME
 mdbx_copy \- MDBX environment copy tool
 .SH SYNOPSIS
@@ -44,6 +44,13 @@ Compact while copying. Only current data pages will be copied; freed
 or unused pages will be omitted from the copy. This option will
 slow down the backup process as it is more CPU-intensive.
 Currently it fails if the environment has suffered a page leak.
+.TP
+.BR \-u
+Warms up the DB before copying via notifying OS kernel of subsequent access to the database pages.
+.TP
+.BR \-U
+Warms up the DB before copying, notifying the OS kernel of subsequent access to the database pages,
+then forcibly loads ones by sequential access and tries to lock database pages in memory.
 .TP
 .BR \-n
 Open MDBX environment(s) which do not use subdirectories.

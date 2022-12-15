@@ -1,3 +1,6 @@
+/// The generic downloader trait for implementing data downloaders over P2P.
+pub mod downloader;
+
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
@@ -12,6 +15,3 @@ pub mod headers;
 /// Error types broadly used by p2p interfaces for any operation which may produce an error when
 /// interacting with the network implementation
 pub mod error;
-
-/// Commonly used traits when implementing clients.
-pub mod traits;

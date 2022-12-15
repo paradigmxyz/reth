@@ -2,7 +2,7 @@
 .\" Copyright 2014-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_DUMP 1 "2022-08-24" "MDBX 0.12.1"
+.TH MDBX_DUMP 1 "2022-11-11" "MDBX 0.12.2"
 .SH NAME
 mdbx_dump \- MDBX environment export tool
 .SH SYNOPSIS
@@ -65,6 +65,13 @@ Dump a specific subdatabase. If no database is specified, only the main database
 .TP
 .BR \-r
 Rescure mode. Ignore some errors to dump corrupted DB.
+.TP
+.BR \-u
+Warms up the DB before dumping via notifying OS kernel of subsequent access to the database pages.
+.TP
+.BR \-U
+Warms up the DB before dumping, notifying the OS kernel of subsequent access to the database pages,
+then forcibly loads ones by sequential access and tries to lock database pages in memory.
 .TP
 .BR \-n
 Dump an MDBX database which does not use subdirectories.

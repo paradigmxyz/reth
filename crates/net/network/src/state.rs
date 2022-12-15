@@ -3,7 +3,7 @@
 use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher, StatusUpdate},
+    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
@@ -18,13 +18,13 @@ use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
     sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tracing::trace;
+use tracing::{debug, error};
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: usize = 512;
@@ -70,6 +70,7 @@ where
         peers_manager: PeersManager,
         genesis_hash: H256,
     ) -> Self {
+        let state_fetcher = StateFetcher::new(peers_manager.handle());
         Self {
             active_peers: Default::default(),
             peers_manager,
@@ -77,7 +78,7 @@ where
             client,
             discovery,
             genesis_hash,
-            state_fetcher: Default::default(),
+            state_fetcher,
         }
     }
 
@@ -233,6 +234,18 @@ where
         }
     }
 
+    /// Bans the [`IpAddr`] in the discovery service.
+    pub(crate) fn ban_ip_discovery(&self, ip: IpAddr) {
+        debug!(target: "net", ?ip, "Banning discovery");
+        self.discovery.ban_ip(ip)
+    }
+
+    /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
+    pub(crate) fn ban_discovery(&self, peer_id: PeerId, ip: IpAddr) {
+        debug!(target: "net", ?peer_id, ?ip, "Banning discovery");
+        self.discovery.ban(peer_id, ip)
+    }
+
     /// Adds a peer and its address to the peerset.
     pub(crate) fn add_peer_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
         self.peers_manager.add_discovered_node(peer_id, addr)
@@ -262,6 +275,7 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
+            PeerAction::DiscoveryBan { peer_id, ip_addr } => self.ban_discovery(peer_id, ip_addr),
         }
     }
 
@@ -340,10 +354,6 @@ where
                     FetchAction::BlockRequest { peer_id, request } => {
                         self.handle_block_request(peer_id, request)
                     }
-                    FetchAction::StatusUpdate(status) => {
-                        // we want to return this directly
-                        return Poll::Ready(StateAction::StatusUpdate(status))
-                    }
                 }
             }
 
@@ -355,10 +365,11 @@ where
             for (id, peer) in self.active_peers.iter_mut() {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
-                        Poll::Ready(Err(_)) => {
-                            trace!(
+                        Poll::Ready(Err(err)) => {
+                            error!(
                                 target : "net",
                                 ?id,
+                                ?err,
                                 "Request canceled, response channel closed."
                             );
                             disconnect_sessions.push(*id);
@@ -413,8 +424,6 @@ pub(crate) struct ActivePeer {
 
 /// Message variants triggered by the [`State`]
 pub(crate) enum StateAction {
-    /// Received a node status update.
-    StatusUpdate(StatusUpdate),
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
         /// Target of the message

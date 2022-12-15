@@ -14,6 +14,7 @@ Ethereum network support
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp" }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-net-common = { path = "../common" }
 
 # ethereum
 discv5 = { git = "https://github.com/sigp/discv5" }
@@ -40,7 +41,7 @@ rand = { version = "0.8", optional = true }
 [dev-dependencies]
 rand = "0.8"
 tokio = { version = "1", features = ["full"] }
-tracing-test = "0.2"
+reth-tracing = { path = "../../tracing" }
 
 [features]
 mock = ["rand"]

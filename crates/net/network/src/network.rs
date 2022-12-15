@@ -7,7 +7,8 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_primitives::{PeerId, TransactionSigned, TxHash, H256};
+use reth_interfaces::p2p::headers::client::StatusUpdater;
+use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -21,7 +22,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NetworkHandle {
     /// The Arc'ed delegate that contains the state.
     inner: Arc<NetworkInner>,
@@ -102,6 +103,11 @@ impl NetworkHandle {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
+    /// Update the status of the node.
+    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    }
+
     /// Announce a block over devp2p
     ///
     /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
@@ -148,6 +154,14 @@ impl NetworkHandle {
     }
 }
 
+impl StatusUpdater for NetworkHandle {
+    /// Update the status of the node.
+    fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    }
+}
+
+#[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
@@ -189,4 +203,6 @@ pub(crate) enum NetworkHandleMessage {
     ReputationChange(PeerId, ReputationChangeKind),
     /// Returns the client that can be used to interact with the network.
     FetchClient(oneshot::Sender<FetchClient>),
+    /// Apply a status update.
+    StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
 }
