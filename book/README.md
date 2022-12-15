@@ -15,6 +15,7 @@ The book is continuously rendered [here](https://paradigmxyz.github.io/reth/)!
 
 **[Getting Started]()**
 To get started with Reth, install, configure and sync your node.
+* To install and build reth, you can use the following [installation instruction](./installation.md).
 
 **[A Tour Of Reth]()**
 
