@@ -1,6 +1,5 @@
-use crate::test_eth_chain::models::{ForkSpec, RootOrState, State};
-
 use super::models::Test;
+use crate::test_eth_chain::models::ForkSpec;
 use reth_db::{
     database::Database,
     mdbx::{test_utils::create_test_rw_db, WriteMap},
@@ -17,7 +16,7 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Tests are test edge cases that are not possible to happen on mainnet, so we are skipping them.
 pub fn should_skip(path: &Path) -> bool {
@@ -87,15 +86,9 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             continue
         }
 
-        if matches!(suite.pre, State(RootOrState::Root(_))) {}
+        // if matches!(suite.pre, State(RootOrState::Root(_))) {}
 
-        let pre_state = match suite.pre.0 {
-            RootOrState::State(state) => state,
-            RootOrState::Root(_) => {
-                info!("Skipping test {name}...");
-                continue
-            }
-        };
+        let pre_state = suite.pre.0;
 
         debug!("Executing test: {name} for spec: {:?}", suite.network);
 
@@ -151,11 +144,11 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             ExecutionStage::new(reth_executor::Config { chain_id: 1.into(), spec_upgrades });
 
         // Call execution stage
-        let input = ExecInput::default(); // TODO:
+        let input = ExecInput::default();
         stage.execute(&mut StageDB::new(db.as_ref())?, input).await?;
 
         // Validate post state
-        // TODO:
+        //for post in
     }
     Ok(())
 }

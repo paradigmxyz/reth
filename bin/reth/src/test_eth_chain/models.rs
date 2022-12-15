@@ -115,9 +115,12 @@ pub struct Block {
 }
 
 /// Ethereum blockchain test data State.
+//#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+//#[serde(deny_unknown_fields)]
+//pub struct State(pub RootOrState);
+
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct State(pub RootOrState);
+pub struct State(pub BTreeMap<Address, Account>);
 
 /// Merkle root hash or storage accounts.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
