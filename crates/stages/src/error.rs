@@ -77,7 +77,7 @@ pub enum DatabaseIntegrityError {
         number: BlockNumber,
     },
     /// The canonical header for a block is missing from the database.
-    #[error("No canonical hash for block #{number}")]
+    #[error("No canonical header for block #{number}")]
     CanonicalHeader {
         /// The block number key
         number: BlockNumber,
