@@ -181,8 +181,11 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
 
         let tip = match cursor.next()? {
             Some((number, hash)) if stage_progress + 1 != number => hash,
-            _ => self.next_fork_choice_state(&head).await.head_block_hash,
+            None => self.next_fork_choice_state(&head).await.head_block_hash,
+            // if next header is present and there is no gap - checkpoint is incorrect
+            _ => return Err(StageError::Checkpoint(stage_progress)),
         };
+
         Ok((head, tip))
     }
 
@@ -274,7 +277,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, UnwindStageTestRunner, PREV_STAGE_ID,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::p2p::error::RequestError;
@@ -370,6 +374,54 @@ mod tests {
                 if stage_progress == tip.number
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+    }
+
+    /// Test the head and tip range lookup
+    #[tokio::test]
+    async fn head_and_tip_lookup() {
+        let runner = HeadersTestRunner::default();
+        let db = runner.db().inner();
+        let stage = runner.stage();
+
+        let head = H256::random();
+        let consensus_tip = H256::random();
+        stage.consensus.update_tip(consensus_tip);
+
+        // Genesis
+        let stage_progress = 0;
+        let (gap_fill_num, gap_fill_hash) = (1, H256::random());
+        let (gap_tip_num, gap_tip_hash) = (2, H256::random());
+
+        // Empty database
+        assert_matches!(
+            stage.get_head_and_tip(&db, stage_progress).await,
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { number }))
+                if number == stage_progress
+        );
+
+        // Checkpoint and no gap
+        db.put::<tables::CanonicalHeaders>(stage_progress, head)
+            .expect("falied to write canonical");
+        assert_matches!(
+            stage.get_head_and_tip(&db, stage_progress).await,
+            Ok((h, t)) if h == head && t == consensus_tip
+        );
+
+        // Checkpoint and gap
+        db.put::<tables::CanonicalHeaders>(gap_tip_num, gap_tip_hash)
+            .expect("falied to write canonical");
+        assert_matches!(
+            stage.get_head_and_tip(&db, stage_progress).await,
+            Ok((h, t)) if h == head && t == gap_tip_hash
+        );
+
+        // Checkpoint and gap closed
+        db.put::<tables::CanonicalHeaders>(gap_fill_num, gap_fill_hash)
+            .expect("falied to write canonical");
+        assert_matches!(
+            stage.get_head_and_tip(&db, stage_progress).await,
+            Err(StageError::Checkpoint(progress)) if progress == stage_progress
+        );
     }
 
     mod test_runner {
