@@ -11,7 +11,7 @@ use reth_primitives::{
     keccak256, Account as RethAccount, BigEndianHash, BlockLocked, SealedHeader, StorageEntry, H256,
 };
 use reth_rlp::Decodable;
-use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageDB};
+use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, Transaction};
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
@@ -145,7 +145,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         // Call execution stage
         let input = ExecInput::default();
-        stage.execute(&mut StageDB::new(db.as_ref())?, input).await?;
+        stage.execute(&mut Transaction::new(db.as_ref())?, input).await?;
 
         // Validate post state
         //for post in

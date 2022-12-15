@@ -1,5 +1,5 @@
 use crate::{
-    db::StageDB, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use itertools::Itertools;
 use rayon::prelude::*;
@@ -55,7 +55,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
     /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let stage_progress = input.stage_progress.unwrap_or_default();
@@ -113,7 +113,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Lookup latest tx id that we should unwind to
@@ -131,8 +131,8 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
-        UnwindStageTestRunner, PREV_STAGE_ID,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
     stage_test_suite!(SendersTestRunner);
@@ -176,13 +176,13 @@ mod tests {
     }
 
     struct SendersTestRunner {
-        db: TestStageDB,
+        db: TestTransaction,
         threshold: u64,
     }
 
     impl Default for SendersTestRunner {
         fn default() -> Self {
-            Self { threshold: 1000, db: TestStageDB::default() }
+            Self { threshold: 1000, db: TestTransaction::default() }
         }
     }
 
@@ -195,7 +195,7 @@ mod tests {
     impl StageTestRunner for SendersTestRunner {
         type S = SendersStage;
 
-        fn db(&self) -> &TestStageDB {
+        fn db(&self) -> &TestTransaction {
             &self.db
         }
 

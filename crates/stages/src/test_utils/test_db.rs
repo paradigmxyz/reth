@@ -10,7 +10,7 @@ use reth_db::{
 use reth_primitives::{BlockNumber, SealedHeader, U256};
 use std::{borrow::Borrow, sync::Arc};
 
-use crate::db::StageDB;
+use crate::db::Transaction;
 
 /// The [StageTestDB] is used as an internal
 /// database for testing stage implementation.
@@ -19,21 +19,21 @@ use crate::db::StageDB;
 /// let db = StageTestDB::default();
 /// stage.execute(&mut db.container(), input);
 /// ```
-pub(crate) struct TestStageDB {
+pub(crate) struct TestTransaction {
     db: Arc<Env<WriteMap>>,
 }
 
-impl Default for TestStageDB {
+impl Default for TestTransaction {
     /// Create a new instance of [StageTestDB]
     fn default() -> Self {
         Self { db: create_test_db::<WriteMap>(EnvKind::RW) }
     }
 }
 
-impl TestStageDB {
-    /// Return a database wrapped in [StageDB].
-    pub(crate) fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
-        StageDB::new(self.db.borrow()).expect("failed to create db container")
+impl TestTransaction {
+    /// Return a database wrapped in [Transaction].
+    pub(crate) fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
+        Transaction::new(self.db.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
