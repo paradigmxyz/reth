@@ -19,7 +19,6 @@ use std::{
     time::Duration,
 };
 use tokio_stream::Stream;
-use metrics::counter;
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
