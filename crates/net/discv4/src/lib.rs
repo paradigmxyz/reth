@@ -636,6 +636,20 @@ impl Discv4Service {
         echo_hash
     }
 
+    /// Sends a enr request message to the node's UDP address.
+    ///
+    /// Returns the echo hash of the ping message.
+    pub(crate) fn send_enr_request(&mut self, node: NodeRecord) -> H256 {
+        let remote_addr = node.udp_addr();
+        let enr_request = EnrRequest { expire: self.enr_request_timeout() };
+
+        trace!(target : "discv4",  ?enr_request, "sending enr request");
+        let echo_hash = self.send_packet(Message::EnrRequest(enr_request), remote_addr);
+
+        self.pending_enr_requests.insert(node.id, EnrRequestState { sent_at: Instant::now() });
+        echo_hash
+    }
+
     /// Message handler for an incoming `Pong`.
     fn on_pong(&mut self, pong: Pong, remote_addr: SocketAddr, remote_id: PeerId) {
         if self.is_expired(pong.expire) {
@@ -701,7 +715,11 @@ impl Discv4Service {
 
     /// Handler for incoming `EnrResponse` message
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, node_id: PeerId) {
-        todo!()
+        let ctx = match self.pending_enr_requests.entry(node_id) {
+            Entry::Occupied(entry) => entry.remove(),
+            Entry::Vacant(_) => return,
+        };
+        trace!(target : "discv4",  ?msg, "received ENR response from {remote_addr}: {:?}", msg.enr);
     }
 
     /// Handler for incoming `EnrRequest` message
@@ -879,6 +897,11 @@ impl Discv4Service {
 
     fn find_node_timeout(&self) -> u64 {
         (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.find_node_timeout)
+            .as_secs()
+    }
+
+    fn enr_request_timeout(&self) -> u64 {
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_request_timeout)
             .as_secs()
     }
 
@@ -1261,15 +1284,13 @@ impl FindNodeRequest {
 struct EnrRequestState {
     // Timestamp when the request was sent.
     sent_at: Instant,
-    // Whether the request has been answered yet.
-    answered: bool,
 }
 
 // === impl ENRRequestState ===
 
 impl EnrRequestState {
     fn new() -> Self {
-        Self { sent_at: Instant::now(), answered: false }
+        Self { sent_at: Instant::now() }
     }
 }
 
