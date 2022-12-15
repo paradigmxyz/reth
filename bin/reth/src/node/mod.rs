@@ -63,6 +63,7 @@ impl Command {
                         .build(consensus.clone(), fetch_client.clone()),
                     consensus: consensus.clone(),
                     client: fetch_client.clone(),
+                    network_handle: network.clone(),
                     commit_threshold: 100,
                 },
                 false,

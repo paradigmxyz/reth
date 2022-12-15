@@ -1,7 +1,6 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
 use crate::{
-    fetch::StatusUpdate,
     message::PeerMessage,
     session::{
         active::ActiveSession,
@@ -20,7 +19,7 @@ use reth_eth_wire::{
     error::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{ForkFilter, Hardfork, PeerId};
+use reth_primitives::{ForkFilter, Hardfork, PeerId, H256, U256};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -150,10 +149,10 @@ impl SessionManager {
     }
 
     /// Invoked on a received status update
-    pub(crate) fn on_status_update(&mut self, status: StatusUpdate) {
-        self.status.blockhash = status.hash;
-        self.status.total_difficulty = status.total_difficulty;
-        self.fork_filter.set_head(status.height);
+    pub(crate) fn on_status_update(&mut self, height: u64, hash: H256, total_difficulty: U256) {
+        self.status.blockhash = hash;
+        self.status.total_difficulty = total_difficulty;
+        self.fork_filter.set_head(height);
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
