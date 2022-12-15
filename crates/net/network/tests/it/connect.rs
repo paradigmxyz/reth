@@ -8,7 +8,8 @@ use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
-use reth_network::{BanList, NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
+use reth_net_common::ban_list::BanList;
+use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::PeerId;
 use reth_provider::test_utils::TestApi;
 use secp256k1::SecretKey;
@@ -88,6 +89,34 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_connect_with_builder() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let mut discv4 = Discv4Config::builder();
+    discv4.add_boot_nodes(mainnet_nodes());
+
+    let client = Arc::new(TestApi::default());
+    let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
+    let (handle, network, _, requests) = NetworkManager::new(config)
+        .await
+        .unwrap()
+        .into_builder()
+        .request_handler(client)
+        .split_with_handle();
+
+    let mut events = handle.event_listener();
+
+    tokio::task::spawn(async move {
+        tokio::join!(network, requests);
+    });
+
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -102,7 +131,7 @@ async fn test_incoming_node_id_blacklist() {
     let geth_peer_id: PeerId =
         provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
-    let ban_list = BanList::new(HashSet::from_iter(vec![geth_peer_id]), HashSet::default());
+    let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
     let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
     let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30303);
@@ -200,7 +229,7 @@ async fn test_outgoing_connect_with_single_geth() {
     let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
     let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-    let provider = Provider::<Http>::try_from(format!("http://{}", geth_endpoint)).unwrap();
+    let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
     // get the peer id we should be expecting
     let geth_peer_id: PeerId =

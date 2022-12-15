@@ -5,6 +5,8 @@
 <!-- Add a quick description about Reth, what it is, the goals of the build, and any other quick overview information   -->
 
 
+The book is continuously rendered [here](https://paradigmxyz.github.io/reth/)!
+
 > 📖 **Contributing**
 >
 > You can contribute to this book on [GitHub][gh-book].

@@ -1,4 +1,4 @@
-use crate::p2p::error::PeerRequestResult;
+use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult};
 use async_trait::async_trait;
 pub use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
@@ -19,13 +19,14 @@ pub struct HeadersRequest {
 /// The block headers downloader client
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeadersClient: Send + Sync + Debug {
-    /// Update the node's Status message.
-    ///
-    /// The updated Status message will be used during any new eth/65 handshakes.
-    fn update_status(&self, height: u64, hash: H256, td: U256);
-
+pub trait HeadersClient: DownloadClient {
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
     async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders>;
+}
+
+/// The status updater for updating the status of the p2p node
+pub trait StatusUpdater: Send + Sync {
+    /// Updates the status of the p2p node
+    fn update_status(&self, height: u64, hash: H256, total_difficulty: U256);
 }

@@ -1,11 +1,14 @@
+//! A set of configuration parameters to tune the discovery protocol.
+//!
+//! This basis of this file has been taken from the discv5 codebase:
+//! https://github.com/sigp/discv5
+
 use crate::node::NodeRecord;
-use bytes::Bytes;
-use discv5::PermitBanList;
-///! A set of configuration parameters to tune the discovery protocol.
-// This basis of this file has been taken from the discv5 codebase:
-// https://github.com/sigp/discv5
+use reth_net_common::ban_list::BanList;
 use std::collections::HashSet;
 use std::time::Duration;
+use bytes::Bytes;
+
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]
@@ -27,9 +30,8 @@ pub struct Discv4Config {
     pub enr_request_timeout: Duration,
     /// The duration we set for neighbours responses
     pub neighbours_timeout: Duration,
-    /// A set of lists that permit or ban IP's or PeerIds from the server. See
-    /// `crate::PermitBanList`.
-    pub permit_ban_list: PermitBanList,
+    /// Provides a way to ban peers and ips.
+    pub ban_list: BanList,
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
     /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
     /// the filter will last indefinitely. Default is 1 hour.
@@ -66,7 +68,7 @@ impl Default for Discv4Config {
             enr_request_timeout: Duration::from_secs(2),
             neighbours_timeout: Duration::from_secs(30),
             lookup_interval: Duration::from_secs(20),
-            permit_ban_list: PermitBanList::default(),
+            ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
@@ -149,10 +151,10 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// A set of lists that permit or ban IP's or PeerIds from the server. See
-    /// `crate::PermitBanList`.
-    pub fn permit_ban_list(&mut self, list: PermitBanList) -> &mut Self {
-        self.config.permit_ban_list = list;
+    /// A set of lists that can ban IP's or PeerIds from the server. See
+    /// [`BanList`].
+    pub fn ban_list(&mut self, ban_list: BanList) -> &mut Self {
+        self.config.ban_list = ban_list;
         self
     }
 

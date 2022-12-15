@@ -12,10 +12,12 @@ use reth_db::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::headers::{
-        client::HeadersClient,
-        downloader::{ensure_parent, HeaderDownloader},
+    p2p::{
         error::DownloadError,
+        headers::{
+            client::{HeadersClient, StatusUpdater},
+            downloader::{ensure_parent, HeaderDownloader},
+        },
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
@@ -40,20 +42,22 @@ const HEADERS: StageId = StageId("Headers");
 /// [`HeaderTD`][reth_interfaces::db::tables::HeaderTD] table). The stage does not return the
 /// control flow to the pipeline in order to preserve the context of the chain tip.
 #[derive(Debug)]
-pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient> {
+pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
     pub consensus: Arc<C>,
     /// Downloader client implementation
     pub client: Arc<H>,
+    /// Network handle for updating status
+    pub network_handle: S,
     /// The number of block headers to commit at once
     pub commit_threshold: usize,
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB>
-    for HeaderStage<D, C, H>
+impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> Stage<DB>
+    for HeaderStage<D, C, H, S>
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -97,6 +101,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
         while let Some(headers) = stream.next().await {
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
+                    info!(len = res.len(), "Received headers");
+
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
                     let write_progress =
@@ -110,12 +116,12 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
                         return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        warn!("Validation error for header {hash}: {error}");
+                        error!("Validation error for header {hash}: {error}");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        warn!("Unexpected error occurred: {error}");
-                        return Err(StageError::Download(error.to_string()))
+                        error!(?error, "An unexpected error occurred");
+                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
                     }
                 },
             }
@@ -144,7 +150,9 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient> Stage<DB
     }
 }
 
-impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
+impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
+    HeaderStage<D, C, H, S>
+{
     async fn update_head<DB: Database>(
         &self,
         db: &StageDB<'_, DB>,
@@ -154,7 +162,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         let td: U256 = *db
             .get::<tables::HeaderTD>(block_key)?
             .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
-        self.client.update_status(height, block_key.hash(), td);
+        // self.client.update_status(height, block_key.hash(), td);
+        self.network_handle.update_status(height, block_key.hash(), td);
         Ok(())
     }
 
@@ -163,6 +172,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient> HeaderStage<D, C, H> {
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
+            debug!(?forkchoice, "Received fork choice state");
             if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
                 return forkchoice.clone()
             }
@@ -312,8 +322,12 @@ mod tests {
         let tip = headers.last().unwrap();
         runner.consensus.update_tip(tip.hash());
 
+        // These errors are not fatal but hand back control to the pipeline
         let result = rx.await.unwrap();
-        assert_matches!(result, Err(StageError::Download(_)));
+        assert_matches!(
+            result,
+            Ok(ExecOutput { stage_progress: 1000, done: false, reached_tip: false })
+        );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -359,7 +373,7 @@ mod tests {
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
-                TestConsensus, TestHeaderDownloader, TestHeadersClient,
+                TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
             },
         };
         use reth_primitives::{BlockNumber, SealedHeader, U256};
@@ -369,6 +383,7 @@ mod tests {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
+            network_handle: TestStatusUpdater,
             db: TestStageDB,
         }
 
@@ -380,13 +395,14 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
+                    network_handle: TestStatusUpdater::default(),
                     db: TestStageDB::default(),
                 }
             }
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient>;
+            type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
             fn db(&self) -> &TestStageDB {
                 &self.db
@@ -397,6 +413,7 @@ mod tests {
                     consensus: self.consensus.clone(),
                     client: self.client.clone(),
                     downloader: self.downloader.clone(),
+                    network_handle: self.network_handle.clone(),
                     commit_threshold: 100,
                 }
             }
@@ -497,7 +514,13 @@ mod tests {
                 let downloader = Arc::new(
                     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
                 );
-                Self { client, consensus, downloader, db: TestStageDB::default() }
+                Self {
+                    client,
+                    consensus,
+                    downloader,
+                    network_handle: TestStatusUpdater::default(),
+                    db: TestStageDB::default(),
+                }
             }
         }
 
