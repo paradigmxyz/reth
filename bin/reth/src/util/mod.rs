@@ -38,8 +38,11 @@ pub mod reth_tracing {
     }
 
     /// Build subscriber
+    // TODO: JSON/systemd support
     pub fn build_subscriber(mods: TracingMode) -> impl Subscriber {
-        let nocolor = std::env::var("RUST_LOG_STYLE").map(|val| val == "never").unwrap_or(false);
+        // TODO: Auto-detect
+        let no_color = std::env::var("RUST_LOG_STYLE").map(|val| val == "never").unwrap_or(false);
+        let with_target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(false);
 
         // Take env over config
         let filter = if std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default().is_empty() {
@@ -49,7 +52,7 @@ pub mod reth_tracing {
         };
 
         tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_ansi(!nocolor).with_target(false))
+            .with(tracing_subscriber::fmt::layer().with_ansi(!no_color).with_target(with_target))
             .with(filter)
     }
 }
