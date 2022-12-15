@@ -191,15 +191,14 @@ where
     K: enr::EnrKey,
 {
     fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.signature().length() + self.seq().length() + self.iter().fold(0, |acc, (k, v)| {
-            let k: &[u8] = k.as_ref();
-            acc + k.length() + v.len()
-        });
+        let payload_length = self.signature().length() +
+            self.seq().length() +
+            self.iter().fold(0, |acc, (k, v)| {
+                let k: &[u8] = k.as_ref();
+                acc + k.length() + v.len()
+            });
 
-        let header = Header {
-            list: true,
-            payload_length,
-        };
+        let header = Header { list: true, payload_length };
         header.encode(out);
 
         self.signature().encode(out);
@@ -620,9 +619,9 @@ mod tests {
     #[cfg(feature = "enr")]
     #[test]
     fn encode_known_rlp_enr() {
-        use std::net::Ipv4Addr;
         use crate::Decodable;
-        use enr::{Enr, EnrPublicKey, k256::ecdsa::SigningKey};
+        use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
+        use std::net::Ipv4Addr;
 
         let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
         let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
