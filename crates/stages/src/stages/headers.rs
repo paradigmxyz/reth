@@ -279,6 +279,7 @@ mod tests {
         let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
         let result = rx.await.unwrap();
+        // TODO: Downcast the internal error and actually check it
         assert_matches!(result, Err(StageError::Recoverable(_)));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }

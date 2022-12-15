@@ -112,7 +112,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut highest_block = previous_block;
         while let Some(result) = bodies_stream.next().await {
             let Ok(block) = result else {
-                warn!(
+                error!(
                     "Encountered an error downloading block {}: {:?}",
                     highest_block + 1,
                     result.unwrap_err()
