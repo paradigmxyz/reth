@@ -36,6 +36,9 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(String),
+    /// Invalid checkpoint passed to the stage
+    #[error("Invalid checkpoint: {0}")]
+    Checkpoint(u64),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline] and trigger a restart of the stage.
