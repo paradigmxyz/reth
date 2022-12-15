@@ -1,0 +1,18 @@
+version: '3.2'
+
+services:
+  prometheus:
+    container_name: prometheus 
+    image: prom/prometheus 
+    ports:
+      - 127.0.0.1:9090:9090
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  reth:
+    container_name: reth
+    image: reth
+    build:
+      context: .
+      dockerfile: ./docker/reth.dockerfile
+    command: ["node"]
