@@ -38,6 +38,8 @@ pub enum Error {
     },
     #[error("Block gas used {got} is different from expected gas used {expected}.")]
     BlockGasUsed { got: u64, expected: u64 },
+    #[error("Revm error {error_code}")]
+    EVMError { error_code: u32 },
     #[error("Provider error")]
     ProviderError,
 }

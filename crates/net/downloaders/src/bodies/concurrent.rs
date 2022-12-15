@@ -1,5 +1,5 @@
 use backon::{ExponentialBackoff, Retryable};
-use futures_util::{stream, StreamExt};
+use futures_util::{stream, StreamExt, TryStreamExt};
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
@@ -24,6 +24,8 @@ pub struct ConcurrentDownloader<Client, Consensus> {
     retries: usize,
     /// The batch size per one request
     batch_size: usize,
+    /// The maximum number of requests to send concurrently.
+    concurrency: usize,
 }
 
 impl<Client, Consensus> Downloader for ConcurrentDownloader<Client, Consensus>
@@ -55,11 +57,15 @@ where
         'b: 'a,
     {
         Box::pin(
-            stream::iter(headers.into_iter().map(|header| {
-                (|| self.fetch_body(header))
-                    .retry(ExponentialBackoff::default().with_max_times(self.retries))
-            }))
-            .buffered(self.batch_size),
+            stream::iter(headers.into_iter())
+                .chunks(self.batch_size)
+                .map(move |headers| {
+                    (move || self.fetch_bodies(headers.clone()))
+                        .retry(ExponentialBackoff::default().with_max_times(self.retries))
+                })
+                .buffered(self.concurrency)
+                .map_ok(|blocks| stream::iter(blocks.into_iter()).map(Ok))
+                .try_flatten(),
         )
     }
 }
@@ -71,7 +77,7 @@ where
 {
     /// Create a new concurrent downloader instance.
     pub fn new(client: Arc<Client>, consensus: Arc<Consensus>) -> Self {
-        Self { client, consensus, retries: 3, batch_size: 100 }
+        Self { client, consensus, retries: 3, batch_size: 100, concurrency: 5 }
     }
 
     /// Set the number of blocks to fetch at the same time.
@@ -79,6 +85,14 @@ where
     /// Defaults to 100.
     pub fn with_batch_size(mut self, batch_size: usize) -> Self {
         self.batch_size = batch_size;
+        self
+    }
+
+    /// Set the maximum number of requests to send concurrently.
+    ///
+    /// Defaults to 5.
+    pub fn with_concurrency(mut self, concurrency: usize) -> Self {
+        self.concurrency = concurrency;
         self
     }
 
@@ -90,25 +104,33 @@ where
         self
     }
 
-    /// Fetch a single block body.
-    async fn fetch_body(&self, header: &SealedHeader) -> DownloadResult<BlockLocked> {
-        let (peer_id, mut response) =
-            self.client.get_block_body(vec![header.hash()]).await?.split();
+    /// Fetch a batch of block bodies.
+    async fn fetch_bodies(&self, headers: Vec<&SealedHeader>) -> DownloadResult<Vec<BlockLocked>> {
+        let (peer_id, response) = self
+            .client
+            .get_block_body(headers.iter().map(|header| header.hash()).collect())
+            .await?
+            .split();
 
-        let body = response.remove(0);
-        let block = BlockLocked {
-            header: header.clone(),
-            body: body.transactions,
-            ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
-        };
+        response
+            .into_iter()
+            .zip(headers)
+            .map(|(body, header)| {
+                let block = BlockLocked {
+                    header: header.clone(),
+                    body: body.transactions,
+                    ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
+                };
 
-        match self.consensus.pre_validate_block(&block) {
-            Ok(_) => Ok(block),
-            Err(error) => {
-                self.client.report_bad_message(peer_id);
-                Err(DownloadError::BlockValidation { hash: header.hash(), error })
-            }
-        }
+                match self.consensus.pre_validate_block(&block) {
+                    Ok(_) => Ok(block),
+                    Err(error) => {
+                        self.client.report_bad_message(peer_id);
+                        Err(DownloadError::BlockValidation { hash: header.hash(), error })
+                    }
+                }
+            })
+            .collect()
     }
 }
 
@@ -141,17 +163,23 @@ mod tests {
         let (headers, mut bodies) = generate_bodies(0..20);
 
         let downloader = ConcurrentDownloader::new(
-            Arc::new(TestBodiesClient::new(|hash: Vec<H256>| {
+            Arc::new(TestBodiesClient::new(|hashes: Vec<H256>| {
                 let mut bodies = bodies.clone();
                 async move {
                     // Simulate that the request for this (random) block takes 0-100ms
-                    tokio::time::sleep(Duration::from_millis(hash[0].to_low_u64_be() % 100)).await;
+                    tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100))
+                        .await;
 
                     Ok((
                         PeerId::default(),
-                        vec![bodies
-                            .remove(&hash[0])
-                            .expect("Downloader asked for a block it should not ask for")],
+                        hashes
+                            .into_iter()
+                            .map(|hash| {
+                                bodies
+                                    .remove(&hash)
+                                    .expect("Downloader asked for a block it should not ask for")
+                            })
+                            .collect(),
                     )
                         .into())
                 }

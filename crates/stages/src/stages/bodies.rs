@@ -1,5 +1,5 @@
 use crate::{
-    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
@@ -75,7 +75,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let previous_stage_progress = input.previous_stage_progress();
@@ -111,23 +111,18 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = previous_block;
         while let Some(result) = bodies_stream.next().await {
-            let block = match result {
-                Ok(block) => block,
-                Err(err) => {
-                    error!(
-                        "Encountered error downloading block {}. Details: {:?}",
-                        highest_block + 1,
-                        err
-                    );
-                    // Exit the stage early
-                    return Ok(ExecOutput {
-                        stage_progress: highest_block,
-                        done: false,
-                        reached_tip: false,
-                    })
-                }
+            let Ok(block) = result else {
+                error!(
+                    "Encountered an error downloading block {}: {:?}",
+                    highest_block + 1,
+                    result.unwrap_err()
+                );
+                return Ok(ExecOutput {
+                    stage_progress: highest_block,
+                    done: false,
+                    reached_tip: false,
+                })
             };
-
             let block_number = block.number;
             // Write block
             let key = (block_number, block.hash()).into();
@@ -170,7 +165,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
@@ -500,7 +495,7 @@ mod tests {
         use crate::{
             stages::bodies::BodyStage,
             test_utils::{
-                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
                 UnwindStageTestRunner,
             },
             ExecInput, ExecOutput, UnwindInput,
@@ -545,7 +540,7 @@ mod tests {
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
             responses: HashMap<H256, DownloadResult<BlockBody>>,
-            db: TestStageDB,
+            db: TestTransaction,
             batch_size: u64,
         }
 
@@ -554,7 +549,7 @@ mod tests {
                 Self {
                     consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
-                    db: TestStageDB::default(),
+                    db: TestTransaction::default(),
                     batch_size: 1000,
                 }
             }
@@ -576,7 +571,7 @@ mod tests {
         impl StageTestRunner for BodyTestRunner {
             type S = BodyStage<TestBodyDownloader, TestConsensus>;
 
-            fn db(&self) -> &TestStageDB {
+            fn db(&self) -> &TestTransaction {
                 &self.db
             }
 

@@ -12,4 +12,4 @@ pub mod config;
 pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
-pub use config::Config;
+pub use config::{Config, SpecUpgrades};
