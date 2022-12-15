@@ -111,6 +111,8 @@ macro_rules! stage_test_suite {
     };
 }
 
+// `execute_already_reached_target` is not suitable for the headers stage thus
+// included in the test suite extension
 macro_rules! stage_test_suite_ext {
     ($runner:ident) => {
         crate::test_utils::stage_test_suite!($runner);
