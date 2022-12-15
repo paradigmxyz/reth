@@ -36,15 +36,25 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(String),
-    /// The stage encountered an internal error.
+    /// The stage encountered a recoverable error.
+    ///
+    /// These types of errors are caught by the [Pipeline] and trigger a restart of the stage.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Recoverable(Box<dyn std::error::Error + Send + Sync>),
+    /// The stage encountered a fatal error.
+    ///
+    /// These types of errors stop the pipeline.
+    #[error(transparent)]
+    Fatal(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl StageError {
     /// If the error is fatal the pipeline will stop.
     pub fn is_fatal(&self) -> bool {
-        matches!(self, StageError::Database(_) | StageError::DatabaseIntegrity(_))
+        matches!(
+            self,
+            StageError::Database(_) | StageError::DatabaseIntegrity(_) | StageError::Fatal(_)
+        )
     }
 }
 

@@ -37,7 +37,7 @@ enum SendersStageError {
 
 impl From<SendersStageError> for StageError {
     fn from(error: SendersStageError) -> Self {
-        StageError::Internal(Box::new(error))
+        StageError::Fatal(Box::new(error))
     }
 }
 

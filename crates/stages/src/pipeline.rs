@@ -255,7 +255,7 @@ impl<DB: Database> Pipeline<DB> {
                     }
                     Err(err) => {
                         self.events_sender.send(PipelineEvent::Error { stage_id }).await?;
-                        return Err(PipelineError::Stage(StageError::Internal(err)))
+                        return Err(PipelineError::Stage(StageError::Fatal(err)))
                     }
                 }
             }
@@ -739,7 +739,7 @@ mod tests {
         let result = Pipeline::<Env<WriteMap>>::new()
             .push(
                 TestStage::new(StageId("NonFatal"))
-                    .add_exec(Err(StageError::Internal(Box::new(std::fmt::Error))))
+                    .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true, reached_tip: true })),
                 false,
             )
