@@ -682,10 +682,10 @@ mod tests {
                         Some((key, _)) => key,
                         None => return Ok(()),
                     };
-                    let mut walker = tx_count_cursor.walk(first_tx_count_key)?.peekable();
+                    let walker = tx_count_cursor.walk(first_tx_count_key)?.peekable();
 
                     let mut prev_entry: Option<(BlockNumHash, NumTransactions)> = None;
-                    while let Some(entry) = walker.next() {
+                    for entry in walker {
                         let (key, count) = entry?;
 
                         // Validate sequentiality only after prev progress,
