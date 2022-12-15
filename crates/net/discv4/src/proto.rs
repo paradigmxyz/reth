@@ -272,6 +272,8 @@ pub struct Ping {
     pub from: NodeEndpoint,
     pub to: NodeEndpoint,
     pub expire: u64,
+    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    pub enr_sq: Option<u64>,
 }
 
 impl Encodable for Ping {
@@ -283,13 +285,33 @@ impl Encodable for Ping {
             to: &'a NodeEndpoint,
             expire: u64,
         }
-        V4PingMessage {
-            version: 4, // version 4
-            from: &self.from,
-            to: &self.to,
-            expire: self.expire,
+
+        #[derive(RlpEncodable)]
+        struct V4PingMessageEIP868<'a> {
+            version: u32,
+            from: &'a NodeEndpoint,
+            to: &'a NodeEndpoint,
+            expire: u64,
+            enr_seq: u64,
         }
-        .encode(out)
+        if let Some(enr_seq) = self.enr_sq {
+            V4PingMessageEIP868 {
+                version: 4, // version 4
+                from: &self.from,
+                to: &self.to,
+                expire: self.expire,
+                enr_seq,
+            }
+            .encode(out);
+        } else {
+            V4PingMessage {
+                version: 4, // version 4
+                from: &self.from,
+                to: &self.to,
+                expire: self.expire,
+            }
+            .encode(out);
+        }
     }
 }
 
@@ -302,11 +324,17 @@ impl Decodable for Ping {
         }
         let started_len = b.len();
         let _version = u32::decode(b)?;
-        let this = Self {
+        let mut this = Self {
             from: Decodable::decode(b)?,
             to: Decodable::decode(b)?,
             expire: Decodable::decode(b)?,
+            enr_sq: None,
         };
+
+        if b.has_remaining() {
+            this.enr_sq = Some(Decodable::decode(b)?);
+        }
+
         let consumed = started_len - b.len();
         if consumed > rlp_head.payload_length {
             return Err(DecodeError::ListLengthMismatch {
@@ -322,12 +350,39 @@ impl Decodable for Ping {
 }
 
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
-// #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pong {
     pub to: NodeEndpoint,
     pub echo: H256,
     pub expire: u64,
+    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    pub enr_sq: Option<u64>,
+}
+
+impl Encodable for Pong {
+    fn encode(&self, out: &mut dyn BufMut) {
+        #[derive(RlpEncodable)]
+        struct PongMessageEIP868<'a> {
+            to: &'a NodeEndpoint,
+            echo: &'a H256,
+            expire: u64,
+            enr_seq: u64,
+        }
+
+        #[derive(RlpEncodable)]
+        struct PongMessage<'a> {
+            to: &'a NodeEndpoint,
+            echo: &'a H256,
+            expire: u64,
+        }
+
+        if let Some(enr_seq) = self.enr_sq {
+            PongMessageEIP868 { to: &self.to, echo: &self.echo, expire: self.expire, enr_seq }
+                .encode(out);
+        } else {
+            PongMessage { to: &self.to, echo: &self.echo, expire: self.expire }.encode(out);
+        }
+    }
 }
 
 impl Decodable for Pong {
@@ -338,11 +393,17 @@ impl Decodable for Pong {
             return Err(DecodeError::UnexpectedString)
         }
         let started_len = b.len();
-        let this = Self {
+        let mut this = Self {
             to: Decodable::decode(b)?,
             echo: Decodable::decode(b)?,
             expire: Decodable::decode(b)?,
+            enr_sq: None,
         };
+
+        if b.has_remaining() {
+            this.enr_sq = Some(Decodable::decode(b)?);
+        }
+
         let consumed = started_len - b.len();
         if consumed > rlp_head.payload_length {
             return Err(DecodeError::ListLengthMismatch {
@@ -353,6 +414,7 @@ impl Decodable for Pong {
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
         *buf = *b;
+
         Ok(this)
     }
 }
@@ -471,12 +533,80 @@ mod tests {
         for _ in 0..100 {
             let mut ip = [0u8; 16];
             rng.fill_bytes(&mut ip);
-            let msg = Ping { from: rng_endpoint(&mut rng), to: rng_endpoint(&mut rng), expire: 0 };
+            let msg = Ping {
+                from: rng_endpoint(&mut rng),
+                to: rng_endpoint(&mut rng),
+                expire: 0,
+                enr_sq: None,
+            };
 
             let mut buf = BytesMut::new();
             msg.encode(&mut buf);
 
             let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_ping_message_with_enr() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Ping {
+                from: rng_endpoint(&mut rng),
+                to: rng_endpoint(&mut rng),
+                expire: 0,
+                enr_sq: Some(rng.gen()),
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_pong_message() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Pong {
+                to: rng_endpoint(&mut rng),
+                echo: H256::random(),
+                expire: rng.gen(),
+                enr_sq: None,
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_pong_message_with_enr() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Pong {
+                to: rng_endpoint(&mut rng),
+                echo: H256::random(),
+                expire: rng.gen(),
+                enr_sq: Some(rng.gen()),
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
             assert_eq!(msg, decoded);
         }
     }

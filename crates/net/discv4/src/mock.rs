@@ -154,7 +154,12 @@ impl Stream for MockDiscovery {
                 IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => match msg {
                     Message::Ping(ping) => {
                         if this.pending_pongs.remove(&node_id) {
-                            let pong = Pong { to: ping.from, echo: hash, expire: ping.expire };
+                            let pong = Pong {
+                                to: ping.from,
+                                echo: hash,
+                                expire: ping.expire,
+                                enr_sq: None,
+                            };
                             let msg = Message::Pong(pong.clone());
                             this.send_packet(msg, remote_addr);
                             return Poll::Ready(Some(MockEvent::Pong {
@@ -255,8 +260,14 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
             expire: rng.gen(),
+            enr_sq: None,
         }),
-        2 => Message::Pong(Pong { to: rng_endpoint(rng), echo: H256::random(), expire: rng.gen() }),
+        2 => Message::Pong(Pong {
+            to: rng_endpoint(rng),
+            echo: H256::random(),
+            expire: rng.gen(),
+            enr_sq: None,
+        }),
         3 => Message::FindNode(FindNode { id: PeerId::random(), expire: rng.gen() }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);

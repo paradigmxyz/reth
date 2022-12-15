@@ -242,6 +242,12 @@ impl Discv4 {
 pub struct Discv4Service {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
+    /// The ENR sequence of this node.
+    ///
+    /// The sequence number, a 64-bit unsigned integer. Nodes should increase the number whenever
+    /// the record changes and republish the record.
+    enr_seq: u64,
+
     /// Local ENR of the server.
     local_enr: NodeRecord,
     /// The secret key used to sign payloads
@@ -336,6 +342,7 @@ impl Discv4Service {
 
         Discv4Service {
             local_address,
+            enr_seq: 0,
             local_enr,
             _socket: socket,
             kbuckets,
@@ -539,14 +546,19 @@ impl Discv4Service {
         ) {
             InsertResult::Inserted => {
                 debug!(target : "discv4",?record, "inserted new record to table");
+
+                // request the node's ENR
+                self.send_enr_request(record);
+
                 self.notify(DiscoveryUpdate::Added(record));
             }
             InsertResult::ValueUpdated { .. } | InsertResult::Updated { .. } => {
                 trace!(target : "discv4",?record,  "updated record");
+                // request the node's ENR again
+                self.send_enr_request(record);
             }
             InsertResult::Failed(FailureReason::BucketFull) => {
-                debug!(target : "discv4", ?record,  "discovered new record but bucket is full");
-                self.notify(DiscoveryUpdate::Discovered(record));
+                trace!(target : "discv4", ?record,  "discovered new record but bucket is full");
             }
             res => {
                 warn!(target : "discv4",?record, ?res,  "failed to insert");
@@ -597,7 +609,12 @@ impl Discv4Service {
         self.add_node(record);
 
         // send the pong
-        let msg = Message::Pong(Pong { to: ping.from, echo: hash, expire: ping.expire });
+        let msg = Message::Pong(Pong {
+            to: ping.from,
+            echo: hash,
+            expire: ping.expire,
+            enr_sq: Some(self.enr_seq),
+        });
         self.send_packet(msg, remote_addr);
     }
 
@@ -626,8 +643,12 @@ impl Discv4Service {
     pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> H256 {
         let remote_addr = node.udp_addr();
         let id = node.id;
-        let ping =
-            Ping { from: self.local_enr.into(), to: node.into(), expire: self.ping_timeout() };
+        let ping = Ping {
+            from: self.local_enr.into(),
+            to: node.into(),
+            expire: self.ping_timeout(),
+            enr_sq: Some(self.enr_seq),
+        };
         trace!(target : "discv4",  ?ping, "sending ping");
         let echo_hash = self.send_packet(Message::Ping(ping), remote_addr);
 
@@ -639,7 +660,6 @@ impl Discv4Service {
     /// Sends a enr request message to the node's UDP address.
     ///
     /// Returns the echo hash of the ping message.
-    #[allow(dead_code)]
     pub(crate) fn send_enr_request(&mut self, node: NodeRecord) -> H256 {
         let remote_addr = node.udp_addr();
         let enr_request = EnrRequest { expire: self.enr_request_timeout() };
