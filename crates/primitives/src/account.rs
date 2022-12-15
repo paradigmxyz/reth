@@ -1,20 +1,20 @@
 use crate::{H256, U256};
 use reth_codecs::{main_codec, Compact};
 
-/// Account saved in database
+/// An Ethereum account.
 #[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Account {
-    /// Nonce.
+    /// Account nonce.
     pub nonce: u64,
     /// Account balance.
     pub balance: U256,
-    /// Hash of the bytecode.
+    /// Hash of the account's bytecode.
     pub bytecode_hash: Option<H256>,
 }
 
 impl Account {
-    /// Does account has a bytecode.
+    /// Whether the account has bytecode.
     pub fn has_bytecode(&self) -> bool {
         self.bytecode_hash.is_some()
     }

@@ -509,7 +509,7 @@ pub enum PeerAction {
 /// Config type for initiating a [`PeersManager`] instance
 #[derive(Debug)]
 pub struct PeersConfig {
-    /// How even to recheck free slots for outbound connections
+    /// How often to recheck free slots for outbound connections
     pub refill_slots_interval: Duration,
     /// Restrictions on connections
     pub connection_info: ConnectionInfo,
