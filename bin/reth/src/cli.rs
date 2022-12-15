@@ -1,6 +1,7 @@
 //! CLI definition and entrypoint to executable
 
 use clap::{ArgAction, Parser, Subcommand};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{
@@ -17,6 +18,10 @@ pub async fn run() -> eyre::Result<()> {
         TracingMode::from(opt.verbose)
     })
     .init();
+
+    PrometheusBuilder::new()
+        .install()
+        .expect("failed to install Prometheus recorder");    
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
