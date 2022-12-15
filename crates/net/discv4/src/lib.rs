@@ -639,6 +639,7 @@ impl Discv4Service {
     /// Sends a enr request message to the node's UDP address.
     ///
     /// Returns the echo hash of the ping message.
+    #[allow(dead_code)]
     pub(crate) fn send_enr_request(&mut self, node: NodeRecord) -> H256 {
         let remote_addr = node.udp_addr();
         let enr_request = EnrRequest { expire: self.enr_request_timeout() };
@@ -715,7 +716,7 @@ impl Discv4Service {
 
     /// Handler for incoming `EnrResponse` message
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, node_id: PeerId) {
-        let ctx = match self.pending_enr_requests.entry(node_id) {
+        match self.pending_enr_requests.entry(node_id) {
             Entry::Occupied(entry) => entry.remove(),
             Entry::Vacant(_) => return,
         };
@@ -723,7 +724,7 @@ impl Discv4Service {
     }
 
     /// Handler for incoming `EnrRequest` message
-    fn on_enr_request(&mut self, msg: EnrRequest, remote_addr: SocketAddr, node_id: PeerId) {
+    fn on_enr_request(&mut self, _msg: EnrRequest, _remote_addr: SocketAddr, _node_id: PeerId) {
         todo!()
     }
 
@@ -900,6 +901,7 @@ impl Discv4Service {
             .as_secs()
     }
 
+    #[allow(dead_code)]
     fn enr_request_timeout(&self) -> u64 {
         (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_request_timeout)
             .as_secs()
@@ -1281,6 +1283,7 @@ impl FindNodeRequest {
     }
 }
 
+#[allow(dead_code)]
 struct EnrRequestState {
     // Timestamp when the request was sent.
     sent_at: Instant,
@@ -1289,6 +1292,7 @@ struct EnrRequestState {
 // === impl ENRRequestState ===
 
 impl EnrRequestState {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self { sent_at: Instant::now() }
     }
