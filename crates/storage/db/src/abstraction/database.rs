@@ -41,7 +41,8 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
     /// the end of the execution.
     fn update<T, F>(&self, f: F) -> Result<T, Error>
     where
-        F: Fn(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
+        // Any variables used inside update are moved and can only be used once.
+        F: FnOnce(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
     {
         let tx = self.tx_mut()?;
 

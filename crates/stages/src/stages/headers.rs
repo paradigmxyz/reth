@@ -20,7 +20,7 @@ use reth_interfaces::{
         },
     },
 };
-use reth_primitives::{BlockNumber, SealedHeader, H256, U256};
+use reth_primitives::{BlockHash, BlockNumber, Header, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -66,25 +66,20 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
     /// Download the headers in reverse order
     /// starting from the tip
-    async fn execute(
-        &mut self,
-        db: &mut StageDB<'_, DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    async fn execute(&mut self, db: &DB, input: ExecInput) -> Result<ExecOutput, StageError> {
         let stage_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(db, stage_progress).await?;
+        self.update_head(db, stage_progress).await?;
 
         // Lookup the last stored header
-        let last_hash = db.get_block_hash(stage_progress)?;
-        let last_header =
-            db.get::<tables::Headers>((stage_progress, last_hash).into())?.ok_or({
-                DatabaseIntegrityError::Header { number: stage_progress, hash: last_hash }
-            })?;
-        let head = SealedHeader::new(last_header, last_hash);
+        let db_reader = HeadersReader(db);
+        let last_number = stage_progress;
+        let last_hash = db_reader.get_block_hash(last_number)?;
+        let last_header = db_reader.get_header((last_number, last_hash))?;
+        let last_header = SealedHeader::new(last_header, last_hash);
 
-        let forkchoice = self.next_fork_choice_state(&head.hash()).await;
-        if let Some(number) = db.get::<tables::HeaderNumbers>(forkchoice.head_block_hash)? {
-            if number < head.number {
+        let forkchoice = self.next_fork_choice_state(&last_header.hash()).await;
+        if let Some(number) = db_reader.get_header_number(forkchoice.head_block_hash)? {
+            if number < last_header.number {
                 // Nothing to do here
                 warn!("Consensus reported old head {}", forkchoice.head_block_hash);
                 return Ok(ExecOutput { stage_progress, done: true, reached_tip: true })
@@ -92,8 +87,10 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         }
 
         let mut current_progress = stage_progress;
-        let mut stream =
-            self.downloader.stream(head.clone(), forkchoice.clone()).chunks(self.commit_threshold);
+        let mut stream = self
+            .downloader
+            .stream(last_header.clone(), forkchoice.clone())
+            .chunks(self.commit_threshold);
 
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
@@ -105,9 +102,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
-                    let write_progress =
-                        self.write_headers::<DB>(db, res).await?.unwrap_or_default();
-                    db.commit()?;
+                    let write_progress = HeadersWriter(db).write_headers(res)?.unwrap_or_default();
                     current_progress = current_progress.max(write_progress);
                 }
                 Err(e) => match e {
@@ -128,7 +123,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         }
 
         // Write total difficulty values after all headers have been inserted
-        self.write_td::<DB>(db, &head)?;
+        HeadersWriter(db).write_td(&last_header)?;
 
         Ok(ExecOutput { stage_progress: current_progress, reached_tip: true, done: true })
     }
@@ -150,18 +145,131 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
     }
 }
 
+// TODO:
+// 1. Refactor into reth-providers
+// 2. Introduce Headers-specific errors
+// 3. Implement HeadersProvider trait
+struct HeadersReader<'a, DB: Database>(&'a DB);
+
+impl<'a, DB: Database> HeadersReader<'a, DB> {
+    /// Query [tables::CanonicalHeaders] table for block hash by block number
+    pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
+        Ok(self
+            .0
+            .view(|tx| tx.get::<tables::CanonicalHeaders>(number))??
+            .ok_or(DatabaseIntegrityError::CanonicalHash { number })?)
+    }
+
+    /// Query for block hash by block number and return it as [BlockNumHash] key
+    pub(crate) fn get_block_numhash(
+        &self,
+        number: BlockNumber,
+    ) -> Result<BlockNumHash, StageError> {
+        Ok((number, self.get_block_hash(number)?).into())
+    }
+
+    /// Gets the total difficulty for the provided header key
+    pub(crate) fn get_header_td(&self, key: BlockNumHash) -> Result<U256, StageError> {
+        Ok(*self
+            .0
+            .view(|tx| tx.get::<tables::HeaderTD>(key))??
+            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: key.number() })?)
+    }
+
+    /// Gets the header for the provider header key
+    pub(crate) fn get_header<T: Into<BlockNumHash>>(&self, key: T) -> Result<Header, StageError> {
+        let key = key.into();
+        Ok(self
+            .0
+            .view(|tx| tx.get::<tables::Headers>(key))??
+            .ok_or(DatabaseIntegrityError::Header { number: key.number(), hash: key.hash() })?)
+    }
+
+    /// Query for block hash by block number and return it as [BlockNumHash] key
+    pub(crate) fn get_header_number(
+        &self,
+        hash: BlockHash,
+    ) -> Result<Option<BlockNumber>, StageError> {
+        Ok(self.0.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??)
+    }
+}
+
+// TODO:
+// 1. Refactor into reth-providers
+// 2. Introduce Headers-specific errors
+// 3. Implement HeadersProvider trait
+struct HeadersWriter<'a, DB: Database>(&'a DB);
+
+impl<'a, DB: Database> HeadersWriter<'a, DB> {
+    /// Write downloaded headers to the database
+    fn write_headers(&self, headers: Vec<SealedHeader>) -> Result<Option<BlockNumber>, StageError> {
+        self.0.update(|tx| {
+            let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
+            let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
+
+            let mut latest = None;
+            // Since the headers were returned in descending order,
+            // iterate them in the reverse order
+            for header in headers.into_iter().rev() {
+                if header.number == 0 {
+                    continue
+                }
+
+                let block_hash = header.hash();
+                let key: BlockNumHash = (header.number, block_hash).into();
+                let header = header.unseal();
+                latest = Some(header.number);
+
+                // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
+                tx.put::<tables::HeaderNumbers>(block_hash, header.number)?;
+                cursor_header.insert(key, header)?;
+                cursor_canonical.insert(key.number(), key.hash())?;
+            }
+
+            Ok(latest)
+        })?
+    }
+
+    /// Iterate over inserted headers and write td entries
+    fn write_td(&self, head: &SealedHeader) -> Result<(), StageError> {
+        self.0.update(|tx| {
+            // Acquire cursor over total difficulty table
+            let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
+
+            // Get latest total difficulty
+            let last_entry = cursor_td
+                .seek_exact(head.num_hash().into())?
+                .ok_or(DatabaseIntegrityError::TotalDifficulty { number: head.number })?;
+            let mut td: U256 = last_entry.1.into();
+
+            // Start at first inserted block during this iteration
+            let start_key = HeadersReader(self.0).get_block_numhash(head.number + 1)?;
+
+            // Walk over newly inserted headers, update & insert td
+            for entry in tx.cursor::<tables::Headers>()?.walk(start_key)? {
+                let (key, header) = entry?;
+                td += header.difficulty;
+                cursor_td.append(key, td.into())?;
+            }
+
+            Ok::<_, StageError>(())
+        })??;
+
+        Ok(())
+    }
+}
+
 impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     HeaderStage<D, C, H, S>
 {
     async fn update_head<DB: Database>(
         &self,
-        db: &StageDB<'_, DB>,
+        db: &DB,
         height: BlockNumber,
     ) -> Result<(), StageError> {
+        let db = HeadersReader(db);
         let block_key = db.get_block_numhash(height)?;
-        let td: U256 = *db
-            .get::<tables::HeaderTD>(block_key)?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
+        let td = db.get_header_td(block_key)?;
         // self.client.update_status(height, block_key.hash(), td);
         self.network_handle.update_status(height, block_key.hash(), td);
         Ok(())
@@ -189,64 +297,6 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
             }
         }
 
-        Ok(())
-    }
-
-    /// Write downloaded headers to the database
-    async fn write_headers<DB: Database>(
-        &self,
-        db: &StageDB<'_, DB>,
-        headers: Vec<SealedHeader>,
-    ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
-
-        let mut latest = None;
-        // Since the headers were returned in descending order,
-        // iterate them in the reverse order
-        for header in headers.into_iter().rev() {
-            if header.number == 0 {
-                continue
-            }
-
-            let block_hash = header.hash();
-            let key: BlockNumHash = (header.number, block_hash).into();
-            let header = header.unseal();
-            latest = Some(header.number);
-
-            // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
-            db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
-            cursor_header.insert(key, header)?;
-            cursor_canonical.insert(key.number(), key.hash())?;
-        }
-
-        Ok(latest)
-    }
-
-    /// Iterate over inserted headers and write td entries
-    fn write_td<DB: Database>(
-        &self,
-        db: &StageDB<'_, DB>,
-        head: &SealedHeader,
-    ) -> Result<(), StageError> {
-        // Acquire cursor over total difficulty table
-        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
-
-        // Get latest total difficulty
-        let last_entry = cursor_td
-            .seek_exact(head.num_hash().into())?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: head.number })?;
-        let mut td: U256 = last_entry.1.into();
-
-        // Start at first inserted block during this iteration
-        let start_key = db.get_block_numhash(head.number + 1)?;
-
-        // Walk over newly inserted headers, update & insert td
-        for entry in db.cursor::<tables::Headers>()?.walk(start_key)? {
-            let (key, header) = entry?;
-            td += header.difficulty;
-            cursor_td.append(key, td.into())?;
-        }
         Ok(())
     }
 }
