@@ -18,8 +18,10 @@ use crate::{
 };
 use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TxHash, TxNumber, H256,
+    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
+
+use self::models::StoredBlockBody;
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -31,11 +33,12 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 21] = [
+pub const TABLES: [(TableType, &str); 24] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
+    (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
     (TableType::Table, CumulativeTxCount::const_name()),
     (TableType::Table, NonCanonicalTransactions::const_name()),
@@ -46,6 +49,8 @@ pub const TABLES: [(TableType, &str); 21] = [
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
     (TableType::Table, Bytecodes::const_name()),
+    (TableType::Table, BlockTransitionIndex::const_name()),
+    (TableType::Table, TxTransitionIndex::const_name()),
     (TableType::Table, AccountHistory::const_name()),
     (TableType::Table, StorageHistory::const_name()),
     (TableType::DupSort, AccountChangeSet::const_name()),
@@ -123,6 +128,11 @@ table!(
 );
 
 table!(
+    /// Stores block bodies.
+    ( BlockBodies ) BlockNumHash | StoredBlockBody
+);
+
+table!(
     /// Stores the uncles/ommers of the block.
     ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
 );
@@ -172,6 +182,16 @@ table!(
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
     ( Bytecodes ) H256 | Bytecode
+);
+
+table!(
+    /// Stores the mapping of block number to state transition id.
+    ( BlockTransitionIndex ) BlockNumber | TransitionId
+);
+
+table!(
+    /// Stores the mapping of transaction number to state transition id.
+    ( TxTransitionIndex ) TxNumber | TransitionId
 );
 
 dupsort!(

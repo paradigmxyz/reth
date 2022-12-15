@@ -40,6 +40,7 @@ impl_compression_for_compact!(
     Receipt,
     TxType,
     StorageEntry,
+    StoredBlockBody,
     StoredBlockOmmers
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);

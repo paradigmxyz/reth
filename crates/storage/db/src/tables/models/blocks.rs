@@ -7,13 +7,24 @@ use crate::{
 };
 use bytes::Bytes;
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{BlockHash, BlockNumber, Header, H256};
+use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, H256};
 use serde::{Deserialize, Serialize};
 
 /// Total chain number of transactions. Value for [`CumulativeTxCount`].
-///
-/// Used for collecting transactions for a block.
 pub type NumTransactions = u64;
+
+/// The storage representation of a block.
+///
+/// It has the pointer to the transaction Number of the first
+/// transaction in the block and the total number of transactions
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
+#[main_codec]
+pub struct StoredBlockBody {
+    /// The id of the first transaction in this block
+    pub start_tx_id: TxNumber,
+    /// The total number of transactions
+    pub tx_count: NumTransactions,
+}
 
 /// The storage representation of a block ommers.
 ///
