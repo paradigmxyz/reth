@@ -9,7 +9,7 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::H256;
+use reth_primitives::{hex_literal::hex, ForkHash, ForkId, H256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -207,7 +207,8 @@ pub enum MockCommand {
 
 /// Creates a new testing instance for [`Discv4`] and its service
 pub async fn create_discv4() -> (Discv4, Discv4Service) {
-    create_discv4_with_config(Default::default()).await
+    let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
+    create_discv4_with_config(Discv4Config::builder().add_eip868_pair("eth", fork_id).build()).await
 }
 
 /// Creates a new testing instance for [`Discv4`] and its service with the given config.
@@ -284,6 +285,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 mod tests {
     use super::*;
     use crate::{Discv4Event, PingReason};
+    use reth_primitives::{hex_literal::hex, ForkHash, ForkId};
     use std::net::{IpAddr, Ipv4Addr};
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific

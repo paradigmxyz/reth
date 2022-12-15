@@ -254,8 +254,11 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::Discovered(node, addr) => {
-                self.peers_manager.add_discovered_node(node, addr);
+            DiscoveryEvent::Discovered(peer, addr) => {
+                self.peers_manager.add_discovered_node(peer, addr);
+            }
+            DiscoveryEvent::EnrForkId(peer, fork_id) => {
+                self.peers_manager.add_discovered_fork_id(peer, fork_id);
             }
         }
     }

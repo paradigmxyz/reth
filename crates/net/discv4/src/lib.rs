@@ -397,11 +397,14 @@ impl Discv4Service {
 
         let self_lookup_interval = tokio::time::interval(config.lookup_interval);
 
-        let ping_interval = tokio::time::interval(config.ping_interval);
+        let ping_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + config.ping_interval,
+            config.ping_interval,
+        );
 
         let evict_expired_requests_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + config.find_node_timeout,
-            config.find_node_timeout,
+            tokio::time::Instant::now() + config.request_timeout,
+            config.request_timeout,
         );
 
         let lookup_rotator = if config.enable_dht_random_walk {
@@ -515,7 +518,6 @@ impl Discv4Service {
                     direction: ConnectionDirection::Outgoing,
                 },
             );
-
             self.try_ping(record, PingReason::Initial);
         }
     }
@@ -872,8 +874,6 @@ impl Discv4Service {
         let remote_addr = node.udp_addr();
         let enr_request = EnrRequest { expire: self.enr_request_timeout() };
 
-        dbg!("sending enr request");
-
         trace!(target : "discv4",  ?enr_request, "sending enr request");
         let echo_hash = self.send_packet(Message::EnrRequest(enr_request), remote_addr);
 
@@ -949,7 +949,6 @@ impl Discv4Service {
 
     /// Handler for incoming `EnrResponse` message
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
-        dbg!("enr response");
         trace!(target : "discv4", ?remote_addr, ?msg, "received ENR response");
         if let Some(resp) = self.pending_enr_requests.remove(&id) {
             if resp.echo_hash == msg.request_hash {
@@ -1132,7 +1131,7 @@ impl Discv4Service {
             true
         });
         self.pending_find_nodes.retain(|node_id, find_node_request| {
-            if now.duration_since(find_node_request.sent_at) > self.config.find_node_timeout {
+            if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
                 if !find_node_request.answered {
                     nodes_to_expire.push(*node_id);
                 }
@@ -1188,13 +1187,12 @@ impl Discv4Service {
     }
 
     fn find_node_timeout(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.find_node_timeout)
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.request_timeout)
             .as_secs()
     }
 
-    #[allow(dead_code)]
     fn enr_request_timeout(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_request_timeout)
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_timeout)
             .as_secs()
     }
 
@@ -1678,8 +1676,6 @@ pub enum DiscoveryUpdate {
     EnrForkId(NodeRecord, ForkId),
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
-    /// A new node was discovered but _not_ added to the table because the bucket is full.
-    Discovered(NodeRecord),
     /// Node that was removed from the table
     Removed(PeerId),
     /// A series of updates
@@ -1729,7 +1725,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore]
     async fn test_lookup() {
         reth_tracing::init_tracing();
         let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
@@ -1737,7 +1732,8 @@ mod tests {
         let all_nodes = mainnet_nodes();
         let config = Discv4Config::builder()
             .add_boot_nodes(all_nodes)
-            .add_eip868_pair(b"eth", fork_id)
+            .lookup_interval(Duration::from_secs(1))
+            .add_eip868_pair("eth", fork_id)
             .build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 

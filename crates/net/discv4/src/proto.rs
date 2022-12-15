@@ -164,7 +164,9 @@ impl Message {
             MessageId::FindNode => Message::FindNode(FindNode::decode(payload)?),
             MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
             MessageId::EnrRequest => Message::EnrRequest(EnrRequest::decode(payload)?),
-            MessageId::EnrResponse => Message::EnrResponse(EnrResponse::decode(payload)?),
+            MessageId::EnrResponse => {
+                Message::EnrResponse(EnrResponse::decode(payload)?)
+            }
         };
 
         Ok(Packet { msg, node_id, hash: header_hash })
@@ -260,7 +262,7 @@ pub struct EnrRequest {
 }
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct EnrResponse {
     pub request_hash: H256,
     pub enr: Enr<SecretKey>,
@@ -275,6 +277,30 @@ impl EnrResponse {
     pub fn eth_fork_id(&self) -> Option<ForkId> {
         let mut maybe_fork_id = self.enr.get(b"eth")?;
         ForkId::decode(&mut maybe_fork_id).ok()
+    }
+}
+
+impl Decodable for EnrResponse {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString)
+        }
+        // let started_len = b.len();
+        let this = Self {
+            request_hash: reth_rlp::Decodable::decode(b)?,
+            enr: reth_rlp::Decodable::decode(b)?,
+        };
+        // let consumed = started_len - b.len();
+        // if consumed != rlp_head.payload_length {
+        //     return Err(reth_rlp::DecodeError::ListLengthMismatch {
+        //         expected: rlp_head.payload_length,
+        //         got: consumed,
+        //     })
+        // }
+        *buf = *b;
+        Ok(this)
     }
 }
 

@@ -27,9 +27,9 @@ pub struct Discv4Config {
     /// The rate at which lookups should be triggered.
     pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
-    pub find_node_timeout: Duration,
+    pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
-    pub enr_request_timeout: Duration,
+    pub enr_timeout: Duration,
     /// The duration we set for neighbours responses
     pub neighbours_timeout: Duration,
     /// Provides a way to ban peers and ips.
@@ -66,8 +66,8 @@ impl Default for Discv4Config {
             request_retries: 1,
             ping_interval: Duration::from_secs(300),
             ping_timeout: Duration::from_secs(5),
-            find_node_timeout: Duration::from_secs(20),
-            enr_request_timeout: Duration::from_secs(2),
+            request_timeout: Duration::from_secs(20),
+            enr_timeout: Duration::from_secs(5),
             neighbours_timeout: Duration::from_secs(30),
             lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
@@ -114,7 +114,7 @@ impl Discv4ConfigBuilder {
 
     /// Sets the timeout for enr requests
     pub fn enr_request_timeout(&mut self, duration: Duration) -> &mut Self {
-        self.config.enr_request_timeout = duration;
+        self.config.enr_timeout = duration;
         self
     }
 

@@ -5,7 +5,7 @@ use crate::{
 use futures::StreamExt;
 use reth_eth_wire::{error::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
-use reth_primitives::PeerId;
+use reth_primitives::{ForkId, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     fmt::Display,
@@ -226,6 +226,15 @@ impl PeersManager {
         }
 
         self.fill_outbound_slots();
+    }
+
+    /// Called as follow-up for a discovered peer.
+    ///
+    /// The [`ForkId`] is retrieved from an ENR record that the peer announces over the discovery protocol
+    pub(crate) fn add_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+
+        }
     }
 
     /// Called for a newly discovered peer.
