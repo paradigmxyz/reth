@@ -279,10 +279,7 @@ mod tests {
         let rx = runner.execute(input);
         runner.consensus.update_tip(H256::from_low_u64_be(1));
         let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { done: false, reached_tip: false, stage_progress: 100 })
-        );
+        assert_matches!(result, Err(StageError::Recoverable(_)));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -324,10 +321,7 @@ mod tests {
 
         // These errors are not fatal but hand back control to the pipeline
         let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { stage_progress: 1000, done: false, reached_tip: false })
-        );
+        assert_matches!(result, Err(StageError::Recoverable(_)));
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 

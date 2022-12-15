@@ -117,7 +117,11 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     highest_block + 1,
                     result.unwrap_err()
                 );
-                break
+                return Ok(ExecOutput {
+                    stage_progress: highest_block,
+                    done: false,
+                    reached_tip: false,
+                })
             };
             let block_number = block.number;
             // Write block
