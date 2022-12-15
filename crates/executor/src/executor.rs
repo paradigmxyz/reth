@@ -249,7 +249,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
-    db: &mut SubState<DB>,
+    db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, config, db)?;
 
@@ -290,7 +290,7 @@ pub fn execute<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
-    db: &mut SubState<DB>,
+    db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut evm = EVM::new();
     evm.database(db);
@@ -509,13 +509,13 @@ mod tests {
         // make it berlin fork
         config.spec_upgrades = SpecUpgrades::new_berlin_activated();
 
-        let mut db = SubState::new(State::new(db));
+        let db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
             block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
         let out =
-            execute_and_verify_receipt(&block.header, &transactions, &config, &mut db).unwrap();
+            execute_and_verify_receipt(&block.header, &transactions, &config, db).unwrap();
 
         assert_eq!(out.changeset.len(), 1, "Should executed one transaction");
 

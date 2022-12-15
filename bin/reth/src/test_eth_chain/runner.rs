@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageDB};
-use std::{ffi::OsStr, path::Path};
+use std::{ffi::OsStr, path::{Path, PathBuf}};
 use tracing::{debug, info};
 
 /// Tests are test edge cases that are not possible to happen on mainnet, so we are skipping them.
@@ -62,7 +62,8 @@ pub fn should_skip(path: &Path) -> bool {
 }
 
 /// Run one JSON-encoded Ethereum blockchain test at the specified path.
-pub async fn run_test(path: &Path) -> eyre::Result<()> {
+pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
+    let path = path.as_path();
     let json_file = std::fs::read(path)?;
     let suites: Test = serde_json::from_reader(&*json_file)?;
 
