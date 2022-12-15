@@ -1,4 +1,6 @@
-use reth_primitives::WithPeerId;
+use crate::consensus;
+use reth_primitives::{rpc::BlockNumber, WithPeerId, H256};
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 /// Result alias for result of a request.
@@ -8,7 +10,7 @@ pub type RequestResult<T> = Result<T, RequestError>;
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, thiserror::Error, Clone)]
+#[derive(Debug, Error, Clone)]
 #[allow(missing_docs)]
 pub enum RequestError {
     #[error("Closed channel to the peer.")]
@@ -44,4 +46,60 @@ impl From<oneshot::error::RecvError> for RequestError {
     fn from(_: oneshot::error::RecvError) -> Self {
         RequestError::ChannelClosed
     }
+}
+
+/// The download result type
+pub type DownloadResult<T> = Result<T, DownloadError>;
+
+/// The downloader error type
+#[derive(Error, Debug, Clone)]
+pub enum DownloadError {
+    /// Header validation failed
+    #[error("Failed to validate header {hash}. Details: {error}.")]
+    HeaderValidation {
+        /// Hash of header failing validation
+        hash: H256,
+        /// The details of validation failure
+        #[source]
+        error: consensus::Error,
+    },
+    /// Block validation failed
+    #[error("Failed to validate body for header {hash}. Details: {error}.")]
+    BlockValidation {
+        /// Hash of header failing validation
+        hash: H256,
+        /// The details of validation failure
+        #[source]
+        error: consensus::Error,
+    },
+    /// Timed out while waiting for request id response.
+    #[error("Timed out while getting headers for request.")]
+    Timeout,
+    /// Error when checking that the current [`Header`] has the parent's hash as the parent_hash
+    /// field, and that they have sequential block numbers.
+    #[error("Headers did not match, current number: {header_number} / current hash: {header_hash}, parent number: {parent_number} / parent_hash: {parent_hash}")]
+    MismatchedHeaders {
+        /// The header number being evaluated
+        header_number: BlockNumber,
+        /// The header hash being evaluated
+        header_hash: H256,
+        /// The parent number being evaluated
+        parent_number: BlockNumber,
+        /// The parent hash being evaluated
+        parent_hash: H256,
+    },
+    /// Received empty response while expecting headers
+    #[error("Received empty header response.")]
+    EmptyResponse,
+    /// Received an invalid tip
+    #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]
+    InvalidTip {
+        /// The hash of the received tip
+        received: H256,
+        /// The hash of the expected tip
+        expected: H256,
+    },
+    /// Error while executing the request.
+    #[error(transparent)]
+    RequestError(#[from] RequestError),
 }

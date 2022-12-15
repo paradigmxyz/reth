@@ -2,12 +2,11 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadStream, Downloader},
-        error::{PeerRequestResult, RequestError},
+        downloader::{DownloadClient, DownloadStream, Downloader},
+        error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
             downloader::HeaderDownloader,
-            error::DownloadError,
         },
     },
 };
@@ -72,7 +71,7 @@ impl HeaderDownloader for TestHeaderDownloader {
         &self,
         _head: SealedHeader,
         _forkchoice: ForkchoiceState,
-    ) -> DownloadStream<SealedHeader> {
+    ) -> DownloadStream<'_, SealedHeader> {
         Box::pin(self.create_download())
     }
 }
@@ -104,7 +103,7 @@ impl TestDownload {
 }
 
 impl Stream for TestDownload {
-    type Item = Result<SealedHeader, DownloadError>;
+    type Item = DownloadResult<SealedHeader>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -165,6 +164,12 @@ impl TestHeadersClient {
     pub async fn set_error(&self, err: RequestError) {
         let mut lock = self.error.lock().await;
         lock.replace(err);
+    }
+}
+
+impl DownloadClient for TestHeadersClient {
+    fn report_bad_message(&self, _peer_id: PeerId) {
+        // noop
     }
 }
 
