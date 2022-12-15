@@ -7,6 +7,7 @@ use crate::{
 };
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
+use metrics::counter;
 use pin_project::pin_project;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,6 @@ use std::{
     time::Duration,
 };
 use tokio_stream::Stream;
-use metrics::counter;
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
