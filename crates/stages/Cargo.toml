@@ -14,7 +14,8 @@ reth-interfaces = { path = "../interfaces" }
 reth-executor = { path = "../executor" }
 reth-rlp = { path = "../common/rlp" }
 reth-db = { path = "../storage/db" }
-reth-provider = { path = "../storage/provider"}
+reth-provider = { path = "../storage/provider" }
+reth-network = { path = "../net/network" }
 
 #async
 tokio = { version = "1.21.2", features = ["sync"] }
@@ -34,7 +35,7 @@ rayon = "1.6.0"
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
-reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
+reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tokio-stream = "0.1.10"
 tempfile = "3.3.0"

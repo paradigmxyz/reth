@@ -456,6 +456,9 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
+            NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
+                self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
+            }
         }
     }
 }
@@ -611,14 +614,6 @@ where
                         .state_mut()
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
-                }
-                SwarmEvent::StatusUpdate(status) => {
-                    trace!(
-                        target : "net",
-                        ?status,
-                        "Status Update received"
-                    );
-                    this.swarm.sessions_mut().on_status_update(status.clone())
                 }
             }
         }
