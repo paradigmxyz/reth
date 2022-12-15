@@ -40,6 +40,13 @@ pub enum StageError {
     Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
+impl StageError {
+    /// If the error is fatal the pipeline will stop.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, StageError::Database(_) | StageError::DatabaseIntegrity(_))
+    }
+}
+
 /// A database integrity error.
 /// The sender stage error
 #[derive(Error, Debug)]
