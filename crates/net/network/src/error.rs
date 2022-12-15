@@ -25,6 +25,9 @@ pub(crate) fn error_merits_discovery_ban(err: &EthStreamError) -> bool {
         )) |
         EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
             P2PHandshakeError::NonHelloMessageInHandshake,
+        )) |
+        EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+            DisconnectReason::UselessPeer,
         )) => true,
         EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
         _ => false,
