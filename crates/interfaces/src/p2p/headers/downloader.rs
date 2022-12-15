@@ -6,8 +6,7 @@ use crate::{
     },
 };
 
-use reth_primitives::SealedHeader;
-use reth_rpc_types::engine::ForkchoiceState;
+use reth_primitives::{SealedHeader, H256};
 
 /// A downloader capable of fetching block headers.
 ///
@@ -17,11 +16,7 @@ use reth_rpc_types::engine::ForkchoiceState;
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeaderDownloader: Downloader {
     /// Stream the headers
-    fn stream(
-        &self,
-        head: SealedHeader,
-        forkchoice: ForkchoiceState,
-    ) -> DownloadStream<'_, SealedHeader>;
+    fn stream(&self, head: SealedHeader, tip: H256) -> DownloadStream<'_, SealedHeader>;
 
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
