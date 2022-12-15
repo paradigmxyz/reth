@@ -193,10 +193,7 @@ where
     fn encode(&self, out: &mut dyn BufMut) {
         let payload_length = self.signature().length() +
             self.seq().length() +
-            self.iter().fold(0, |acc, (k, v)| {
-                let k: &[u8] = k.as_ref();
-                acc + k.length() + v.len()
-            });
+            self.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
 
         let header = Header { list: true, payload_length };
         header.encode(out);
@@ -206,8 +203,7 @@ where
 
         for (k, v) in self.iter() {
             // Keys are byte data
-            let k: &[u8] = k.as_ref();
-            k.encode(out);
+            k.as_slice().encode(out);
             // Values are raw RLP encoded data
             out.put_slice(v);
         }
@@ -216,7 +212,7 @@ where
     fn length(&self) -> usize {
         let payload_length = self.signature().length() +
             self.seq().length() +
-            self.iter().fold(0, |acc, (k, v)| acc + k.length() + v.len());
+            self.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
         payload_length + length_of_length(payload_length)
     }
 }
@@ -642,5 +638,8 @@ mod tests {
         let mut encoded = BytesMut::new();
         enr.encode(&mut encoded);
         assert_eq!(&encoded[..], &valid_record[..]);
+
+        // ensure the length is equal
+        assert_eq!(enr.length(), valid_record.len());
     }
 }
