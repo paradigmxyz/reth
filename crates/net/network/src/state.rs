@@ -3,7 +3,7 @@
 use crate::{
     cache::LruCache,
     discovery::{Discovery, DiscoveryEvent},
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher, StatusUpdate},
+    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
@@ -70,6 +70,7 @@ where
         peers_manager: PeersManager,
         genesis_hash: H256,
     ) -> Self {
+        let state_fetcher = StateFetcher::new(peers_manager.handle());
         Self {
             active_peers: Default::default(),
             peers_manager,
@@ -77,7 +78,7 @@ where
             client,
             discovery,
             genesis_hash,
-            state_fetcher: Default::default(),
+            state_fetcher,
         }
     }
 
@@ -353,10 +354,6 @@ where
                     FetchAction::BlockRequest { peer_id, request } => {
                         self.handle_block_request(peer_id, request)
                     }
-                    FetchAction::StatusUpdate(status) => {
-                        // we want to return this directly
-                        return Poll::Ready(StateAction::StatusUpdate(status))
-                    }
                 }
             }
 
@@ -427,8 +424,6 @@ pub(crate) struct ActivePeer {
 
 /// Message variants triggered by the [`State`]
 pub(crate) enum StateAction {
-    /// Received a node status update.
-    StatusUpdate(StatusUpdate),
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
         /// Target of the message

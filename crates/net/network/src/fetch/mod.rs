@@ -1,13 +1,13 @@
 //! Fetch data from the network.
 
-use crate::message::BlockRequest;
+use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
 };
-use reth_primitives::{Header, PeerId, H256, U256};
+use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
@@ -32,21 +32,32 @@ pub struct StateFetcher {
         HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of available peers for requests.
     peers: HashMap<PeerId, Peer>,
+    /// The handle to the peers manager
+    peers_handle: PeersHandle,
     /// Requests queued for processing
     queued_requests: VecDeque<DownloadRequest>,
     /// Receiver for new incoming download requests
     download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest>,
-    /// Receiver for new incoming [`StatusUpdate`] requests.
-    status_rx: UnboundedReceiverStream<StatusUpdate>,
-    /// Sender for updating the status, used to detach a [`FetchClient`]
-    status_tx: UnboundedSender<StatusUpdate>,
 }
 
 // === impl StateSyncer ===
 
 impl StateFetcher {
+    pub(crate) fn new(peers_handle: PeersHandle) -> Self {
+        let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
+        Self {
+            inflight_headers_requests: Default::default(),
+            inflight_bodies_requests: Default::default(),
+            peers: Default::default(),
+            peers_handle,
+            queued_requests: Default::default(),
+            download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
+            download_requests_tx,
+        }
+    }
+
     /// Invoked when connected to a new peer.
     pub(crate) fn new_active_peer(&mut self, peer_id: PeerId, best_hash: H256, best_number: u64) {
         self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
@@ -119,10 +130,6 @@ impl StateFetcher {
                 PollAction::NoRequests => false,
                 PollAction::NoPeersAvailable => true,
             };
-
-            if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
-                return Poll::Ready(FetchAction::StatusUpdate(status))
-            }
 
             loop {
                 // poll incoming requests
@@ -231,24 +238,7 @@ impl StateFetcher {
     pub(crate) fn client(&self) -> FetchClient {
         FetchClient {
             request_tx: self.download_requests_tx.clone(),
-            status_tx: self.status_tx.clone(),
-        }
-    }
-}
-
-impl Default for StateFetcher {
-    fn default() -> Self {
-        let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
-        let (status_tx, status_rx) = mpsc::unbounded_channel();
-        Self {
-            inflight_headers_requests: Default::default(),
-            inflight_bodies_requests: Default::default(),
-            peers: Default::default(),
-            queued_requests: Default::default(),
-            download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
-            download_requests_tx,
-            status_rx: UnboundedReceiverStream::new(status_rx),
-            status_tx,
+            peers_handle: self.peers_handle.clone(),
         }
     }
 }
@@ -314,14 +304,6 @@ struct Request<Req, Resp> {
     response: oneshot::Sender<Resp>,
 }
 
-/// A message to update the status.
-#[derive(Debug, Clone)]
-pub(crate) struct StatusUpdate {
-    pub(crate) height: u64,
-    pub(crate) hash: H256,
-    pub(crate) total_difficulty: U256,
-}
-
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
@@ -357,8 +339,6 @@ pub(crate) enum FetchAction {
         /// The request to send
         request: BlockRequest,
     },
-    /// Propagate a received status update for the node
-    StatusUpdate(StatusUpdate),
 }
 
 /// Outcome of a processed response.
@@ -374,12 +354,15 @@ pub(crate) enum BlockResponseOutcome {
 
 #[cfg(test)]
 mod tests {
+    use crate::{peers::PeersManager, PeersConfig};
+
     use super::*;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
-        let mut fetcher = StateFetcher::default();
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle());
 
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());

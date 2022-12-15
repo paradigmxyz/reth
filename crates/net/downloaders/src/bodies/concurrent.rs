@@ -1,58 +1,77 @@
 use backon::{ExponentialBackoff, Retryable};
 use futures_util::{stream, StreamExt};
-use reth_eth_wire::BlockBody;
-use reth_interfaces::p2p::{
-    bodies::{
-        client::BodiesClient,
-        downloader::{BodiesStream, BodyDownloader},
+use reth_interfaces::{
+    consensus::Consensus as ConsensusTrait,
+    p2p::{
+        bodies::{client::BodiesClient, downloader::BodyDownloader},
+        downloader::{DownloadStream, Downloader},
+        error::{DownloadError, DownloadResult},
     },
-    error::RequestResult,
 };
-use reth_primitives::{BlockNumber, H256};
-use std::sync::Arc;
+use reth_primitives::{BlockLocked, SealedHeader};
+use std::{borrow::Borrow, sync::Arc};
 
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
 #[derive(Debug)]
-pub struct ConcurrentDownloader<C> {
+pub struct ConcurrentDownloader<Client, Consensus> {
     /// The bodies client
-    client: Arc<C>,
+    client: Arc<Client>,
+    /// The consensus client
+    consensus: Arc<Consensus>,
     /// The number of retries for each request.
     retries: usize,
     /// The batch size per one request
     batch_size: usize,
 }
 
-impl<C: BodiesClient> BodyDownloader for ConcurrentDownloader<C> {
-    type Client = C;
+impl<Client, Consensus> Downloader for ConcurrentDownloader<Client, Consensus>
+where
+    Client: BodiesClient,
+    Consensus: ConsensusTrait,
+{
+    type Client = Client;
+    type Consensus = Consensus;
 
-    /// The block bodies client
     fn client(&self) -> &Self::Client {
-        &self.client
+        self.client.borrow()
     }
 
-    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
+    fn consensus(&self) -> &Self::Consensus {
+        self.consensus.borrow()
+    }
+}
+
+impl<Client, Consensus> BodyDownloader for ConcurrentDownloader<Client, Consensus>
+where
+    Client: BodiesClient,
+    Consensus: ConsensusTrait,
+{
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockLocked>
     where
-        I: IntoIterator<Item = &'b (BlockNumber, H256)>,
+        I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,
         'b: 'a,
     {
         Box::pin(
-            stream::iter(headers.into_iter().map(|(block_number, header_hash)| {
-                (|| self.fetch_body(*block_number, *header_hash))
+            stream::iter(headers.into_iter().map(|header| {
+                (|| self.fetch_body(header))
                     .retry(ExponentialBackoff::default().with_max_times(self.retries))
-                    .when(|err| err.is_retryable())
             }))
             .buffered(self.batch_size),
         )
     }
 }
 
-impl<C: BodiesClient> ConcurrentDownloader<C> {
+impl<Client, Consensus> ConcurrentDownloader<Client, Consensus>
+where
+    Client: BodiesClient,
+    Consensus: ConsensusTrait,
+{
     /// Create a new concurrent downloader instance.
-    pub fn new(client: Arc<C>) -> Self {
-        Self { client, retries: 3, batch_size: 100 }
+    pub fn new(client: Arc<Client>, consensus: Arc<Consensus>) -> Self {
+        Self { client, consensus, retries: 3, batch_size: 100 }
     }
 
     /// Set the number of blocks to fetch at the same time.
@@ -72,13 +91,24 @@ impl<C: BodiesClient> ConcurrentDownloader<C> {
     }
 
     /// Fetch a single block body.
-    async fn fetch_body(
-        &self,
-        block_number: BlockNumber,
-        header_hash: H256,
-    ) -> RequestResult<(BlockNumber, H256, BlockBody)> {
-        let mut response = self.client.get_block_body(vec![header_hash]).await?;
-        Ok((block_number, header_hash, response.1.remove(0))) // TODO:
+    async fn fetch_body(&self, header: &SealedHeader) -> DownloadResult<BlockLocked> {
+        let (peer_id, mut response) =
+            self.client.get_block_body(vec![header.hash()]).await?.split();
+
+        let body = response.remove(0);
+        let block = BlockLocked {
+            header: header.clone(),
+            body: body.transactions,
+            ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
+        };
+
+        match self.consensus.pre_validate_block(&block) {
+            Ok(_) => Ok(block),
+            Err(error) => {
+                self.client.report_bad_message(peer_id);
+                Err(DownloadError::BlockValidation { hash: header.hash(), error })
+            }
+        }
     }
 }
 
@@ -86,10 +116,14 @@ impl<C: BodiesClient> ConcurrentDownloader<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{generate_bodies, TestClient};
+    use crate::test_utils::{generate_bodies, TestBodiesClient};
     use assert_matches::assert_matches;
     use futures_util::stream::{StreamExt, TryStreamExt};
-    use reth_interfaces::p2p::{bodies::downloader::BodyDownloader, error::RequestError};
+    use reth_eth_wire::BlockBody;
+    use reth_interfaces::{
+        p2p::{bodies::downloader::BodyDownloader, error::RequestError},
+        test_utils::TestConsensus,
+    };
     use reth_primitives::{PeerId, H256};
     use std::{
         sync::{
@@ -104,38 +138,46 @@ mod tests {
     #[tokio::test]
     async fn emits_bodies_in_order() {
         // Generate some random blocks
-        let (hashes, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..20);
 
-        let downloader = ConcurrentDownloader::new(Arc::new(TestClient::new(|hash: Vec<H256>| {
-            let mut bodies = bodies.clone();
-            async move {
-                // Simulate that the request for this (random) block takes 0-100ms
-                tokio::time::sleep(Duration::from_millis(hash[0].to_low_u64_be() % 100)).await;
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|hash: Vec<H256>| {
+                let mut bodies = bodies.clone();
+                async move {
+                    // Simulate that the request for this (random) block takes 0-100ms
+                    tokio::time::sleep(Duration::from_millis(hash[0].to_low_u64_be() % 100)).await;
 
-                Ok((
-                    PeerId::default(),
-                    vec![bodies
-                        .remove(&hash[0])
-                        .expect("Downloader asked for a block it should not ask for")],
-                )
-                    .into())
-            }
-        })));
+                    Ok((
+                        PeerId::default(),
+                        vec![bodies
+                            .remove(&hash[0])
+                            .expect("Downloader asked for a block it should not ask for")],
+                    )
+                        .into())
+                }
+            })),
+            Arc::new(TestConsensus::default()),
+        );
 
         assert_matches!(
             downloader
-                .bodies_stream(hashes.iter())
-                .try_collect::<Vec<(BlockNumber, H256, BlockBody)>>()
+                .bodies_stream(headers.clone().iter())
+                .try_collect::<Vec<BlockLocked>>()
                 .await,
             Ok(responses) => {
                 assert_eq!(
                     responses,
-                    hashes
+                    headers
                         .into_iter()
-                        .map(|(num, hash)| {
-                            (num, hash, bodies.remove(&hash).unwrap())
+                        .map(| header | {
+                            let body = bodies .remove(&header.hash()).unwrap();
+                            BlockLocked {
+                                header,
+                                body: body.transactions,
+                                ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
+                            }
                         })
-                        .collect::<Vec<(BlockNumber, H256, BlockBody)>>()
+                        .collect::<Vec<BlockLocked>>()
                 );
             }
         );
@@ -144,14 +186,16 @@ mod tests {
     /// Checks that non-retryable errors bubble up
     #[tokio::test]
     async fn client_failure() {
-        let downloader =
-            ConcurrentDownloader::new(Arc::new(TestClient::new(|_: Vec<H256>| async {
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|_: Vec<H256>| async {
                 Err(RequestError::ChannelClosed)
-            })));
+            })),
+            Arc::new(TestConsensus::default()),
+        );
 
         assert_matches!(
-            downloader.bodies_stream(&[(0, H256::zero())]).next().await,
-            Some(Err(RequestError::ChannelClosed))
+            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
+            Some(Err(DownloadError::RequestError(RequestError::ChannelClosed)))
         );
     }
 
@@ -159,8 +203,8 @@ mod tests {
     #[tokio::test]
     async fn retries_timeouts() {
         let retries_left = Arc::new(AtomicUsize::new(3));
-        let downloader =
-            ConcurrentDownloader::new(Arc::new(TestClient::new(|mut header_hash: Vec<H256>| {
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|mut header_hash: Vec<H256>| {
                 let retries_left = retries_left.clone();
                 let _header_hash = header_hash.remove(0);
                 async move {
@@ -175,17 +219,14 @@ mod tests {
                             .into())
                     }
                 }
-            })));
+            })),
+            Arc::new(TestConsensus::default()),
+        );
 
         assert_matches!(
-            downloader.bodies_stream(&[(0, H256::zero())]).next().await,
+            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
             Some(Ok(body)) => {
-                assert_eq!(body.0, 0);
-                assert_eq!(body.1, H256::zero());
-                assert_eq!(body.2, BlockBody {
-                    transactions: vec![],
-                    ommers: vec![]
-                })
+                assert_eq!(body, BlockLocked::default());
             }
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 0);
@@ -195,8 +236,8 @@ mod tests {
     #[tokio::test]
     async fn too_many_retries() {
         let retries_left = Arc::new(AtomicUsize::new(3));
-        let downloader =
-            ConcurrentDownloader::new(Arc::new(TestClient::new(|mut header_hash: Vec<H256>| {
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|mut header_hash: Vec<H256>| {
                 let _header_hash = header_hash.remove(0);
                 let retries_left = retries_left.clone();
                 async move {
@@ -211,12 +252,14 @@ mod tests {
                             .into())
                     }
                 }
-            })))
-            .with_retries(0);
+            })),
+            Arc::new(TestConsensus::default()),
+        )
+        .with_retries(0);
 
         assert_matches!(
-            downloader.bodies_stream(&[(0, H256::zero())]).next().await,
-            Some(Err(RequestError::Timeout))
+            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
+            Some(Err(DownloadError::RequestError(RequestError::Timeout)))
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 2);
     }

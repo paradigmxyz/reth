@@ -22,7 +22,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::trace;
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PeersHandle {
     /// Sender half of command channel back to the [`PeersManager`]
     manager_tx: mpsc::UnboundedSender<PeerCommand>,

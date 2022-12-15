@@ -62,19 +62,23 @@ use tracing::{error, info, trace, warn};
 ///  graph TB
 ///    handle(NetworkHandle)
 ///    events(NetworkEvents)
-///    transactions[(Transactions Task)]
+///    transactions(Transactions Task)
+///    ethrequest(ETH Request Task)
+///    discovery(Discovery Task)
 ///    subgraph NetworkManager
 ///      direction LR
 ///      subgraph Swarm
 ///          direction TB
-///          B1[(Peer Sessions)]
+///          B1[(Session Manager)]
 ///          B2[(Connection Lister)]
-///          B3[(State)]
+///          B3[(Network State)]
 ///      end
-///    end
-///   handle <--> |request/response channel| NetworkManager
+///   end
+///   handle <--> |request response channel| NetworkManager
 ///   NetworkManager --> |Network events| events
-///   transactions --> |propagate transactions| NetworkManager
+///   transactions <--> |transactions| NetworkManager
+///   ethrequest <--> |ETH request handing| NetworkManager
+///   discovery --> |Discovered peers| NetworkManager
 /// ```
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
@@ -456,6 +460,9 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
+            NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
+                self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
+            }
         }
     }
 }
@@ -611,14 +618,6 @@ where
                         .state_mut()
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
-                }
-                SwarmEvent::StatusUpdate(status) => {
-                    trace!(
-                        target : "net",
-                        ?status,
-                        "Status Update received"
-                    );
-                    this.swarm.sessions_mut().on_status_update(status.clone())
                 }
             }
         }
