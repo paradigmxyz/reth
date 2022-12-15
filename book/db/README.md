@@ -76,7 +76,7 @@ pub struct StageDB<'this, DB: Database> {
 }
 ```
 
-Further, we can also see where the `StageDB` uses the `Database::tx_mut()` function to create a mutable transaction.
+Further, we can also see where the `StageDB` uses the `Database::tx_mut()` function to create a mutable transaction. However, looking further through the `StageDB` impl, we will start to find methods that are used, but are not defined within the `Database` trait. For example, the `get_block_hash()` method, uses `self.get()` which is not defined within the `Database` trait.
 
 [File: ]()
 ```rust ignore
@@ -93,36 +93,22 @@ where
     }
 
     //--snip--
-}
 
-```
-
-Looking further through the `StageDB` impl, we will start to find methods that are used, but are not defined within the `Database` trait. For example:
-
-[File: ]()
-
-```rust ignore
-
-  /// Query [tables::CanonicalHeaders] table for block hash by block number
+    /// Query [tables::CanonicalHeaders] table for block hash by block number
     pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
         let hash = self
             .get::<tables::CanonicalHeaders>(number)?
             .ok_or(DatabaseIntegrityError::CanonicalHash { number })?;
         Ok(hash)
     }
-```
 
-It is not immediately known where the `self.get()` function is coming from. To understand this, lets take a little deeper look at the `Database` trait, into `DatabaseGAT` and its associated types.
-
-[File: ]()
-```rust ignore
-/// Main Database trait that spawns transactions to be executed.
-pub trait Database: for<'a> DatabaseGAT<'a> {
     //--snip--
+
 }
 ```
 
-Revising the `Database` trait's definition, we can see that the trait also implements the `DatabaseGAT` trait.
+
+While is not immediately known where the `self.get()` function is coming from, the answer lies one step deeper into the `Database` trait. Lets take a deeper look at the `Database` trait, looking at the `DatabaseGAT` trait and its associated types. Revising the `Database` trait's definition, we can see that the trait also implements the `DatabaseGAT` trait.
 
 [File: ]()
 ```rust ignore
