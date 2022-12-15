@@ -59,6 +59,13 @@ impl Default for ExecutionStage {
     }
 }
 
+impl ExecutionStage {
+    /// Create new execution stage with specified config.
+    pub fn new(config: Config) -> Self {
+        Self { config }
+    }
+}
+
 /// Specify batch sizes of block in execution
 /// TODO make this as config
 const BATCH_SIZE: u64 = 1000;
@@ -176,6 +183,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (header, (start_tx_index, end_tx_index, block_reward_index)) in
             headers_batch.iter().zip(tx_index_ranges.iter())
         {
+            let num = header.number;
+            tracing::trace!(target: "stages::execution",?num, "Execute block num.");
             let body_tx_cnt = end_tx_index - start_tx_index;
             // iterate over all transactions
             let mut tx_walker = tx.walk(*start_tx_index)?;
@@ -215,23 +224,27 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
             // for now use default eth config
 
-            let mut state_provider =
-                SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
+            let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
 
-            // execute and store output to results
-            // ANCHOR: snippet-block_change_patches
-            block_change_patches.push((
-                reth_executor::executor::execute_and_verify_receipt(
-                    header,
-                    &recovered_transactions,
-                    &self.config,
-                    &mut state_provider,
-                )
-                .map_err(|error| StageError::ExecutionError { block: header.number, error })?,
-                start_tx_index,
-                block_reward_index,
-            ));
-            // ANCHOR_END: snippet-block_change_patches
+            let change_set = std::thread::scope(|scope| {
+                let handle = std::thread::Builder::new()
+                    .stack_size(50 * 1024 * 1024)
+                    .spawn_scoped(scope, || {
+                        // execute and store output to results
+                        // ANCHOR: snippet-block_change_patches
+                        reth_executor::executor::execute_and_verify_receipt(
+                            header,
+                            &recovered_transactions,
+                            &self.config,
+                            state_provider,
+                        )
+                        // ANCHOR_END: snippet-block_change_patches
+                    })
+                    .expect("Expects that thread name is not null");
+                handle.join().expect("Expects for thread to not panic")
+            })
+            .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
+            block_change_patches.push((change_set, start_tx_index, block_reward_index));
         }
 
         // apply changes to plain database.
