@@ -113,7 +113,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 Err(e) => match e {
                     DownloadError::Timeout => {
                         warn!("No response for header request");
-                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
+                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
                         error!("Validation error for header {hash}: {error}");
@@ -121,7 +121,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                     }
                     error => {
                         error!(?error, "An unexpected error occurred");
-                        return Ok(ExecOutput { stage_progress, reached_tip: false, done: false })
+                        return Err(StageError::Recoverable(error.into()))
                     }
                 },
             }
