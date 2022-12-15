@@ -84,7 +84,7 @@ pub enum DatabaseIntegrityError {
         hash: H256,
     },
     /// The cumulative transaction count is missing from the database.
-    #[error("No cumulative tx count for ${number} ({hash})")]
+    #[error("No cumulative tx count for #{number} ({hash})")]
     CumulativeTxCount {
         /// The block number key
         number: BlockNumber,
