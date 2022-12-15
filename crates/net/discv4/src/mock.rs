@@ -179,6 +179,7 @@ impl Stream for MockDiscovery {
                         }
                     }
                     Message::Neighbours(_) => {}
+                    Message::EnrRequest(_) | Message::EnrResponse(_) => todo!(),
                 },
             }
         }
