@@ -52,10 +52,11 @@ impl Command {
 
         // TODO: More info from chainspec (chain ID etc.)
         let consensus = Arc::new(EthConsensus::new(consensus_config()));
-        init_genesis(db.clone(), serde_json::from_str(&MAINNET_GENESIS).unwrap())?;
+        let genesis_hash =
+            init_genesis(db.clone(), serde_json::from_str(MAINNET_GENESIS).unwrap())?;
 
         info!("Connecting to p2p");
-        let network = start_network(network_config(db.clone())).await?;
+        let network = start_network(network_config(db.clone(), genesis_hash)).await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own
@@ -121,37 +122,18 @@ fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 
 /// Write the genesis block if it has not already been written
 #[allow(clippy::field_reassign_with_default)]
-fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<(), reth_db::Error> {
+fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, reth_db::Error> {
     let tx = db.tx_mut()?;
-    if tx.cursor::<tables::CanonicalHeaders>()?.first()?.is_some() {
+    if let Some((_, hash)) = tx.cursor::<tables::CanonicalHeaders>()?.first()? {
         debug!("Genesis already written, skipping.");
-        return Ok(())
+        return Ok(hash)
     }
     debug!("Writing genesis block.");
 
-    // Insert header
-    let header = Header {
-        gas_limit: genesis.gas_limit,
-        difficulty: genesis.difficulty,
-        nonce: genesis.nonce,
-        extra_data: genesis.extra_data.0,
-        state_root: genesis.state_root,
-        timestamp: genesis.timestamp,
-        mix_hash: genesis.mix_hash,
-        beneficiary: genesis.coinbase,
-        ..Default::default()
-    }
-    .seal();
-    tx.put::<tables::CanonicalHeaders>(0, header.hash())?;
-    tx.put::<tables::HeaderNumbers>(header.hash(), 0)?;
-    tx.put::<tables::CumulativeTxCount>((0, header.hash()).into(), 0)?;
-    tx.put::<tables::HeaderTD>((0, header.hash()).into(), genesis.difficulty.into())?;
-    tx.put::<tables::Headers>((0, header.hash()).into(), header.unseal())?;
-
     // Insert account state
-    for (address, account) in genesis.alloc {
+    for (address, account) in &genesis.alloc {
         tx.put::<tables::PlainAccountState>(
-            address,
+            *address,
             Account {
                 nonce: account.nonce.unwrap_or_default(),
                 balance: account.balance,
@@ -160,13 +142,27 @@ fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<(), reth_
         )?;
     }
 
-    tx.commit().map(|_| ())
+    // Insert header
+    let header: Header = genesis.into();
+    let hash = header.hash_slow();
+    tx.put::<tables::CanonicalHeaders>(0, hash)?;
+    tx.put::<tables::HeaderNumbers>(hash, 0)?;
+    tx.put::<tables::CumulativeTxCount>((0, hash).into(), 0)?;
+    tx.put::<tables::HeaderTD>((0, hash).into(), header.difficulty.into())?;
+    tx.put::<tables::Headers>((0, hash).into(), header)?;
+
+    tx.commit()?;
+    Ok(hash)
 }
 
 // TODO: This should be based on some external config
-fn network_config<DB: Database>(db: Arc<DB>) -> NetworkConfig<ProviderImpl<DB>> {
+fn network_config<DB: Database>(
+    db: Arc<DB>,
+    genesis_hash: H256,
+) -> NetworkConfig<ProviderImpl<DB>> {
     NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
         .boot_nodes(mainnet_nodes())
+        .genesis_hash(genesis_hash)
         .build()
 }
 

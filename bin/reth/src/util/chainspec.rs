@@ -1,6 +1,6 @@
 use reth_primitives::{
     utils::serde_helpers::{deserialize_number, deserialize_stringified_u64},
-    Address, Bytes, H256, U256,
+    Address, Bytes, Header, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,6 +31,22 @@ pub struct Genesis {
     pub state_root: H256,
     /// The initial state of accounts in the genesis block.
     pub alloc: HashMap<Address, GenesisAccount>,
+}
+
+impl From<Genesis> for Header {
+    fn from(genesis: Genesis) -> Header {
+        Header {
+            gas_limit: genesis.gas_limit,
+            difficulty: genesis.difficulty,
+            nonce: genesis.nonce,
+            extra_data: genesis.extra_data.0,
+            state_root: genesis.state_root,
+            timestamp: genesis.timestamp,
+            mix_hash: genesis.mix_hash,
+            beneficiary: genesis.coinbase,
+            ..Default::default()
+        }
+    }
 }
 
 /// An account in the state of the genesis block.
