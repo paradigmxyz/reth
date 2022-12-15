@@ -117,7 +117,7 @@ impl Command {
     }
 }
 
-/// Wraps over the StageDB and derefs to a transaction.
+/// Wrapper over DB that implements many useful DB queries.
 struct DbTool<'a, DB: Database> {
     pub(crate) db: &'a DB,
 }
