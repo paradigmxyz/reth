@@ -175,13 +175,13 @@ mod tests {
     #[test]
     fn test_display_named_chain() {
         let chain = Chain::Named(ethers_core::types::Chain::Mainnet);
-        assert_eq!(format!("{}", chain), "mainnet");
+        assert_eq!(format!("{chain}"), "mainnet");
     }
 
     #[test]
     fn test_display_id_chain() {
         let chain = Chain::Id(1234);
-        assert_eq!(format!("{}", chain), "1234");
+        assert_eq!(format!("{chain}"), "1234");
     }
 
     #[test]
