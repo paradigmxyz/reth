@@ -20,37 +20,6 @@ macro_rules! stage_test_suite {
             assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
         }
 
-        /// Check that the execution is short-circuited if the target was already reached.
-        #[tokio::test]
-        async fn execute_already_reached_target() {
-            let stage_progress = 1000;
-
-            // Set up the runner
-            let mut runner = $runner::default();
-            let input = crate::stage::ExecInput {
-                previous_stage: Some((crate::test_utils::PREV_STAGE_ID, stage_progress)),
-                stage_progress: Some(stage_progress),
-            };
-            let seed = runner.seed_execution(input).expect("failed to seed");
-
-            // Run stage execution
-            let rx = runner.execute(input);
-
-            // Run `after_execution` hook
-            runner.after_execution(seed).await.expect("failed to run after execution hook");
-
-            // Assert the successful result
-            let result = rx.await.unwrap();
-            assert_matches::assert_matches!(
-                result,
-                Ok(ExecOutput { done, reached_tip, stage_progress })
-                    if done && reached_tip && stage_progress == stage_progress
-            );
-
-            // Validate the stage execution
-            assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-        }
-
         // Run the complete stage execution flow.
         #[tokio::test]
         async fn execute() {
@@ -142,4 +111,44 @@ macro_rules! stage_test_suite {
     };
 }
 
+// `execute_already_reached_target` is not suitable for the headers stage thus
+// included in the test suite extension
+macro_rules! stage_test_suite_ext {
+    ($runner:ident) => {
+        crate::test_utils::stage_test_suite!($runner);
+
+        /// Check that the execution is short-circuited if the target was already reached.
+        #[tokio::test]
+        async fn execute_already_reached_target() {
+            let stage_progress = 1000;
+
+            // Set up the runner
+            let mut runner = $runner::default();
+            let input = crate::stage::ExecInput {
+                previous_stage: Some((crate::test_utils::PREV_STAGE_ID, stage_progress)),
+                stage_progress: Some(stage_progress),
+            };
+            let seed = runner.seed_execution(input).expect("failed to seed");
+
+            // Run stage execution
+            let rx = runner.execute(input);
+
+            // Run `after_execution` hook
+            runner.after_execution(seed).await.expect("failed to run after execution hook");
+
+            // Assert the successful result
+            let result = rx.await.unwrap();
+            assert_matches::assert_matches!(
+                result,
+                Ok(ExecOutput { done, reached_tip, stage_progress })
+                    if done && reached_tip && stage_progress == stage_progress
+            );
+
+            // Validate the stage execution
+            assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        }
+    };
+}
+
 pub(crate) use stage_test_suite;
+pub(crate) use stage_test_suite_ext;

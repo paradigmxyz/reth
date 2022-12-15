@@ -247,7 +247,7 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
@@ -258,7 +258,7 @@ mod tests {
     use std::collections::HashMap;
     use test_utils::*;
 
-    stage_test_suite!(BodyTestRunner);
+    stage_test_suite_ext!(BodyTestRunner);
 
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]
