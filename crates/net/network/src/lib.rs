@@ -14,6 +14,37 @@
 //! port of that network. This includes public identities (public key) and addresses (where to reach
 //! them).
 //!
+//! ## Bird's Eye View
+//!
+//! See also diagram in [`NetworkManager`]
+//!
+//! The `Network` is made up of several, separate tasks:
+//!
+//!    - `Transactions Task`: is a spawned
+//!      [`TransactionManager`](crate::transactions::TransactionsManager) future that:
+//!
+//!        * Responds to incoming transaction related requests
+//!        * Requests missing transactions from the `Network`
+//!        * Broadcasts new transactions received from the
+//!          [`TransactionPool`](reth_transaction_pool::TransactionPool) over the `Network`
+//!
+//!    - `ETH request Task`: is a spawned
+//!      [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) future that:
+//!
+//!        * Responds to incoming ETH related requests: `Headers`, `Bodies`
+//!
+//!    - `Discovery Task`: is a spawned [`Discv4`](reth_discv4::Discv4) future that handles peer
+//!      discovery and emits new peers to the `Network`
+//!
+//!    - [`NetworkManager`] task advances the state of the `Network`, which includes:
+//!
+//!        * Initiating new _outgoing_ connections to discovered peers
+//!        * Handling _incoming_ TCP connections from peers
+//!        * Peer management
+//!        * Route requests:
+//!             - from remote peers to corresponding tasks
+//!             - from local to remote peers
+//!
 //! ## Usage
 //!
 //! ### Configure and launch a standalone network
