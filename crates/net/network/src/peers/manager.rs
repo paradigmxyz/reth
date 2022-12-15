@@ -1,12 +1,13 @@
-use crate::peers::{reputation::BANNED_REPUTATION, ReputationChangeKind, ReputationChangeWeights};
-use futures::StreamExt;
-use reth_eth_wire::{
-    error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
-    DisconnectReason,
+use crate::{
+    error::{error_merits_discovery_ban, is_fatal_protocol_error},
+    peers::{reputation::BANNED_REPUTATION, ReputationChangeKind, ReputationChangeWeights},
 };
+use futures::StreamExt;
+use reth_eth_wire::{error::EthStreamError, DisconnectReason};
+use reth_net_common::ban_list::BanList;
 use reth_primitives::PeerId;
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, VecDeque},
     fmt::Display,
     net::{IpAddr, SocketAddr},
     task::{Context, Poll},
@@ -109,7 +110,7 @@ impl PeersManager {
         &mut self,
         addr: IpAddr,
     ) -> Result<(), InboundConnectionError> {
-        if self.ban_list.banned_ip(&addr) {
+        if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
         if !self.connection_info.has_in_capacity() {
@@ -140,7 +141,7 @@ impl PeersManager {
     pub(crate) fn on_active_inbound_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
         // we only need to check the peer id here as the ip address will have been checked at
         // on_inbound_pending_session
-        if self.ban_list.banned_peer(&peer_id) {
+        if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
             return
         }
@@ -197,12 +198,25 @@ impl PeersManager {
     ///
     /// Depending on whether the error is fatal, the peer will be removed from the peer set
     /// otherwise its reputation is slashed.
-    pub(crate) fn on_connection_dropped(&mut self, peer_id: &PeerId, err: &EthStreamError) {
+    pub(crate) fn on_connection_dropped(
+        &mut self,
+        remote_addr: &SocketAddr,
+        peer_id: &PeerId,
+        err: &EthStreamError,
+    ) {
         if is_fatal_protocol_error(err) {
             // remove the peer to which we can't establish a connection due to protocol related
             // issues.
             if let Some(peer) = self.peers.remove(peer_id) {
                 self.connection_info.decr_state(peer.state);
+            }
+
+            // If the error is caused by a peer that should be banned
+            if error_merits_discovery_ban(err) {
+                self.queued_actions.push_back(PeerAction::DiscoveryBan {
+                    peer_id: *peer_id,
+                    ip_addr: remote_addr.ip(),
+                })
             }
         } else if let Some(mut peer) = self.peers.get_mut(peer_id) {
             self.connection_info.decr_state(peer.state);
@@ -219,7 +233,7 @@ impl PeersManager {
     /// If the peer already exists, then the address will be updated. If the addresses differ, the
     /// old address is returned
     pub(crate) fn add_discovered_node(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        if self.ban_list.is_banned(&addr.ip(), &peer_id) {
+        if self.ban_list.is_banned(&peer_id, &addr.ip()) {
             return
         }
 
@@ -488,6 +502,8 @@ pub enum PeerAction {
         /// Peer id of the established connection.
         peer_id: PeerId,
     },
+    /// Ban the peer in discovery.
+    DiscoveryBan { peer_id: PeerId, ip_addr: IpAddr },
 }
 
 /// Config type for initiating a [`PeersManager`] instance
@@ -550,40 +566,6 @@ impl PeersConfig {
     }
 }
 
-/// Configuration for the automatic removal of unwanted peers
-#[derive(Debug, Default)]
-pub struct BanList {
-    /// banned peer ids
-    banned_peers: HashSet<PeerId>,
-    /// banned ips
-    banned_ips: HashSet<IpAddr>,
-}
-
-impl BanList {
-    /// creates a new instance from existing values
-    pub fn new(banned_peers: HashSet<PeerId>, banned_ips: HashSet<IpAddr>) -> Self {
-        Self { banned_ips, banned_peers }
-    }
-
-    /// checks the ban list to see if it contains the given ip
-    #[inline]
-    pub(self) fn banned_ip(&self, ip: &IpAddr) -> bool {
-        self.banned_ips.contains(ip)
-    }
-
-    /// checks the banned list to see if it contains the given peer id
-    #[inline]
-    pub(self) fn banned_peer(&self, peer_id: &PeerId) -> bool {
-        self.banned_peers.contains(peer_id)
-    }
-    /// checks the ban list for the given ip address and peer_id and returns true
-    /// if the address is in the ban list
-    #[inline]
-    pub(self) fn is_banned(&self, ip: &IpAddr, peer_id: &PeerId) -> bool {
-        self.banned_ip(ip) || self.banned_peer(peer_id)
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum InboundConnectionError {
     ExceedsLimit(usize),
@@ -596,50 +578,28 @@ impl Display for InboundConnectionError {
     }
 }
 
-/// Returns true if the error indicates that we'll never be able to establish a connection to that
-/// peer. For example, not matching capabilities or a mismatch in protocols.
-fn is_fatal_protocol_error(err: &EthStreamError) -> bool {
-    match err {
-        EthStreamError::P2PStreamError(err) => {
-            matches!(
-                err,
-                P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities) |
-                    P2PStreamError::UnknownReservedMessageId(_) |
-                    P2PStreamError::EmptyProtocolMessage |
-                    P2PStreamError::ParseVersionError(_) |
-                    P2PStreamError::Disconnected(DisconnectReason::UselessPeer) |
-                    P2PStreamError::MismatchedProtocolVersion { .. }
-            )
-        }
-        EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::HashSet,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-    };
-
-    use reth_primitives::{PeerId, H512};
-
+    use super::PeersManager;
     use crate::{
         peers::{
             manager::{ConnectionInfo, PeerConnectionState},
             PeerAction,
         },
-        BanList, PeersConfig,
+        PeersConfig,
     };
-
-    use super::PeersManager;
+    use reth_net_common::ban_list::BanList;
+    use reth_primitives::{PeerId, H512};
+    use std::{
+        collections::HashSet,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+    };
 
     #[tokio::test]
     async fn test_discovery_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![ip]));
+        let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         peer_manager.add_discovered_node(H512::default(), socket_addr);
@@ -651,7 +611,7 @@ mod test {
     async fn test_on_pending_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![ip]));
+        let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         let a = peer_manager.on_inbound_pending_session(socket_addr.ip());
@@ -672,7 +632,7 @@ mod test {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
         let given_peer_id: PeerId = H512::from_low_u64_ne(123403423412);
-        let ban_list = BanList::new(HashSet::from_iter(vec![given_peer_id]), HashSet::default());
+        let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         peer_manager.on_active_inbound_session(given_peer_id, socket_addr);

@@ -203,7 +203,7 @@ mod tests {
     fn test_from_bytes() {
         let b = bytes::Bytes::from("0123456789abcdef");
         let wrapped_b = Bytes::from(b.clone());
-        let expected = Bytes { 0: b };
+        let expected = Bytes(b);
 
         assert_eq!(wrapped_b, expected);
     }
@@ -212,7 +212,7 @@ mod tests {
     fn test_from_slice() {
         let arr = [1, 35, 69, 103, 137, 171, 205, 239];
         let b = Bytes::from(&arr);
-        let expected = Bytes { 0: bytes::Bytes::from(arr.to_vec()) };
+        let expected = Bytes(bytes::Bytes::from(arr.to_vec()));
 
         assert_eq!(b, expected);
     }
@@ -221,8 +221,8 @@ mod tests {
     fn hex_formatting() {
         let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         let expected = String::from("0x0123456789abcdef");
-        assert_eq!(format!("{:x}", b), expected);
-        assert_eq!(format!("{}", b), expected);
+        assert_eq!(format!("{b:x}"), expected);
+        assert_eq!(format!("{b}"), expected);
     }
 
     #[test]
@@ -240,8 +240,8 @@ mod tests {
     #[test]
     fn test_debug_formatting() {
         let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
-        assert_eq!(format!("{:?}", b), "Bytes(0x0123456789abcdef)");
-        assert_eq!(format!("{:#?}", b), "Bytes(0x0123456789abcdef)");
+        assert_eq!(format!("{b:?}"), "Bytes(0x0123456789abcdef)");
+        assert_eq!(format!("{b:#?}"), "Bytes(0x0123456789abcdef)");
     }
 
     #[test]

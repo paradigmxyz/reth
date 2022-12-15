@@ -7,7 +7,7 @@ use reth_primitives::PeerId;
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     task::{Context, Poll},
 };
 use tokio::task::JoinHandle;
@@ -24,7 +24,7 @@ pub struct Discovery {
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
-    _discv4: Discv4,
+    discv4: Discv4,
     /// All KAD table updates from the discv4 service.
     discv4_updates: ReceiverStream<DiscoveryUpdate>,
     /// The initial config for the discv4 service
@@ -57,13 +57,23 @@ impl Discovery {
 
         Ok(Self {
             local_enr,
-            _discv4: discv4,
+            discv4,
             discv4_updates,
             _dsicv4_config: dsicv4_config,
             _discv4_service,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
         })
+    }
+
+    /// Bans the [`IpAddr`] in the discovery service.
+    pub(crate) fn ban_ip(&self, ip: IpAddr) {
+        self.discv4.ban_ip(ip)
+    }
+
+    /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
+    pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
+        self.discv4.ban(peer_id, ip)
     }
 
     /// Returns the id with which the local identifies itself in the network

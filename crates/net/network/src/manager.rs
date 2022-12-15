@@ -456,6 +456,9 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
+            NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
+                self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
+            }
         }
     }
 }
@@ -552,7 +555,11 @@ where
 
                     if let Some(ref err) = error {
                         // If the connection was closed due to an error, we report the peer
-                        this.swarm.state_mut().peers_mut().on_connection_dropped(&peer_id, err);
+                        this.swarm.state_mut().peers_mut().on_connection_dropped(
+                            &remote_addr,
+                            &peer_id,
+                            err,
+                        );
                     } else {
                         // Gracefully disconnected
                         this.swarm.state_mut().peers_mut().on_disconnected(&peer_id);
@@ -567,7 +574,11 @@ where
                         ?error,
                         "Incoming pending session failed"
                     );
-                    this.swarm.state_mut().peers_mut().on_closed_incoming_pending_session()
+                    this.swarm.state_mut().peers_mut().on_closed_incoming_pending_session();
+
+                    if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
+                        this.swarm.state_mut().ban_ip_discovery(remote_addr.ip());
+                    }
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                     warn!(
@@ -580,6 +591,10 @@ where
                     let swarm = this.swarm.state_mut().peers_mut();
                     swarm.on_closed_outgoing_pending_session();
                     swarm.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+
+                    if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
+                        this.swarm.state_mut().ban_discovery(peer_id, remote_addr.ip());
+                    }
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                     warn!(
@@ -599,14 +614,6 @@ where
                         .state_mut()
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
-                }
-                SwarmEvent::StatusUpdate(status) => {
-                    trace!(
-                        target : "net",
-                        ?status,
-                        "Status Update received"
-                    );
-                    this.swarm.sessions_mut().on_status_update(status.clone())
                 }
             }
         }

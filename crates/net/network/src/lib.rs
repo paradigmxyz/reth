@@ -102,4 +102,4 @@ pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::NetworkHandle;
-pub use peers::{BanList, PeersConfig};
+pub use peers::PeersConfig;

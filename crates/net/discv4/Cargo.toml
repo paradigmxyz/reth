@@ -14,6 +14,7 @@ Ethereum network support
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp" }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-net-common = { path = "../common" }
 
 # ethereum
 discv5 = { git = "https://github.com/sigp/discv5" }

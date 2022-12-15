@@ -7,7 +7,7 @@ use reth_interfaces::p2p::{
     error::{PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
 };
-use reth_primitives::{Header, PeerId, H256, U256};
+use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
@@ -40,10 +40,6 @@ pub struct StateFetcher {
     download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest>,
-    /// Receiver for new incoming [`StatusUpdate`] requests.
-    status_rx: UnboundedReceiverStream<StatusUpdate>,
-    /// Sender for updating the status, used to detach a [`FetchClient`]
-    status_tx: UnboundedSender<StatusUpdate>,
 }
 
 // === impl StateSyncer ===
@@ -51,7 +47,6 @@ pub struct StateFetcher {
 impl StateFetcher {
     pub(crate) fn new(peers_handle: PeersHandle) -> Self {
         let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
-        let (status_tx, status_rx) = mpsc::unbounded_channel();
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
@@ -60,8 +55,6 @@ impl StateFetcher {
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
-            status_rx: UnboundedReceiverStream::new(status_rx),
-            status_tx,
         }
     }
 
@@ -137,10 +130,6 @@ impl StateFetcher {
                 PollAction::NoRequests => false,
                 PollAction::NoPeersAvailable => true,
             };
-
-            if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
-                return Poll::Ready(FetchAction::StatusUpdate(status))
-            }
 
             loop {
                 // poll incoming requests
@@ -249,7 +238,6 @@ impl StateFetcher {
     pub(crate) fn client(&self) -> FetchClient {
         FetchClient {
             request_tx: self.download_requests_tx.clone(),
-            status_tx: self.status_tx.clone(),
             peers_handle: self.peers_handle.clone(),
         }
     }
@@ -316,14 +304,6 @@ struct Request<Req, Resp> {
     response: oneshot::Sender<Resp>,
 }
 
-/// A message to update the status.
-#[derive(Debug, Clone)]
-pub(crate) struct StatusUpdate {
-    pub(crate) height: u64,
-    pub(crate) hash: H256,
-    pub(crate) total_difficulty: U256,
-}
-
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
@@ -359,8 +339,6 @@ pub(crate) enum FetchAction {
         /// The request to send
         request: BlockRequest,
     },
-    /// Propagate a received status update for the node
-    StatusUpdate(StatusUpdate),
 }
 
 /// Outcome of a processed response.
