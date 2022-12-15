@@ -104,7 +104,7 @@ pub enum DatabaseIntegrityError {
     TransactionsSignerGap { missing: TxNumber },
     #[error("Got to the end of transaction table")]
     EndOfTransactionTable,
-    #[error("Got to the end of transaction table")]
+    #[error("Got to the end of the transaction sender table")]
     EndOfTransactionSenderTable,
     /// The total difficulty from the block header is missing.
     #[error("Total difficulty not found for block #{number}")]

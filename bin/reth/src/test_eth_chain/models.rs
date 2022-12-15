@@ -1,4 +1,7 @@
-use reth_primitives::{Address, Bloom, Bytes, JsonU256, H160, H256, H64};
+use reth_primitives::{
+    Address, BigEndianHash, Bloom, Bytes, Header as RethHeader, JsonU256, SealedHeader, H160, H256,
+    H64,
+};
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
 
@@ -70,6 +73,32 @@ pub struct Header {
     pub base_fee_per_gas: Option<JsonU256>,
 }
 
+impl From<Header> for SealedHeader {
+    fn from(value: Header) -> Self {
+        SealedHeader::new(
+            RethHeader {
+                base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.as_u64()),
+                beneficiary: value.coinbase,
+                difficulty: value.difficulty.0,
+                extra_data: value.extra_data.0,
+                gas_limit: value.gas_limit.0.as_u64(),
+                gas_used: value.gas_used.0.as_u64(),
+                mix_hash: value.mix_hash,
+                nonce: value.nonce.into_uint().as_u64(),
+                number: value.number.0.as_u64(),
+                timestamp: value.timestamp.0.as_u64(),
+                transactions_root: value.transactions_trie,
+                receipts_root: value.receipt_trie,
+                ommers_hash: value.uncle_hash,
+                state_root: value.state_root,
+                parent_hash: value.parent_hash,
+                logs_bloom: Bloom::default(), // TODO: ?
+            },
+            value.hash,
+        )
+    }
+}
+
 /// Ethereum blockchain test data Block.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,9 +115,12 @@ pub struct Block {
 }
 
 /// Ethereum blockchain test data State.
+//#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+//#[serde(deny_unknown_fields)]
+//pub struct State(pub RootOrState);
+
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct State(pub RootOrState);
+pub struct State(pub BTreeMap<Address, Account>);
 
 /// Merkle root hash or storage accounts.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -96,7 +128,7 @@ pub struct State(pub RootOrState);
 pub enum RootOrState {
     /// If state is too big, only state root is present
     Root(H256),
-    /// Staet
+    /// State
     State(BTreeMap<Address, Account>),
 }
 
@@ -114,45 +146,79 @@ pub struct Account {
     pub storage: BTreeMap<JsonU256, JsonU256>,
 }
 
-/// Ethereum blockchain test data State.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+/// Fork Spec
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Deserialize)]
 pub enum ForkSpec {
-    /// Fork EIP150.
-    EIP150,
-    /// Fork EIP158.
-    EIP158,
-    /// Fork Frontier.
+    /// Frontier
     Frontier,
-    /// Fork Homestead.
-    Homestead,
-    /// Fork Byzantium.
-    Byzantium,
-    /// Fork Constantinople.
-    Constantinople,
-    /// Fork ConstantinopleFix.
-    ConstantinopleFix,
-    /// Fork Istanbul.
-    Istanbul,
-    /// Fork EIP158ToByzantiumAt5.
-    EIP158ToByzantiumAt5,
-    /// Fork FrontierToHomesteadAt5.
+    /// Frontier to Homestead
     FrontierToHomesteadAt5,
-    /// Fork HomesteadToDaoAt5.
+    /// Homestead
+    Homestead,
+    /// Homestead to Tangerine
     HomesteadToDaoAt5,
-    /// Fork HomesteadToEIP150At5.
+    /// Homestead to Tangerine
     HomesteadToEIP150At5,
-    /// Fork ByzantiumToConstantinopleAt5.
-    ByzantiumToConstantinopleAt5,
-    /// Fork ByzantiumToConstantinopleFixAt5.
+    /// Tangerine
+    EIP150,
+    /// Spurious Dragon
+    EIP158, // EIP-161: State trie clearing
+    /// Spurious Dragon to Byzantium
+    EIP158ToByzantiumAt5,
+    /// Byzantium
+    Byzantium,
+    /// Byzantium to Constantinople
+    ByzantiumToConstantinopleAt5, // SKIPPED
+    /// Byzantium to Constantinople
     ByzantiumToConstantinopleFixAt5,
-    /// Fork Berlin.
+    /// Constantinople
+    Constantinople, // SKIPPED
+    /// Constantinople fix
+    ConstantinopleFix,
+    /// Instanbul
+    Istanbul,
+    /// Berlin
     Berlin,
-    /// Fork London.
-    London,
-    /// Fork BerlinToLondonAt5.
+    /// Berlin to London
     BerlinToLondonAt5,
-    /// Fork Merge,
+    /// London
+    London,
+    /// Paris aka The Merge
     Merge,
+    /// Merge EOF test
+    #[serde(alias = "Merge+3540+3670")]
+    MergeEOF,
+    /// After Merge Init Code test
+    #[serde(alias = "Merge+3860")]
+    MergeMeterInitCode,
+}
+
+impl From<ForkSpec> for reth_executor::SpecUpgrades {
+    fn from(fork_spec: ForkSpec) -> Self {
+        match fork_spec {
+            ForkSpec::Frontier => Self::new_frontier_activated(),
+            ForkSpec::Homestead | ForkSpec::FrontierToHomesteadAt5 => {
+                Self::new_homestead_activated()
+            }
+            ForkSpec::EIP150 | ForkSpec::HomesteadToDaoAt5 | ForkSpec::HomesteadToEIP150At5 => {
+                Self::new_tangerine_whistle_activated()
+            }
+            ForkSpec::EIP158 => Self::new_spurious_dragon_activated(),
+            ForkSpec::Byzantium |
+            ForkSpec::EIP158ToByzantiumAt5 |
+            ForkSpec::ConstantinopleFix |
+            ForkSpec::ByzantiumToConstantinopleFixAt5 => Self::new_byzantium_activated(),
+            ForkSpec::Istanbul => Self::new_istanbul_activated(),
+            ForkSpec::Berlin => Self::new_berlin_activated(),
+            ForkSpec::London | ForkSpec::BerlinToLondonAt5 => Self::new_london_activated(),
+            ForkSpec::Merge => Self::new_paris_activated(),
+            ForkSpec::MergeEOF => Self::new_paris_activated(),
+            ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
+            ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
+                panic!("Overriden with PETERSBURG")
+            }
+        }
+    }
 }
 
 /// Json Block test possible engine kind.

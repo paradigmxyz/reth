@@ -3,6 +3,7 @@
 use crate::util;
 use clap::Parser;
 use std::path::PathBuf;
+use tracing::{error, info};
 /// Models for parsing JSON blockchain tests
 pub mod models;
 /// Ethereum blockhain test runner
@@ -19,35 +20,30 @@ impl Command {
     /// Execute the command
     pub async fn execute(self) -> eyre::Result<()> {
         // note the use of `into_iter()` to consume `items`
-        let task_group: Vec<_> = self
+        let futs: Vec<_> = self
             .path
             .iter()
-            .map(|item| {
-                util::find_all_files_with_postfix(item, ".json").into_iter().map(|file| {
-                    let tfile = file.clone();
-                    let join = tokio::spawn(async move { runner::run_test(tfile.as_path()).await });
-                    (join, file)
-                })
-            })
+            .flat_map(|item| util::find_all_files_with_postfix(item, ".json"))
+            .map(|file| async { (runner::run_test(file.clone()).await, file) })
             .collect();
+
+        let results = futures::future::join_all(futs).await;
         // await the tasks for resolve's to complete and give back our test results
         let mut num_of_failed = 0;
         let mut num_of_passed = 0;
-        for tasks in task_group {
-            for (join, file) in tasks {
-                match join.await.unwrap() {
-                    Ok(_) => {
-                        num_of_passed += 1;
-                    }
-                    Err(error) => {
-                        num_of_failed += 1;
-                        println!("Test {file:?} failed:\n {error}\n");
-                    }
+        for (result, file) in results {
+            match result {
+                Ok(_) => {
+                    num_of_passed += 1;
+                }
+                Err(error) => {
+                    num_of_failed += 1;
+                    error!("Test {file:?} failed:\n {error}\n");
                 }
             }
         }
 
-        println!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
+        info!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
 
         Ok(())
     }

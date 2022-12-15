@@ -120,6 +120,10 @@ pub mod test_utils {
     /// Error during tempdir creation
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
+    /// Create rw database for testing
+    pub fn create_test_rw_db<E: EnvironmentKind>() -> Arc<Env<E>> {
+        create_test_db(EnvKind::RW)
+    }
     /// Create database for testing
     pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
         Arc::new(create_test_db_with_path(

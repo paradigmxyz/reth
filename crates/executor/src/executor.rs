@@ -12,7 +12,8 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database, EVM,
+    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
+    Return, EVM,
 };
 use std::collections::BTreeMap;
 
@@ -248,7 +249,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
-    db: &mut SubState<DB>,
+    db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, config, db)?;
 
@@ -289,7 +290,7 @@ pub fn execute<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
-    db: &mut SubState<DB>,
+    db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut evm = EVM::new();
     evm.database(db);
@@ -319,7 +320,10 @@ pub fn execute<DB: StateProvider>(
         revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
 
         // Execute transaction.
-        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = evm.transact();
+        let (revm::ExecutionResult { exit_reason, gas_used, logs, gas_refunded, .. }, state) =
+            evm.transact();
+
+        tracing::trace!(target:"evm","Executing transaction {:?}, gas:{gas_used} refund:{gas_refunded}",transaction.hash());
 
         // Fatal internal error.
         if exit_reason == revm::Return::FatalExternalError {
@@ -327,15 +331,11 @@ pub fn execute<DB: StateProvider>(
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
-        let is_success = matches!(
-            exit_reason,
-            revm::Return::Continue |
-                revm::Return::Stop |
-                revm::Return::Return |
-                revm::Return::SelfDestruct
-        );
-
-        // TODO add handling of other errors
+        let is_success = match exit_reason {
+            revm::return_ok!() => true,
+            revm::return_revert!() => false,
+            e => return Err(Error::EVMError { error_code: e as u32 }),
+        };
 
         // Add spend gas.
         cumulative_gas_used += gas_used;
@@ -509,13 +509,12 @@ mod tests {
         // make it berlin fork
         config.spec_upgrades = SpecUpgrades::new_berlin_activated();
 
-        let mut db = SubState::new(State::new(db));
+        let db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
             block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block.header, &transactions, &config, &mut db).unwrap();
+        let out = execute_and_verify_receipt(&block.header, &transactions, &config, db).unwrap();
 
         assert_eq!(out.changeset.len(), 1, "Should executed one transaction");
 
