@@ -216,7 +216,7 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
             ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overriden with PETERSBURG")
-            } //_ => panic!("Conversion failed"),
+            }
         }
     }
 }

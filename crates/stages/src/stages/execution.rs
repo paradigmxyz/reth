@@ -230,12 +230,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
                     .spawn_scoped(scope, || {
+                        // execute and store output to results
+                        // ANCHOR: snippet-block_change_patches
                         reth_executor::executor::execute_and_verify_receipt(
                             header,
                             &recovered_transactions,
                             &self.config,
                             state_provider,
                         )
+                        // ANCHOR_END: snippet-block_change_patches
                     })
                     .expect("Expects that thread name is not null");
                 handle.join().expect("Expects for thread to not panic")
