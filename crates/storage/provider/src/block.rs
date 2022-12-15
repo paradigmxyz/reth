@@ -114,12 +114,12 @@ pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 ) -> Result<u64> {
     let block_number = tx
         .get::<tables::HeaderNumbers>(block_hash)?
-        .ok_or(ProviderError::BlockHashNotExist { block_hash })?;
+        .ok_or(ProviderError::BlockHash { block_hash })?;
 
     let block_num_hash = BlockNumHash((block_number, block_hash));
 
     tx.get::<tables::CumulativeTxCount>(block_num_hash)?.ok_or_else(|| {
-        ProviderError::BlockBodyNotExist {
+        ProviderError::BlockBody {
             block_number: block_num_hash.number(),
             block_hash: block_num_hash.hash(),
         }

@@ -186,7 +186,7 @@ table!(
 
 table!(
     /// Stores the mapping of block number to state transition id.
-    ( BlockTransitionIndex ) BlockNumber | TransitionId
+    ( BlockTransitionIndex ) BlockNumHash | TransitionId
 );
 
 table!(

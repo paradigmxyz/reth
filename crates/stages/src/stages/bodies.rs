@@ -98,7 +98,8 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
         let bodies_to_download = self.bodies_to_download::<DB>(db, starting_block, target)?;
 
-        // Cursors used to write bodies and transactions
+        // Cursors used to write bodies, ommers and transactions
+        let mut body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
         let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
         let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
