@@ -261,8 +261,7 @@ fn test_concurrent_writers() {
         threads.push(thread::spawn(move || {
             let txn = writer_env.begin_rw_txn().unwrap();
             let db = txn.open_db(None).unwrap();
-            txn.put(&db, format!("{}{}", key, i), format!("{}{}", val, i), WriteFlags::empty())
-                .unwrap();
+            txn.put(&db, format!("{key}{i}"), format!("{val}{i}"), WriteFlags::empty()).unwrap();
             txn.commit().is_ok()
         }));
     }
@@ -273,8 +272,8 @@ fn test_concurrent_writers() {
 
     for i in 0..n {
         assert_eq!(
-            Cow::<Vec<u8>>::Owned(format!("{}{}", val, i).into_bytes()),
-            txn.get(&db, format!("{}{}", key, i).as_bytes()).unwrap().unwrap()
+            Cow::<Vec<u8>>::Owned(format!("{val}{i}").into_bytes()),
+            txn.get(&db, format!("{key}{i}").as_bytes()).unwrap().unwrap()
         );
     }
 }
