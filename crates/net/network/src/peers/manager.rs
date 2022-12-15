@@ -15,7 +15,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio::{
-    sync::mpsc,
+    sync::{mpsc, oneshot},
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -48,6 +48,14 @@ impl PeersHandle {
     /// Send a reputation change for the given peer.
     pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         self.send(PeerCommand::ReputationChange(peer_id, kind));
+    }
+
+    /// Returns a peer by its [`PeerId`], or `None` if the peer is not in the peer set.
+    pub async fn peer_by_id(&self, peer_id: PeerId) -> Option<Peer> {
+        let (tx, rx) = oneshot::channel();
+        self.send(PeerCommand::GetPeer(peer_id, tx));
+
+        rx.await.unwrap_or(None)
     }
 }
 
@@ -331,6 +339,9 @@ impl PeersManager {
                     PeerCommand::ReputationChange(peer_id, rep) => {
                         self.apply_reputation_change(&peer_id, rep)
                     }
+                    PeerCommand::GetPeer(peer, tx) => {
+                        let _ = tx.send(self.peers.get(&peer).cloned());
+                    }
                 }
             }
 
@@ -402,8 +413,9 @@ impl Default for ConnectionInfo {
     }
 }
 
+#[derive(Debug, Clone)]
 /// Tracks info about a single peer.
-struct Peer {
+pub struct Peer {
     /// Where to reach the peer
     addr: SocketAddr,
     /// Reputation of the peer.
@@ -482,6 +494,8 @@ pub(crate) enum PeerCommand {
     Remove(PeerId),
     /// Apply a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
+    /// Get information about a peer
+    GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
 }
 
 /// Actions the peer manager can trigger.
