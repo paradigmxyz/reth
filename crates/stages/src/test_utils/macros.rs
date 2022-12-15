@@ -10,14 +10,13 @@ macro_rules! stage_test_suite {
             let input = crate::stage::ExecInput::default();
 
             // Run stage execution
-            let result = runner.execute(input).await.unwrap();
-            assert_matches::assert_matches!(
-                result,
-                Err(crate::error::StageError::DatabaseIntegrity(_))
-            );
+            let result = runner.execute(input).await;
+            // Check that the result is returned and the stage does not panic.
+            // The return result with empty db is stage-specific.
+            assert_matches::assert_matches!(result, Ok(_));
 
             // Validate the stage execution
-            assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+            assert!(runner.validate_execution(input, result.unwrap().ok()).is_ok(), "execution validation");
         }
 
         /// Check that the execution is short-circuited if the target was already reached.
