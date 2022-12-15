@@ -22,7 +22,7 @@ use crate::{
     node::{kad_key, NodeKey},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use discv5::{
     kbucket::{
         Distance, Entry as BucketEntry, FailureReason, InsertResult, KBucketsTable, NodeStatus,
@@ -232,8 +232,7 @@ impl Discv4 {
     /// Removes the peer from the table, if it exists.
     pub fn remove_peer(&self, node_id: PeerId) {
         let cmd = Discv4Command::Remove(node_id);
-        // we want this message to arrive, so we clone the sender
-        let _ = self.to_service.clone().try_send(cmd);
+        self.safe_send_to_service(cmd);
     }
 
     /// Adds the peer and id to the ban list.
@@ -241,16 +240,14 @@ impl Discv4 {
     /// This will prevent any future inclusion in the table
     pub fn ban(&self, node_id: PeerId, ip: IpAddr) {
         let cmd = Discv4Command::Ban(node_id, ip);
-        // we want this message to arrive, so we clone the sender
-        let _ = self.to_service.clone().try_send(cmd);
+        self.safe_send_to_service(cmd);
     }
     /// Adds the ip to the ban list.
     ///
     /// This will prevent any future inclusion in the table
     pub fn ban_ip(&self, ip: IpAddr) {
         let cmd = Discv4Command::BanIp(ip);
-        // we want this message to arrive, so we clone the sender
-        let _ = self.to_service.clone().try_send(cmd);
+        self.safe_send_to_service(cmd);
     }
 
     /// Adds the peer to the ban list.
@@ -258,7 +255,36 @@ impl Discv4 {
     /// This will prevent any future inclusion in the table
     pub fn ban_node(&self, node_id: PeerId) {
         let cmd = Discv4Command::BanPeer(node_id);
-        // we want this message to arrive, so we clone the sender
+        self.safe_send_to_service(cmd);
+    }
+
+    /// Sets the tcp port
+    pub fn set_tcp_port(&self, port: u16) {
+        let cmd = Discv4Command::SetTcpPort(port);
+        self.safe_send_to_service(cmd);
+    }
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    ///
+    /// CAUTION: The value **must** be rlp encoded
+    pub fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {
+        let cmd = Discv4Command::SetEIP868RLPPair { key, rlp };
+        self.safe_send_to_service(cmd);
+    }
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl reth_rlp::Encodable) {
+        let mut buf = BytesMut::new();
+        value.encode(&mut buf);
+        self.set_eip868_rlp_pair(key, buf.freeze())
+    }
+
+    fn safe_send_to_service(&self, cmd: Discv4Command) {
+        // we want this message to always arrive, so we clone the sender
         let _ = self.to_service.clone().try_send(cmd);
     }
 
@@ -1077,6 +1103,21 @@ impl Discv4Service {
                         Discv4Command::BanIp(ip) => {
                             self.ban_ip(ip);
                         }
+                        Discv4Command::SetEIP868RLPPair { key, rlp } => {
+                            debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
+
+                            let _ =
+                                self.local_eip_868_enr.insert_raw_rlp(key, rlp, &self.secret_key);
+                        }
+                        Discv4Command::SetTcpPort(port) => {
+                            debug!(target: "discv4", %port, "Update tcp port");
+                            self.local_node_record.tcp_port = port;
+                            if self.local_node_record.address.is_ipv4() {
+                                let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
+                            } else {
+                                let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                            }
+                        }
                     }
                 } else {
                     is_done = true;
@@ -1220,6 +1261,8 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 
 /// The commands sent from the frontend to the service
 enum Discv4Command {
+    SetTcpPort(u16),
+    SetEIP868RLPPair { key: Vec<u8>, rlp: Bytes },
     Ban(PeerId, IpAddr),
     BanPeer(PeerId),
     BanIp(IpAddr),

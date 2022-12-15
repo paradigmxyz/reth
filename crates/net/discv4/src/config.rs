@@ -4,11 +4,12 @@
 //! https://github.com/sigp/discv5
 
 use crate::node::NodeRecord;
-use reth_net_common::ban_list::BanList;
-use std::collections::HashSet;
-use std::time::Duration;
 use bytes::Bytes;
-
+use reth_net_common::ban_list::BanList;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]
@@ -47,7 +48,7 @@ pub struct Discv4Config {
     /// Whether to enable EIP-868 extension
     pub enable_eip868: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
-    pub additional_eip868_rlp_pairs: Vec<(Vec<u8>, Bytes)>,
+    pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
 }
 
 impl Discv4Config {
@@ -74,7 +75,7 @@ impl Default for Discv4Config {
             enable_dht_random_walk: true,
             enable_lookup: true,
             enable_eip868: true,
-            additional_eip868_rlp_pairs: vec![],
+            additional_eip868_rlp_pairs: Default::default(),
         }
     }
 }
@@ -136,7 +137,7 @@ impl Discv4ConfigBuilder {
 
     /// Add another key value pair to include in the ENR
     pub fn add_eip868_rlp_pair(&mut self, key: impl AsRef<[u8]>, rlp: Bytes) -> &mut Self {
-        self.config.additional_eip868_rlp_pairs.push((key.as_ref().to_vec(), rlp));
+        self.config.additional_eip868_rlp_pairs.insert(key.as_ref().to_vec(), rlp);
         self
     }
 
