@@ -18,6 +18,7 @@ use std::{
     time::Duration,
 };
 use tokio_stream::Stream;
+use metrics::counter;
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -119,6 +120,7 @@ where
                 let reason = DisconnectReason::try_from(disconnect_id)?;
 
                 tracing::error!("Disconnected by peer during handshake: {}", reason);
+                counter!("p2pstream.disconnected_errors", 1);
                 return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             id => {

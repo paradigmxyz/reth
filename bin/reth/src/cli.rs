@@ -17,9 +17,11 @@ pub async fn run() -> eyre::Result<()> {
 
     reth_tracing::build_subscriber(tracing).init();
 
-    PrometheusBuilder::new()
-        .install()
-        .expect("failed to install Prometheus recorder");    
+    if opt.metrics {
+        PrometheusBuilder::new()
+            .install()
+            .expect("failed to install Prometheus recorder");    
+    }
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -40,6 +42,7 @@ pub enum Commands {
     /// DB Debugging utilities
     #[command(name = "db")]
     Db(db::Command),
+
 }
 
 #[derive(Parser)]
@@ -56,4 +59,7 @@ struct Cli {
     /// Silence all output
     #[clap(long, global = true)]
     silent: bool,
+
+    #[clap(long, global = true)]
+    metrics: bool,
 }
