@@ -162,6 +162,8 @@ where
 
         // merge configured boot nodes
         discovery_v4_config.bootstrap_nodes.extend(boot_nodes.clone());
+        discovery_v4_config.add_eip868_pair("eth", status.forkid);
+
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
@@ -462,6 +464,7 @@ where
             }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
                 self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
+                self.swarm.state_mut().on_status_update(height, hash)
             }
         }
     }

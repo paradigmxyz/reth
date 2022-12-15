@@ -137,7 +137,7 @@ pub enum DiscoveryEvent {
     /// A new node was discovered
     Discovered(PeerId, SocketAddr),
     /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
-    EnrForkId(PeerId, ForkId)
+    EnrForkId(PeerId, ForkId),
 }
 
 #[cfg(test)]

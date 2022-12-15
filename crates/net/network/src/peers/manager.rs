@@ -238,10 +238,12 @@ impl PeersManager {
 
     /// Called as follow-up for a discovered peer.
     ///
-    /// The [`ForkId`] is retrieved from an ENR record that the peer announces over the discovery protocol
-    pub(crate) fn add_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
+    /// The [`ForkId`] is retrieved from an ENR record that the peer announces over the discovery
+    /// protocol
+    pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-
+            trace!(target : "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
+            peer.fork_id = Some(fork_id);
         }
     }
 
@@ -291,8 +293,18 @@ impl PeersManager {
         let mut best_peer = unconnected.next()?;
 
         for maybe_better in unconnected {
-            if maybe_better.1.reputation > best_peer.1.reputation {
-                best_peer = maybe_better;
+            match (maybe_better.1.fork_id.as_ref(), best_peer.1.fork_id.as_ref()) {
+                (Some(_), Some(_)) | (None, None) => {
+                    if maybe_better.1.reputation > best_peer.1.reputation {
+                        best_peer = maybe_better;
+                    }
+                }
+                (Some(_), None) => {
+                    if !maybe_better.1.is_banned() {
+                        best_peer = maybe_better;
+                    }
+                }
+                _ => {}
             }
         }
         Some((*best_peer.0, best_peer.1))
@@ -431,6 +443,8 @@ pub struct Peer {
     reputation: i32,
     /// The state of the connection, if any.
     state: PeerConnectionState,
+    /// The [`ForkId`] that the peer announced via discovery.
+    fork_id: Option<ForkId>,
 }
 
 // === impl Peer ===
@@ -441,7 +455,7 @@ impl Peer {
     }
 
     fn with_state(addr: SocketAddr, state: PeerConnectionState) -> Self {
-        Self { addr, state, reputation: 0 }
+        Self { addr, state, reputation: 0, fork_id: None }
     }
 
     /// Returns true if the peer's reputation is below the banned threshold.

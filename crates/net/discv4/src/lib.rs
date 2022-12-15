@@ -182,7 +182,7 @@ impl Discv4 {
         trace!( target : "discv4",  ?local_addr,"opened UDP socket");
 
         // We don't expect many commands, so the buffer can be quite small here.
-        let (to_service, rx) = mpsc::channel(5);
+        let (to_service, rx) = mpsc::channel(100);
         let service =
             Discv4Service::new(socket, local_addr, local_node_record, secret_key, config, Some(rx));
         let discv4 = Discv4 { local_addr, to_service };
@@ -1192,8 +1192,7 @@ impl Discv4Service {
     }
 
     fn enr_request_timeout(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_timeout)
-            .as_secs()
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_timeout).as_secs()
     }
 
     fn send_neighbours_timeout(&self) -> u64 {
@@ -1725,6 +1724,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn test_lookup() {
         reth_tracing::init_tracing();
         let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };

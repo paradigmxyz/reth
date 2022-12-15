@@ -164,9 +164,7 @@ impl Message {
             MessageId::FindNode => Message::FindNode(FindNode::decode(payload)?),
             MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
             MessageId::EnrRequest => Message::EnrRequest(EnrRequest::decode(payload)?),
-            MessageId::EnrResponse => {
-                Message::EnrResponse(EnrResponse::decode(payload)?)
-            }
+            MessageId::EnrResponse => Message::EnrResponse(EnrResponse::decode(payload)?),
         };
 
         Ok(Packet { msg, node_id, hash: header_hash })

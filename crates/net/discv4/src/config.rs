@@ -57,6 +57,30 @@ impl Discv4Config {
     pub fn builder() -> Discv4ConfigBuilder {
         Default::default()
     }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_pair(&mut self, key: impl AsRef<[u8]>, value: impl Encodable) -> &mut Self {
+        let mut buf = BytesMut::new();
+        value.encode(&mut buf);
+        self.add_eip868_rlp_pair(key, buf.freeze())
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_rlp_pair(&mut self, key: impl AsRef<[u8]>, rlp: Bytes) -> &mut Self {
+        self.additional_eip868_rlp_pairs.insert(key.as_ref().to_vec(), rlp);
+        self
+    }
+
+    /// Extend additional key value pairs to include in the ENR
+    pub fn extend_eip868_rlp_pairs(
+        &mut self,
+        pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, Bytes)>,
+    ) -> &mut Self {
+        for (k, v) in pairs.into_iter() {
+            self.add_eip868_rlp_pair(k, v);
+        }
+        self
+    }
 }
 
 impl Default for Discv4Config {
@@ -68,8 +92,8 @@ impl Default for Discv4Config {
             ping_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(20),
             enr_timeout: Duration::from_secs(5),
-            neighbours_timeout: Duration::from_secs(30),
-            lookup_interval: Duration::from_secs(20),
+            neighbours_timeout: Duration::from_secs(5),
+            lookup_interval: Duration::from_secs(15),
             ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
