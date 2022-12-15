@@ -99,7 +99,7 @@ impl Default for Discv4Config {
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
-            enable_eip868: true,
+            enable_eip868: false,
             additional_eip868_rlp_pairs: Default::default(),
         }
     }
