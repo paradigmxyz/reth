@@ -131,11 +131,11 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
-    stage_test_suite!(SendersTestRunner);
+    stage_test_suite_ext!(SendersTestRunner);
 
     #[tokio::test]
     async fn execute_intermediate_commit() {

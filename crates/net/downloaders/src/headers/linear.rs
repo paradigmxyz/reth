@@ -11,7 +11,6 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{HeadersDirection, SealedHeader, H256};
-use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     borrow::Borrow,
     collections::VecDeque,
@@ -57,12 +56,8 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    fn stream(
-        &self,
-        head: SealedHeader,
-        forkchoice: ForkchoiceState,
-    ) -> DownloadStream<'_, SealedHeader> {
-        Box::pin(self.new_download(head, forkchoice))
+    fn stream(&self, head: SealedHeader, tip: H256) -> DownloadStream<'_, SealedHeader> {
+        Box::pin(self.new_download(head, tip))
     }
 }
 
@@ -78,14 +73,10 @@ impl<C: Consensus, H: HeadersClient> Clone for LinearDownloader<C, H> {
 }
 
 impl<C: Consensus, H: HeadersClient> LinearDownloader<C, H> {
-    fn new_download(
-        &self,
-        head: SealedHeader,
-        forkchoice: ForkchoiceState,
-    ) -> HeadersDownload<C, H> {
+    fn new_download(&self, head: SealedHeader, tip: H256) -> HeadersDownload<C, H> {
         HeadersDownload {
             head,
-            forkchoice,
+            tip,
             buffered: VecDeque::default(),
             request: Default::default(),
             consensus: Arc::clone(&self.consensus),
@@ -132,7 +123,8 @@ impl Future for HeadersRequestFuture {
 pub struct HeadersDownload<C, H> {
     /// The local head of the chain.
     head: SealedHeader,
-    forkchoice: ForkchoiceState,
+    /// Tip to start syncing from
+    tip: H256,
     /// Buffered results
     buffered: VecDeque<SealedHeader>,
     /// Contains the request that's currently in progress.
@@ -174,7 +166,7 @@ where
 
     /// Returns the start hash for a new request.
     fn request_start(&self) -> H256 {
-        self.earliest_header().map_or(self.forkchoice.head_block_hash, |h| h.parent_hash)
+        self.earliest_header().map_or(self.tip, |h| h.parent_hash)
     }
 
     /// Get the headers request to dispatch
@@ -279,12 +271,12 @@ where
                         // Proceed to insert. If there is a validation error re-queue
                         // the future.
                         self.validate(header, &parent)?;
-                    } else if parent.hash() != self.forkchoice.head_block_hash {
+                    } else if parent.hash() != self.tip {
                         // The buffer is empty and the first header does not match the
                         // tip, requeue the future
                         return Err(DownloadError::InvalidTip {
                             received: parent.hash(),
-                            expected: self.forkchoice.head_block_hash,
+                            expected: self.tip,
                         })
                     }
 
@@ -460,7 +452,7 @@ mod tests {
             LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
 
         let result = downloader
-            .stream(SealedHeader::default(), ForkchoiceState::default())
+            .stream(SealedHeader::default(), H256::default())
             .try_collect::<Vec<_>>()
             .await;
         assert!(result.is_err());
@@ -487,9 +479,7 @@ mod tests {
             ])
             .await;
 
-        let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
-
-        let result = downloader.stream(p0, fork).try_collect::<Vec<_>>().await;
+        let result = downloader.stream(p0.clone(), p0.hash_slow()).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert!(headers.is_empty());
     }
@@ -515,9 +505,7 @@ mod tests {
             ])
             .await;
 
-        let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
-
-        let result = downloader.stream(p3, fork).try_collect::<Vec<_>>().await;
+        let result = downloader.stream(p3, p0.hash_slow()).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert_eq!(headers.len(), 3);
         assert_eq!(headers[0], p0);
@@ -532,7 +520,7 @@ mod tests {
             LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
 
         let result = downloader
-            .stream(SealedHeader::default(), ForkchoiceState::default())
+            .stream(SealedHeader::default(), H256::default())
             .try_collect::<Vec<_>>()
             .await;
         assert!(result.is_err());
@@ -559,9 +547,7 @@ mod tests {
             ])
             .await;
 
-        let fork = ForkchoiceState { head_block_hash: p0.hash_slow(), ..Default::default() };
-
-        let result = downloader.stream(p3, fork).try_collect::<Vec<_>>().await;
+        let result = downloader.stream(p3, p0.hash_slow()).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert_eq!(headers.len(), 3);
         assert_eq!(headers[0], p0);
