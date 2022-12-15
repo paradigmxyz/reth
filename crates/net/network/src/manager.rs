@@ -62,19 +62,23 @@ use tracing::{error, info, trace, warn};
 ///  graph TB
 ///    handle(NetworkHandle)
 ///    events(NetworkEvents)
-///    transactions[(Transactions Task)]
+///    transactions(Transactions Task)
+///    ethrequest(ETH Request Task)
+///    discovery(Discovery Task)
 ///    subgraph NetworkManager
 ///      direction LR
 ///      subgraph Swarm
 ///          direction TB
-///          B1[(Peer Sessions)]
+///          B1[(Session Manager)]
 ///          B2[(Connection Lister)]
-///          B3[(State)]
+///          B3[(Network State)]
 ///      end
-///    end
-///   handle <--> |request/response channel| NetworkManager
+///   end
+///   handle <--> |request response channel| NetworkManager
 ///   NetworkManager --> |Network events| events
-///   transactions --> |propagate transactions| NetworkManager
+///   transactions <--> |transactions| NetworkManager
+///   ethrequest <--> |ETH request handing| NetworkManager
+///   discovery --> |Discovered peers| NetworkManager
 /// ```
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
