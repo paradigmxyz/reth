@@ -31,7 +31,7 @@ impl Command {
         // await the tasks for resolve's to complete and give back our test results
         let mut num_of_failed = 0;
         let mut num_of_passed = 0;
-        for (result,file) in results {
+        for (result, file) in results {
             match result {
                 Ok(_) => {
                     num_of_passed += 1;

@@ -3173,7 +3173,6 @@ dependencies = [
  "clap 4.0.22",
  "eyre",
  "futures",
- "rayon",
  "reth-consensus",
  "reth-db",
  "reth-downloaders",

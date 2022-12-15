@@ -1,4 +1,4 @@
-use crate::test_eth_chain::models::{RootOrState, State, ForkSpec};
+use crate::test_eth_chain::models::{ForkSpec, RootOrState, State};
 
 use super::models::Test;
 use reth_db::{
@@ -13,50 +13,55 @@ use reth_primitives::{
 };
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageDB};
-use std::{ffi::OsStr, path::{Path, PathBuf}};
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 use tracing::{debug, info};
 
 /// Tests are test edge cases that are not possible to happen on mainnet, so we are skipping them.
 pub fn should_skip(path: &Path) -> bool {
-    // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require custom json parser.
-    // https://github.com/ethereum/tests/issues/971
+    // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
+    // custom json parser. https://github.com/ethereum/tests/issues/971
     if path.file_name() == Some(OsStr::new("ValueOverflow.json")) {
-        return true;
+        return true
     }
     // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
     if path.file_name() == Some(OsStr::new("typeTwoBerlin.json")) {
-        return true;
+        return true
     }
-    // Test checks if nonce overflows. We are handling this correctly but we are not parsing exception in testsuite
-    // There are more nonce overflow tests that are in internal call/create, and those tests are passing and are enabled.
+    // Test checks if nonce overflows. We are handling this correctly but we are not parsing
+    // exception in testsuite There are more nonce overflow tests that are in internal
+    // call/create, and those tests are passing and are enabled.
     if path.file_name() == Some(OsStr::new("CreateTransactionHighNonce.json")) {
-        return true;
+        return true
     }
 
-    // Test check if gas price overflows, we handle this correctly but does not match tests specific exception.
+    // Test check if gas price overflows, we handle this correctly but does not match tests specific
+    // exception.
     if path.file_name() == Some(OsStr::new("HighGasPrice.json")) {
-        return true;
+        return true
     }
 
-    // Skip test where basefee/accesslist/diffuculty is present but it shouldn't be supported in London/Berlin/TheMerge.
-    // https://github.com/ethereum/tests/blob/5b7e1ab3ffaf026d99d20b17bb30f533a2c80c8b/GeneralStateTests/stExample/eip1559.json#L130
+    // Skip test where basefee/accesslist/diffuculty is present but it shouldn't be supported in
+    // London/Berlin/TheMerge. https://github.com/ethereum/tests/blob/5b7e1ab3ffaf026d99d20b17bb30f533a2c80c8b/GeneralStateTests/stExample/eip1559.json#L130
     // It is expected to not execute these tests.
-    if path.file_name() == Some(OsStr::new("accessListExample.json"))
-        || path.file_name() == Some(OsStr::new("basefeeExample.json"))
-        || path.file_name() == Some(OsStr::new("eip1559.json"))
-        || path.file_name() == Some(OsStr::new("mergeTest.json"))
+    if path.file_name() == Some(OsStr::new("accessListExample.json")) ||
+        path.file_name() == Some(OsStr::new("basefeeExample.json")) ||
+        path.file_name() == Some(OsStr::new("eip1559.json")) ||
+        path.file_name() == Some(OsStr::new("mergeTest.json"))
     {
-        return true;
+        return true
     }
 
     // These tests are passing, but they take a lot of time to execute so we are going to skip them.
-    if path.file_name() == Some(OsStr::new("loopExp.json"))
-        || path.file_name() == Some(OsStr::new("Call50000_sha256.json"))
-        || path.file_name() == Some(OsStr::new("static_Call50000_sha256.json"))
-        || path.file_name() == Some(OsStr::new("loopMul.json"))
-        || path.file_name() == Some(OsStr::new("CALLBlake2f_MaxRounds.json"))
+    if path.file_name() == Some(OsStr::new("loopExp.json")) ||
+        path.file_name() == Some(OsStr::new("Call50000_sha256.json")) ||
+        path.file_name() == Some(OsStr::new("static_Call50000_sha256.json")) ||
+        path.file_name() == Some(OsStr::new("loopMul.json")) ||
+        path.file_name() == Some(OsStr::new("CALLBlake2f_MaxRounds.json"))
     {
-        return true;
+        return true
     }
     false
 }
@@ -68,18 +73,18 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
     let suites: Test = serde_json::from_reader(&*json_file)?;
 
     if should_skip(path) {
-        return Ok(());
+        return Ok(())
     }
 
     for (name, suite) in suites.0 {
         if matches!(
             suite.network,
-            ForkSpec::ByzantiumToConstantinopleAt5
-                | ForkSpec::Constantinople
-                | ForkSpec::MergeEOF
-                | ForkSpec::MergeMeterInitCode
+            ForkSpec::ByzantiumToConstantinopleAt5 |
+                ForkSpec::Constantinople |
+                ForkSpec::MergeEOF |
+                ForkSpec::MergeMeterInitCode
         ) {
-            continue;
+            continue
         }
 
         if matches!(suite.pre, State(RootOrState::Root(_))) {}
@@ -88,7 +93,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             RootOrState::State(state) => state,
             RootOrState::Root(_) => {
                 info!("Skipping test {name}...");
-                continue;
+                continue
             }
         };
 

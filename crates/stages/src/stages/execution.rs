@@ -109,7 +109,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
-            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block });
+            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block })
         }
 
         // get headers from canonical numbers
@@ -194,9 +194,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
-                    return Err(
-                        DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into()
-                    );
+                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
             }
@@ -209,10 +207,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .next()
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
-                    return Err(DatabaseIntegrityError::TransactionsSignerGap {
-                        missing: tx_index,
-                    }
-                    .into());
+                    return Err(
+                        DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
+                    )
                 }
                 signers.push(tx);
             }
@@ -232,7 +229,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let change_set = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
-                    .spawn_scoped(&scope, || {
+                    .spawn_scoped(scope, || {
                         reth_executor::executor::execute_and_verify_receipt(
                             header,
                             &recovered_transactions,
@@ -240,8 +237,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             state_provider,
                         )
                     })
-                    .unwrap();
-                handle.join().unwrap()
+                    .expect("Expects that thread name is not null");
+                handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
             block_change_patches.push((change_set, start_tx_index, block_reward_index));
@@ -374,7 +371,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: unwind_to });
+            return Ok(UnwindOutput { stage_progress: unwind_to })
         }
 
         // get all batches for account change
@@ -415,7 +412,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = account_changeset.last()?;
         while let Some((tx_number, _)) = entry {
             if tx_number < to_tx_number {
-                break;
+                break
             }
             account_changeset.delete_current()?;
             entry = account_changeset.prev()?;
@@ -424,7 +421,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = storage_changeset.last()?;
         while let Some((TxNumberAddress((tx_number, _)), _)) = entry {
             if tx_number < to_tx_number {
-                break;
+                break
             }
             storage_changeset.delete_current()?;
             entry = storage_changeset.prev()?;

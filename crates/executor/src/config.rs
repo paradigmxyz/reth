@@ -77,7 +77,7 @@ impl SpecUpgrades {
         }
     }
 
-    /// New frontier enabled spec
+    /// New homestead enabled spec
     pub fn new_homestead_activated() -> Self {
         Self {
             homestead: 0,

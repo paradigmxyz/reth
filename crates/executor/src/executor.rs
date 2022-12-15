@@ -514,8 +514,7 @@ mod tests {
             block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block.header, &transactions, &config, db).unwrap();
+        let out = execute_and_verify_receipt(&block.header, &transactions, &config, db).unwrap();
 
         assert_eq!(out.changeset.len(), 1, "Should executed one transaction");
 
