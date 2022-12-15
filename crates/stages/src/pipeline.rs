@@ -183,9 +183,14 @@ impl<DB: Database> Pipeline<DB> {
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
+            trace!(
+                target: "sync::pipeline",
+                stage = %stage_id,
+                "Executing stage"
+            );
             let next = queued_stage
                 .execute(state, previous_stage, db)
-                .instrument(info_span!("Running", stage = %stage_id))
+                .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
             match next {
@@ -287,7 +292,11 @@ impl<DB: Database> QueuedStage<DB> {
     ) -> Result<ControlFlow, PipelineError> {
         let stage_id = self.stage.id();
         if self.require_tip && !state.reached_tip() {
-            warn!(stage = %stage_id, "Tip not reached as required by stage, skipping.");
+            warn!(
+                target: "sync::pipeline",
+                stage = %stage_id,
+                "Tip not reached as required by stage, skipping."
+            );
             state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
             // Stage requires us to reach the tip of the chain first, but we have
@@ -304,7 +313,11 @@ impl<DB: Database> QueuedStage<DB> {
                 .zip(state.max_block)
                 .map_or(false, |(prev_progress, target)| prev_progress >= target);
             if stage_reached_max_block {
-                warn!(stage = %stage_id, "Stage reached maximum block, skipping.");
+                warn!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    "Stage reached maximum block, skipping."
+                );
                 state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
                 // We reached the maximum block, so we skip the stage
@@ -323,7 +336,13 @@ impl<DB: Database> QueuedStage<DB> {
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
-                    info!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
+                    info!(
+                        target: "sync::pipeline",
+                        stage = %stage_id,
+                        %stage_progress,
+                        %done,
+                        "Stage made progress"
+                    );
                     stage_id.save_progress(db.deref(), stage_progress)?;
 
                     state
@@ -345,7 +364,12 @@ impl<DB: Database> QueuedStage<DB> {
                     state.events_sender.send(PipelineEvent::Error { stage_id }).await?;
 
                     return if let StageError::Validation { block, error } = err {
-                        warn!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error: {error}");
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            bad_block = %block,
+                            "Stage encountered a validation error: {error}"
+                        );
 
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the
@@ -355,12 +379,20 @@ impl<DB: Database> QueuedStage<DB> {
                             bad_block: Some(block),
                         })
                     } else if err.is_fatal() {
-                        error!(stage = %stage_id, "Stage encountered a fatal error: {err}.");
+                        error!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            "Stage encountered a fatal error: {err}."
+                        );
                         Err(err.into())
                     } else {
                         // On other errors we assume they are recoverable if we discard the
                         // transaction and run the stage again.
-                        warn!(stage = %stage_id, "Stage encountered a non-fatal error: {err}. Retrying");
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            "Stage encountered a non-fatal error: {err}. Retrying"
+                        );
                         continue
                     }
                 }
