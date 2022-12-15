@@ -16,10 +16,7 @@ mod state;
 /// Common test helpers for mocking the Provider.
 pub mod test_utils;
 
-pub use block::{
-    get_cumulative_tx_count_by_hash, insert_canonical_block, BlockProvider, ChainInfo,
-    HeaderProvider,
-};
+pub use block::{insert_canonical_block, BlockProvider, ChainInfo, HeaderProvider};
 pub use db_provider::{
     self as db, ProviderImpl, StateProviderImplHistory, StateProviderImplLatest,
     StateProviderImplRefHistory, StateProviderImplRefLatest,

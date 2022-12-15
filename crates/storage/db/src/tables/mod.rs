@@ -11,7 +11,7 @@ use crate::{
         codecs::CompactU256,
         models::{
             accounts::{AccountBeforeTx, TxNumberAddress},
-            blocks::{HeaderHash, NumTransactions, StoredBlockOmmers},
+            blocks::{HeaderHash, StoredBlockOmmers},
             BlockNumHash, ShardedKey,
         },
     },
@@ -33,14 +33,13 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 24] = [
+pub const TABLES: [(TableType, &str); 23] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
     (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
-    (TableType::Table, CumulativeTxCount::const_name()),
     (TableType::Table, NonCanonicalTransactions::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
@@ -136,15 +135,6 @@ table!(
     /// Stores the uncles/ommers of the block.
     ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
 );
-
-table!(
-    /// Stores the maximum [`TxNumber`] from which this particular block starts.
-    ///
-    /// Used to collect transactions for the block. e.g. To collect transactions
-    /// for block `x` you would need to look at cumulative count at block `x` and
-    /// at block `x - 1`.
-    ( CumulativeTxCount ) BlockNumHash | NumTransactions
-); // TODO U256?
 
 table!(
     /// Stores the transaction body from non canonical transactions.

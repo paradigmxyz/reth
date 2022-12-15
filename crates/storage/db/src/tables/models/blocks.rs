@@ -1,5 +1,7 @@
 //! Block related models and types.
 
+use std::ops::Range;
+
 use crate::{
     impl_fixed_arbitrary,
     table::{Decode, Encode},
@@ -24,6 +26,32 @@ pub struct StoredBlockBody {
     pub start_tx_id: TxNumber,
     /// The total number of transactions
     pub tx_count: NumTransactions,
+}
+
+impl StoredBlockBody {
+    /// Return the range of transaction ids for this body
+    pub fn tx_id_range(&self) -> Range<u64> {
+        self.start_tx_id..self.start_tx_id + self.tx_count
+    }
+
+    /// Return the last tx index if the block is not empty
+    pub fn last_tx_index(&self) -> Option<TxNumber> {
+        if !self.is_empty() {
+            Some(self.start_tx_id + self.tx_count - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Return any last index that should be before this block
+    pub fn any_last_tx_index(&self) -> TxNumber {
+        self.start_tx_id.saturating_add(self.tx_count).saturating_sub(1)
+    }
+
+    /// Return a flag whether the block is empty
+    pub fn is_empty(&self) -> bool {
+        self.tx_count == 0
+    }
 }
 
 /// The storage representation of a block ommers.

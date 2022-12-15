@@ -82,10 +82,13 @@ macro_rules! stage_test_suite {
 
         // Check that unwind does not panic on empty database.
         #[tokio::test]
-        async fn unwind_empty_db() {
+        async fn unwind_no_entries() {
             // Set up the runner
-            let runner = $runner::default();
+            let mut runner = $runner::default();
             let input = crate::stage::UnwindInput::default();
+
+            // Seed the database
+            runner.seed_execution(crate::stage::ExecInput::default()).expect("failed to seed");
 
             // Run stage unwind
             let rx = runner.unwind(input).await;

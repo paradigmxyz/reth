@@ -330,7 +330,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: unwind_from })?;
 
         let from_tx_number = db_tx
-            .get::<tables::CumulativeTxCount>(BlockNumHash((unwind_from, unwind_from_hash)))?
+            .get::<tables::CumulativeTxCount>((unwind_from, unwind_from_hash).into())?
             .ok_or(DatabaseIntegrityError::CumulativeTxCount {
                 number: unwind_from,
                 hash: unwind_from_hash,

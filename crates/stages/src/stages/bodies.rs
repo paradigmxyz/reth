@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
-    models::StoredBlockOmmers,
+    models::{StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -87,13 +87,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         }
 
         // The block we ended at last sync, and the one we are starting on now
-        let previous_block = input.stage_progress.unwrap_or_default();
-        let starting_block = previous_block + 1;
+        let stage_progress = input.stage_progress.unwrap_or_default();
+        let starting_block = stage_progress + 1;
 
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.batch_size);
-        if target <= previous_block {
-            return Ok(ExecOutput { stage_progress: target, reached_tip: true, done: true })
+        if target <= stage_progress {
+            return Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
         }
 
         let bodies_to_download = self.bodies_to_download::<DB>(db, starting_block, target)?;
@@ -102,10 +102,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
         let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
-        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
+
+        // Cursors used to write state transition mapping
+        let mut block_transition_cursor = db.cursor_mut::<tables::BlockTransitionIndex>()?;
+        let mut tx_transition_cursor = db.cursor_mut::<tables::TxTransitionIndex>()?;
 
         // Get id for the first transaction in the block
-        let mut first_tx_id = db.get_first_tx_id(starting_block)?;
+        let (mut current_tx_id, mut transition_id) = db.get_next_block_ids(starting_block)?;
 
         // Cursor used to look up headers for block pre-validation
         let mut header_cursor = db.cursor::<tables::Headers>()?;
@@ -113,7 +116,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
-        let mut highest_block = previous_block;
+        let mut highest_block = stage_progress;
         while let Some((block_number, header_hash, body)) =
             bodies_stream.try_next().await.map_err(|err| StageError::Internal(err.into()))?
         {
@@ -139,16 +142,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                 .map_err(|err| StageError::Validation { block: block_number, error: err })?;
 
             // Write block
-            let key = (block_number, header_hash).into();
-            // Additional +1, increments tx count to allow indexing of ChangeSet that contains block
-            // reward. This can't be added to last transaction ChangeSet as it would
-            // break if block is empty.
-            let this_tx_count = first_tx_id +
-                block.body.len() as u64 +
-                if self.consensus.has_block_reward(block_number) { 1 } else { 0 };
-            tx_count_cursor.append(key, this_tx_count)?;
+            let block_key = (block_number, header_hash).into();
+            body_cursor.append(
+                block_key,
+                StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
+            )?;
             ommers_cursor.append(
-                key,
+                block_key,
                 StoredBlockOmmers {
                     ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
                 },
@@ -157,14 +157,24 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // Write transactions
             for transaction in block.body {
                 // Insert the transaction hash to number mapping
-                db.put::<tables::TxHashNumber>(transaction.hash(), first_tx_id)?;
+                db.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
                 // Append the transaction
-                tx_cursor.append(first_tx_id, transaction)?;
-                first_tx_id += 1;
+                tx_cursor.append(current_tx_id, transaction)?;
+                tx_transition_cursor.append(current_tx_id, transition_id)?;
+                current_tx_id += 1;
+                transition_id += 1;
             }
 
+            // The block transition marks the final state at the end of the block.
+            // Increment the transition if the block contains an addition block reward.
+            // If the block does not have a reward, the transition will be the same as the
+            // transition at the last transaction of this block.
+            if self.consensus.has_block_reward(block_number) {
+                transition_id += 1;
+            }
+            block_transition_cursor.append(block_key, transition_id)?;
+
             highest_block = block_number;
-            first_tx_id = this_tx_count;
         }
 
         // The stage is "done" if:
@@ -182,38 +192,51 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         db: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
-        let mut block_ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
+        // Cursors to unwind bodies, ommers, transactions and tx hash to number
+        let mut body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
+        let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
         let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
         let mut tx_hash_number_cursor = db.cursor_mut::<tables::TxHashNumber>()?;
+        // Cursors to unwind transitions
+        let mut block_transition_cursor = db.cursor_mut::<tables::BlockTransitionIndex>()?;
+        let mut tx_transition_cursor = db.cursor_mut::<tables::TxTransitionIndex>()?;
 
-        let mut entry = tx_count_cursor.last()?;
-        while let Some((key, count)) = entry {
+        // let mut entry = tx_count_cursor.last()?;
+        let mut entry = body_cursor.last()?;
+        while let Some((key, body)) = entry {
             if key.number() <= input.unwind_to {
                 break
             }
 
-            // First delete the current and find the previous cum tx count value
-            tx_count_cursor.delete_current()?;
-            entry = tx_count_cursor.prev()?;
-
-            if block_ommers_cursor.seek_exact(key)?.is_some() {
-                block_ommers_cursor.delete_current()?;
+            // Delete the ommers value if any
+            if ommers_cursor.seek_exact(key)?.is_some() {
+                ommers_cursor.delete_current()?;
             }
 
-            let prev_count = entry.map(|(_, v)| v).unwrap_or_default();
-            for tx_id in prev_count..count {
-                // Block reward introduces gaps in transaction (Last tx number can be the gap)
-                // this is why we are checking if tx exist or not.
-                // NOTE: more performant way is probably to use `prev`/`next` fn. and reduce
-                // count by one if block has block reward.
+            // Delete the block transition if any
+            if block_transition_cursor.seek_exact(key)?.is_some() {
+                block_transition_cursor.delete_current()?;
+            }
+
+            // Delete all transactions that belong to this block
+            for tx_id in body.tx_id_range() {
+                // First delete the transaction and hash to id mapping
                 if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
                     transaction_cursor.delete_current()?;
                     if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
                 }
+                // Delete the transaction transition if any
+                if tx_transition_cursor.seek_exact(tx_id)?.is_some() {
+                    tx_transition_cursor.delete_current()?;
+                }
             }
+
+            // Delete the current body value
+            body_cursor.delete_current()?;
+            // Move the cursor to the previous value
+            entry = body_cursor.prev()?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -490,7 +513,7 @@ mod tests {
         use assert_matches::assert_matches;
         use reth_db::{
             cursor::DbCursorRO,
-            models::{BlockNumHash, NumTransactions, StoredBlockOmmers},
+            models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
         };
@@ -508,7 +531,7 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{BlockLocked, BlockNumber, Header, SealedHeader, H256};
+        use reth_primitives::{BlockLocked, BlockNumber, TxNumber, H256};
         use std::{collections::HashMap, sync::Arc};
 
         /// The block hash of the genesis block.
@@ -578,7 +601,6 @@ mod tests {
             type Seed = Vec<BlockLocked>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                self.insert_genesis()?;
                 let start = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage_progress() + 1;
                 let blocks = random_block_range(start..end, GENESIS_HASH);
@@ -587,20 +609,27 @@ mod tests {
                     // Insert last progress data
                     self.db.commit(|tx| {
                         let key = (progress.number, progress.hash()).into();
-                        let last_count = tx
-                            .cursor::<tables::CumulativeTxCount>()?
-                            .last()?
-                            .map(|(_, v)| v)
-                            .unwrap_or_default();
-                        // +1 for block reward,
-                        let tx_count = last_count + progress.body.len() as u64 + 1;
-                        tx.put::<tables::CumulativeTxCount>(key, tx_count)?;
-                        tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
-                        (last_count..tx_count).try_for_each(|idx| {
+                        let body = StoredBlockBody {
+                            start_tx_id: 0,
+                            tx_count: progress.body.len() as u64,
+                        };
+                        body.tx_id_range().try_for_each(|tx_id| {
                             let transaction = random_signed_tx();
-                            tx.put::<tables::TxHashNumber>(transaction.hash(), idx)?;
-                            tx.put::<tables::Transactions>(idx, transaction)
-                        })
+                            tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
+                            tx.put::<tables::Transactions>(tx_id, transaction)?;
+                            tx.put::<tables::TxTransitionIndex>(tx_id, tx_id)
+                        })?;
+
+                        // Randomize rewards
+                        let has_reward: bool = rand::random();
+                        let last_transition_id = progress.body.len().saturating_sub(1) as u64;
+                        let block_transition_id =
+                            last_transition_id + if has_reward { 1 } else { 0 };
+
+                        tx.put::<tables::BlockTransitionIndex>(key, block_transition_id)?;
+                        tx.put::<tables::BlockBodies>(key, body)?;
+                        tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
+                        Ok(())
                     })?;
                 }
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
@@ -622,16 +651,23 @@ mod tests {
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+                self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
+                    key.number()
+                })?;
                 self.db.check_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
                     key.number()
                 })?;
-                self.db.check_no_entry_above::<tables::CumulativeTxCount, _>(
+                self.db.check_no_entry_above::<tables::BlockTransitionIndex, _>(
                     input.unwind_to,
                     |key| key.number(),
                 )?;
-                if let Some(last_tx_id) = self.last_count() {
+                if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.db
                         .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
+                    self.db.check_no_entry_above::<tables::TxTransitionIndex, _>(
+                        last_tx_id,
+                        |key| key,
+                    )?;
                     self.db.check_no_entry_above_by_value::<tables::TxHashNumber, _>(
                         last_tx_id,
                         |value| value,
@@ -642,28 +678,18 @@ mod tests {
         }
 
         impl BodyTestRunner {
-            /// Insert the genesis block into the appropriate tables
-            ///
-            /// The genesis block always has no transactions and no ommers, and it always has the
-            /// same hash.
-            pub(crate) fn insert_genesis(&self) -> Result<(), TestRunnerError> {
-                let header = SealedHeader::new(Header::default(), GENESIS_HASH);
-                self.db.insert_headers(std::iter::once(&header))?;
-                self.db.commit(|tx| {
-                    let key = (0, GENESIS_HASH).into();
-                    tx.put::<tables::CumulativeTxCount>(key, 0)?;
-                    tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })
+            /// Get the last available tx id if any
+            pub(crate) fn get_last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
+                let last_body = self.db.query(|tx| {
+                    let v = tx.cursor::<tables::BlockBodies>()?.last()?;
+                    Ok(v)
                 })?;
-
-                Ok(())
-            }
-
-            /// Retrieve the last tx count from the database
-            pub(crate) fn last_count(&self) -> Option<NumTransactions> {
-                self.db
-                    .query(|tx| Ok(tx.cursor::<tables::CumulativeTxCount>()?.last()?.map(|e| e.1)))
-                    .ok()
-                    .flatten()
+                Ok(match last_body {
+                    Some((_, body)) if body.tx_count != 0 => {
+                        Some(body.start_tx_id + body.tx_count - 1)
+                    }
+                    _ => None,
+                })
             }
 
             /// Validate that the inserted block data is valid
@@ -674,26 +700,28 @@ mod tests {
             ) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     // Acquire cursors on body related tables
+                    let mut bodies_cursor = tx.cursor::<tables::BlockBodies>()?;
                     let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
-                    let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
+                    let mut block_transition_cursor = tx.cursor::<tables::BlockTransitionIndex>()?;
                     let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
                     let mut tx_hash_num_cursor = tx.cursor::<tables::TxHashNumber>()?;
+                    let mut tx_transition_cursor = tx.cursor::<tables::TxTransitionIndex>()?;
 
-                    let first_tx_count_key = match tx_count_cursor.first()? {
+                    let first_body_key = match bodies_cursor.first()? {
                         Some((key, _)) => key,
                         None => return Ok(()),
                     };
-                    let mut walker = tx_count_cursor.walk(first_tx_count_key)?.peekable();
+                    let mut walker = bodies_cursor.walk(first_body_key)?;
 
-                    let mut prev_entry: Option<(BlockNumHash, NumTransactions)> = None;
+                    let mut prev_key: Option<BlockNumHash> = None;
                     while let Some(entry) = walker.next() {
-                        let (key, count) = entry?;
+                        let (key, body) = entry?;
 
                         // Validate sequentiality only after prev progress,
                         // since the data before is mocked and can contain gaps
                         if key.number() > prev_progress {
-                            if let Some((prev_key, _)) = prev_entry {
-                                assert_eq!(prev_key.number() + 1, key.number(), "Tx count entries must be sequential");
+                            if let Some(prev_key) = prev_key {
+                                assert_eq!(prev_key.number() + 1, key.number(), "Body entries must be sequential");
                             }
                         }
 
@@ -707,21 +735,23 @@ mod tests {
                         // Validate that ommers exist
                         assert_matches!(ommers_cursor.seek_exact(key), Ok(Some(_)), "Block ommers are missing");
 
-                        // Validate that block trasactions exist
-                        let first_tx_id = prev_entry.map(|(_, v)| v).unwrap_or_default();
-                        // reduce by one for block_reward index
-                        let tx_count = if count == 0 { 0 } else { count - 1 };
-                        for tx_id in first_tx_id..tx_count {
+                        // Validate that block transition exists
+                        assert_matches!(block_transition_cursor.seek_exact(key), Ok(Some(_)), "Block transition is missing");
+
+                        for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
-                            assert!(tx_entry.is_some(), "A transaction is missing.");
+                            assert!(tx_entry.is_some(), "Transaction is missing.");
+                            assert_matches!(
+                                tx_transition_cursor.seek_exact(tx_id), Ok(Some(_)), "Transaction transition is missing"
+                            );
                             assert_matches!(
                                 tx_hash_num_cursor.seek_exact(tx_entry.unwrap().1.hash),
                                 Ok(Some(_)),
-                                "A transaction hash to index mapping is missing."
+                                "Transaction hash to index mapping is missing."
                             );
                         }
 
-                        prev_entry = Some((key, count));
+                        prev_key = Some(key);
                     }
                     Ok(())
                 })?;
