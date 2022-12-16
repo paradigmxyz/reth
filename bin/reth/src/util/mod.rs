@@ -31,7 +31,7 @@ pub mod reth_tracing {
     impl TracingMode {
         fn into_env_filter(self) -> EnvFilter {
             match self {
-                Self::All => EnvFilter::new("reth=info"),
+                Self::All => EnvFilter::new("reth=trace"),
                 Self::Silent => EnvFilter::new(""),
             }
         }

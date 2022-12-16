@@ -2397,14 +2397,18 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7d24dc2dbae22bff6f1f9326ffce828c9f07ef9cc1e8002e5279f845432a30a"
 dependencies = [
+ "aho-corasick",
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.12.3",
+ "indexmap",
  "metrics",
  "num_cpus",
+ "ordered-float",
  "parking_lot 0.12.1",
  "portable-atomic",
  "quanta",
+ "radix_trie",
  "sketches-ddsketch",
 ]
 
@@ -2643,6 +2647,15 @@ name = "openssl-probe"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
+
+[[package]]
+name = "ordered-float"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "os_str_bytes"
@@ -3241,6 +3254,7 @@ dependencies = [
  "eyre",
  "futures",
  "metrics-exporter-prometheus",
+ "metrics-util",
  "reth-consensus",
  "reth-db",
  "reth-downloaders",
