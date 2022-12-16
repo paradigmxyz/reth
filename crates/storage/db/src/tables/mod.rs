@@ -10,16 +10,18 @@ use crate::{
     tables::{
         codecs::CompactU256,
         models::{
-            accounts::{AccountBeforeTx, TxNumberAddress},
-            blocks::{HeaderHash, NumTransactions, StoredBlockOmmers},
+            accounts::{AccountBeforeTx, TransitionIdAddress},
+            blocks::{HeaderHash, StoredBlockOmmers},
             BlockNumHash, ShardedKey,
         },
     },
 };
 use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TxHash, TxNumber, H256,
+    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
+
+use self::models::StoredBlockBody;
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -31,13 +33,13 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 21] = [
+pub const TABLES: [(TableType, &str); 23] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
+    (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
-    (TableType::Table, CumulativeTxCount::const_name()),
     (TableType::Table, NonCanonicalTransactions::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
@@ -46,6 +48,8 @@ pub const TABLES: [(TableType, &str); 21] = [
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
     (TableType::Table, Bytecodes::const_name()),
+    (TableType::Table, BlockTransitionIndex::const_name()),
+    (TableType::Table, TxTransitionIndex::const_name()),
     (TableType::Table, AccountHistory::const_name()),
     (TableType::Table, StorageHistory::const_name()),
     (TableType::DupSort, AccountChangeSet::const_name()),
@@ -123,18 +127,14 @@ table!(
 );
 
 table!(
-    /// Stores the uncles/ommers of the block.
-    ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
+    /// Stores block bodies.
+    ( BlockBodies ) BlockNumHash | StoredBlockBody
 );
 
 table!(
-    /// Stores the maximum [`TxNumber`] from which this particular block starts.
-    ///
-    /// Used to collect transactions for the block. e.g. To collect transactions
-    /// for block `x` you would need to look at cumulative count at block `x` and
-    /// at block `x - 1`.
-    ( CumulativeTxCount ) BlockNumHash | NumTransactions
-); // TODO U256?
+    /// Stores the uncles/ommers of the block.
+    ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
+);
 
 table!(
     /// Stores the transaction body from non canonical transactions.
@@ -172,6 +172,16 @@ table!(
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
     ( Bytecodes ) H256 | Bytecode
+);
+
+table!(
+    /// Stores the mapping of block number to state transition id.
+    ( BlockTransitionIndex ) BlockNumHash | TransitionId
+);
+
+table!(
+    /// Stores the mapping of transaction number to state transition id.
+    ( TxTransitionIndex ) TxNumber | TransitionId
 );
 
 dupsort!(
@@ -234,14 +244,14 @@ dupsort!(
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed (balance,nonce).
-    ( AccountChangeSet ) TxNumber | [Address] AccountBeforeTx
+    ( AccountChangeSet ) TransitionId | [Address] AccountBeforeTx
 );
 
 dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    ( StorageChangeSet ) TxNumberAddress | [H256] StorageEntry
+    ( StorageChangeSet ) TransitionIdAddress | [H256] StorageEntry
 );
 
 table!(

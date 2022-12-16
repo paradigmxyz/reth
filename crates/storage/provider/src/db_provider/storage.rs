@@ -9,7 +9,8 @@ use reth_db::{
 use reth_interfaces::Result;
 
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxNumber, H256, U256,
+    Account, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TransitionId, H256,
+    U256,
 };
 use std::marker::PhantomData;
 
@@ -26,71 +27,68 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
         // get block hash
         let block_hash = tx
             .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockNumberNotExists { block_number })?;
+            .ok_or(Error::BlockNumber { block_number })?;
 
-        // get transaction number
+        // get transition id
         let block_num_hash = (block_number, block_hash);
-        let transaction_number = tx
-            .get::<tables::CumulativeTxCount>(block_num_hash.into())?
-            .ok_or(Error::BlockTxNumberNotExists { block_hash })?;
+        let transition = tx
+            .get::<tables::BlockTransitionIndex>(block_num_hash.into())?
+            .ok_or(Error::BlockTransition { block_number, block_hash })?;
 
-        Ok(StateProviderImplHistory::new(tx, transaction_number))
+        Ok(StateProviderImplHistory::new(tx, transition))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<Self::HistorySP<'_>> {
         let tx = self.db.tx()?;
         // get block number
-        let block_number = tx
-            .get::<tables::HeaderNumbers>(block_hash)?
-            .ok_or(Error::BlockHashNotExist { block_hash })?;
+        let block_number =
+            tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
 
-        // get transaction number
+        // get transition id
         let block_num_hash = (block_number, block_hash);
-        let transaction_number = tx
-            .get::<tables::CumulativeTxCount>(block_num_hash.into())?
-            .ok_or(Error::BlockTxNumberNotExists { block_hash })?;
+        let transition = tx
+            .get::<tables::BlockTransitionIndex>(block_num_hash.into())?
+            .ok_or(Error::BlockTransition { block_number, block_hash })?;
 
-        Ok(StateProviderImplHistory::new(tx, transaction_number))
+        Ok(StateProviderImplHistory::new(tx, transition))
     }
 }
 
-/// State provider for given transaction number
+/// State provider for a given transition
 pub struct StateProviderImplHistory<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
-    /// Transaction number is main indexer of account and storage changes
-    transaction_number: TxNumber,
+    /// Transition is main indexer of account and storage changes
+    transition: TransitionId,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, TX: DbTx<'a>> StateProviderImplHistory<'a, TX> {
     /// Create new StateProvider from history transaction number
-    pub fn new(tx: TX, transaction_number: TxNumber) -> Self {
-        Self { tx, transaction_number, _phantom: PhantomData {} }
+    pub fn new(tx: TX, transition: TransitionId) -> Self {
+        Self { tx, transition, _phantom: PhantomData {} }
     }
 }
 
 impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplHistory<'a, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        StateProviderImplRefHistory::new(&self.tx, self.transaction_number).basic_account(address)
+        StateProviderImplRefHistory::new(&self.tx, self.transition).basic_account(address)
     }
 }
 
 impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
-        StateProviderImplRefHistory::new(&self.tx, self.transaction_number)
-            .storage(account, storage_key)
+        StateProviderImplRefHistory::new(&self.tx, self.transition).storage(account, storage_key)
     }
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
-        StateProviderImplRefHistory::new(&self.tx, self.transaction_number)
-            .bytecode_by_hash(code_hash)
+        StateProviderImplRefHistory::new(&self.tx, self.transition).bytecode_by_hash(code_hash)
     }
 
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        StateProviderImplRefHistory::new(&self.tx, self.transaction_number).block_hash(number)
+        StateProviderImplRefHistory::new(&self.tx, self.transition).block_hash(number)
     }
 }
 /// State provider with given hash
@@ -104,16 +102,16 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
 pub struct StateProviderImplRefHistory<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
-    /// Transaction number is main indexer of account and storage changes
-    transaction_number: TxNumber,
+    /// Transition is main indexer of account and storage changes
+    transition: TransitionId,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateProviderImplRefHistory<'a, 'b, TX> {
     /// Create new StateProvider from history transaction number
-    pub fn new(tx: &'b TX, transaction_number: TxNumber) -> Self {
-        Self { tx, transaction_number, _phantom: PhantomData {} }
+    pub fn new(tx: &'b TX, transition: TransitionId) -> Self {
+        Self { tx, transition, _phantom: PhantomData {} }
     }
 }
 
@@ -131,8 +129,8 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for StateProviderImplRefHistory<'a, 'b,
         // TODO when StorageHistory is defined
         let transaction_number =
             self.tx.get::<tables::StorageHistory>(Vec::new())?.map(|_integer_list|
-            // TODO select integer that is one less from transaction_number
-            self.transaction_number);
+            // TODO select integer that is one less from transaction_number <- // TODO: (rkrasiuk) not sure this comment is still relevant
+            self.transition);
 
         if transaction_number.is_none() {
             return Ok(None)

@@ -10,14 +10,13 @@ macro_rules! stage_test_suite {
             let input = crate::stage::ExecInput::default();
 
             // Run stage execution
-            let result = runner.execute(input).await.unwrap();
-            assert_matches::assert_matches!(
-                result,
-                Err(crate::error::StageError::DatabaseIntegrity(_))
-            );
+            let result = runner.execute(input).await;
+            // Check that the result is returned and the stage does not panic.
+            // The return result with empty db is stage-specific.
+            assert_matches::assert_matches!(result, Ok(_));
 
             // Validate the stage execution
-            assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+            assert!(runner.validate_execution(input, result.unwrap().ok()).is_ok(), "execution validation");
         }
 
         // Run the complete stage execution flow.
@@ -49,12 +48,15 @@ macro_rules! stage_test_suite {
             assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
         }
 
-        // Check that unwind does not panic on empty database.
+        // Check that unwind does not panic on no new entries within the input range.
         #[tokio::test]
-        async fn unwind_empty_db() {
+        async fn unwind_no_new_entries() {
             // Set up the runner
-            let runner = $runner::default();
+            let mut runner = $runner::default();
             let input = crate::stage::UnwindInput::default();
+
+            // Seed the database
+            runner.seed_execution(crate::stage::ExecInput::default()).expect("failed to seed");
 
             // Run stage unwind
             let rx = runner.unwind(input).await;

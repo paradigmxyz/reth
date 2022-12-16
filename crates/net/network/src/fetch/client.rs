@@ -41,7 +41,7 @@ impl HeadersClient for FetchClient {
 
 #[async_trait::async_trait]
 impl BodiesClient for FetchClient {
-    async fn get_block_body(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    async fn get_block_bodies(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
         let (response, rx) = oneshot::channel();
         self.request_tx.send(DownloadRequest::GetBlockBodies { request, response })?;
         rx.await?
