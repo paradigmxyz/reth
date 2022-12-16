@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
 use reth_db::{
-    models::{BlockNumHash, StoredBlockOmmers},
+    models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -151,12 +151,19 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         }
     };
 
+    // insert body data
+    tx.put::<tables::BlockBodies>(
+        block_num_hash,
+        StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
+    )?;
+
     for transaction in block.body.iter() {
         let rec_tx = transaction.clone().into_ecrecovered().unwrap();
         tx.put::<tables::TxSenders>(current_tx_id, rec_tx.signer())?;
         tx.put::<tables::Transactions>(current_tx_id, rec_tx.into())?;
         tx.put::<tables::TxTransitionIndex>(current_tx_id, transition_id)?;
         current_tx_id += 1;
+        transition_id += 1;
     }
 
     if has_block_reward {

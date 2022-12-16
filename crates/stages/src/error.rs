@@ -89,6 +89,12 @@ pub enum DatabaseIntegrityError {
         /// The block number key
         number: BlockNumber,
     },
+    /// The transaction is missing
+    #[error("Transaction #{id} not found")]
+    Transaction {
+        /// The transaction id
+        id: TxNumber,
+    },
     #[error("Block transition not found for block #{number} ({hash:?})")]
     BlockTransition { number: BlockNumber, hash: BlockHash },
     #[error("Gap in transaction table. Missing tx number #{missing}.")]
@@ -104,12 +110,6 @@ pub enum DatabaseIntegrityError {
     TotalDifficulty {
         /// The block number key
         number: BlockNumber,
-    },
-    /// The transaction is missing
-    #[error("Transaction #{id} not found")]
-    Transaction {
-        /// The transaction id
-        id: TxNumber,
     },
 }
 
