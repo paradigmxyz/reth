@@ -55,7 +55,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
     /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let stage_progress = input.stage_progress.unwrap_or_default();
@@ -67,10 +67,10 @@ impl<DB: Database> Stage<DB> for SendersStage {
         }
 
         // Look up the start index for the transaction range
-        let start_tx_index = db.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
+        let start_tx_index = tx.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
 
         // Look up the end index for transaction range (inclusive)
-        let end_tx_index = db.get_block_body_by_num(max_block_num)?.last_tx_index();
+        let end_tx_index = tx.get_block_body_by_num(max_block_num)?.last_tx_index();
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
@@ -78,10 +78,10 @@ impl<DB: Database> Stage<DB> for SendersStage {
         }
 
         // Acquire the cursor for inserting elements
-        let mut senders_cursor = db.cursor_mut::<tables::TxSenders>()?;
+        let mut senders_cursor = tx.cursor_mut::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
-        let mut tx_cursor = db.cursor::<tables::Transactions>()?;
+        let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
         // Walk the transactions from start to end index (inclusive)
         let entries = tx_cursor
             .walk(start_tx_index)?
@@ -112,12 +112,12 @@ impl<DB: Database> Stage<DB> for SendersStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = db.get_block_body_by_num(input.unwind_to)?.last_tx_index();
-        db.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
+        let latest_tx_id = tx.get_block_body_by_num(input.unwind_to)?.last_tx_index();
+        tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -176,13 +176,13 @@ mod tests {
     }
 
     struct SendersTestRunner {
-        db: TestTransaction,
+        tx: TestTransaction,
         threshold: u64,
     }
 
     impl Default for SendersTestRunner {
         fn default() -> Self {
-            Self { threshold: 1000, db: TestTransaction::default() }
+            Self { threshold: 1000, tx: TestTransaction::default() }
         }
     }
 
@@ -195,8 +195,8 @@ mod tests {
     impl StageTestRunner for SendersTestRunner {
         type S = SendersStage;
 
-        fn db(&self) -> &TestTransaction {
-            &self.db
+        fn tx(&self) -> &TestTransaction {
+            &self.tx
         }
 
         fn stage(&self) -> Self::S {
@@ -213,7 +213,7 @@ mod tests {
 
             let blocks = random_block_range(stage_progress..end, H256::zero());
 
-            self.db.commit(|tx| {
+            self.tx.commit(|tx| {
                 let mut current_tx_id = 0;
                 blocks.iter().try_for_each(|b| {
                     let txs = b.body.clone();
@@ -251,7 +251,7 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             if let Some(output) = output {
-                self.db.query(|tx| {
+                self.tx.query(|tx| {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
 
@@ -292,15 +292,15 @@ mod tests {
 
     impl SendersTestRunner {
         fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.db.inner().get_block_body_by_num(block);
+            let body_result = self.tx.inner().get_block_body_by_num(block);
             match body_result {
                 Ok(body) => self
-                    .db
+                    .tx
                     .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
                         key
                     })?,
                 Err(_) => {
-                    assert!(self.db.table_is_empty::<tables::TxSenders>()?);
+                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
                 }
             };
 
