@@ -48,9 +48,9 @@ macro_rules! stage_test_suite {
             assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
         }
 
-        // Check that unwind does not panic on empty database.
+        // Check that unwind does not panic on no new entries within the input range.
         #[tokio::test]
-        async fn unwind_no_entries() {
+        async fn unwind_no_new_entries() {
             // Set up the runner
             let mut runner = $runner::default();
             let input = crate::stage::UnwindInput::default();
