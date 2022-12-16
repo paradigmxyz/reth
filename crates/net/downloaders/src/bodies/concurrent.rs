@@ -124,13 +124,14 @@ where
         &self,
         headers: Vec<&SealedHeader>,
     ) -> DownloadResult<Vec<BlockResponse>> {
-        let non_empty_headers =
+        let headers_with_txs_and_ommers =
             headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).collect::<Vec<_>>();
-        if non_empty_headers.is_empty() {
+        if headers_with_txs_and_ommers.is_empty() {
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
-        let (peer_id, bodies) = self.client.get_block_body(non_empty_headers).await?.split();
+        let (peer_id, bodies) =
+            self.client.get_block_body(headers_with_txs_and_ommers).await?.split();
 
         let mut bodies = bodies.into_iter();
 

@@ -137,7 +137,7 @@ where
     }
 
     /// Query the last transition of the block by [BlockNumHash] key
-    pub(crate) fn get_last_block_transition(
+    pub(crate) fn get_block_transition(
         &self,
         key: BlockNumHash,
     ) -> Result<TransitionId, StageError> {
@@ -148,12 +148,12 @@ where
     }
 
     /// Query the last transition of the block by number
-    pub(crate) fn get_last_block_transition_by_num(
+    pub(crate) fn get_block_transition_by_num(
         &self,
         number: BlockNumber,
     ) -> Result<TransitionId, StageError> {
         let key = self.get_block_numhash(number)?;
-        self.get_last_block_transition(key)
+        self.get_block_transition(key)
     }
 
     /// Get the next start transaction id for the `block` by looking the previous block

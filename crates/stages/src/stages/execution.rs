@@ -194,7 +194,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
-        let mut current_transition_id = db.get_last_block_transition_by_num(last_block)? + 1;
+        let mut current_transition_id = db.get_block_transition_by_num(last_block)? + 1;
 
         // apply changes to plain database.
         for results in block_change_patches.into_iter() {
@@ -275,10 +275,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut account_changeset = db.cursor_dup_mut::<tables::AccountChangeSet>()?;
         let mut storage_changeset = db.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        let from_transition = db.get_last_block_transition_by_num(input.stage_progress)?;
+        let from_transition = db.get_block_transition_by_num(input.stage_progress)?;
 
         let to_transition = if input.unwind_to != 0 {
-            db.get_last_block_transition_by_num(input.unwind_to - 1)?
+            db.get_block_transition_by_num(input.unwind_to - 1)?
         } else {
             0
         };
