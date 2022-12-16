@@ -156,7 +156,8 @@ where
         self.get_block_transition(key)
     }
 
-    /// Get the next start transaction id for the `block` by looking the previous block
+    /// Get the next start transaction id and transition for the `block` by looking at the previous block.
+    /// Returns Zero/Zero for Genesis.
     pub(crate) fn get_next_block_ids(
         &self,
         block: BlockNumber,
