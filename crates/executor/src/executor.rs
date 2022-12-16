@@ -260,9 +260,11 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, config, db)?;
 
-    let receipts_iter =
+    let _receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
-    verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
+    
+    // TODO check https://eips.ethereum.org/EIPS/eip-658 introduced in Byzantium
+    //verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
 
     Ok(transaction_change_set)
 }
@@ -328,9 +330,9 @@ pub fn execute<DB: StateProvider>(
         revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
 
         // Execute transaction.
-        //let out = evm.transact();
-        let out = evm.inspect(revm::inspectors::CustomPrintTracer::new());
-        tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?} \nENV:{:?}",transaction.hash(),transaction,evm.env);
+        let out = evm.transact();
+        //let out = evm.inspect(revm::inspectors::CustomPrintTracer::new());
+        //tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?} \nENV:{:?}",transaction.hash(),transaction,evm.env);
 
         let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
 
