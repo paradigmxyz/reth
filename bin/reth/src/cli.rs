@@ -29,7 +29,7 @@ pub enum Commands {
     /// Main node command
     #[command(name = "node")]
     Node(node::Command),
-    // /// Runs Ethereum blockchain tests
+    /// Runs Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
     /// DB Debugging utilities
