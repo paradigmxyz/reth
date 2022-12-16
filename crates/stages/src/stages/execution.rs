@@ -394,16 +394,18 @@ mod tests {
         let code = hex!("5a465a905090036002900360015500");
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
-        db_tx.put::<tables::PlainAccountState>(
-            acc1,
-            Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) },
-        )
-        .unwrap();
-        db_tx.put::<tables::PlainAccountState>(
-            acc2,
-            Account { nonce: 0, balance, bytecode_hash: None },
-        )
-        .unwrap();
+        db_tx
+            .put::<tables::PlainAccountState>(
+                acc1,
+                Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) },
+            )
+            .unwrap();
+        db_tx
+            .put::<tables::PlainAccountState>(
+                acc2,
+                Account { nonce: 0, balance, bytecode_hash: None },
+            )
+            .unwrap();
         db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
         tx.commit().unwrap();
 
