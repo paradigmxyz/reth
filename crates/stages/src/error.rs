@@ -56,10 +56,10 @@ impl StageError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            StageError::Database(_)
-                | StageError::DatabaseIntegrity(_)
-                | StageError::StageProgress(_)
-                | StageError::Fatal(_)
+            StageError::Database(_) |
+                StageError::DatabaseIntegrity(_) |
+                StageError::StageProgress(_) |
+                StageError::Fatal(_)
         )
     }
 }
