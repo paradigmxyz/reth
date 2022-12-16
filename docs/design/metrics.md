@@ -53,6 +53,14 @@ How the metrics are exposed to the end-user is determined by the CLI.
 
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
 
+### Current metrics
+#### Headers
+- `stages.headers.counter`: Number of headers successfully retrived
+- `stages.headers.timeout_error`: Number of timeout errors while requesting headers
+- `stages.headers.validation_errors`: Number of validation errores while requesting headers
+- `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
+- `stages.headers.request_time`: Elapsed time of successful header requests
+
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html
 [metrics.KeyName]: https://docs.rs/metrics/latest/metrics/struct.KeyName.html
