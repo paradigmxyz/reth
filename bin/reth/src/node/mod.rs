@@ -8,6 +8,7 @@ use reth_db::{
     cursor::DbCursorRO,
     database::Database,
     mdbx::{Env, WriteMap},
+    // models::StoredBlockBody,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -92,15 +93,15 @@ impl Command {
         // TODO: This is a temporary measure to set the fork choice state, but this should be
         // handled by the engine API
         consensus.notify_fork_choice_state(ForkchoiceState {
-            // NOTE: This is block 1000
+            // NOTE: This is block 50,000. The first transaction ever is in block 46,147
             head_block_hash: H256(hex!(
-                "5b4590a9905fa1c9cc273f32e6dc63b4c512f0ee14edc6fa41c26b416a7b5d58"
+                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
             )),
             safe_block_hash: H256(hex!(
-                "5b4590a9905fa1c9cc273f32e6dc63b4c512f0ee14edc6fa41c26b416a7b5d58"
+                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
             )),
             finalized_block_hash: H256(hex!(
-                "5b4590a9905fa1c9cc273f32e6dc63b4c512f0ee14edc6fa41c26b416a7b5d58"
+                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
             )),
         })?;
         pipeline.run(db.clone()).await?;
@@ -149,7 +150,8 @@ fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, ret
     let hash = header.hash_slow();
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
     tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::CumulativeTxCount>((0, hash).into(), 0)?;
+    tx.put::<tables::BlockBodies>((0, hash).into(), Default::default())?;
+    tx.put::<tables::BlockTransitionIndex>((0, hash).into(), 0)?;
     tx.put::<tables::HeaderTD>((0, hash).into(), header.difficulty.into())?;
     tx.put::<tables::Headers>((0, hash).into(), header)?;
 

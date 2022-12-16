@@ -6,6 +6,7 @@ use walkdir::{DirEntry, WalkDir};
 /// Utilities for parsing chainspecs
 pub mod chainspec;
 
+#[allow(dead_code)]
 pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<PathBuf> {
     WalkDir::new(path)
         .into_iter()
