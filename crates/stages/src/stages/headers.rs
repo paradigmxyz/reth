@@ -76,8 +76,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
         // Lookup the head and tip of the sync range
         let (head, tip) = self.get_head_and_tip(db, stage_progress).await?;
-        trace!(
-            target = "sync::stages::headers",
+        debug!(
+            target: "sync::stages::headers",
             "Syncing from tip {:?} to head {:?}",
             tip,
             head.hash()
@@ -92,7 +92,11 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         while let Some(headers) = stream.next().await {
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
-                    info!(len = res.len(), "Received headers");
+                    info!(
+                        target: "sync::stages::headers",
+                        len = res.len(),
+                        "Received headers"
+                    );
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
@@ -103,15 +107,25 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 }
                 Err(e) => match e {
                     DownloadError::Timeout => {
-                        warn!("No response for header request");
+                        warn!(
+                            target: "sync::stages::headers",
+                            "No response for header request"
+                        );
                         return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        error!("Validation error for header {hash}: {error}");
+                        error!(
+                            target: "sync::stages::headers",
+                            "Validation error for header {hash}: {error}"
+                        );
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        error!(?error, "An unexpected error occurred");
+                        error!(
+                            target: "sync::stages::headers",
+                            ?error,
+                            "An unexpected error occurred"
+                        );
                         return Err(StageError::Recoverable(error.into()))
                     }
                 },
@@ -160,7 +174,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         let td: U256 = *db
             .get::<tables::HeaderTD>(block_key)?
             .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
-        // self.client.update_status(height, block_key.hash(), td);
+        // TODO: This should happen in the last stage
         self.network_handle.update_status(height, block_key.hash(), td);
         Ok(())
     }
@@ -214,7 +228,6 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
-            debug!(?forkchoice, "Received fork choice state");
             if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
                 return forkchoice.clone()
             }
