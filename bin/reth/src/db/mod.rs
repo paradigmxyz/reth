@@ -33,11 +33,11 @@ const DEFAULT_NUM_ITEMS: &str = "5";
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
 pub enum Subcommands {
-    /// Lists all the table names, number of entries, and size in KB
+    /// Lists all the tables, their entry count and their size
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
-    /// Seeds the block db with random blocks on top of each other
+    /// Seeds the database with random blocks on top of each other
     Seed {
         /// How many blocks to generate
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
@@ -95,7 +95,7 @@ impl Command {
                         let overflow_pages = stats.overflow_pages();
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
-                        tracing::info!(
+                        info!(
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -130,7 +130,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        tracing::info!("generating random block range from 0 to {len}");
+        info!("Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default());
 
         self.db.update(|tx| {
@@ -140,18 +140,34 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database committed with {len} blocks");
-
+        info!("Database seeded with {len} blocks");
         Ok(())
     }
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
+        // TODO: We should codegen this
         match args.table.as_str() {
             "canonical_headers" => {
                 self.list_table::<tables::CanonicalHeaders>(args.start, args.len)?
             }
+            "header_td" => self.list_table::<tables::HeaderTD>(args.start, args.len)?,
+            "header_numbers" => self.list_table::<tables::HeaderNumbers>(args.start, args.len)?,
             "headers" => self.list_table::<tables::Headers>(args.start, args.len)?,
+            "block_bodies" => self.list_table::<tables::BlockBodies>(args.start, args.len)?,
+            "ommers" => self.list_table::<tables::BlockOmmers>(args.start, args.len)?,
+            "tx_hash_number" => self.list_table::<tables::TxHashNumber>(args.start, args.len)?,
+            "plain_account_state" => {
+                self.list_table::<tables::PlainAccountState>(args.start, args.len)?
+            }
+            "block_transition_index" => {
+                self.list_table::<tables::BlockTransitionIndex>(args.start, args.len)?
+            }
+            "tx_transition_index" => {
+                self.list_table::<tables::TxTransitionIndex>(args.start, args.len)?
+            }
+            "sync_stage" => self.list_table::<tables::SyncStage>(args.start, args.len)?,
+
             "txs" => self.list_table::<tables::Transactions>(args.start, args.len)?,
             _ => panic!(),
         };
