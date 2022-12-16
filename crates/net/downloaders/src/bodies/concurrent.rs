@@ -190,7 +190,7 @@ mod tests {
         p2p::{bodies::downloader::BodyDownloader, error::RequestError},
         test_utils::TestConsensus,
     };
-    use reth_primitives::{PeerId, H256};
+    use reth_primitives::{Header, PeerId, H256};
     use std::{
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -265,8 +265,10 @@ mod tests {
             Arc::new(TestConsensus::default()),
         );
 
+        let headers = &[Header { ommers_hash: H256::default(), ..Default::default() }.seal()];
+        let mut stream = downloader.bodies_stream(headers);
         assert_matches!(
-            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
+            stream.next().await,
             Some(Err(DownloadError::RequestError(RequestError::ChannelClosed)))
         );
     }
@@ -295,10 +297,11 @@ mod tests {
             Arc::new(TestConsensus::default()),
         );
 
+        let header = Header { ommers_hash: H256::default(), ..Default::default() }.seal();
         assert_matches!(
-            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
-            Some(Ok(body)) => {
-                assert_eq!(body, BlockResponse::Full(BlockLocked::default()));
+            downloader.bodies_stream(&[header.clone()]).next().await,
+            Some(Ok(BlockResponse::Full(block))) => {
+                assert_eq!(block.header, header);
             }
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 0);
@@ -330,7 +333,12 @@ mod tests {
         .with_retries(0);
 
         assert_matches!(
-            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
+            downloader
+                .bodies_stream(&[
+                    Header { ommers_hash: H256::default(), ..Default::default() }.seal()
+                ])
+                .next()
+                .await,
             Some(Err(DownloadError::RequestError(RequestError::Timeout)))
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 2);
