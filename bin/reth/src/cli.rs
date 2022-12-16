@@ -1,12 +1,11 @@
 //! CLI definition and entrypoint to executable
 
-use clap::{ArgAction, Parser, Subcommand};
-use tracing_subscriber::util::SubscriberInitExt;
-
 use crate::{
-    db, node, test_eth_chain,
+    db, node, stage, test_eth_chain,
     util::reth_tracing::{self, TracingMode},
 };
+use clap::{ArgAction, Parser, Subcommand};
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
@@ -20,21 +19,25 @@ pub async fn run() -> eyre::Result<()> {
         Commands::Node(command) => command.execute().await,
         Commands::TestEthChain(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
+        Commands::Stage(command) => command.execute().await,
     }
 }
 
 /// Commands to be executed
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Main node command
+    /// Start the node
     #[command(name = "node")]
     Node(node::Command),
-    /// Runs Ethereum blockchain tests
+    /// Run Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
-    /// DB Debugging utilities
+    /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
+    /// Run a single stage
+    #[command(name = "stage")]
+    Stage(stage::Command),
 }
 
 #[derive(Parser)]

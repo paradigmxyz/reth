@@ -9,5 +9,6 @@
 pub mod cli;
 pub mod db;
 pub mod node;
+pub mod stage;
 pub mod test_eth_chain;
 pub mod util;
