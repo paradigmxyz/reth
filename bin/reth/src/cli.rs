@@ -2,6 +2,7 @@
 
 use clap::{ArgAction, Parser, Subcommand};
 use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_util::layers::{PrefixLayer, Stack};
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{
@@ -20,7 +21,13 @@ pub async fn run() -> eyre::Result<()> {
     .init();
 
     if opt.metrics {
-        PrometheusBuilder::new().install().expect("failed to install Prometheus recorder");
+        let (recorder, exporter) =
+            PrometheusBuilder::new().build().expect("couldn't build Prometheus");
+        tokio::task::spawn(exporter);
+        Stack::new(recorder)
+            .push(PrefixLayer::new("reth"))
+            .install()
+            .expect("couldn't install metrics recorder");
     }
 
     match opt.command {
