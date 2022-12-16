@@ -25,6 +25,10 @@
 
 # Table design
 
+We do Transaction-granularity indexing. This means that we store the state for every account after every transaction that touched it, and we provide indexes for accessing that quickly.
+While this may make the database size bigger (and we need to benchmark this once we're closer to prod) it also enables blazing-fast historical tracing and simulations because we
+don't need to re-execute all transactions inside a block.
+
 Table design: 
 
 ```mermaid
