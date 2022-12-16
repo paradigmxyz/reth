@@ -84,11 +84,23 @@ pub struct ForkId {
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Hash)]
 pub enum ValidationError {
     /// Remote node is outdated and needs a software update.
-    #[error("remote node is outdated and needs a software update")]
-    RemoteStale,
+    #[error(
+        "remote node is outdated and needs a software update: local={local:?}, remote={remote:?}"
+    )]
+    RemoteStale {
+        /// locally configured forkId
+        local: ForkId,
+        /// ForkId received from remote
+        remote: ForkId,
+    },
     /// Local node is on an incompatible chain or needs a software update.
-    #[error("local node is on an incompatible chain or needs a software update")]
-    LocalIncompatibleOrStale,
+    #[error("local node is on an incompatible chain or needs a software update: local={local:?}, remote={remote:?}")]
+    LocalIncompatibleOrStale {
+        /// locally configured forkId
+        local: ForkId,
+        /// ForkId received from remote
+        remote: ForkId,
+    },
 }
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
@@ -181,7 +193,10 @@ impl ForkFilter {
             return if self.head >= fork_id.next {
                 // 1a) A remotely announced but remotely not passed block is already passed locally,
                 // disconnect, since the chains are incompatible.
-                Err(ValidationError::LocalIncompatibleOrStale)
+                Err(ValidationError::LocalIncompatibleOrStale {
+                    local: self.current(),
+                    remote: fork_id,
+                })
             } else {
                 // 1b) Remotely announced fork not yet passed locally, connect.
                 Ok(())
@@ -198,7 +213,7 @@ impl ForkFilter {
                     return if *actual_fork_block == fork_id.next {
                         Ok(())
                     } else {
-                        Err(ValidationError::RemoteStale)
+                        Err(ValidationError::RemoteStale { local: self.current(), remote: fork_id })
                     }
                 }
 
@@ -215,7 +230,7 @@ impl ForkFilter {
         }
 
         // 4) Reject in all other cases.
-        Err(ValidationError::LocalIncompatibleOrStale)
+        Err(ValidationError::LocalIncompatibleOrStale { local: self.current(), remote: fork_id })
     }
 }
 

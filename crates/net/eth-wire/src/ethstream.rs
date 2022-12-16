@@ -259,7 +259,7 @@ mod tests {
     #[tokio::test]
     async fn can_handshake() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
@@ -393,7 +393,7 @@ mod tests {
         );
 
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
