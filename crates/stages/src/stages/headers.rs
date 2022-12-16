@@ -178,7 +178,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
             .seek_exact(stage_progress)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number: stage_progress })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
 
         // Construct head
         let (_, head) = header_cursor
@@ -415,7 +415,7 @@ mod tests {
         // Empty database
         assert_matches!(
             stage.get_head_and_tip(&db, stage_progress).await,
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHash { number }))
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { number }))
                 if number == stage_progress
         );
 
