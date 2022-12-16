@@ -34,15 +34,6 @@ impl StoredBlockBody {
         self.start_tx_id..self.start_tx_id + self.tx_count
     }
 
-    /// Return the last tx index if the block is not empty
-    pub fn last_tx_index(&self) -> Option<TxNumber> {
-        if !self.is_empty() {
-            Some(self.start_tx_id + self.tx_count - 1)
-        } else {
-            None
-        }
-    }
-
     /// Return any last index that should be before this block
     pub fn any_last_tx_index(&self) -> TxNumber {
         self.start_tx_id.saturating_add(self.tx_count).saturating_sub(1)
