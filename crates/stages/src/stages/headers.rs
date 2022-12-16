@@ -3,6 +3,7 @@ use crate::{
     UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
+use metrics::{counter, histogram, increment_counter};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -23,7 +24,6 @@ use reth_interfaces::{
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
-use metrics::{counter, increment_counter, histogram};
 
 const HEADERS: StageId = StageId("Headers");
 
@@ -117,7 +117,6 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                         return Err(StageError::Recoverable(error.into()))
                     }
                 },
-                
             }
             // Restart timer for next request
             start = tokio::time::Instant::now();

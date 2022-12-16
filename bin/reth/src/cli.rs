@@ -1,9 +1,8 @@
 //! CLI definition and entrypoint to executable
 
+use crate::{metrics_describer, prometheus_exporter};
 use clap::{ArgAction, Parser, Subcommand};
 use tracing_subscriber::util::SubscriberInitExt;
-use crate::prometheus_exporter;
-use crate::metrics_describer;
 
 use crate::{
     db, node, test_eth_chain,
