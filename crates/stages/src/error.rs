@@ -21,6 +21,7 @@ pub enum StageError {
     Database(#[from] DbError),
     #[error("Stage encountered a execution error in block {block}: {error}.")]
     /// The stage encountered a execution error
+    // TODO: Probably redundant, should be rolled into `Validation`
     ExecutionError {
         /// The block that failed execution.
         block: BlockNumber,
@@ -35,9 +36,32 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(String),
-    /// The stage encountered an internal error.
+    /// Invalid checkpoint passed to the stage
+    #[error("Invalid stage progress: {0}")]
+    StageProgress(u64),
+    /// The stage encountered a recoverable error.
+    ///
+    /// These types of errors are caught by the [Pipeline] and trigger a restart of the stage.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Recoverable(Box<dyn std::error::Error + Send + Sync>),
+    /// The stage encountered a fatal error.
+    ///
+    /// These types of errors stop the pipeline.
+    #[error(transparent)]
+    Fatal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl StageError {
+    /// If the error is fatal the pipeline will stop.
+    pub fn is_fatal(&self) -> bool {
+        matches!(
+            self,
+            StageError::Database(_) |
+                StageError::DatabaseIntegrity(_) |
+                StageError::StageProgress(_) |
+                StageError::Fatal(_)
+        )
+    }
 }
 
 /// A database integrity error.
@@ -45,15 +69,8 @@ pub enum StageError {
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum DatabaseIntegrityError {
-    // TODO(onbjerg): What's the difference between this and the one below?
-    /// The canonical hash for a block is missing from the database.
-    #[error("No canonical hash for block #{number}")]
-    CanonicalHash {
-        /// The block number key
-        number: BlockNumber,
-    },
     /// The canonical header for a block is missing from the database.
-    #[error("No canonical hash for block #{number}")]
+    #[error("No canonical header for block #{number}")]
     CanonicalHeader {
         /// The block number key
         number: BlockNumber,
@@ -80,7 +97,7 @@ pub enum DatabaseIntegrityError {
     TransactionsSignerGap { missing: TxNumber },
     #[error("Got to the end of transaction table")]
     EndOfTransactionTable,
-    #[error("Got to the end of transaction table")]
+    #[error("Got to the end of the transaction sender table")]
     EndOfTransactionSenderTable,
     /// The total difficulty from the block header is missing.
     #[error("Total difficulty not found for block #{number}")]

@@ -35,7 +35,7 @@ use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    DisconnectReason,
+    DisconnectReason, Status,
 };
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
@@ -522,6 +522,7 @@ where
                     remote_addr,
                     capabilities,
                     messages,
+                    status,
                     direction,
                 } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
@@ -543,6 +544,7 @@ where
                     this.event_listeners.send(NetworkEvent::SessionEstablished {
                         peer_id,
                         capabilities,
+                        status,
                         messages,
                     });
                 }
@@ -645,6 +647,8 @@ pub enum NetworkEvent {
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
         messages: PeerRequestSender,
+        /// The status of the peer to which a session was established.
+        status: Status,
     },
 }
 

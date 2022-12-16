@@ -1,12 +1,12 @@
 use crate::p2p::downloader::{DownloadStream, Downloader};
 use reth_primitives::{BlockLocked, SealedHeader};
 
-/// TODO: docs
+/// The block response
 #[derive(PartialEq, Eq, Debug)]
 pub enum BlockResponse {
-    /// TODO:
+    /// The empty block response
     Empty(SealedHeader),
-    /// TODO:
+    /// Full block response (no transactions and ommers)
     Full(BlockLocked),
 }
 

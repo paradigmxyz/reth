@@ -1,4 +1,4 @@
-use crate::{db::StageDB, error::StageError, id::StageId};
+use crate::{db::Transaction, error::StageError, id::StageId};
 use async_trait::async_trait;
 use reth_db::database::Database;
 use reth_primitives::BlockNumber;
@@ -58,7 +58,7 @@ pub struct UnwindOutput {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
-/// Stages receive [`StageDB`] which manages the lifecycle of a transaction,
+/// Stages receive [`Transaction`] which manages the lifecycle of a transaction,
 /// such as when to commit / reopen a new one etc.
 // ANCHOR: trait-Stage
 #[async_trait]
@@ -71,14 +71,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }

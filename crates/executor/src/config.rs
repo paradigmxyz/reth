@@ -51,7 +51,7 @@ pub struct SpecUpgrades {
 impl SpecUpgrades {
     /// After merge/peric block reward was removed from execution layer.
     pub fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        block_num <= self.paris
+        block_num < self.paris
     }
 
     /// Ethereum mainnet spec
@@ -79,7 +79,24 @@ impl SpecUpgrades {
 
     /// New homestead enabled spec
     pub fn new_homestead_activated() -> Self {
-        Self { homestead: 0, ..Self::new_ethereum() }
+        Self {
+            homestead: 0,
+            frontier: u64::MAX,
+            tangerine_whistle: u64::MAX,
+            spurious_dragon: u64::MAX,
+            byzantium: u64::MAX,
+            petersburg: u64::MAX,
+            istanbul: u64::MAX,
+            berlin: u64::MAX,
+            london: u64::MAX,
+            paris: u64::MAX,
+            shanghai: u64::MAX,
+        }
+    }
+
+    /// New homestead enabled spec
+    pub fn new_frontier_activated() -> Self {
+        Self { frontier: 0, ..Self::new_ethereum() }
     }
 
     /// New tangerine enabled spec
@@ -125,18 +142,54 @@ impl SpecUpgrades {
     /// return revm_spec from spec configuration.
     pub fn revm_spec(&self, for_block: BlockNumber) -> revm::SpecId {
         match for_block {
-            b if self.shanghai >= b => revm::MERGE_EOF,
-            b if self.paris >= b => revm::MERGE,
-            b if self.london >= b => revm::LONDON,
-            b if self.berlin >= b => revm::BERLIN,
-            b if self.istanbul >= b => revm::ISTANBUL,
-            b if self.petersburg >= b => revm::PETERSBURG,
-            b if self.byzantium >= b => revm::BYZANTIUM,
-            b if self.spurious_dragon >= b => revm::SPURIOUS_DRAGON,
-            b if self.tangerine_whistle >= b => revm::TANGERINE,
-            b if self.homestead >= b => revm::HOMESTEAD,
-            b if self.frontier >= b => revm::FRONTIER,
+            b if b >= self.shanghai => revm::MERGE_EOF,
+            b if b >= self.paris => revm::MERGE,
+            b if b >= self.london => revm::LONDON,
+            b if b >= self.berlin => revm::BERLIN,
+            b if b >= self.istanbul => revm::ISTANBUL,
+            b if b >= self.petersburg => revm::PETERSBURG,
+            b if b >= self.byzantium => revm::BYZANTIUM,
+            b if b >= self.spurious_dragon => revm::SPURIOUS_DRAGON,
+            b if b >= self.tangerine_whistle => revm::TANGERINE,
+            b if b >= self.homestead => revm::HOMESTEAD,
+            b if b >= self.frontier => revm::FRONTIER,
             _ => panic!("wrong configuration"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpecUpgrades;
+    #[test]
+    fn test_to_revm_spec() {
+        assert_eq!(SpecUpgrades::new_paris_activated().revm_spec(1), revm::MERGE);
+        assert_eq!(SpecUpgrades::new_london_activated().revm_spec(1), revm::LONDON);
+        assert_eq!(SpecUpgrades::new_berlin_activated().revm_spec(1), revm::BERLIN);
+        assert_eq!(SpecUpgrades::new_istanbul_activated().revm_spec(1), revm::ISTANBUL);
+        assert_eq!(SpecUpgrades::new_petersburg_activated().revm_spec(1), revm::PETERSBURG);
+        assert_eq!(SpecUpgrades::new_byzantium_activated().revm_spec(1), revm::BYZANTIUM);
+        assert_eq!(
+            SpecUpgrades::new_spurious_dragon_activated().revm_spec(1),
+            revm::SPURIOUS_DRAGON
+        );
+        assert_eq!(SpecUpgrades::new_tangerine_whistle_activated().revm_spec(1), revm::TANGERINE);
+        assert_eq!(SpecUpgrades::new_homestead_activated().revm_spec(1), revm::HOMESTEAD);
+        assert_eq!(SpecUpgrades::new_frontier_activated().revm_spec(1), revm::FRONTIER);
+    }
+
+    #[test]
+    fn test_eth_spec() {
+        let spec = SpecUpgrades::new_ethereum();
+        assert_eq!(spec.revm_spec(15537394 + 10), revm::MERGE);
+        assert_eq!(spec.revm_spec(15537394 - 10), revm::LONDON);
+        assert_eq!(spec.revm_spec(12244000 + 10), revm::BERLIN);
+        assert_eq!(spec.revm_spec(12244000 - 10), revm::ISTANBUL);
+        assert_eq!(spec.revm_spec(7280000 + 10), revm::PETERSBURG);
+        assert_eq!(spec.revm_spec(7280000 - 10), revm::BYZANTIUM);
+        assert_eq!(spec.revm_spec(2675000 + 10), revm::SPURIOUS_DRAGON);
+        assert_eq!(spec.revm_spec(2675000 - 10), revm::TANGERINE);
+        assert_eq!(spec.revm_spec(1150000 + 10), revm::HOMESTEAD);
+        assert_eq!(spec.revm_spec(1150000 - 10), revm::FRONTIER);
     }
 }

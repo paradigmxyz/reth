@@ -1,5 +1,5 @@
 use crate::{
-    db::StageDB, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use reth_db::{
@@ -59,6 +59,13 @@ impl Default for ExecutionStage {
     }
 }
 
+impl ExecutionStage {
+    /// Create new execution stage with specified config.
+    pub fn new(config: Config) -> Self {
+        Self { config }
+    }
+}
+
 /// Specify batch sizes of block in execution
 /// TODO make this as config
 const BATCH_SIZE: u64 = 1000;
@@ -73,25 +80,24 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Execute the stage
     async fn execute(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let db_tx = db.deref_mut();
         // none and zero are same as for genesis block (zeroed block) we are making assumption to
         // not have transaction.
         let last_block = input.stage_progress.unwrap_or_default();
         let start_block = last_block + 1;
 
         // Get next canonical block hashes to execute.
-        let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut canonicals = db.cursor::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
-        let mut headers = db_tx.cursor::<tables::Headers>()?;
+        let mut headers = db.cursor::<tables::Headers>()?;
         // Get bodies with canonical hashes.
-        let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
+        let mut bodies = db.cursor::<tables::BlockBodies>()?;
         // Get transaction of the block that we are executing.
-        let mut tx = db_tx.cursor::<tables::Transactions>()?;
+        let mut tx = db.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
-        let mut tx_sender = db_tx.cursor::<tables::TxSenders>()?;
+        let mut tx_sender = db.cursor::<tables::TxSenders>()?;
 
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
@@ -178,6 +184,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (header, (start_tx_index, end_tx_index, block_reward_index)) in
             headers_batch.iter().zip(tx_index_ranges.iter())
         {
+            let num = header.number;
+            tracing::trace!(target: "stages::execution",?num, "Execute block num.");
             let body_tx_cnt = end_tx_index - start_tx_index;
             // iterate over all transactions
             let mut tx_walker = tx.walk(*start_tx_index)?;
@@ -217,23 +225,27 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
             // for now use default eth config
 
-            let mut state_provider =
-                SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
+            let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(db)));
 
-            // execute and store output to results
-            // ANCHOR: snippet-block_change_patches
-            block_change_patches.push((
-                reth_executor::executor::execute_and_verify_receipt(
-                    header,
-                    &recovered_transactions,
-                    &self.config,
-                    &mut state_provider,
-                )
-                .map_err(|error| StageError::ExecutionError { block: header.number, error })?,
-                start_tx_index,
-                block_reward_index,
-            ));
-            // ANCHOR_END: snippet-block_change_patches
+            let change_set = std::thread::scope(|scope| {
+                let handle = std::thread::Builder::new()
+                    .stack_size(50 * 1024 * 1024)
+                    .spawn_scoped(scope, || {
+                        // execute and store output to results
+                        // ANCHOR: snippet-block_change_patches
+                        reth_executor::executor::execute_and_verify_receipt(
+                            header,
+                            &recovered_transactions,
+                            &self.config,
+                            state_provider,
+                        )
+                        // ANCHOR_END: snippet-block_change_patches
+                    })
+                    .expect("Expects that thread name is not null");
+                handle.join().expect("Expects for thread to not panic")
+            })
+            .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
+            block_change_patches.push((change_set, start_tx_index, block_reward_index));
         }
 
         // apply changes to plain database.
@@ -246,12 +258,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 {
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
-                    account.apply_to_db(address, tx_index, db_tx)?;
+                    account.apply_to_db(address, tx_index, db)?;
 
                     // wipe storage
                     if wipe_storage {
                         // TODO insert all changes to StorageChangeSet
-                        db_tx.delete::<tables::PlainStorageState>(address, None)?;
+                        db.delete::<tables::PlainStorageState>(address, None)?;
                     }
                     // insert storage changeset
                     let storage_id = TxNumberAddress((tx_index, address));
@@ -260,18 +272,18 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         key.to_big_endian(&mut hkey.0);
 
                         // insert into StorageChangeSet
-                        db_tx.put::<tables::StorageChangeSet>(
+                        db.put::<tables::StorageChangeSet>(
                             storage_id.clone(),
                             StorageEntry { key: hkey, value: old_value },
                         )?;
 
                         if new_value.is_zero() {
-                            db_tx.delete::<tables::PlainStorageState>(
+                            db.delete::<tables::PlainStorageState>(
                                 address,
                                 Some(StorageEntry { key: hkey, value: old_value }),
                             )?;
                         } else {
-                            db_tx.put::<tables::PlainStorageState>(
+                            db.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
                             )?;
@@ -282,10 +294,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
                     // make different types of bytecode. Checked and maybe even analyzed (needs to
                     // be packed). Currently save only raw bytes.
-                    db_tx.put::<tables::Bytecodes>(
-                        hash,
-                        bytecode.bytes()[..bytecode.len()].to_vec(),
-                    )?;
+                    db.put::<tables::Bytecodes>(hash, bytecode.bytes()[..bytecode.len()].to_vec())?;
 
                     // NOTE: bytecode bytes are not inserted in change set and it stand in saparate
                     // table
@@ -298,7 +307,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 // we are sure that block reward index is present.
                 let block_reward_index = block_reward_index.unwrap();
                 for (address, changeset) in block_reward_changeset.into_iter() {
-                    changeset.apply_to_db(address, block_reward_index, db_tx)?;
+                    changeset.apply_to_db(address, block_reward_index, db)?;
                 }
             }
         }
@@ -311,17 +320,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db_tx: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Acquire changeset cursors
-        let mut account_changeset = db_tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
-        let mut storage_changeset = db_tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
+        let mut account_changeset = db.cursor_dup_mut::<tables::AccountChangeSet>()?;
+        let mut storage_changeset = db.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        let from_transition = db_tx.get_last_block_transition_by_num(input.stage_progress)?;
+        let from_transition = db.get_last_block_transition_by_num(input.stage_progress)?;
 
         let to_transition = if input.unwind_to != 0 {
-            db_tx.get_last_block_transition_by_num(input.unwind_to - 1)?
+            db.get_last_block_transition_by_num(input.unwind_to - 1)?
         } else {
             0
         };
@@ -348,9 +357,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
             // TODO refactor in db fn called tx.aplly_account_changeset
             if let Some(account_info) = changeset.info {
-                db_tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+                db.put::<tables::PlainAccountState>(changeset.address, account_info)?;
             } else {
-                db_tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+                db.delete::<tables::PlainAccountState>(changeset.address, None)?;
             }
         }
 
@@ -365,10 +374,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // revert all changes to PlainStorage
         for (TxNumberAddress((_, address)), storage) in storage_chageset_batch.into_iter().rev() {
-            db_tx.put::<tables::PlainStorageState>(address, storage.clone())?;
+            db.put::<tables::PlainStorageState>(address, storage.clone())?;
             if storage.value == U256::zero() {
                 // delete value that is zero
-                db_tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
+                db.delete::<tables::PlainStorageState>(address, Some(storage))?;
             }
         }
 
@@ -410,7 +419,7 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut db = StageDB::new(state_db.as_ref()).unwrap();
+        let mut db = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
             previous_stage: None,
             /// The progress of this stage the last time it was executed.
@@ -493,7 +502,7 @@ mod tests {
         // is merged as it has similar framework
 
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut db = StageDB::new(state_db.as_ref()).unwrap();
+        let mut db = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
             previous_stage: None,
             /// The progress of this stage the last time it was executed.

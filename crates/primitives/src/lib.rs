@@ -85,6 +85,11 @@ mod __reexport {
     pub use tiny_keccak;
 }
 
+/// Various utilities
+pub mod utils {
+    pub use ethers_core::types::serde_helpers;
+}
+
 // Useful reexports
 pub use __reexport::*;
 
