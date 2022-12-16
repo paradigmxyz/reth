@@ -32,6 +32,21 @@ impl BanList {
         Self { banned_ips, banned_peers }
     }
 
+    /// Removes all peers that are no longer banned.
+    pub fn evict_peers(&mut self, now: Instant) -> Vec<PeerId> {
+        let mut evicted = Vec::new();
+        self.banned_peers.retain(|peer, until| {
+            if let Some(until) = until {
+                if now > *until {
+                    evicted.push(*peer);
+                    return false
+                }
+            }
+            true
+        });
+        evicted
+    }
+
     /// Removes all entries that should no longer be banned.
     pub fn evict(&mut self, now: Instant) {
         self.banned_ips.retain(|_, until| {
