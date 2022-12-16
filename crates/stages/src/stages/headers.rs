@@ -105,30 +105,34 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                         self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
                     current_progress = current_progress.max(write_progress);
                 }
-                Err(e) => match e {
-                    DownloadError::Timeout => {
-                        warn!(
-                            target: "sync::stages::headers",
-                            "No response for header request"
-                        );
-                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                Err(e) => {
+                    // TEMP: "Backoff"
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    match e {
+                        DownloadError::Timeout => {
+                            warn!(
+                                target: "sync::stages::headers",
+                                "No response for header request"
+                            );
+                            return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                        }
+                        DownloadError::HeaderValidation { hash, error } => {
+                            error!(
+                                target: "sync::stages::headers",
+                                "Validation error for header {hash}: {error}"
+                            );
+                            return Err(StageError::Validation { block: stage_progress, error })
+                        }
+                        error => {
+                            error!(
+                                target: "sync::stages::headers",
+                                ?error,
+                                "An unexpected error occurred"
+                            );
+                            return Err(StageError::Recoverable(error.into()))
+                        }
                     }
-                    DownloadError::HeaderValidation { hash, error } => {
-                        error!(
-                            target: "sync::stages::headers",
-                            "Validation error for header {hash}: {error}"
-                        );
-                        return Err(StageError::Validation { block: stage_progress, error })
-                    }
-                    error => {
-                        error!(
-                            target: "sync::stages::headers",
-                            ?error,
-                            "An unexpected error occurred"
-                        );
-                        return Err(StageError::Recoverable(error.into()))
-                    }
-                },
+                }
             }
         }
 
