@@ -8,7 +8,6 @@ use reth_db::{
     cursor::DbCursorRO,
     database::Database,
     mdbx::{Env, WriteMap},
-    // models::StoredBlockBody,
     tables,
     transaction::{DbTx, DbTxMut},
 };
