@@ -6,7 +6,7 @@ use crate::{
     session::SessionsConfig,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, PeerId, H256};
+use reth_primitives::{Chain, ForkFilter, Hardfork, PeerId, H256, MAINNET_GENESIS};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -51,6 +51,13 @@ pub struct NetworkConfig<C> {
     pub chain: Chain,
     /// Genesis hash of the network
     pub genesis_hash: H256,
+    /// The [`ForkFilter`] to use at launch for authenticating sessions.
+    ///
+    /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
+    ///
+    /// For sync from block `0`, this should be the default chain [`ForkFilter`] beginning at the
+    /// first hardfork, `Frontier` for mainnet.
+    pub fork_filter: ForkFilter,
     /// The block importer type.
     pub block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
@@ -122,6 +129,10 @@ pub struct NetworkConfigBuilder<C> {
     status: Option<Status>,
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
+    /// The [`ForkFilter`] to use at launch for authenticating sessions.
+    fork_filter: Option<ForkFilter>,
+    /// Head used to start set for the fork filter
+    head: Option<u64>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -139,12 +150,14 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: None,
             sessions_config: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
-            genesis_hash: Default::default(),
+            genesis_hash: MAINNET_GENESIS,
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
             status: None,
             hello_message: None,
+            fork_filter: None,
+            head: None,
         }
     }
 
@@ -259,6 +272,8 @@ impl<C> NetworkConfigBuilder<C> {
             executor,
             status,
             hello_message,
+            fork_filter,
+            head,
         } = self;
 
         let listener_addr = listener_addr.unwrap_or_else(|| {
@@ -268,6 +283,13 @@ impl<C> NetworkConfigBuilder<C> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+
+        // get the fork filter
+        let fork_filter = fork_filter.unwrap_or_else(|| {
+            let head = head.unwrap_or_default();
+            // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
+            ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
+        });
 
         NetworkConfig {
             client,
@@ -287,6 +309,7 @@ impl<C> NetworkConfigBuilder<C> {
             executor,
             status: status.unwrap_or_default(),
             hello_message,
+            fork_filter,
         }
     }
 }
