@@ -311,10 +311,7 @@ mod tests {
         // at block 0xffffffff, but that is uncertain.
         filter.set_head(7_987_396);
         assert_eq!(
-            filter.validate(ForkId {
-                hash: ForkHash(hex!("668db0af")),
-                next: BlockNumber::max_value()
-            }),
+            filter.validate(ForkId { hash: ForkHash(hex!("668db0af")), next: BlockNumber::MAX }),
             Ok(())
         );
 
@@ -340,10 +337,7 @@ mod tests {
         // mismatch, but we still connect for now.
         filter.set_head(7_279_999);
         assert_eq!(
-            filter.validate(ForkId {
-                hash: ForkHash(hex!("a00bc324")),
-                next: BlockNumber::max_value()
-            }),
+            filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: BlockNumber::MAX }),
             Ok(())
         );
 
@@ -377,32 +371,36 @@ mod tests {
         // Local is mainnet Petersburg. remote announces Byzantium but is not aware of further
         // forks. Remote needs software update.
         filter.set_head(7_987_396);
+        let remote = ForkId { hash: ForkHash(hex!("a00bc324")), next: 0 };
         assert_eq!(
-            filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: 0 }),
-            Err(ValidationError::RemoteStale)
+            filter.validate(remote),
+            Err(ValidationError::RemoteStale { local: filter.current(), remote })
         );
 
         // Local is mainnet Petersburg, and isn't aware of more forks. Remote announces Petersburg +
         // 0xffffffff. Local needs software update, reject.
         filter.set_head(7_987_396);
+        let remote = ForkId { hash: ForkHash(hex!("5cddc0e1")), next: 0 };
         assert_eq!(
-            filter.validate(ForkId { hash: ForkHash(hex!("5cddc0e1")), next: 0 }),
-            Err(ValidationError::LocalIncompatibleOrStale)
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
 
         // Local is mainnet Byzantium, and is aware of Petersburg. Remote announces Petersburg +
         // 0xffffffff. Local needs software update, reject.
         filter.set_head(7_279_999);
+        let remote = ForkId { hash: ForkHash(hex!("5cddc0e1")), next: 0 };
         assert_eq!(
-            filter.validate(ForkId { hash: ForkHash(hex!("5cddc0e1")), next: 0 }),
-            Err(ValidationError::LocalIncompatibleOrStale)
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
 
         // Local is mainnet Petersburg, remote is Rinkeby Petersburg.
         filter.set_head(7_987_396);
+        let remote = ForkId { hash: ForkHash(hex!("afec6b27")), next: 0 };
         assert_eq!(
-            filter.validate(ForkId { hash: ForkHash(hex!("afec6b27")), next: 0 }),
-            Err(ValidationError::LocalIncompatibleOrStale)
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
 
         // Local is mainnet Petersburg, far in the future. Remote announces Gopherium (non existing
@@ -411,17 +409,19 @@ mod tests {
         //
         // This case detects non-upgraded nodes with majority hash power (typical Ropsten mess).
         filter.set_head(88_888_888);
+        let remote = ForkId { hash: ForkHash(hex!("668db0af")), next: 88_888_888 };
         assert_eq!(
-            filter.validate(ForkId { hash: ForkHash(hex!("668db0af")), next: 88_888_888 }),
-            Err(ValidationError::LocalIncompatibleOrStale)
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
 
         // Local is mainnet Byzantium. Remote is also in Byzantium, but announces Gopherium (non
         // existing fork) at block 7279999, before Petersburg. Local is incompatible.
         filter.set_head(7_279_999);
+        let remote = ForkId { hash: ForkHash(hex!("a00bc324")), next: 7_279_999 };
         assert_eq!(
-            filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: 7_279_999 }),
-            Err(ValidationError::LocalIncompatibleOrStale)
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
     }
 
@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(
             &*reth_rlp::encode_fixed_size(&ForkId {
                 hash: ForkHash(hex!("ffffffff")),
-                next: u64::max_value()
+                next: u64::MAX
             }),
             hex!("ce84ffffffff88ffffffffffffffff")
         );
@@ -456,7 +456,7 @@ mod tests {
         );
         assert_eq!(
             ForkId::decode(&mut (&hex!("ce84ffffffff88ffffffffffffffff") as &[u8])).unwrap(),
-            ForkId { hash: ForkHash(hex!("ffffffff")), next: u64::max_value() }
+            ForkId { hash: ForkHash(hex!("ffffffff")), next: u64::MAX }
         );
     }
 
