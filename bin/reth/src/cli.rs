@@ -4,7 +4,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{
-    db, node, test_eth_chain,
+    db, node, /* test_eth_chain, */
     util::reth_tracing::{self, TracingMode},
 };
 
@@ -18,7 +18,7 @@ pub async fn run() -> eyre::Result<()> {
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
-        Commands::TestEthChain(command) => command.execute().await,
+        // Commands::TestEthChain(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
     }
 }
@@ -29,9 +29,9 @@ pub enum Commands {
     /// Main node command
     #[command(name = "node")]
     Node(node::Command),
-    /// Runs Ethereum blockchain tests
-    #[command(name = "test-chain")]
-    TestEthChain(test_eth_chain::Command),
+    // /// Runs Ethereum blockchain tests
+    // #[command(name = "test-chain")]
+    // TestEthChain(test_eth_chain::Command),
     /// DB Debugging utilities
     #[command(name = "db")]
     Db(db::Command),

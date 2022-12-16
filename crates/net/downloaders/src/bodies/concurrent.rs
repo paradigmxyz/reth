@@ -1,6 +1,5 @@
 use backon::{ExponentialBackoff, Retryable};
 use futures_util::{stream, StreamExt, TryStreamExt};
-use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
@@ -13,7 +12,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockLocked, SealedHeader};
-use std::{borrow::Borrow, sync::Arc, vec::IntoIter};
+use std::{borrow::Borrow, sync::Arc};
 
 /// Downloads bodies in batches.
 ///

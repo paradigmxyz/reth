@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
