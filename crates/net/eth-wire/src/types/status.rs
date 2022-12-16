@@ -100,7 +100,7 @@ impl Default for Status {
             total_difficulty: 17_179_869_184u64.into(),
             blockhash: MAINNET_GENESIS,
             genesis: MAINNET_GENESIS,
-            forkid: Hardfork::Latest.fork_id(),
+            forkid: Hardfork::Frontier.fork_id(),
         }
     }
 }
