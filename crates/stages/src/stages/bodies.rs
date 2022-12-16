@@ -798,7 +798,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
-            async fn get_block_body(&self, _: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+            async fn get_block_bodies(&self, _: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
                 panic!("Noop client should not be called")
             }
         }

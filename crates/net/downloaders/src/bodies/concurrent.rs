@@ -131,7 +131,7 @@ where
         }
 
         let (peer_id, bodies) =
-            self.client.get_block_body(headers_with_txs_and_ommers).await?.split();
+            self.client.get_block_bodies(headers_with_txs_and_ommers).await?.split();
 
         let mut bodies = bodies.into_iter();
 
