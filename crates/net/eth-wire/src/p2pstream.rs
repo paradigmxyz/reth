@@ -7,6 +7,7 @@ use crate::{
 };
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
+use metrics::counter;
 use pin_project::pin_project;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
@@ -119,6 +120,7 @@ where
                 let reason = DisconnectReason::try_from(disconnect_id)?;
 
                 tracing::error!("Disconnected by peer during handshake: {}", reason);
+                counter!("p2pstream.disconnected_errors", 1);
                 return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             id => {
