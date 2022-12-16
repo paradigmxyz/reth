@@ -229,14 +229,14 @@ impl<DB: Database> Pipeline<DB> {
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut db = Transaction::new(db)?;
+        let mut tx = Transaction::new(db)?;
 
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = stage_id.get_progress(db.deref())?.unwrap_or_default();
+            let mut stage_progress = stage_id.get_progress(tx.deref())?.unwrap_or_default();
             if stage_progress < to {
                 debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                 self.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
@@ -248,11 +248,11 @@ impl<DB: Database> Pipeline<DB> {
                 let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
                 self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                let output = stage.unwind(&mut db, input).await;
+                let output = stage.unwind(&mut tx, input).await;
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
-                        stage_id.save_progress(db.deref(), stage_progress)?;
+                        stage_id.save_progress(tx.deref(), stage_progress)?;
 
                         self.events_sender
                             .send(PipelineEvent::Unwound { stage_id, result: unwind_output })
@@ -266,7 +266,7 @@ impl<DB: Database> Pipeline<DB> {
             }
         }
 
-        db.commit()?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -305,9 +305,9 @@ impl<DB: Database> QueuedStage<DB> {
         }
 
         loop {
-            let mut db = Transaction::new(db)?;
+            let mut tx = Transaction::new(db)?;
 
-            let prev_progress = stage_id.get_progress(db.deref())?;
+            let prev_progress = stage_id.get_progress(tx.deref())?;
 
             let stage_reached_max_block = prev_progress
                 .zip(state.max_block)
@@ -332,7 +332,7 @@ impl<DB: Database> QueuedStage<DB> {
 
             match self
                 .stage
-                .execute(&mut db, ExecInput { previous_stage, stage_progress: prev_progress })
+                .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
@@ -343,7 +343,7 @@ impl<DB: Database> QueuedStage<DB> {
                         %done,
                         "Stage made progress"
                     );
-                    stage_id.save_progress(db.deref(), stage_progress)?;
+                    stage_id.save_progress(tx.deref(), stage_progress)?;
 
                     state
                         .events_sender
@@ -351,7 +351,7 @@ impl<DB: Database> QueuedStage<DB> {
                         .await?;
 
                     // TODO: Make the commit interval configurable
-                    db.commit()?;
+                    tx.commit()?;
 
                     state.record_progress_outliers(stage_progress);
                     state.set_reached_tip(reached_tip);
