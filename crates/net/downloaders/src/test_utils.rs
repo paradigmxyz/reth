@@ -65,7 +65,7 @@ where
     F: FnMut(Vec<H256>) -> Fut + Send + Sync,
     Fut: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send,
 {
-    async fn get_block_body(&self, hash: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    async fn get_block_bodies(&self, hash: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
         let f = &mut *self.0.lock().await;
         (f)(hash).await
     }

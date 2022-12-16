@@ -1,6 +1,6 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{consensus, db::Error as DbError, executor};
-use reth_primitives::{BlockNumber, TxNumber, H256};
+use reth_primitives::{BlockHash, BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -76,16 +76,8 @@ pub enum DatabaseIntegrityError {
         number: BlockNumber,
     },
     /// A header is missing from the database.
-    #[error("No header for block #{number} ({hash})")]
+    #[error("No header for block #{number} ({hash:?})")]
     Header {
-        /// The block number key
-        number: BlockNumber,
-        /// The block hash key
-        hash: H256,
-    },
-    /// The cumulative transaction count is missing from the database.
-    #[error("No cumulative tx count for #{number} ({hash})")]
-    CumulativeTxCount {
         /// The block number key
         number: BlockNumber,
         /// The block hash key
@@ -97,6 +89,14 @@ pub enum DatabaseIntegrityError {
         /// The block number key
         number: BlockNumber,
     },
+    /// The transaction is missing
+    #[error("Transaction #{id} not found")]
+    Transaction {
+        /// The transaction id
+        id: TxNumber,
+    },
+    #[error("Block transition not found for block #{number} ({hash:?})")]
+    BlockTransition { number: BlockNumber, hash: BlockHash },
     #[error("Gap in transaction table. Missing tx number #{missing}.")]
     TransactionsGap { missing: TxNumber },
     #[error("Gap in transaction signer table. Missing tx number #{missing}.")]
@@ -110,12 +110,6 @@ pub enum DatabaseIntegrityError {
     TotalDifficulty {
         /// The block number key
         number: BlockNumber,
-    },
-    /// The transaction is missing
-    #[error("Transaction #{id} not found")]
-    Transaction {
-        /// The transaction id
-        id: TxNumber,
     },
 }
 

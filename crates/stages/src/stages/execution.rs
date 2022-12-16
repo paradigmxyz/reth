@@ -3,9 +3,9 @@ use crate::{
     UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{BlockNumHash, TxNumberAddress},
+    models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -15,9 +15,9 @@ use reth_executor::{
     revm_wrap::{State, SubState},
     Config,
 };
-use reth_primitives::{Address, StorageEntry, TransactionSignedEcRecovered, H256, U256};
+use reth_primitives::{Address, Header, StorageEntry, TransactionSignedEcRecovered, H256, U256};
 use reth_provider::StateProviderImplRefLatest;
-use std::{fmt::Debug, ops::DerefMut};
+use std::fmt::Debug;
 
 const EXECUTION: StageId = StageId("Execution");
 
@@ -83,114 +83,61 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         db: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let db_tx = db.deref_mut();
         // none and zero are same as for genesis block (zeroed block) we are making assumption to
         // not have transaction.
         let last_block = input.stage_progress.unwrap_or_default();
         let start_block = last_block + 1;
 
         // Get next canonical block hashes to execute.
-        let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut canonicals = db.cursor::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
-        let mut headers = db_tx.cursor::<tables::Headers>()?;
-        // Get bodies (to get tx index) with canonical hashes.
-        let mut cumulative_tx_count = db_tx.cursor::<tables::CumulativeTxCount>()?;
+        let mut headers = db.cursor::<tables::Headers>()?;
+        // Get bodies with canonical hashes.
+        let mut bodies_cursor = db.cursor::<tables::BlockBodies>()?;
         // Get transaction of the block that we are executing.
-        let mut tx = db_tx.cursor::<tables::Transactions>()?;
+        let mut tx = db.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
-        let mut tx_sender = db_tx.cursor::<tables::TxSenders>()?;
+        let mut tx_sender = db.cursor::<tables::TxSenders>()?;
 
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
             .walk(start_block)?
-            .take(BATCH_SIZE as usize)
+            .take(BATCH_SIZE as usize) // TODO: commit_threshold
             .map(|i| i.map(BlockNumHash))
             .collect::<Result<Vec<_>, _>>()?;
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
-            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block })
+            return Ok(ExecOutput { stage_progress: last_block, done: true, reached_tip: true })
         }
 
-        // get headers from canonical numbers
-        let headers_batch = canonical_batch
+        // Get block headers and bodies from canonical hashes
+        let block_batch = canonical_batch
             .iter()
-            .map(|ch_index| {
+            .map(|key| -> Result<(Header, StoredBlockBody), StageError> {
                 // TODO see if walker next has better performance then seek_exact calls.
-                headers.seek_exact(*ch_index).map_err(StageError::Database).and_then(|res| {
-                    res.ok_or_else(|| {
-                        DatabaseIntegrityError::Header {
-                            number: ch_index.number(),
-                            hash: ch_index.hash(),
-                        }
-                        .into()
-                    })
-                    .map(|(_, header)| header)
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // get last tx count so that we can know amount of transaction in the block.
-        let mut last_tx_index = if last_block == 0 {
-            0u64
-        } else {
-            // headers_batch is not empty,
-            let parent_hash = headers_batch[0].parent_hash;
-
-            let (_, tx_cnt) = cumulative_tx_count
-                .seek_exact(BlockNumHash((last_block, parent_hash)))?
-                .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                    number: last_block,
-                    hash: parent_hash,
-                })?;
-            tx_cnt
-        };
-
-        let tx_index_ranges = canonical_batch
-            .iter()
-            .map(|ch_index| {
-                // TODO see if walker next has better performance then seek_exact calls.
-                cumulative_tx_count
-                    .seek_exact(*ch_index)
-                    .map_err(StageError::Database)
-                    .and_then(|res| {
-                        res.ok_or_else(|| {
-                            DatabaseIntegrityError::CumulativeTxCount {
-                                number: ch_index.number(),
-                                hash: ch_index.hash(),
-                            }
-                            .into()
-                        })
-                    })
-                    .map(|(_, cumulative_tx_count)| {
-                        let ret = if self.config.spec_upgrades.has_block_reward(ch_index.number()) {
-                            // if there is block reward, cumulative tx count needs to remove block
-                            // reward index. It is okay to subtract it, as
-                            // block reward index is calculated in the block stage.
-                            (last_tx_index, cumulative_tx_count - 1, Some(cumulative_tx_count - 1))
-                        } else {
-                            // if there is no block reward we just need to use tx_count
-                            (last_tx_index, cumulative_tx_count, None)
-                        };
-                        last_tx_index = cumulative_tx_count;
-                        ret
-                    })
+                let (_, header) =
+                    headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
+                        number: key.number(),
+                        hash: key.hash(),
+                    })?;
+                let (_, body) = bodies_cursor
+                    .seek_exact(*key)?
+                    .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
+                Ok((header, body))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, (start_tx_index, end_tx_index, block_reward_index)) in
-            headers_batch.iter().zip(tx_index_ranges.iter())
-        {
+        for (header, body) in block_batch.iter() {
             let num = header.number;
-            tracing::trace!(target: "stages::execution",?num, "Execute block num.");
-            let body_tx_cnt = end_tx_index - start_tx_index;
+            tracing::trace!(target: "stages::execution", ?num, "Execute block num.");
             // iterate over all transactions
-            let mut tx_walker = tx.walk(*start_tx_index)?;
-            let mut transactions = Vec::with_capacity(body_tx_cnt as usize);
+            let mut tx_walker = tx.walk(body.start_tx_id)?;
+            let mut transactions = Vec::with_capacity(body.tx_count as usize);
             // get next N transactions.
-            for index in *start_tx_index..*end_tx_index {
+            for index in body.tx_id_range() {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
@@ -200,9 +147,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
 
             // take signers
-            let mut tx_sender_walker = tx_sender.walk(*start_tx_index)?;
-            let mut signers = Vec::with_capacity(body_tx_cnt as usize);
-            for index in *start_tx_index..*end_tx_index {
+            let mut tx_sender_walker = tx_sender.walk(body.start_tx_id)?;
+            let mut signers = Vec::with_capacity(body.tx_count as usize);
+            for index in body.tx_id_range() {
                 let (tx_index, tx) = tx_sender_walker
                     .next()
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
@@ -223,8 +170,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 .collect();
 
             // for now use default eth config
-
-            let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(db_tx)));
+            let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**db)));
 
             let change_set = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
@@ -244,59 +190,59 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push((change_set, start_tx_index, block_reward_index));
+            block_change_patches.push(change_set);
         }
 
+        // Get last tx count so that we can know amount of transaction in the block.
+        let mut current_transition_id = db.get_block_transition_by_num(last_block)? + 1;
+
         // apply changes to plain database.
-        for (results, start_tx_index, block_reward_index) in block_change_patches.into_iter() {
+        for results in block_change_patches.into_iter() {
             // insert state change set
-            for (index, result) in results.changeset.into_iter().enumerate() {
-                let tx_index = start_tx_index + index as u64;
-                for (address, AccountChangeSet { account, wipe_storage, storage }) in
-                    result.state_diff.into_iter()
-                {
+            for result in results.changeset.into_iter() {
+                // TODO insert to transitionId to tx_index
+                for (address, account_change_set) in result.state_diff.into_iter() {
+                    let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
-                    account.apply_to_db(address, tx_index, db_tx)?;
+                    account.apply_to_db(&**db, address, current_transition_id)?;
 
                     // wipe storage
                     if wipe_storage {
                         // TODO insert all changes to StorageChangeSet
-                        db_tx.delete::<tables::PlainStorageState>(address, None)?;
+                        db.delete::<tables::PlainStorageState>(address, None)?;
                     }
                     // insert storage changeset
-                    let storage_id = TxNumberAddress((tx_index, address));
+                    let storage_id = TransitionIdAddress((current_transition_id, address));
                     for (key, (old_value, new_value)) in storage {
                         let mut hkey = H256::zero();
                         key.to_big_endian(&mut hkey.0);
 
                         // insert into StorageChangeSet
-                        db_tx.put::<tables::StorageChangeSet>(
+                        db.put::<tables::StorageChangeSet>(
                             storage_id.clone(),
                             StorageEntry { key: hkey, value: old_value },
                         )?;
 
                         if new_value.is_zero() {
-                            db_tx.delete::<tables::PlainStorageState>(
+                            db.delete::<tables::PlainStorageState>(
                                 address,
                                 Some(StorageEntry { key: hkey, value: old_value }),
                             )?;
                         } else {
-                            db_tx.put::<tables::PlainStorageState>(
+                            db.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
                             )?;
                         }
                     }
+                    current_transition_id += 1;
                 }
                 // insert bytecode
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
                     // make different types of bytecode. Checked and maybe even analyzed (needs to
                     // be packed). Currently save only raw bytes.
-                    db_tx.put::<tables::Bytecodes>(
-                        hash,
-                        bytecode.bytes()[..bytecode.len()].to_vec(),
-                    )?;
+                    db.put::<tables::Bytecodes>(hash, bytecode.bytes()[..bytecode.len()].to_vec())?;
 
                     // NOTE: bytecode bytes are not inserted in change set and it stand in saparate
                     // table
@@ -307,10 +253,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             // TODO add apply_block_reward_changeset to db tx fn which maybe takes an option.
             if let Some(block_reward_changeset) = results.block_reward {
                 // we are sure that block reward index is present.
-                let block_reward_index = block_reward_index.unwrap();
                 for (address, changeset) in block_reward_changeset.into_iter() {
-                    changeset.apply_to_db(address, block_reward_index, db_tx)?;
+                    changeset.apply_to_db(&**db, address, current_transition_id)?;
                 }
+                current_transition_id += 1;
             }
         }
 
@@ -325,96 +271,74 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let unwind_from = input.stage_progress;
-        let unwind_to = input.unwind_to;
-        let _bad_block = input.bad_block;
+        // Acquire changeset cursors
+        let mut account_changeset = db.cursor_dup_mut::<tables::AccountChangeSet>()?;
+        let mut storage_changeset = db.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        // get block body tx indexes
-        let db_tx = db.deref_mut();
+        let from_transition = db.get_block_transition_by_num(input.stage_progress)?;
 
-        // Get transaction of the block that we are executing.
-        let mut account_changeset = db_tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
-        // Skip sender recovery and load signer from database.
-        let mut storage_changeset = db_tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
-
-        // get from tx_number
-        let unwind_from_hash = db_tx
-            .get::<tables::CanonicalHeaders>(unwind_from)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: unwind_from })?;
-
-        let from_tx_number = db_tx
-            .get::<tables::CumulativeTxCount>(BlockNumHash((unwind_from, unwind_from_hash)))?
-            .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                number: unwind_from,
-                hash: unwind_from_hash,
-            })?;
-
-        // get to tx_number
-        let to_tx_number = if unwind_to == 0 {
-            0
+        let to_transition = if input.unwind_to != 0 {
+            db.get_block_transition_by_num(input.unwind_to - 1)?
         } else {
-            let parent_number = unwind_to - 1;
-            let parent_hash = db_tx
-                .get::<tables::CanonicalHeaders>(parent_number)?
-                .ok_or(DatabaseIntegrityError::CanonicalHeader { number: parent_number })?;
-
-            db_tx
-                .get::<tables::CumulativeTxCount>(BlockNumHash((parent_number, parent_hash)))?
-                .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                    number: parent_number,
-                    hash: parent_hash,
-                })?
+            0
         };
 
-        if to_tx_number > from_tx_number {
-            panic!("Parents CumulativeTxCount {to_tx_number} is higer then present block #{unwind_to} TxCount {from_tx_number}")
+        if to_transition > from_transition {
+            panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", to_transition, input.stage_progress, from_transition, input.unwind_to);
         }
-        let num_of_tx = (from_tx_number - to_tx_number) as usize;
+        let num_of_tx = (from_transition - to_transition) as usize;
 
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: unwind_to })
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
+        // TODO(dragan) test walking here
         let account_changeset_batch = account_changeset
-            .walk_dup(to_tx_number, Address::zero())?
-            .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= from_tx_number))
+            .walk(to_transition)?
+            .take_while(|item| {
+                item.as_ref().map(|(num, _)| *num <= from_transition).unwrap_or_default()
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
             // TODO refactor in db fn called tx.aplly_account_changeset
             if let Some(account_info) = changeset.info {
-                db_tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+                db.put::<tables::PlainAccountState>(changeset.address, account_info)?;
             } else {
-                db_tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+                db.delete::<tables::PlainAccountState>(changeset.address, None)?;
             }
         }
 
+        // TODO(dragan) fix walking here
         // get all batches for storage change
         let storage_chageset_batch = storage_changeset
-            .walk_dup(TxNumberAddress((to_tx_number, Address::zero())), H256::zero())?
+            .walk((to_transition, Address::zero()).into())?
             .take_while(|item| {
-                item.as_ref().map_or(false, |(TxNumberAddress((num, _)), _)| *num <= from_tx_number)
+                item.as_ref()
+                    .map(|(key, _)| key.transition_id() <= from_transition)
+                    .unwrap_or_default()
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
-        for (TxNumberAddress((_, address)), storage) in storage_chageset_batch.into_iter().rev() {
-            db_tx.put::<tables::PlainStorageState>(address, storage.clone())?;
+        for (key, storage) in storage_chageset_batch.into_iter().rev() {
+            let address = key.address();
+            db.put::<tables::PlainStorageState>(address, storage.clone())?;
             if storage.value == U256::zero() {
                 // delete value that is zero
-                db_tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
+                db.delete::<tables::PlainStorageState>(address, Some(storage))?;
             }
         }
 
         // Discard unwinded changesets
         let mut entry = account_changeset.last()?;
-        while let Some((tx_number, _)) = entry {
-            if tx_number < to_tx_number {
+        while let Some((transition_id, _)) = entry {
+            if transition_id < to_transition {
                 break
             }
             account_changeset.delete_current()?;
@@ -422,8 +346,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         let mut entry = storage_changeset.last()?;
-        while let Some((TxNumberAddress((tx_number, _)), _)) = entry {
-            if tx_number < to_tx_number {
+        while let Some((key, _)) = entry {
+            if key.transition_id() < to_transition {
                 break
             }
             storage_changeset.delete_current()?;
@@ -436,7 +360,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
+    use std::ops::{Deref, DerefMut};
 
     use super::*;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
