@@ -1,6 +1,3 @@
-// TODO: Remove
-//! Main db command
-//!
 //! Database debugging tool
 
 use clap::{Parser, Subcommand};
@@ -59,7 +56,7 @@ pub struct ListArgs {
 }
 
 impl Command {
-    /// Execute `node` command
+    /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let path = shellexpand::full(&self.db)?.into_owned();
         let expanded_db_path = Path::new(&path);
