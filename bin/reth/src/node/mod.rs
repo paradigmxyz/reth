@@ -92,15 +92,15 @@ impl Command {
         // TODO: This is a temporary measure to set the fork choice state, but this should be
         // handled by the engine API
         consensus.notify_fork_choice_state(ForkchoiceState {
-            // NOTE: This is block 1000
+            // NOTE: This is block 50,000. The first transaction ever is in block 46,147
             head_block_hash: H256(hex!(
-                "5b4590a9905fa1c9cc273f32e6dc63b4c512f0ee14edc6fa41c26b416a7b5d58"
+                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
             )),
             safe_block_hash: H256(hex!(
-                "5b4590a9905fa1c9cc273f32e6dc63b4c512f0ee14edc6fa41c26b416a7b5d58"
+                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
             )),
             finalized_block_hash: H256(hex!(
-                "5b4590a9905fa1c9cc273f32e6dc63b4c512f0ee14edc6fa41c26b416a7b5d58"
+                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
             )),
         })?;
         pipeline.run(db.clone()).await?;
