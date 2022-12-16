@@ -4,7 +4,7 @@
 pub(crate) type Reputation = i32;
 
 /// The minimal unit we're measuring reputation
-const REPUTATION_UNIT: i32 = -1024;
+const REPUTATION_UNIT: i32 = 1024;
 
 /// The reputation value below which new connection from/to peers are rejected.
 pub(crate) const BANNED_REPUTATION: i32 = 100 * REPUTATION_UNIT;

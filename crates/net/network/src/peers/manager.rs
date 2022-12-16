@@ -19,7 +19,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -174,9 +174,11 @@ impl PeersManager {
         let reputation_change = self.reputation_weights.change(rep);
         let should_disconnect = if let Some(mut peer) = self.peers.get_mut(peer_id) {
             peer.reputation = peer.reputation.saturating_sub(reputation_change.as_i32());
+            trace!(target: "net::peers", repuation=%peer.reputation, banned=%peer.is_banned(), "applied reputation change");
             let should_disconnect = peer.state.is_connected() && peer.is_banned();
 
             if should_disconnect {
+                debug!(target: "net::peers", repuation=%peer.reputation, "disconnecting peer on reputation change");
                 peer.state.disconnect();
             }
 
