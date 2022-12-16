@@ -19,7 +19,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -262,12 +262,24 @@ impl PeersManager {
 
     /// Removes the tracked node from the set.
     pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
-        if let Some(entry) = self.peers.remove(&peer_id) {
+        if let Some(mut peer) = self.peers.remove(&peer_id) {
             trace!(target : "net::peers",  ?peer_id, "remove discovered node");
-            if entry.state.is_connected() {
-                // TODO(mattsse): is this right to disconnect peers?
-                self.connection_info.decr_state(entry.state);
-                self.queued_actions.push_back(PeerAction::Disconnect { peer_id, reason: None })
+
+            if peer.state.is_connected() {
+                debug!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
+                // we terminate the session here, so we don't need to keep track of an additional
+                // state where the peer is connected but not in the set. Otherwise, there could be a
+                // scenario in which the peer is discovered again, added to the set again and ready
+                // to make an outgoing connection, even though we might still be connected.
+                // We only mark the peer as disconnecting and add it back to prevent an edge case
+                // where we're disconnecting but the peer is discovered again
+                // immediately.
+                peer.state.disconnect();
+                self.peers.insert(peer_id, peer);
+                self.queued_actions.push_back(PeerAction::Disconnect {
+                    peer_id,
+                    reason: Some(DisconnectReason::DisconnectRequested),
+                })
             }
         }
     }
