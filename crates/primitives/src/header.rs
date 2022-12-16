@@ -100,6 +100,11 @@ impl Header {
         H256::from_slice(keccak256(&out).as_slice())
     }
 
+    /// Checks if the header is empty - has no transactions and no ommers
+    pub fn is_empty(&self) -> bool {
+        self.ommers_hash == EMPTY_LIST_HASH && self.transactions_root == EMPTY_ROOT
+    }
+
     /// Calculate hash and seal the Header so that it can't be changed.
     pub fn seal(self) -> SealedHeader {
         let hash = self.hash_slow();

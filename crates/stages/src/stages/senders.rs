@@ -59,24 +59,23 @@ impl<DB: Database> Stage<DB> for SendersStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let stage_progress = input.stage_progress.unwrap_or_default();
-
-        // Look up the start index for the transaction range
-        let start_tx_index = db.get_first_tx_id(stage_progress + 1)?;
-
-        // Look up the end index for transaction range (inclusive)
         let previous_stage_progress = input.previous_stage_progress();
         let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
-        let end_tx_index = match db.get_latest_tx_id(max_block_num) {
-            Ok(id) => id,
-            // No transactions in the database
-            Err(_) => {
-                return Ok(ExecOutput {
-                    stage_progress: max_block_num,
-                    done: true,
-                    reached_tip: true,
-                })
-            }
-        };
+
+        if max_block_num <= stage_progress {
+            return Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+        }
+
+        // Look up the start index for the transaction range
+        let start_tx_index = db.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
+
+        // Look up the end index for transaction range (inclusive)
+        let end_tx_index = db.get_block_body_by_num(max_block_num)?.last_tx_index();
+
+        // No transactions to walk over
+        if start_tx_index > end_tx_index {
+            return Ok(ExecOutput { stage_progress: max_block_num, done: true, reached_tip: true })
+        }
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = db.cursor_mut::<tables::TxSenders>()?;
@@ -117,7 +116,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = db.get_latest_tx_id(input.unwind_to).unwrap_or_default();
+        let latest_tx_id = db.get_block_body_by_num(input.unwind_to)?.last_tx_index();
         db.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -126,6 +125,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use reth_db::models::StoredBlockBody;
     use reth_interfaces::test_utils::generators::random_block_range;
     use reth_primitives::{BlockLocked, BlockNumber, H256};
 
@@ -214,25 +214,27 @@ mod tests {
             let blocks = random_block_range(stage_progress..end, H256::zero());
 
             self.db.commit(|tx| {
-                let mut base_tx_id = 0;
+                let mut current_tx_id = 0;
                 blocks.iter().try_for_each(|b| {
                     let txs = b.body.clone();
-                    let tx_amount = txs.len() as u64;
 
                     let num_hash = (b.number, b.hash()).into();
                     tx.put::<tables::CanonicalHeaders>(b.number, b.hash())?;
-                    tx.put::<tables::CumulativeTxCount>(num_hash, base_tx_id + tx_amount)?;
+                    tx.put::<tables::BlockBodies>(
+                        num_hash,
+                        StoredBlockBody { start_tx_id: current_tx_id, tx_count: txs.len() as u64 },
+                    )?;
 
                     for body_tx in txs {
                         // Insert senders for previous stage progress
                         if b.number == stage_progress {
                             tx.put::<tables::TxSenders>(
-                                base_tx_id,
+                                current_tx_id,
                                 body_tx.recover_signer().expect("failed to recover sender"),
                             )?;
                         }
-                        tx.put::<tables::Transactions>(base_tx_id, body_tx)?;
-                        base_tx_id += 1;
+                        tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
+                        current_tx_id += 1;
                     }
 
                     Ok(())
@@ -257,17 +259,12 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut tx_count_cursor = tx.cursor::<tables::CumulativeTxCount>()?;
+                    let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
+                    let mut body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    body_cursor.seek_exact((start_block, start_hash).into())?;
 
-                    let last_block = start_block - 1;
-                    let last_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
-                    let mut last_tx_count = tx_count_cursor
-                        .seek_exact((last_block, last_hash).into())?
-                        .map(|(_, v)| v)
-                        .unwrap_or_default();
-
-                    while let Some((_, count)) = tx_count_cursor.next()? {
-                        for tx_id in last_tx_count..count {
+                    while let Some((_, body)) = body_cursor.next()? {
+                        for tx_id in body.tx_id_range() {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");
@@ -275,7 +272,6 @@ mod tests {
                                 transaction.recover_signer().expect("failed to recover signer");
                             assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);
                         }
-                        last_tx_count = count;
                     }
 
                     Ok(())
@@ -296,11 +292,13 @@ mod tests {
 
     impl SendersTestRunner {
         fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let latest_tx_id = self.db.inner().get_latest_tx_id(block);
-            match latest_tx_id {
-                Ok(last_index) => {
-                    self.db.check_no_entry_above::<tables::TxSenders, _>(last_index, |key| key)?
-                }
+            let body_result = self.db.inner().get_block_body_by_num(block);
+            match body_result {
+                Ok(body) => self
+                    .db
+                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
+                        key
+                    })?,
                 Err(_) => {
                     assert!(self.db.table_is_empty::<tables::TxSenders>()?);
                 }
