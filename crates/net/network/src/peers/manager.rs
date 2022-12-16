@@ -113,7 +113,8 @@ impl PeersManager {
                 now + refill_slots_interval,
                 refill_slots_interval,
             ),
-            unban_interval: tokio::time::interval_at(now + ban_duration, ban_duration),
+            // Use half of ban duration for interval
+            unban_interval: tokio::time::interval_at(now + ban_duration, ban_duration / 2),
             connection_info,
             ban_list,
             ban_duration,
