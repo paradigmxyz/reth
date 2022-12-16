@@ -85,7 +85,7 @@ pub(crate) struct PeersManager {
     connection_info: ConnectionInfo,
     /// Tracks unwanted ips/peer ids,
     ban_list: BanList,
-    /// Interval for triggering unban.
+    /// Interval at which to check for peers to unban.
     unban_interval: Interval,
     /// How long to ban bad peers.
     ban_duration: Duration,
