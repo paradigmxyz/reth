@@ -4,7 +4,7 @@ use reth_primitives::{BlockLocked, SealedHeader};
 /// The block response
 #[derive(PartialEq, Eq, Debug)]
 pub enum BlockResponse {
-    /// Full block response (no transactions and ommers)
+    /// Full block response (with transactions or ommers)
     Full(BlockLocked),
     /// The empty block response
     Empty(SealedHeader),
