@@ -12,5 +12,6 @@ pub mod db;
 pub mod dirs;
 pub mod node;
 pub mod prometheus_exporter;
+pub mod stage;
 pub mod test_eth_chain;
 pub mod util;
