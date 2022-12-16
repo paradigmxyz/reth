@@ -285,6 +285,8 @@ impl PeersManager {
 
     /// Returns the idle peer with the highest reputation.
     ///
+    /// Peers with a `forkId` are considered better than peers without.
+    ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| peer.state.is_unconnected());

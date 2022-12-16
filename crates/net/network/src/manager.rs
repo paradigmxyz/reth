@@ -464,7 +464,6 @@ where
             }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
                 self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
-                self.swarm.state_mut().on_status_update(height, hash)
             }
         }
     }

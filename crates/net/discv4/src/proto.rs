@@ -290,6 +290,8 @@ impl Decodable for EnrResponse {
             request_hash: reth_rlp::Decodable::decode(b)?,
             enr: reth_rlp::Decodable::decode(b)?,
         };
+        // TODO: `Decodable` can be derived once we have native reth_rlp decoding for ENR: <https://github.com/paradigmxyz/reth/issues/482>
+        // Skipping the size check here is fine since the `buf` is the UDP datagram
         // let consumed = started_len - b.len();
         // if consumed != rlp_head.payload_length {
         //     return Err(reth_rlp::DecodeError::ListLengthMismatch {
@@ -367,6 +369,7 @@ impl Decodable for Ping {
             enr_sq: None,
         };
 
+        // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
             this.enr_sq = Some(Decodable::decode(b)?);
         }
@@ -436,6 +439,7 @@ impl Decodable for Pong {
             enr_sq: None,
         };
 
+        // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
             this.enr_sq = Some(Decodable::decode(b)?);
         }

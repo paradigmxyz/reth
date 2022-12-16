@@ -93,13 +93,13 @@ impl Default for Discv4Config {
             request_timeout: Duration::from_secs(20),
             enr_timeout: Duration::from_secs(5),
             neighbours_timeout: Duration::from_secs(5),
-            lookup_interval: Duration::from_secs(15),
+            lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
-            enable_eip868: false,
+            enable_eip868: true,
             additional_eip868_rlp_pairs: Default::default(),
         }
     }

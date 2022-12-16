@@ -181,7 +181,6 @@ impl Discv4 {
         local_node_record.udp_port = local_addr.port();
         trace!( target : "discv4",  ?local_addr,"opened UDP socket");
 
-        // We don't expect many commands, so the buffer can be quite small here.
         let (to_service, rx) = mpsc::channel(100);
         let service =
             Discv4Service::new(socket, local_addr, local_node_record, secret_key, config, Some(rx));
@@ -260,6 +259,8 @@ impl Discv4 {
     }
 
     /// Sets the tcp port
+    ///
+    /// This will update our [`NodeRecord`]'s tcp port.
     pub fn set_tcp_port(&self, port: u16) {
         let cmd = Discv4Command::SetTcpPort(port);
         self.safe_send_to_service(cmd);
@@ -397,6 +398,8 @@ impl Discv4Service {
 
         let self_lookup_interval = tokio::time::interval(config.lookup_interval);
 
+        // Wait `ping_interval` and then start pinging every `ping_interval` because we want to wait
+        // for
         let ping_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + config.ping_interval,
             config.ping_interval,
@@ -783,7 +786,6 @@ impl Discv4Service {
     /// If the node's not in the table yet, this will start a ping to get it added on ping.
     pub fn add_node(&mut self, record: NodeRecord) {
         let key = kad_key(record.id);
-
         if let BucketEntry::Absent(_) = self.kbuckets.entry(&key) {
             self.try_ping(record, PingReason::Initial)
         }
@@ -905,7 +907,7 @@ impl Discv4Service {
             PingReason::Initial => {
                 let _ = self.insert_or_update(node, pong.enr_sq);
             }
-            PingReason::Reping => {
+            PingReason::RePing => {
                 self.update_on_reping(node, pong.enr_sq);
             }
             PingReason::FindNode(target, status) => {
@@ -1153,7 +1155,7 @@ impl Discv4Service {
         nodes.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
         let to_ping = nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING).collect::<Vec<_>>();
         for node in to_ping {
-            self.try_ping(node, PingReason::Reping)
+            self.try_ping(node, PingReason::RePing)
         }
     }
 
@@ -1657,8 +1659,8 @@ impl NodeEntry {
 enum PingReason {
     /// Initial ping to a previously unknown peer.
     Initial,
-    /// Reping a peer..
-    Reping,
+    /// Re-ping a peer..
+    RePing,
     /// Ping issued to adhere to endpoint proof procedure
     ///
     /// Once the expected PONG is received, the endpoint proof is complete and the find node can be

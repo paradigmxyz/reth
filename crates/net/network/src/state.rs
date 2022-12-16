@@ -14,7 +14,7 @@ use crate::{
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
-use reth_primitives::{ForkHash, ForkId, PeerId, H256};
+use reth_primitives::{ForkId, PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
     collections::{HashMap, VecDeque},
@@ -216,12 +216,10 @@ where
         self.state_fetcher.update_peer_block(peer_id, hash, number);
     }
 
-    /// Invoked on a received status update
-    pub(crate) fn on_status_update(&mut self, height: u64, hash: H256) {
-        self.discovery.update_fork_id(ForkId {
-            hash: ForkHash((&hash.as_bytes()[..4]).try_into().unwrap()),
-            next: height + 1,
-        })
+    /// Invoked on a [`ForkId`] update
+    #[allow(unused)]
+    pub(crate) fn update_fork_id(&mut self, _fork_id: ForkId) {
+        todo!()
     }
 
     /// Invoked after a `NewBlock` message was received by the peer.

@@ -67,6 +67,7 @@ impl Discovery {
     }
 
     /// Updates the `eth:ForkId` field in discv4.
+    #[allow(unused)]
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         self.discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
     }
