@@ -11,6 +11,7 @@ use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     ops::{Add, AddAssign},
 };
 use thiserror::Error;
@@ -19,7 +20,6 @@ use thiserror::Error;
 #[derive(
     Clone,
     Copy,
-    Debug,
     PartialEq,
     Eq,
     Hash,
@@ -30,6 +30,12 @@ use thiserror::Error;
     Deserialize,
 )]
 pub struct ForkHash(pub [u8; 4]);
+
+impl fmt::Debug for ForkHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ForkHash").field(&hex::encode(&self.0[..])).finish()
+    }
+}
 
 impl From<H256> for ForkHash {
     fn from(genesis: H256) -> Self {
@@ -87,7 +93,7 @@ pub enum ValidationError {
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
 /// compatibility.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkFilter {
     forks: BTreeMap<BlockNumber, ForkHash>,
 
@@ -96,55 +102,16 @@ pub struct ForkFilter {
     cache: Cache,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct Cache {
-    // An epoch is a period between forks.
-    // When we progress from one fork to the next one we move to the next epoch.
-    epoch_start: BlockNumber,
-    epoch_end: Option<BlockNumber>,
-    past: Vec<(BlockNumber, ForkHash)>,
-    future: Vec<ForkHash>,
-    fork_id: ForkId,
-}
-
-impl Cache {
-    /// Compute cache.
-    fn compute_cache(forks: &BTreeMap<BlockNumber, ForkHash>, head: BlockNumber) -> Self {
-        let mut past = Vec::with_capacity(forks.len());
-        let mut future = Vec::with_capacity(forks.len());
-
-        let mut epoch_start = 0;
-        let mut epoch_end = None;
-        for (block, hash) in forks {
-            if *block <= head {
-                epoch_start = *block;
-                past.push((*block, *hash));
-            } else {
-                if epoch_end.is_none() {
-                    epoch_end = Some(*block);
-                }
-                future.push(*hash);
-            }
-        }
-
-        let fork_id = ForkId {
-            hash: past.last().expect("there is always at least one - genesis - fork hash; qed").1,
-            next: epoch_end.unwrap_or(0),
-        };
-
-        Self { epoch_start, epoch_end, past, future, fork_id }
-    }
-}
-
 impl ForkFilter {
     /// Create the filter from provided head, genesis block hash, past forks and expected future
     /// forks.
-    pub fn new<F>(head: BlockNumber, genesis: H256, forks: F) -> Self
+    pub fn new<F, B>(head: BlockNumber, genesis: H256, forks: F) -> Self
     where
-        F: IntoIterator<Item = BlockNumber>,
+        F: IntoIterator<Item = B>,
+        B: Into<BlockNumber>,
     {
         let genesis_fork_hash = ForkHash::from(genesis);
-        let mut forks = forks.into_iter().collect::<BTreeSet<_>>();
+        let mut forks = forks.into_iter().map(Into::into).collect::<BTreeSet<_>>();
         forks.remove(&0);
         let forks = forks
             .into_iter()
@@ -197,7 +164,10 @@ impl ForkFilter {
     /// Check whether the provided `ForkId` is compatible based on the validation rules in
     /// `EIP-2124`.
     ///
+    /// Implements the rules following: <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
+    ///
     /// # Errors
+    ///
     /// Returns a `ValidationError` if the `ForkId` is not compatible.
     pub fn validate(&self, fork_id: ForkId) -> Result<(), ValidationError> {
         // 1) If local and remote FORK_HASH matches...
@@ -208,13 +178,13 @@ impl ForkFilter {
             }
 
             //... compare local head to FORK_NEXT.
-            if self.head >= fork_id.next {
+            return if self.head >= fork_id.next {
                 // 1a) A remotely announced but remotely not passed block is already passed locally,
                 // disconnect, since the chains are incompatible.
-                return Err(ValidationError::LocalIncompatibleOrStale)
+                Err(ValidationError::LocalIncompatibleOrStale)
             } else {
                 // 1b) Remotely announced fork not yet passed locally, connect.
-                return Ok(())
+                Ok(())
             }
         }
 
@@ -225,10 +195,10 @@ impl ForkFilter {
                 // ...and the remote FORK_NEXT matches with the locally following fork block number,
                 // connect.
                 if let Some((actual_fork_block, _)) = it.next() {
-                    if *actual_fork_block == fork_id.next {
-                        return Ok(())
+                    return if *actual_fork_block == fork_id.next {
+                        Ok(())
                     } else {
-                        return Err(ValidationError::RemoteStale)
+                        Err(ValidationError::RemoteStale)
                     }
                 }
 
@@ -249,11 +219,50 @@ impl ForkFilter {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cache {
+    // An epoch is a period between forks.
+    // When we progress from one fork to the next one we move to the next epoch.
+    epoch_start: BlockNumber,
+    epoch_end: Option<BlockNumber>,
+    past: Vec<(BlockNumber, ForkHash)>,
+    future: Vec<ForkHash>,
+    fork_id: ForkId,
+}
+
+impl Cache {
+    /// Compute cache.
+    fn compute_cache(forks: &BTreeMap<BlockNumber, ForkHash>, head: BlockNumber) -> Self {
+        let mut past = Vec::with_capacity(forks.len());
+        let mut future = Vec::with_capacity(forks.len());
+
+        let mut epoch_start = 0;
+        let mut epoch_end = None;
+        for (block, hash) in forks {
+            if *block <= head {
+                epoch_start = *block;
+                past.push((*block, *hash));
+            } else {
+                if epoch_end.is_none() {
+                    epoch_end = Some(*block);
+                }
+                future.push(*hash);
+            }
+        }
+
+        let fork_id = ForkId {
+            hash: past.last().expect("there is always at least one - genesis - fork hash; qed").1,
+            next: epoch_end.unwrap_or(0),
+        };
+
+        Self { epoch_start, epoch_end, past, future, fork_id }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use hex_literal::hex;
-
     const GENESIS_HASH: H256 =
         H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
 
@@ -276,7 +285,7 @@ mod tests {
         let mut filter = ForkFilter::new(
             0,
             GENESIS_HASH,
-            vec![1_150_000, 1_920_000, 2_463_000, 2_675_000, 4_370_000, 7_280_000],
+            vec![1_150_000u64, 1_920_000, 2_463_000, 2_675_000, 4_370_000, 7_280_000],
         );
 
         // Local is mainnet Petersburg, remote announces the same. No future fork is announced.

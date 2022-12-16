@@ -19,7 +19,7 @@ use reth_eth_wire::{
     error::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{ForkFilter, Hardfork, PeerId, H256, U256};
+use reth_primitives::{ForkFilter, PeerId, H256, U256};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -103,12 +103,10 @@ impl SessionManager {
         executor: Option<TaskExecutor>,
         status: Status,
         hello_message: HelloMessage,
+        fork_filter: ForkFilter,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
-
-        let hardfork = Hardfork::from(status.forkid.next);
-        let fork_filter = hardfork.fork_filter();
 
         Self {
             next_id: 0,

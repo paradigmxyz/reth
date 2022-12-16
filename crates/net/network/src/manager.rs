@@ -151,6 +151,7 @@ where
             executor,
             hello_message,
             status,
+            fork_filter,
             ..
         } = config;
 
@@ -166,8 +167,14 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let sessions =
-            SessionManager::new(secret_key, sessions_config, executor, status, hello_message);
+        let sessions = SessionManager::new(
+            secret_key,
+            sessions_config,
+            executor,
+            status,
+            hello_message,
+            fork_filter,
+        );
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
