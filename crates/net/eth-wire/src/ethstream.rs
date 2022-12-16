@@ -73,7 +73,10 @@ where
 
         let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
             Ok(m) => m,
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                tracing::trace!("rlp decode error {their_msg:?}");
+                return Err(err.into())
+            }
         };
 
         // TODO: Add any missing checks
@@ -191,7 +194,10 @@ where
 
         let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
             Ok(m) => m,
-            Err(err) => return Poll::Ready(Some(Err(err.into()))),
+            Err(err) => {
+                tracing::trace!("rlp decode error {bytes:?}");
+                return Poll::Ready(Some(Err(err.into())))
+            }
         };
 
         if matches!(msg.message, EthMessage::Status(_)) {
