@@ -20,3 +20,49 @@
     * [Postcard Encoding](https://github.com/jamesmunns/postcard)
     * Passthrough (called `no_codec` in the codebase)
 * We made implementation of these traits easy via a derive macro called [`main_codec`](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/lib.rs#L15) that delegates to one of Compact (default), Scale, Postcard or Passthrough encoding. This is [derived on every struct we need](https://github.com/search?q=repo%3Aparadigmxyz%2Freth%20%22%23%5Bmain_codec%5D%22&type=code), and lets us experiment with different encoding formats without having to modify the entire codebase each time.
+
+
+
+# Table design
+
+We do Transaction-granularity indexing. This means that we store the state for every account after every transaction that touched it, and we provide indexes for accessing that quickly.
+While this may make the database size bigger (and we need to benchmark this once we're closer to prod) it also enables blazing-fast historical tracing and simulations because we
+don't need to re-execute all transactions inside a block.
+
+Below, you can see the table design that implements this scheme:
+
+```mermaid
+erDiagram
+TransactionHash ||--o{ TxChangeIdIndex : index
+BlockChangeIdIndex ||--o{ ChangeSet : "unique index"
+History ||--o{ ChangeSet : index
+TxChangeIdIndex ||--o{ ChangeSet : "unique index"
+Transactions {
+    u64 TxNumber "PK"
+    Transaction Data
+}
+TransactionHash {
+    H256 TxHash "PK"
+    u64 TxNumber
+}
+TxChangeIdIndex {
+    u64 TxNumber "PK"
+    u64 ChangeId 
+}
+BlockChangeIdIndex {
+    u64 BlockNumber "PK"
+    u64 ChangeId
+}
+ChangeSet {
+    u64 ChangeId "PK"
+    ChangeSet PreviousValues "[Acc1[Balance,Nonce),Acc2(Balance,Nonce)] Previous values"
+}
+History {
+    H256 Account "PK"
+    u64 ChangeIdList "[ChangeId,ChangeId,...] Points where account changed"
+}
+EVM ||--o{ History: "Load Account by finding first bigger ChangeId in List, and index it in ChangeSet table"
+BlockChangeIdIndex ||--o{ EVM : "Use state (by block Changeid)"
+TxChangeIdIndex ||--o{ EVM : "Use state (by tx ChangeId)"
+TransactionHash ||--o{ Transactions : index
+```
