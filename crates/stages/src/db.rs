@@ -106,7 +106,7 @@ where
     pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
         let hash = self
             .get::<tables::CanonicalHeaders>(number)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number })?;
         Ok(hash)
     }
 
