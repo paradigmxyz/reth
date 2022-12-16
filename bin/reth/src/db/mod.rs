@@ -1,6 +1,3 @@
-// TODO: Remove
-//! Main db command
-//!
 //! Database debugging tool
 
 use clap::{Parser, Subcommand};
@@ -33,11 +30,11 @@ const DEFAULT_NUM_ITEMS: &str = "5";
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
 pub enum Subcommands {
-    /// Lists all the table names, number of entries, and size in KB
+    /// Lists all the tables, their entry count and their size
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
-    /// Seeds the block db with random blocks on top of each other
+    /// Seeds the database with random blocks on top of each other
     Seed {
         /// How many blocks to generate
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
@@ -59,7 +56,7 @@ pub struct ListArgs {
 }
 
 impl Command {
-    /// Execute `node` command
+    /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let path = shellexpand::full(&self.db)?.into_owned();
         let expanded_db_path = Path::new(&path);
@@ -95,7 +92,7 @@ impl Command {
                         let overflow_pages = stats.overflow_pages();
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
-                        tracing::info!(
+                        info!(
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -130,7 +127,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        tracing::info!("generating random block range from 0 to {len}");
+        info!("Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default());
 
         self.db.update(|tx| {
@@ -140,21 +137,41 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database committed with {len} blocks");
-
+        info!("Database seeded with {len} blocks");
         Ok(())
     }
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
-        match args.table.as_str() {
-            "canonical_headers" => {
-                self.list_table::<tables::CanonicalHeaders>(args.start, args.len)?
-            }
-            "headers" => self.list_table::<tables::Headers>(args.start, args.len)?,
-            "txs" => self.list_table::<tables::Transactions>(args.start, args.len)?,
-            _ => panic!(),
-        };
+        macro_rules! list_tables {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+                match $arg {
+                    $(stringify!($table) => {
+                        self.list_table::<tables::$table>($start, $len)?
+                    },)*
+                    _ => {
+                        tracing::error!("Unknown table.");
+                        return Ok(())
+                    }
+                }
+            };
+        }
+
+        list_tables!(args.table.to_lowercase().as_str(), args.start, args.len => [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            TxHashNumber,
+            PlainAccountState,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            SyncStage,
+            Transactions
+        ]);
+
         Ok(())
     }
 
@@ -174,7 +191,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         })?;
 
         println!("{data:?}");
-
         Ok(())
     }
 }
