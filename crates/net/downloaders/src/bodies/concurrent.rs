@@ -1,5 +1,6 @@
 use backon::{ExponentialBackoff, Retryable};
 use futures_util::{stream, StreamExt, TryStreamExt};
+use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
@@ -11,11 +12,8 @@ use reth_interfaces::{
         error::{DownloadError, DownloadResult, RequestError},
     },
 };
-use reth_primitives::{
-    proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockLocked, SealedHeader,
-};
-use std::{borrow::Borrow, sync::Arc};
+use reth_primitives::{BlockLocked, SealedHeader};
+use std::{borrow::Borrow, sync::Arc, vec::IntoIter};
 
 /// Downloads bodies in batches.
 ///
@@ -56,7 +54,7 @@ where
     Client: BodiesClient,
     Consensus: ConsensusTrait,
 {
-    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockLocked>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockResponse>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,
@@ -111,65 +109,65 @@ where
     }
 
     /// Fetch a batch of block bodies.
-    async fn fetch_bodies(&self, headers: Vec<&SealedHeader>) -> DownloadResult<Vec<BlockLocked>> {
+    async fn fetch_bodies(
+        &self,
+        headers: Vec<&SealedHeader>,
+    ) -> DownloadResult<Vec<BlockResponse>> {
         let non_empty_headers =
-            headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).collect();
-
-        // TODO: handle no non empty
-        let (peer_id, response) = self.client.get_block_body(non_empty_headers).await?.split();
-
-        let bodies = vec![];
-        let mut response_iter = response.iter();
-        for header in headers.iter() {
-            if header.is_empty() {
-                // TODO: bodies.push(value);
-                continue
-            }
-
-            let Some(body) = response_iter.next() else {
-                // TODO:
-                return Err(DownloadError::RequestError(RequestError::BadResponse))
-            };
-            let block = BlockLocked {
-                header: *header.clone(),
-                body: body.transactions,
-                ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
-            };
-
-            match self.consensus.pre_validate_block(&block) {
-                Ok(_) => Ok(block),
-                Err(error) => {
-                    self.client.report_bad_message(peer_id);
-                    Err(DownloadError::BlockValidation { hash: header.hash(), error })
-                }
-            }
+            headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).collect::<Vec<_>>();
+        if non_empty_headers.is_empty() {
+            return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
-        let (peer_id, response) = self
-            .client
-            .get_block_body(headers.iter().map(|header| header.hash()).collect())
-            .await?
-            .split();
+        let (peer_id, response) = self.client.get_block_body(non_empty_headers).await?.split();
 
-        response
-            .into_iter()
-            .zip(headers)
-            .map(|(body, header)| {
-                let block = BlockLocked {
-                    header: header.clone(),
-                    body: body.transactions,
-                    ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
-                };
-
-                match self.consensus.pre_validate_block(&block) {
-                    Ok(_) => Ok(block),
-                    Err(error) => {
-                        self.client.report_bad_message(peer_id);
-                        Err(DownloadError::BlockValidation { hash: header.hash(), error })
+        let mut bodies = vec![];
+        let mut response_iter = response.into_iter();
+        for header in headers.iter() {
+            match self.map_empty_or_validate_response(*header, &mut response_iter) {
+                Ok(body) => bodies.push(body),
+                Err(err) => {
+                    self.client.report_bad_message(peer_id);
+                    tracing::error!(target : "downloaders::bodies", "Error processing body response: {:?}", err);
+                    if bodies.is_empty() {
+                        return Err(err)
+                    } else {
+                        tracing::warn!(target : "downloaders::bodies", "Returning {} bodies despite the error", bodies.len());
+                        break
                     }
                 }
-            })
-            .collect()
+            };
+        }
+
+        Ok(bodies)
+    }
+
+    /// Return the [BlockResponse] depending on the header and the next item
+    /// in the peer response. If the header is empty, returning early. Otherwise,
+    /// attempt to get next body from the response, validate it and return if
+    /// it's correct
+    fn map_empty_or_validate_response(
+        &self,
+        header: &SealedHeader,
+        response: &mut IntoIter<BlockBody>,
+    ) -> DownloadResult<BlockResponse> {
+        if header.is_empty() {
+            return Ok(BlockResponse::Empty(header.clone()))
+        }
+
+        let Some(body) = response.next() else {
+            return Err(DownloadError::RequestError(RequestError::BadResponse))
+        };
+        let block = BlockLocked {
+            header: header.clone(),
+            body: body.transactions,
+            ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
+        };
+
+        self.consensus
+            .pre_validate_block(&block)
+            .map_err(|error| DownloadError::BlockValidation { hash: header.hash(), error })?;
+        Ok(BlockResponse::Full(block))
     }
 }
 
@@ -229,7 +227,7 @@ mod tests {
         assert_matches!(
             downloader
                 .bodies_stream(headers.clone().iter())
-                .try_collect::<Vec<BlockLocked>>()
+                .try_collect::<Vec<BlockResponse>>()
                 .await,
             Ok(responses) => {
                 assert_eq!(
@@ -238,13 +236,13 @@ mod tests {
                         .into_iter()
                         .map(| header | {
                             let body = bodies .remove(&header.hash()).unwrap();
-                            BlockLocked {
+                            BlockResponse::Full(BlockLocked {
                                 header,
                                 body: body.transactions,
                                 ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
-                            }
+                            })
                         })
-                        .collect::<Vec<BlockLocked>>()
+                        .collect::<Vec<BlockResponse>>()
                 );
             }
         );
@@ -293,7 +291,7 @@ mod tests {
         assert_matches!(
             downloader.bodies_stream(&[SealedHeader::default()]).next().await,
             Some(Ok(body)) => {
-                assert_eq!(body, BlockLocked::default());
+                assert_eq!(body, BlockResponse::Full(BlockLocked::default()));
             }
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 0);

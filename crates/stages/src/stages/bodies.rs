@@ -10,7 +10,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{consensus::Consensus, p2p::bodies::downloader::BodyDownloader};
+use reth_interfaces::{
+    consensus::Consensus,
+    p2p::bodies::downloader::{BlockResponse, BodyDownloader},
+};
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{error, warn};
@@ -112,7 +115,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = stage_progress;
         while let Some(result) = bodies_stream.next().await {
-            let Ok(block) = result else {
+            let Ok(response) = result else {
                 error!(
                     "Encountered an error downloading block {}: {:?}",
                     highest_block + 1,
@@ -124,30 +127,50 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     reached_tip: false,
                 })
             };
-            let block_number = block.number;
-            // Write block
-            let block_key = (block_number, block.hash()).into();
-            body_cursor.append(
-                block_key,
-                StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
-            )?;
-            ommers_cursor.append(
-                block_key,
-                StoredBlockOmmers {
-                    ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
-                },
-            )?;
 
-            // Write transactions
-            for transaction in block.body {
-                // Insert the transaction hash to number mapping
-                db.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
-                // Append the transaction
-                tx_cursor.append(current_tx_id, transaction)?;
-                tx_transition_cursor.append(current_tx_id, transition_id)?;
-                current_tx_id += 1;
-                transition_id += 1;
-            }
+            // Write block
+            let block_header = response.header();
+            let block_number = block_header.number;
+            let block_key = block_header.num_hash().into();
+
+            match response {
+                BlockResponse::Full(block) => {
+                    body_cursor.append(
+                        block_key,
+                        StoredBlockBody {
+                            start_tx_id: current_tx_id,
+                            tx_count: block.body.len() as u64,
+                        },
+                    )?;
+                    ommers_cursor.append(
+                        block_key,
+                        StoredBlockOmmers {
+                            ommers: block
+                                .ommers
+                                .into_iter()
+                                .map(|header| header.unseal())
+                                .collect(),
+                        },
+                    )?;
+
+                    // Write transactions
+                    for transaction in block.body {
+                        // Insert the transaction hash to number mapping
+                        db.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
+                        // Append the transaction
+                        tx_cursor.append(current_tx_id, transaction)?;
+                        tx_transition_cursor.append(current_tx_id, transition_id)?;
+                        current_tx_id += 1;
+                        transition_id += 1;
+                    }
+                }
+                BlockResponse::Empty(_) => {
+                    body_cursor.append(
+                        block_key,
+                        StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
+                    )?;
+                }
+            };
 
             // The block transition marks the final state at the end of the block.
             // Increment the transition if the block contains an addition block reward.
@@ -523,7 +546,10 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             p2p::{
-                bodies::{client::BodiesClient, downloader::BodyDownloader},
+                bodies::{
+                    client::BodiesClient,
+                    downloader::{BlockResponse, BodyDownloader},
+                },
                 downloader::{DownloadClient, DownloadStream, Downloader},
                 error::{DownloadResult, PeerRequestResult},
             },
@@ -804,7 +830,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn bodies_stream<'a, 'b, I>(&'a self, hashes: I) -> DownloadStream<'a, BlockLocked>
+            fn bodies_stream<'a, 'b, I>(&'a self, hashes: I) -> DownloadStream<'a, BlockResponse>
             where
                 I: IntoIterator<Item = &'b SealedHeader>,
                 <I as IntoIterator>::IntoIter: Send + 'b,
@@ -816,11 +842,11 @@ mod tests {
                         .get(&header.hash())
                         .expect("Stage tried downloading a block we do not have.")
                         .clone()?;
-                    Ok(BlockLocked {
+                    Ok(BlockResponse::Full(BlockLocked {
                         header: header.clone(),
                         body: result.transactions,
                         ommers: result.ommers.into_iter().map(|header| header.seal()).collect(),
-                    })
+                    }))
                 })))
             }
         }
