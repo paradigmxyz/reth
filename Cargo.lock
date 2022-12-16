@@ -3841,32 +3841,34 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "2.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73d84c8f9836efb0f5f5f8de4700a953c4e1f3119e5cfcb0aad8e5be73daf991"
+source = "git+https://github.com/bluealloy/revm?branch=custom_inspector#a8970609f5437a727f4eb69c7a2c69c59dbdd626"
 dependencies = [
  "arrayref",
  "auto_impl",
  "bytes",
+ "derive_more",
+ "fixed-hash",
  "hashbrown 0.13.1",
+ "hex",
+ "hex-literal",
  "num_enum",
- "primitive-types",
  "revm_precompiles",
  "rlp",
+ "ruint",
  "sha3",
 ]
 
 [[package]]
 name = "revm_precompiles"
 version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0353d456ef3e989dc9190f42c6020f09bc2025930c37895826029304413204b5"
+source = "git+https://github.com/bluealloy/revm?branch=custom_inspector#a8970609f5437a727f4eb69c7a2c69c59dbdd626"
 dependencies = [
  "bytes",
  "hashbrown 0.13.1",
  "num",
  "once_cell",
- "primitive-types",
  "ripemd",
+ "ruint",
  "secp256k1",
  "sha2 0.10.6",
  "sha3",
@@ -3928,6 +3930,26 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "ruint"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ad3a104dc8c3867f653b0fec89c65e00b0ceb752718ad282177a7e0f33257ac"
+dependencies = [
+ "derive_more",
+ "primitive-types",
+ "rlp",
+ "ruint-macro",
+ "rustc_version 0.4.0",
+ "thiserror",
+]
+
+[[package]]
+name = "ruint-macro"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62cc5760263ea229d367e7dff3c0cbf09e4797a125bd87059a6c095804f3b2d1"
 
 [[package]]
 name = "rustc-hash"

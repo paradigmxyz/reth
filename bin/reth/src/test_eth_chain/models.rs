@@ -21,7 +21,7 @@ pub struct BlockchainTestData {
     /// Blocks.
     pub blocks: Vec<Block>,
     /// Post state.
-    pub post_state: Option<State>,
+    pub post_state: Option<RootOrState>,
     /// Pre state.
     pub pre: State,
     /// Hash of best block.
