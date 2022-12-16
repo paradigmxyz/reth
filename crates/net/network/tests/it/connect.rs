@@ -13,7 +13,8 @@ use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::PeerId;
 use reth_provider::test_utils::TestApi;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
+use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -109,6 +110,14 @@ async fn test_connect_with_builder() {
 
     tokio::task::spawn(async move {
         tokio::join!(network, requests);
+    });
+
+    let h = handle.clone();
+    task::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            dbg!(h.num_connected_peers());
+        }
     });
 
     while let Some(ev) = events.next().await {

@@ -1160,6 +1160,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
+ "secp256k1",
  "serde",
  "sha3",
  "zeroize",
@@ -3264,6 +3265,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "discv5",
+ "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "generic-array",
  "hex",
  "public-ip",
@@ -3565,11 +3567,15 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
+ "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ethereum-types",
  "ethnum",
  "hex-literal",
+ "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
+ "rlp",
+ "secp256k1",
  "smol_str",
 ]
 
