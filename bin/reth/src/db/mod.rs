@@ -146,31 +146,35 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
-        // TODO: We should codegen this
-        match args.table.as_str() {
-            "canonical_headers" => {
-                self.list_table::<tables::CanonicalHeaders>(args.start, args.len)?
-            }
-            "header_td" => self.list_table::<tables::HeaderTD>(args.start, args.len)?,
-            "header_numbers" => self.list_table::<tables::HeaderNumbers>(args.start, args.len)?,
-            "headers" => self.list_table::<tables::Headers>(args.start, args.len)?,
-            "block_bodies" => self.list_table::<tables::BlockBodies>(args.start, args.len)?,
-            "ommers" => self.list_table::<tables::BlockOmmers>(args.start, args.len)?,
-            "tx_hash_number" => self.list_table::<tables::TxHashNumber>(args.start, args.len)?,
-            "plain_account_state" => {
-                self.list_table::<tables::PlainAccountState>(args.start, args.len)?
-            }
-            "block_transition_index" => {
-                self.list_table::<tables::BlockTransitionIndex>(args.start, args.len)?
-            }
-            "tx_transition_index" => {
-                self.list_table::<tables::TxTransitionIndex>(args.start, args.len)?
-            }
-            "sync_stage" => self.list_table::<tables::SyncStage>(args.start, args.len)?,
+        macro_rules! list_tables {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+                match $arg {
+                    $(stringify!($table) => {
+                        self.list_table::<tables::$table>($start, $len)?
+                    },)*
+                    _ => {
+                        tracing::error!("Unknown table.");
+                        return Ok(())
+                    }
+                }
+            };
+        }
 
-            "txs" => self.list_table::<tables::Transactions>(args.start, args.len)?,
-            _ => panic!(),
-        };
+        list_tables!(args.table.as_str(), args.start, args.len => [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            TxHashNumber,
+            PlainAccountState,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            SyncStage,
+            Transactions
+        ]);
+
         Ok(())
     }
 
@@ -190,7 +194,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         })?;
 
         println!("{data:?}");
-
         Ok(())
     }
 }
