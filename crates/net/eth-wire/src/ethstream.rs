@@ -74,7 +74,7 @@ where
         let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::trace!("rlp decode error {their_msg:?}");
+                tracing::warn!("rlp decode error in handshake {their_msg:x}");
                 return Err(err.into())
             }
         };
@@ -195,7 +195,7 @@ where
         let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::trace!("rlp decode error {bytes:?}");
+                tracing::warn!("rlp decode error {bytes:x}");
                 return Poll::Ready(Some(Err(err.into())))
             }
         };
