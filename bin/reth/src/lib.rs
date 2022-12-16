@@ -9,6 +9,5 @@
 pub mod cli;
 pub mod db;
 pub mod node;
-// TODO: Re-enable once execution is ported.
-// pub mod test_eth_chain;
+pub mod test_eth_chain;
 pub mod util;
