@@ -34,8 +34,10 @@ impl StoredBlockBody {
         self.start_tx_id..self.start_tx_id + self.tx_count
     }
 
-    /// Return any last index that should be before this block
-    pub fn any_last_tx_index(&self) -> TxNumber {
+    /// Return the index of last transaction in this block unless the block
+    /// is empty in which case it refers to the last transaction in a previous
+    /// non-empty block
+    pub fn last_tx_index(&self) -> TxNumber {
         self.start_tx_id.saturating_add(self.tx_count).saturating_sub(1)
     }
 

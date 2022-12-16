@@ -70,7 +70,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         let start_tx_index = db.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
 
         // Look up the end index for transaction range (inclusive)
-        let end_tx_index = db.get_block_body_by_num(max_block_num)?.any_last_tx_index();
+        let end_tx_index = db.get_block_body_by_num(max_block_num)?.last_tx_index();
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
@@ -116,7 +116,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = db.get_block_body_by_num(input.unwind_to)?.any_last_tx_index();
+        let latest_tx_id = db.get_block_body_by_num(input.unwind_to)?.last_tx_index();
         db.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -294,10 +294,11 @@ mod tests {
         fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.db.inner().get_block_body_by_num(block);
             match body_result {
-                Ok(body) => self.db.check_no_entry_above::<tables::TxSenders, _>(
-                    body.any_last_tx_index(),
-                    |key| key,
-                )?,
+                Ok(body) => self
+                    .db
+                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
+                        key
+                    })?,
                 Err(_) => {
                     assert!(self.db.table_is_empty::<tables::TxSenders>()?);
                 }
