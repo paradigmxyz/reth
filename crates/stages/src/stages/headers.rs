@@ -23,6 +23,7 @@ use reth_interfaces::{
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
+use metrics::{counter, histogram};
 
 const HEADERS: StageId = StageId("Headers");
 
@@ -79,9 +80,10 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
         let mut current_progress = stage_progress;
+        // Start timer for request_time metric
+        let mut start = tokio::time::Instant::now();
         let mut stream =
             self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold as usize);
-
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
@@ -89,6 +91,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
                     info!(target: "sync::stages::headers", len = res.len(), "Received headers");
+                    histogram!("stages.headers.request_time", start.elapsed());
+                    counter!("stages.headers.counter", res.len() as u64);
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
@@ -98,19 +102,25 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 }
                 Err(e) => match e {
                     DownloadError::Timeout => {
+                        counter!("stages.headers.timeout_errors", 1);
                         warn!(target: "sync::stages::headers", "No response for header request");
                         return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
+                        counter!("stages.headers.validation_errors", 1);
                         error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
+                        counter!("stages.headers.unexpected_errors", 1);
                         error!(target: "sync::stages::headers", ?error, "Unexpected error");
                         return Err(StageError::Recoverable(error.into()))
                     }
                 },
+                
             }
+            // Restart timer for next request
+            start = tokio::time::Instant::now();
         }
 
         // Write total difficulty values after all headers have been inserted
