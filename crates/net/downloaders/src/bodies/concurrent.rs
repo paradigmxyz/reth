@@ -108,7 +108,19 @@ where
         self
     }
 
-    /// Fetch a batch of block bodies.
+    /// Given a batch of headers, this function proceeds to:
+    /// 1. Filter for all the non-empty headers
+    /// 2. Return early with the header values, if there were no non-empty headers, else..
+    /// 3. Request the bodies for the non-empty headers from a peer chosen by the network client
+    /// 4. For any non-empty headers, it proceeds to validate the corresponding body from the peer
+    /// and return it as part of the response via the [`BlockResponse::Full`] variant.
+    ///
+    /// NB: This assumes that peers respond with bodies in the order that they were requested.
+    /// This is a reasonable assumption to make as that's [what Geth
+    /// does](https://github.com/ethereum/go-ethereum/blob/f53ff0ff4a68ffc56004ab1d5cc244bcb64d3277/les/server_requests.go#L245).
+    /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
+    /// that try to give us bodies that do not match the requested order are going to be penalized
+    /// and eventually disconnected.
     async fn fetch_bodies(
         &self,
         headers: Vec<&SealedHeader>,
@@ -119,55 +131,51 @@ where
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
-        let (peer_id, response) = self.client.get_block_body(non_empty_headers).await?.split();
+        let (peer_id, bodies) = self.client.get_block_body(non_empty_headers).await?.split();
 
-        let mut bodies = vec![];
-        let mut response_iter = response.into_iter();
-        for header in headers.iter() {
-            match self.map_empty_or_validate_response(*header, &mut response_iter) {
-                Ok(body) => bodies.push(body),
-                Err(err) => {
-                    self.client.report_bad_message(peer_id);
-                    tracing::error!(target : "downloaders::bodies", "Error processing body response: {:?}", err);
-                    if bodies.is_empty() {
-                        return Err(err)
-                    } else {
-                        tracing::warn!(target : "downloaders::bodies", "Returning {} bodies despite the error", bodies.len());
-                        break
+        let mut bodies = bodies.into_iter();
+
+        let mut responses = vec![];
+        for header in headers.into_iter().cloned() {
+            // If the header has no txs / ommers, just push it and continue
+            if header.is_empty() {
+                responses.push(BlockResponse::Empty(header));
+            } else {
+                // If the header was not empty, and there is no body, then
+                // the peer gave us a bad resopnse and we should return
+                // error.
+                let body = match bodies.next() {
+                    Some(body) => body,
+                    None => {
+                        self.client.report_bad_message(peer_id);
+                        // TODO: We error always, this means that if we got no body from a peer
+                        // and the header was not empty we will discard a bunch of progress.
+                        // This will cause redundant bandwdith usage (due to how our retriable
+                        // stream works via std::iter), but we will address this
+                        // with a custom retriable stream that maintains state and is able to
+                        // "resume" progress from the current state of `responses`.
+                        return Err(DownloadError::RequestError(RequestError::BadResponse))
                     }
-                }
-            };
+                };
+
+                let block = BlockLocked {
+                    header: header.clone(),
+                    body: body.transactions,
+                    ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
+                };
+
+                // This ensures that the TxRoot and OmmersRoot from the header match the
+                // ones calculated manually from the block body.
+                self.consensus.pre_validate_block(&block).map_err(|error| {
+                    self.client.report_bad_message(peer_id);
+                    DownloadError::BlockValidation { hash: header.hash(), error }
+                })?;
+
+                responses.push(BlockResponse::Full(block));
+            }
         }
 
-        Ok(bodies)
-    }
-
-    /// Return the [BlockResponse] depending on the header and the next item
-    /// in the peer response. If the header is empty, returning early. Otherwise,
-    /// attempt to get next body from the response, validate it and return if
-    /// it's correct
-    fn map_empty_or_validate_response(
-        &self,
-        header: &SealedHeader,
-        response: &mut IntoIter<BlockBody>,
-    ) -> DownloadResult<BlockResponse> {
-        if header.is_empty() {
-            return Ok(BlockResponse::Empty(header.clone()))
-        }
-
-        let Some(body) = response.next() else {
-            return Err(DownloadError::RequestError(RequestError::BadResponse))
-        };
-        let block = BlockLocked {
-            header: header.clone(),
-            body: body.transactions,
-            ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
-        };
-
-        self.consensus
-            .pre_validate_block(&block)
-            .map_err(|error| DownloadError::BlockValidation { hash: header.hash(), error })?;
-        Ok(BlockResponse::Full(block))
+        Ok(responses)
     }
 }
 
