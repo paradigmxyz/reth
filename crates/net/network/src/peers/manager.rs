@@ -814,6 +814,15 @@ mod test {
         assert!(p.is_banned());
 
         match event!(peers) {
+            PeerAction::Disconnect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+
+        match event!(peers) {
             PeerAction::BanPeer { peer_id } => {
                 assert_eq!(peer_id, peer);
             }
