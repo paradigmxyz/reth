@@ -71,14 +71,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }
