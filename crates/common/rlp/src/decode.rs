@@ -384,6 +384,33 @@ impl Decodable for smol_str::SmolStr {
     }
 }
 
+#[cfg(feature = "enr")]
+impl<K> Decodable for enr::Enr<K>
+where
+    K: enr::EnrKey,
+{
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        // currently the only way to build an enr is to decode it using the rlp::Decodable trait
+        <Self as rlp::Decodable>::decode(&rlp::Rlp::new(buf)).map_err(|e| match e {
+            rlp::DecoderError::RlpIsTooShort => DecodeError::InputTooShort,
+            rlp::DecoderError::RlpInvalidLength => DecodeError::Overflow,
+            rlp::DecoderError::RlpExpectedToBeList => DecodeError::UnexpectedString,
+            rlp::DecoderError::RlpExpectedToBeData => DecodeError::UnexpectedList,
+            rlp::DecoderError::RlpDataLenWithZeroPrefix |
+            rlp::DecoderError::RlpListLenWithZeroPrefix => DecodeError::LeadingZero,
+            rlp::DecoderError::RlpInvalidIndirection => DecodeError::NonCanonicalSize,
+            rlp::DecoderError::RlpIncorrectListLen => {
+                DecodeError::Custom("incorrect list length when decoding rlp")
+            }
+            rlp::DecoderError::RlpIsTooBig => DecodeError::Custom("rlp is too big"),
+            rlp::DecoderError::RlpInconsistentLengthAndData => {
+                DecodeError::Custom("inconsistent length and data when decoding rlp")
+            }
+            rlp::DecoderError::Custom(s) => DecodeError::Custom(s),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -601,5 +628,63 @@ mod tests {
             (Ok(SmolStr::new("test smol str")), b.as_ref()),
             (Err(DecodeError::UnexpectedList), &hex!("C0")[..]),
         ])
+    }
+
+    // test vector from the enr library rlp encoding tests
+    // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#L1019>
+    #[cfg(feature = "enr")]
+    #[test]
+    fn decode_enr_rlp() {
+        use enr::{secp256k1::SecretKey, Enr, EnrPublicKey};
+        use std::net::Ipv4Addr;
+
+        let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
+        let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
+        let expected_pubkey =
+            hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
+
+        let enr = Enr::<SecretKey>::decode(&mut &valid_record[..]).unwrap();
+        let pubkey = enr.public_key().encode();
+
+        assert_eq!(enr.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(enr.id(), Some(String::from("v4")));
+        assert_eq!(enr.udp4(), Some(30303));
+        assert_eq!(enr.tcp4(), None);
+        assert_eq!(enr.signature(), &signature[..]);
+        assert_eq!(pubkey.to_vec(), expected_pubkey);
+        assert!(enr.verify());
+    }
+
+    // test vector from the enr library rlp encoding tests
+    // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
+    #[cfg(feature = "enr")]
+    #[test]
+    fn encode_decode_enr_rlp() {
+        use enr::{secp256k1::SecretKey, Enr, EnrBuilder, EnrKey, EnrPublicKey};
+        use std::net::Ipv4Addr;
+
+        let key = SecretKey::new(&mut rand::rngs::OsRng);
+        let ip = Ipv4Addr::new(127, 0, 0, 1);
+        let tcp = 3000;
+
+        let enr = {
+            let mut builder = EnrBuilder::new("v4");
+            builder.ip(ip.into());
+            builder.tcp4(tcp);
+            builder.build(&key).unwrap()
+        };
+
+        let mut encoded = BytesMut::new();
+        enr.encode(&mut encoded);
+
+        let decoded_enr = Enr::<SecretKey>::decode(&mut &encoded[..]).unwrap();
+
+        assert_eq!(decoded_enr, enr);
+
+        assert_eq!(decoded_enr.id(), Some("v4".into()));
+        assert_eq!(decoded_enr.ip4(), Some(ip));
+        assert_eq!(decoded_enr.tcp4(), Some(tcp));
+        assert_eq!(decoded_enr.public_key().encode(), key.public().encode());
+        assert!(decoded_enr.verify());
     }
 }

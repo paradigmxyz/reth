@@ -2,7 +2,8 @@
 
 use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use reth_primitives::{keccak256, H256};
+use enr::Enr;
+use reth_primitives::{keccak256, ForkId, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
@@ -21,6 +22,8 @@ pub enum MessageId {
     Pong = 2,
     FindNode = 3,
     Neighbours = 4,
+    EnrRequest = 5,
+    EnrResponse = 6,
 }
 
 impl MessageId {
@@ -31,6 +34,8 @@ impl MessageId {
             2 => MessageId::Pong,
             3 => MessageId::FindNode,
             4 => MessageId::Neighbours,
+            5 => MessageId::EnrRequest,
+            6 => MessageId::EnrResponse,
             _ => return Err(msg),
         };
         Ok(msg)
@@ -44,6 +49,8 @@ pub enum Message {
     Pong(Pong),
     FindNode(FindNode),
     Neighbours(Neighbours),
+    EnrRequest(EnrRequest),
+    EnrResponse(EnrResponse),
 }
 
 // === impl Message ===
@@ -56,6 +63,8 @@ impl Message {
             Message::Pong(_) => MessageId::Pong,
             Message::FindNode(_) => MessageId::FindNode,
             Message::Neighbours(_) => MessageId::Neighbours,
+            Message::EnrRequest(_) => MessageId::EnrRequest,
+            Message::EnrResponse(_) => MessageId::EnrResponse,
         }
     }
 
@@ -87,6 +96,14 @@ impl Message {
             }
             Message::Neighbours(message) => {
                 payload.put_u8(4);
+                message.encode(&mut payload);
+            }
+            Message::EnrRequest(message) => {
+                payload.put_u8(5);
+                message.encode(&mut payload);
+            }
+            Message::EnrResponse(message) => {
+                payload.put_u8(6);
                 message.encode(&mut payload);
             }
         }
@@ -146,6 +163,8 @@ impl Message {
             MessageId::Pong => Message::Pong(Pong::decode(payload)?),
             MessageId::FindNode => Message::FindNode(FindNode::decode(payload)?),
             MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
+            MessageId::EnrRequest => Message::EnrRequest(EnrRequest::decode(payload)?),
+            MessageId::EnrResponse => Message::EnrResponse(EnrResponse::decode(payload)?),
         };
 
         Ok(Packet { msg, node_id, hash: header_hash })
@@ -220,7 +239,7 @@ impl From<NodeRecord> for NodeEndpoint {
     }
 }
 
-/// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).).
+/// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct FindNode {
     pub id: PeerId,
@@ -234,12 +253,65 @@ pub struct Neighbours {
     pub expire: u64,
 }
 
+/// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+pub struct EnrRequest {
+    pub expire: u64,
+}
+
+/// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
+pub struct EnrResponse {
+    pub request_hash: H256,
+    pub enr: Enr<SecretKey>,
+}
+
+// === impl EnrResponse ===
+
+impl EnrResponse {
+    /// Returns the [`ForkId`] if set
+    ///
+    /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
+    pub fn eth_fork_id(&self) -> Option<ForkId> {
+        let mut maybe_fork_id = self.enr.get(b"eth")?;
+        ForkId::decode(&mut maybe_fork_id).ok()
+    }
+}
+
+impl Decodable for EnrResponse {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString)
+        }
+        // let started_len = b.len();
+        let this = Self {
+            request_hash: reth_rlp::Decodable::decode(b)?,
+            enr: reth_rlp::Decodable::decode(b)?,
+        };
+        // TODO: `Decodable` can be derived once we have native reth_rlp decoding for ENR: <https://github.com/paradigmxyz/reth/issues/482>
+        // Skipping the size check here is fine since the `buf` is the UDP datagram
+        // let consumed = started_len - b.len();
+        // if consumed != rlp_head.payload_length {
+        //     return Err(reth_rlp::DecodeError::ListLengthMismatch {
+        //         expected: rlp_head.payload_length,
+        //         got: consumed,
+        //     })
+        // }
+        *buf = *b;
+        Ok(this)
+    }
+}
+
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Ping {
     pub from: NodeEndpoint,
     pub to: NodeEndpoint,
     pub expire: u64,
+    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    pub enr_sq: Option<u64>,
 }
 
 impl Encodable for Ping {
@@ -251,13 +323,33 @@ impl Encodable for Ping {
             to: &'a NodeEndpoint,
             expire: u64,
         }
-        V4PingMessage {
-            version: 4, // version 4
-            from: &self.from,
-            to: &self.to,
-            expire: self.expire,
+
+        #[derive(RlpEncodable)]
+        struct V4PingMessageEIP868<'a> {
+            version: u32,
+            from: &'a NodeEndpoint,
+            to: &'a NodeEndpoint,
+            expire: u64,
+            enr_seq: u64,
         }
-        .encode(out)
+        if let Some(enr_seq) = self.enr_sq {
+            V4PingMessageEIP868 {
+                version: 4, // version 4
+                from: &self.from,
+                to: &self.to,
+                expire: self.expire,
+                enr_seq,
+            }
+            .encode(out);
+        } else {
+            V4PingMessage {
+                version: 4, // version 4
+                from: &self.from,
+                to: &self.to,
+                expire: self.expire,
+            }
+            .encode(out);
+        }
     }
 }
 
@@ -270,11 +362,18 @@ impl Decodable for Ping {
         }
         let started_len = b.len();
         let _version = u32::decode(b)?;
-        let this = Self {
+        let mut this = Self {
             from: Decodable::decode(b)?,
             to: Decodable::decode(b)?,
             expire: Decodable::decode(b)?,
+            enr_sq: None,
         };
+
+        // only decode the ENR sequence if there's more data in the datagram to decode else skip
+        if b.has_remaining() {
+            this.enr_sq = Some(Decodable::decode(b)?);
+        }
+
         let consumed = started_len - b.len();
         if consumed > rlp_head.payload_length {
             return Err(DecodeError::ListLengthMismatch {
@@ -290,12 +389,39 @@ impl Decodable for Ping {
 }
 
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
-// #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pong {
     pub to: NodeEndpoint,
     pub echo: H256,
     pub expire: u64,
+    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    pub enr_sq: Option<u64>,
+}
+
+impl Encodable for Pong {
+    fn encode(&self, out: &mut dyn BufMut) {
+        #[derive(RlpEncodable)]
+        struct PongMessageEIP868<'a> {
+            to: &'a NodeEndpoint,
+            echo: &'a H256,
+            expire: u64,
+            enr_seq: u64,
+        }
+
+        #[derive(RlpEncodable)]
+        struct PongMessage<'a> {
+            to: &'a NodeEndpoint,
+            echo: &'a H256,
+            expire: u64,
+        }
+
+        if let Some(enr_seq) = self.enr_sq {
+            PongMessageEIP868 { to: &self.to, echo: &self.echo, expire: self.expire, enr_seq }
+                .encode(out);
+        } else {
+            PongMessage { to: &self.to, echo: &self.echo, expire: self.expire }.encode(out);
+        }
+    }
 }
 
 impl Decodable for Pong {
@@ -306,11 +432,18 @@ impl Decodable for Pong {
             return Err(DecodeError::UnexpectedString)
         }
         let started_len = b.len();
-        let this = Self {
+        let mut this = Self {
             to: Decodable::decode(b)?,
             echo: Decodable::decode(b)?,
             expire: Decodable::decode(b)?,
+            enr_sq: None,
         };
+
+        // only decode the ENR sequence if there's more data in the datagram to decode else skip
+        if b.has_remaining() {
+            this.enr_sq = Some(Decodable::decode(b)?);
+        }
+
         let consumed = started_len - b.len();
         if consumed > rlp_head.payload_length {
             return Err(DecodeError::ListLengthMismatch {
@@ -321,6 +454,7 @@ impl Decodable for Pong {
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
         *buf = *b;
+
         Ok(this)
     }
 }
@@ -439,12 +573,80 @@ mod tests {
         for _ in 0..100 {
             let mut ip = [0u8; 16];
             rng.fill_bytes(&mut ip);
-            let msg = Ping { from: rng_endpoint(&mut rng), to: rng_endpoint(&mut rng), expire: 0 };
+            let msg = Ping {
+                from: rng_endpoint(&mut rng),
+                to: rng_endpoint(&mut rng),
+                expire: 0,
+                enr_sq: None,
+            };
 
             let mut buf = BytesMut::new();
             msg.encode(&mut buf);
 
             let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_ping_message_with_enr() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Ping {
+                from: rng_endpoint(&mut rng),
+                to: rng_endpoint(&mut rng),
+                expire: 0,
+                enr_sq: Some(rng.gen()),
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_pong_message() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Pong {
+                to: rng_endpoint(&mut rng),
+                echo: H256::random(),
+                expire: rng.gen(),
+                enr_sq: None,
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn test_pong_message_with_enr() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let mut ip = [0u8; 16];
+            rng.fill_bytes(&mut ip);
+            let msg = Pong {
+                to: rng_endpoint(&mut rng),
+                echo: H256::random(),
+                expire: rng.gen(),
+                enr_sq: Some(rng.gen()),
+            };
+
+            let mut buf = BytesMut::new();
+            msg.encode(&mut buf);
+
+            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
