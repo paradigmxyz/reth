@@ -73,7 +73,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         let end_tx_index = db.get_block_body_by_num(max_block_num)?.any_last_tx_index();
 
         // No transactions to walk over
-        if start_tx_index >= end_tx_index {
+        if start_tx_index > end_tx_index {
             return Ok(ExecOutput { stage_progress: max_block_num, done: true, reached_tip: true })
         }
 
