@@ -1,10 +1,7 @@
-// TODO: Remove
-//! Main db command
-//!
 //! Database debugging tool
 
 use clap::{Parser, Subcommand};
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
     database::Database,
@@ -14,7 +11,6 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use reth_stages::StageDB;
 use std::path::Path;
 use tracing::info;
 
@@ -34,11 +30,11 @@ const DEFAULT_NUM_ITEMS: &str = "5";
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
 pub enum Subcommands {
-    /// Lists all the table names, number of entries, and size in KB
+    /// Lists all the tables, their entry count and their size
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
-    /// Seeds the block db with random blocks on top of each other
+    /// Seeds the database with random blocks on top of each other
     Seed {
         /// How many blocks to generate
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
@@ -60,7 +56,7 @@ pub struct ListArgs {
 }
 
 impl Command {
-    /// Execute `node` command
+    /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let path = shellexpand::full(&self.db)?.into_owned();
         let expanded_db_path = Path::new(&path);
@@ -71,35 +67,40 @@ impl Command {
             expanded_db_path,
             reth_db::mdbx::EnvKind::RW,
         )?;
-        db.create_tables()?;
 
         let mut tool = DbTool::new(&db)?;
+
         match &self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
-                // Get the env from MDBX
-                let env = &tool.db.inner().inner;
-                let tx = env.begin_ro_txn()?;
-                for table in tables::TABLES.iter().map(|(_, name)| name) {
-                    let table_db = tx.open_db(Some(table))?;
-                    let stats = tx.db_stat(&table_db)?;
+                tool.db.view(|tx| {
+                    for table in tables::TABLES.iter().map(|(_, name)| name) {
+                        let table_db =
+                            tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
-                    // Defaults to 16KB right now but we should
-                    // re-evaluate depending on the DB we end up using
-                    // (e.g. REDB does not have these options as configurable intentionally)
-                    let page_size = stats.page_size() as usize;
-                    let leaf_pages = stats.leaf_pages();
-                    let branch_pages = stats.branch_pages();
-                    let overflow_pages = stats.overflow_pages();
-                    let num_pages = leaf_pages + branch_pages + overflow_pages;
-                    let table_size = page_size * num_pages;
-                    tracing::info!(
-                        "Table {} has {} entries (total size: {} KB)",
-                        table,
-                        stats.entries(),
-                        table_size / 1024
-                    );
-                }
+                        let stats = tx
+                            .inner
+                            .db_stat(&table_db)
+                            .wrap_err(format!("Could not find table: {table}"))?;
+
+                        // Defaults to 16KB right now but we should
+                        // re-evaluate depending on the DB we end up using
+                        // (e.g. REDB does not have these options as configurable intentionally)
+                        let page_size = stats.page_size() as usize;
+                        let leaf_pages = stats.leaf_pages();
+                        let branch_pages = stats.branch_pages();
+                        let overflow_pages = stats.overflow_pages();
+                        let num_pages = leaf_pages + branch_pages + overflow_pages;
+                        let table_size = page_size * num_pages;
+                        info!(
+                            "Table {} has {} entries (total size: {} KB)",
+                            table,
+                            stats.entries(),
+                            table_size / 1024
+                        );
+                    }
+                    Ok::<(), eyre::Report>(())
+                })??;
             }
             Subcommands::Seed { len } => {
                 tool.seed(*len)?;
@@ -113,57 +114,83 @@ impl Command {
     }
 }
 
-/// Abstraction over StageDB for writing/reading from/to the DB
-/// Wraps over the StageDB and derefs to a transaction.
+/// Wrapper over DB that implements many useful DB queries.
 struct DbTool<'a, DB: Database> {
-    // TODO: StageDB derefs to Tx, is this weird or not?
-    pub(crate) db: StageDB<'a, DB>,
+    pub(crate) db: &'a DB,
 }
 
 impl<'a, DB: Database> DbTool<'a, DB> {
-    /// Takes a DB where the tables have already been created
+    /// Takes a DB where the tables have already been created.
     fn new(db: &'a DB) -> eyre::Result<Self> {
-        Ok(Self { db: StageDB::new(db)? })
+        Ok(Self { db })
     }
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        tracing::info!("generating random block range from 0 to {len}");
+        info!("Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default());
-        chain.iter().try_for_each(|block| {
-            insert_canonical_block(&*self.db, block, true)?;
-            Ok::<_, eyre::Error>(())
-        })?;
-        self.db.commit()?;
-        info!("Database committed with {len} blocks");
 
+        self.db.update(|tx| {
+            chain.iter().try_for_each(|block| {
+                insert_canonical_block(tx, block, true)?;
+                Ok::<_, eyre::Error>(())
+            })
+        })??;
+
+        info!("Database seeded with {len} blocks");
         Ok(())
     }
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
-        match args.table.as_str() {
-            "headers" => self.list_table::<tables::Headers>(args.start, args.len)?,
-            "txs" => self.list_table::<tables::Transactions>(args.start, args.len)?,
-            _ => panic!(),
-        };
+        macro_rules! list_tables {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+                match $arg {
+                    $(stringify!($table) => {
+                        self.list_table::<tables::$table>($start, $len)?
+                    },)*
+                    _ => {
+                        tracing::error!("Unknown table.");
+                        return Ok(())
+                    }
+                }
+            };
+        }
+
+        list_tables!(args.table.to_lowercase().as_str(), args.start, args.len => [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            TxHashNumber,
+            PlainAccountState,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            SyncStage,
+            Transactions
+        ]);
+
         Ok(())
     }
 
     fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
-        let mut cursor = self.db.cursor::<T>()?;
+        let data = self.db.view(|tx| {
+            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
 
-        // TODO: Upstream this in the DB trait.
-        let start_walker = cursor.current().transpose();
-        let walker = Walker {
-            cursor: &mut cursor,
-            start: start_walker,
-            _tx_phantom: std::marker::PhantomData,
-        };
+            // TODO: Upstream this in the DB trait.
+            let start_walker = cursor.current().transpose();
+            let walker = Walker {
+                cursor: &mut cursor,
+                start: start_walker,
+                _tx_phantom: std::marker::PhantomData,
+            };
 
-        let data = walker.skip(start).take(len).collect::<Vec<_>>();
-        dbg!(&data);
+            walker.skip(start).take(len).collect::<Vec<_>>()
+        })?;
 
+        println!("{data:?}");
         Ok(())
     }
 }

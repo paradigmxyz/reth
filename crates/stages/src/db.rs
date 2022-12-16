@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
@@ -6,13 +7,13 @@ use std::{
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
-    models::{BlockNumHash, NumTransactions},
+    models::{BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
     Error,
 };
-use reth_primitives::{BlockHash, BlockNumber, TxNumber};
+use reth_primitives::{BlockHash, BlockNumber, TransitionId, TxNumber};
 
 use crate::{DatabaseIntegrityError, StageError};
 
@@ -21,19 +22,22 @@ use crate::{DatabaseIntegrityError, StageError};
 // NOTE: This container is needed since `Transaction::commit` takes `mut self`, so methods in
 // the pipeline that just take a reference will not be able to commit their transaction and let
 // the pipeline continue. Is there a better way to do this?
-pub struct StageDB<'this, DB: Database> {
+//
+// TODO: Re-evaluate if this is actually needed, this was introduced as a way to manage the
+// lifetime of the `TXMut` and having a nice API for re-opening a new transaction after `commit`
+pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
     pub(crate) db: &'this DB,
     tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
 }
 
-impl<'a, DB: Database> Debug for StageDB<'a, DB> {
+impl<'a, DB: Database> Debug for Transaction<'a, DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StageDB").finish()
+        f.debug_struct("Transaction").finish()
     }
 }
 
-impl<'a, DB: Database> Deref for StageDB<'a, DB> {
+impl<'a, DB: Database> Deref for Transaction<'a, DB> {
     type Target = <DB as DatabaseGAT<'a>>::TXMut;
 
     /// Dereference as the inner transaction.
@@ -41,25 +45,25 @@ impl<'a, DB: Database> Deref for StageDB<'a, DB> {
     /// # Panics
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
     fn deref(&self) -> &Self::Target {
         self.tx.as_ref().expect("Tried getting a reference to a non-existent transaction")
     }
 }
 
-impl<'a, DB: Database> DerefMut for StageDB<'a, DB> {
+impl<'a, DB: Database> DerefMut for Transaction<'a, DB> {
     /// Dereference as a mutable reference to the inner transaction.
     ///
     /// # Panics
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.tx.as_mut().expect("Tried getting a mutable reference to a non-existent transaction")
     }
 }
 
-impl<'this, DB> StageDB<'this, DB>
+impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
@@ -80,7 +84,7 @@ where
     /// # Panics
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [StageDB::close] was called without following up with a call to [StageDB::open].
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
     pub fn commit(&mut self) -> Result<bool, Error> {
         let success =
             self.tx.take().expect("Tried committing a non-existent transaction").commit()?;
@@ -103,7 +107,7 @@ where
     pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
         let hash = self
             .get::<tables::CanonicalHeaders>(number)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number })?;
         Ok(hash)
     }
 
@@ -115,77 +119,62 @@ where
         Ok((number, self.get_block_hash(number)?).into())
     }
 
-    /// Query [tables::CumulativeTxCount] table for total transaction
-    /// count block by [BlockNumHash] key
-    pub(crate) fn get_tx_count(&self, key: BlockNumHash) -> Result<NumTransactions, StageError> {
-        let count = self.get::<tables::CumulativeTxCount>(key)?.ok_or(
-            DatabaseIntegrityError::CumulativeTxCount { number: key.number(), hash: key.hash() },
-        )?;
-        Ok(count)
+    /// Query the block body by [BlockNumHash] key
+    pub(crate) fn get_block_body(&self, key: BlockNumHash) -> Result<StoredBlockBody, StageError> {
+        let body = self
+            .get::<tables::BlockBodies>(key)?
+            .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
+        Ok(body)
     }
 
-    /// Get id for the first **potential** transaction in a block by looking up
-    /// the cumulative transaction count at the previous block.
-    ///
-    /// This function does not care whether the block is empty.
-    pub(crate) fn get_first_tx_id(&self, block: BlockNumber) -> Result<TxNumber, StageError> {
-        // Handle genesis block
+    /// Query the block body by number
+    pub(crate) fn get_block_body_by_num(
+        &self,
+        number: BlockNumber,
+    ) -> Result<StoredBlockBody, StageError> {
+        let key = self.get_block_numhash(number)?;
+        self.get_block_body(key)
+    }
+
+    /// Query the last transition of the block by [BlockNumHash] key
+    pub(crate) fn get_block_transition(
+        &self,
+        key: BlockNumHash,
+    ) -> Result<TransitionId, StageError> {
+        let last_transition_id = self.get::<tables::BlockTransitionIndex>(key)?.ok_or(
+            DatabaseIntegrityError::BlockTransition { number: key.number(), hash: key.hash() },
+        )?;
+        Ok(last_transition_id)
+    }
+
+    /// Query the last transition of the block by number
+    pub(crate) fn get_block_transition_by_num(
+        &self,
+        number: BlockNumber,
+    ) -> Result<TransitionId, StageError> {
+        let key = self.get_block_numhash(number)?;
+        self.get_block_transition(key)
+    }
+
+    /// Get the next start transaction id and transition for the `block` by looking at the previous
+    /// block. Returns Zero/Zero for Genesis.
+    pub(crate) fn get_next_block_ids(
+        &self,
+        block: BlockNumber,
+    ) -> Result<(TxNumber, TransitionId), StageError> {
         if block == 0 {
-            return Ok(0)
+            return Ok((0, 0))
         }
 
         let prev_key = self.get_block_numhash(block - 1)?;
-        self.get_tx_count(prev_key)
-    }
-
-    /// Get id of the last transaction in the block.
-    /// Returns [None] if the block is empty.
-    ///
-    /// The blocks must exist in the database.
-    #[allow(dead_code)]
-    pub(crate) fn get_last_tx_id(
-        &self,
-        block: BlockNumber,
-    ) -> Result<Option<TxNumber>, StageError> {
-        let key = self.get_block_numhash(block)?;
-
-        let mut cursor = self.cursor::<tables::CumulativeTxCount>()?;
-        let (_, tx_count) =
-            cursor.seek_exact(key)?.ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                number: key.number(),
-                hash: key.hash(),
-            })?;
-
-        let is_empty = {
-            if block != 0 {
-                let (_, prev_tx_count) =
-                    cursor.prev()?.ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                        number: key.number() + 1,
-                        hash: self.get_block_hash(key.number() + 1)?,
-                    })?;
-                tx_count != prev_tx_count
-            } else {
-                tx_count == 0
-            }
-        };
-
-        Ok(if !is_empty { Some(tx_count - 1) } else { None })
-    }
-
-    /// Get id of the latest transaction observed before a given block (inclusive).
-    /// Returns error if there are no transactions in the database.
-    pub(crate) fn get_latest_tx_id(
-        &self,
-        up_to_block: BlockNumber,
-    ) -> Result<TxNumber, StageError> {
-        let key = self.get_block_numhash(up_to_block)?;
-        let tx_count = self.get_tx_count(key)?;
-        if tx_count != 0 {
-            Ok(tx_count - 1)
-        } else {
-            // No transactions in the database
-            Err(DatabaseIntegrityError::Transaction { id: 0 }.into())
-        }
+        let prev_body = self.get_block_body(prev_key)?;
+        let last_transition = self.get::<tables::BlockTransitionIndex>(prev_key)?.ok_or(
+            DatabaseIntegrityError::BlockTransition {
+                number: prev_key.number(),
+                hash: prev_key.hash(),
+            },
+        )?;
+        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition + 1))
     }
 
     /// Unwind table by some number key

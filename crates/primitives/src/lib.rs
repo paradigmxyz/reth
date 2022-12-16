@@ -70,6 +70,8 @@ pub type ChainId = u64;
 pub type StorageKey = H256;
 /// An account storage value.
 pub type StorageValue = U256;
+/// The ID of block/transaction transition (represents state transition)
+pub type TransitionId = u64;
 
 pub use ethers_core::{
     types as rpc,
@@ -81,6 +83,11 @@ mod __reexport {
     pub use hex;
     pub use hex_literal;
     pub use tiny_keccak;
+}
+
+/// Various utilities
+pub mod utils {
+    pub use ethers_core::types::serde_helpers;
 }
 
 // Useful reexports

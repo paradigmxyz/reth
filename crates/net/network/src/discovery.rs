@@ -3,11 +3,11 @@
 use crate::error::NetworkError;
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, NodeRecord};
-use reth_primitives::PeerId;
+use reth_primitives::{ForkId, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     task::{Context, Poll},
 };
 use tokio::task::JoinHandle;
@@ -24,7 +24,7 @@ pub struct Discovery {
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
-    _discv4: Discv4,
+    discv4: Discv4,
     /// All KAD table updates from the discv4 service.
     discv4_updates: ReceiverStream<DiscoveryUpdate>,
     /// The initial config for the discv4 service
@@ -57,13 +57,29 @@ impl Discovery {
 
         Ok(Self {
             local_enr,
-            _discv4: discv4,
+            discv4,
             discv4_updates,
             _dsicv4_config: dsicv4_config,
             _discv4_service,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
         })
+    }
+
+    /// Updates the `eth:ForkId` field in discv4.
+    #[allow(unused)]
+    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
+        self.discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
+    }
+
+    /// Bans the [`IpAddr`] in the discovery service.
+    pub(crate) fn ban_ip(&self, ip: IpAddr) {
+        self.discv4.ban_ip(ip)
+    }
+
+    /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
+    pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
+        self.discv4.ban(peer_id, ip)
     }
 
     /// Returns the id with which the local identifies itself in the network
@@ -73,7 +89,7 @@ impl Discovery {
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            DiscoveryUpdate::Added(node) | DiscoveryUpdate::Discovered(node) => {
+            DiscoveryUpdate::Added(node) => {
                 let id = node.id;
                 let addr = node.tcp_addr();
                 match self.discovered_nodes.entry(id) {
@@ -83,6 +99,9 @@ impl Discovery {
                         self.queued_events.push_back(DiscoveryEvent::Discovered(id, addr))
                     }
                 }
+            }
+            DiscoveryUpdate::EnrForkId(node, fork_id) => {
+                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
             DiscoveryUpdate::Removed(node) => {
                 self.discovered_nodes.remove(&node);
@@ -118,6 +137,8 @@ impl Discovery {
 pub enum DiscoveryEvent {
     /// A new node was discovered
     Discovered(PeerId, SocketAddr),
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(PeerId, ForkId),
 }
 
 #[cfg(test)]

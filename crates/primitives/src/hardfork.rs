@@ -111,8 +111,9 @@ impl Hardfork {
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
-    /// This assumes the current hardfork's block number is the current head and uses all known
-    /// future hardforks to initialize the filter.
+    ///
+    /// **CAUTION**: This assumes the current hardfork's block number is the current head and uses
+    /// all known future hardforks to initialize the filter.
     pub fn fork_filter(&self) -> ForkFilter {
         let all_forks = Hardfork::all_forks();
         let future_forks: Vec<BlockNumber> = all_forks
@@ -178,6 +179,12 @@ impl From<BlockNumber> for Hardfork {
 
             _ => Hardfork::Latest,
         }
+    }
+}
+
+impl From<Hardfork> for BlockNumber {
+    fn from(value: Hardfork) -> Self {
+        value.fork_block()
     }
 }
 

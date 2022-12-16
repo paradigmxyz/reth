@@ -23,7 +23,7 @@ futures = "0.3.25"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
+secp256k1 = { version = "0.24.2", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
 modular-bitfield = "0.11.2"
 
 # misc
@@ -45,7 +45,7 @@ arbitrary = { version = "1.1.7", features = ["derive"]}
 reth-db = { path = ".", features = ["test-utils","bench"]}
 
 # needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
-secp256k1 = "0.24.0"
+secp256k1 = "0.24.2"
 
 reth-interfaces = { path = "../../interfaces",features=["bench"] }
 async-trait = "0.1.58"

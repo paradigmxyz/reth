@@ -27,17 +27,19 @@ pub enum Error {
     ReceiptLogDiff,
     #[error("Receipt log is different.")]
     ExecutionSuccessDiff { got: bool, expected: bool },
-    #[error("Receipt root {got:?} is different then expected {expected:?}.")]
+    #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff { got: H256, expected: H256 },
-    #[error("Header bloom filter {got:?} is different then expected {expected:?}.")]
+    #[error("Header bloom filter {got:?} is different than expected {expected:?}.")]
     BloomLogDiff { got: Box<Bloom>, expected: Box<Bloom> },
-    #[error("Transaction gas limit {transaction_gas_limit} is more then blocks available gas {block_available_gas}")]
+    #[error("Transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
     TransactionGasLimitMoreThenAvailableBlockGas {
         transaction_gas_limit: u64,
         block_available_gas: u64,
     },
     #[error("Block gas used {got} is different from expected gas used {expected}.")]
     BlockGasUsed { got: u64, expected: u64 },
+    #[error("Revm error {error_code}")]
+    EVMError { error_code: u32 },
     #[error("Provider error")]
     ProviderError,
 }

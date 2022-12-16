@@ -39,6 +39,9 @@ pub(crate) fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
 }
 
 /// Represents a ENR in discv4.
+///
+/// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
+/// message.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NodeRecord {
     /// The Address of a node.

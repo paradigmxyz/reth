@@ -1,12 +1,16 @@
-use crate::peers::{reputation::BANNED_REPUTATION, ReputationChangeKind, ReputationChangeWeights};
-use futures::StreamExt;
-use reth_eth_wire::{
-    error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
-    DisconnectReason,
+use crate::{
+    error::{error_merits_discovery_ban, is_fatal_protocol_error},
+    peers::{
+        reputation::{is_banned_reputation, DEFAULT_REPUTATION},
+        ReputationChangeKind, ReputationChangeWeights,
+    },
 };
-use reth_primitives::PeerId;
+use futures::StreamExt;
+use reth_eth_wire::{error::EthStreamError, DisconnectReason};
+use reth_net_common::ban_list::BanList;
+use reth_primitives::{ForkId, PeerId};
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, VecDeque},
     fmt::Display,
     net::{IpAddr, SocketAddr},
     task::{Context, Poll},
@@ -14,14 +18,14 @@ use std::{
 };
 use thiserror::Error;
 use tokio::{
-    sync::mpsc,
+    sync::{mpsc, oneshot},
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::trace;
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PeersHandle {
     /// Sender half of command channel back to the [`PeersManager`]
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
@@ -48,6 +52,14 @@ impl PeersHandle {
     pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         self.send(PeerCommand::ReputationChange(peer_id, kind));
     }
+
+    /// Returns a peer by its [`PeerId`], or `None` if the peer is not in the peer set.
+    pub async fn peer_by_id(&self, peer_id: PeerId) -> Option<Peer> {
+        let (tx, rx) = oneshot::channel();
+        self.send(PeerCommand::GetPeer(peer_id, tx));
+
+        rx.await.unwrap_or(None)
+    }
 }
 
 /// Maintains the state of _all_ the peers known to the network.
@@ -73,14 +85,24 @@ pub(crate) struct PeersManager {
     connection_info: ConnectionInfo,
     /// Tracks unwanted ips/peer ids,
     ban_list: BanList,
+    /// Interval at which to check for peers to unban.
+    unban_interval: Interval,
+    /// How long to ban bad peers.
+    ban_duration: Duration,
 }
 
 impl PeersManager {
     /// Create a new instance with the given config
     pub(crate) fn new(config: PeersConfig) -> Self {
-        let PeersConfig { refill_slots_interval, connection_info, reputation_weights, ban_list } =
-            config;
+        let PeersConfig {
+            refill_slots_interval,
+            connection_info,
+            reputation_weights,
+            ban_list,
+            ban_duration,
+        } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
+        let now = Instant::now();
         Self {
             peers: Default::default(),
             manager_tx,
@@ -88,11 +110,14 @@ impl PeersManager {
             queued_actions: Default::default(),
             reputation_weights,
             refill_slots_interval: tokio::time::interval_at(
-                Instant::now() + refill_slots_interval,
+                now + refill_slots_interval,
                 refill_slots_interval,
             ),
+            // Use half of ban duration for interval
+            unban_interval: tokio::time::interval_at(now + ban_duration, ban_duration / 2),
             connection_info,
             ban_list,
+            ban_duration,
         }
     }
 
@@ -109,7 +134,7 @@ impl PeersManager {
         &mut self,
         addr: IpAddr,
     ) -> Result<(), InboundConnectionError> {
-        if self.ban_list.banned_ip(&addr) {
+        if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
         if !self.connection_info.has_in_capacity() {
@@ -126,8 +151,11 @@ impl PeersManager {
         self.connection_info.decr_in()
     }
 
-    /// Invoked when a pending session was closed.
-    pub(crate) fn on_closed_outgoing_pending_session(&mut self) {
+    /// Invoked when a pending outgoing session was closed.
+    pub(crate) fn on_closed_outgoing_pending_session(&mut self, peer_id: &PeerId) {
+        if let Some(mut peer) = self.peers.get_mut(peer_id) {
+            peer.state = PeerConnectionState::Idle;
+        }
         self.connection_info.decr_out()
     }
 
@@ -140,7 +168,7 @@ impl PeersManager {
     pub(crate) fn on_active_inbound_session(&mut self, peer_id: PeerId, addr: SocketAddr) {
         // we only need to check the peer id here as the ip address will have been checked at
         // on_inbound_pending_session
-        if self.ban_list.banned_peer(&peer_id) {
+        if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
             return
         }
@@ -160,26 +188,40 @@ impl PeersManager {
         }
     }
 
+    /// Bans the peer temporarily with the given timeout
+    fn ban_peer(&mut self, peer_id: PeerId) {
+        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + self.ban_duration);
+        self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
+    }
+
+    /// Unbans the peer
+    fn unban_peer(&mut self, peer_id: PeerId) {
+        self.ban_list.unban_peer(&peer_id);
+        self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
+    }
+
     /// Apply the corresponding reputation change to the given peer
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         let reputation_change = self.reputation_weights.change(rep);
-        let should_disconnect = if let Some(mut peer) = self.peers.get_mut(peer_id) {
-            peer.reputation = peer.reputation.saturating_sub(reputation_change.as_i32());
-            let should_disconnect = peer.state.is_connected() && peer.is_banned();
-
-            if should_disconnect {
-                peer.state.disconnect();
-            }
-
-            should_disconnect
+        let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
+            peer.apply_reputation(reputation_change.as_i32())
         } else {
-            false
+            return
         };
 
-        if should_disconnect {
-            // start the disconnect process
-            self.queued_actions
-                .push_back(PeerAction::Disconnect { peer_id: *peer_id, reason: None })
+        match outcome {
+            ReputationChangeOutcome::None => {}
+            ReputationChangeOutcome::Ban => {
+                self.ban_peer(*peer_id);
+            }
+            ReputationChangeOutcome::Unban => self.unban_peer(*peer_id),
+            ReputationChangeOutcome::DisconnectAndBan => {
+                self.queued_actions.push_back(PeerAction::Disconnect {
+                    peer_id: *peer_id,
+                    reason: Some(DisconnectReason::DisconnectRequested),
+                });
+                self.ban_peer(*peer_id);
+            }
         }
     }
 
@@ -197,12 +239,25 @@ impl PeersManager {
     ///
     /// Depending on whether the error is fatal, the peer will be removed from the peer set
     /// otherwise its reputation is slashed.
-    pub(crate) fn on_connection_dropped(&mut self, peer_id: &PeerId, err: &EthStreamError) {
+    pub(crate) fn on_connection_dropped(
+        &mut self,
+        remote_addr: &SocketAddr,
+        peer_id: &PeerId,
+        err: &EthStreamError,
+    ) {
         if is_fatal_protocol_error(err) {
             // remove the peer to which we can't establish a connection due to protocol related
             // issues.
             if let Some(peer) = self.peers.remove(peer_id) {
                 self.connection_info.decr_state(peer.state);
+            }
+
+            // If the error is caused by a peer that should be banned
+            if error_merits_discovery_ban(err) {
+                self.queued_actions.push_back(PeerAction::DiscoveryBan {
+                    peer_id: *peer_id,
+                    ip_addr: remote_addr.ip(),
+                })
             }
         } else if let Some(mut peer) = self.peers.get_mut(peer_id) {
             self.connection_info.decr_state(peer.state);
@@ -214,12 +269,23 @@ impl PeersManager {
         self.fill_outbound_slots();
     }
 
+    /// Called as follow-up for a discovered peer.
+    ///
+    /// The [`ForkId`] is retrieved from an ENR record that the peer announces over the discovery
+    /// protocol
+    pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            trace!(target : "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
+            peer.fork_id = Some(fork_id);
+        }
+    }
+
     /// Called for a newly discovered peer.
     ///
     /// If the peer already exists, then the address will be updated. If the addresses differ, the
     /// old address is returned
     pub(crate) fn add_discovered_node(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        if self.ban_list.is_banned(&addr.ip(), &peer_id) {
+        if self.ban_list.is_banned(&peer_id, &addr.ip()) {
             return
         }
 
@@ -252,6 +318,8 @@ impl PeersManager {
 
     /// Returns the idle peer with the highest reputation.
     ///
+    /// Peers with a `forkId` are considered better than peers without.
+    ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| peer.state.is_unconnected());
@@ -260,8 +328,18 @@ impl PeersManager {
         let mut best_peer = unconnected.next()?;
 
         for maybe_better in unconnected {
-            if maybe_better.1.reputation > best_peer.1.reputation {
-                best_peer = maybe_better;
+            match (maybe_better.1.fork_id.as_ref(), best_peer.1.fork_id.as_ref()) {
+                (Some(_), Some(_)) | (None, None) => {
+                    if maybe_better.1.reputation > best_peer.1.reputation {
+                        best_peer = maybe_better;
+                    }
+                }
+                (Some(_), None) => {
+                    if !maybe_better.1.is_banned() {
+                        best_peer = maybe_better;
+                    }
+                }
+                _ => {}
             }
         }
         Some((*best_peer.0, best_peer.1))
@@ -317,11 +395,25 @@ impl PeersManager {
                     PeerCommand::ReputationChange(peer_id, rep) => {
                         self.apply_reputation_change(&peer_id, rep)
                     }
+                    PeerCommand::GetPeer(peer, tx) => {
+                        let _ = tx.send(self.peers.get(&peer).cloned());
+                    }
                 }
             }
 
             if self.refill_slots_interval.poll_tick(cx).is_ready() {
                 self.fill_outbound_slots();
+            }
+
+            if self.unban_interval.poll_tick(cx).is_ready() {
+                for peer_id in self.ban_list.evict_peers(std::time::Instant::now()) {
+                    if let Some(peer) = self.peers.get_mut(&peer_id) {
+                        peer.unban();
+                    } else {
+                        continue
+                    }
+                    self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
+                }
             }
 
             if self.queued_actions.is_empty() {
@@ -331,12 +423,18 @@ impl PeersManager {
     }
 }
 
+impl Default for PeersManager {
+    fn default() -> Self {
+        PeersManager::new(Default::default())
+    }
+}
+
 /// Tracks stats about connected nodes
 #[derive(Debug)]
 pub struct ConnectionInfo {
-    /// Currently occupied slots for outbound connections.
+    /// Counter for currently occupied slots for active outbound connections.
     num_outbound: usize,
-    /// Currently occupied slots for inbound connections.
+    /// Counter for currently occupied slots for active inbound connections.
     num_inbound: usize,
     /// Maximum allowed outbound connections.
     max_outbound: usize,
@@ -382,14 +480,23 @@ impl ConnectionInfo {
     }
 }
 
+impl Default for ConnectionInfo {
+    fn default() -> Self {
+        ConnectionInfo { num_outbound: 0, num_inbound: 0, max_outbound: 100, max_inbound: 30 }
+    }
+}
+
 /// Tracks info about a single peer.
-struct Peer {
+#[derive(Debug, Clone)]
+pub struct Peer {
     /// Where to reach the peer
     addr: SocketAddr,
     /// Reputation of the peer.
     reputation: i32,
     /// The state of the connection, if any.
     state: PeerConnectionState,
+    /// The [`ForkId`] that the peer announced via discovery.
+    fork_id: Option<ForkId>,
 }
 
 // === impl Peer ===
@@ -400,18 +507,60 @@ impl Peer {
     }
 
     fn with_state(addr: SocketAddr, state: PeerConnectionState) -> Self {
-        Self { addr, state, reputation: 0 }
+        Self { addr, state, reputation: DEFAULT_REPUTATION, fork_id: None }
+    }
+
+    /// Applies a reputation change to the peer and returns what action should be taken.
+    fn apply_reputation(&mut self, reputation: i32) -> ReputationChangeOutcome {
+        let previous = self.reputation;
+        // we add reputation since negative reputation change decrease total reputation
+        self.reputation = previous.saturating_add(reputation);
+
+        trace!(target: "net::peers", repuation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
+
+        if self.state.is_connected() && self.is_banned() {
+            self.state.disconnect();
+            return ReputationChangeOutcome::DisconnectAndBan
+        }
+
+        if self.is_banned() && !is_banned_reputation(previous) {
+            return ReputationChangeOutcome::Ban
+        }
+
+        if !self.is_banned() && is_banned_reputation(previous) {
+            return ReputationChangeOutcome::Unban
+        }
+
+        ReputationChangeOutcome::None
     }
 
     /// Returns true if the peer's reputation is below the banned threshold.
     #[inline]
     fn is_banned(&self) -> bool {
-        self.reputation < BANNED_REPUTATION
+        is_banned_reputation(self.reputation)
+    }
+
+    /// Unbans the peer by resetting its reputation
+    #[inline]
+    fn unban(&mut self) {
+        self.reputation = DEFAULT_REPUTATION
     }
 }
 
+/// Outcomes when a reputation change is applied to a peer
+enum ReputationChangeOutcome {
+    /// Nothing to do.
+    None,
+    /// Ban the peer.
+    Ban,
+    /// Ban and disconnect
+    DisconnectAndBan,
+    /// Unban the peer
+    Unban,
+}
+
 /// Represents the kind of connection established to the peer, if any
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 enum PeerConnectionState {
     /// Not connected currently.
     #[default]
@@ -462,6 +611,8 @@ pub(crate) enum PeerCommand {
     Remove(PeerId),
     /// Apply a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
+    /// Get information about a peer
+    GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
 }
 
 /// Actions the peer manager can trigger.
@@ -482,33 +633,38 @@ pub enum PeerAction {
         /// Peer id of the established connection.
         peer_id: PeerId,
     },
+    /// Ban the peer in discovery.
+    DiscoveryBan { peer_id: PeerId, ip_addr: IpAddr },
+    /// Ban the peer temporarily
+    BanPeer { peer_id: PeerId },
+    /// Unban the peer temporarily
+    UnBanPeer { peer_id: PeerId },
 }
 
 /// Config type for initiating a [`PeersManager`] instance
 #[derive(Debug)]
 pub struct PeersConfig {
-    /// How even to recheck free slots for outbound connections
+    /// How often to recheck free slots for outbound connections.
     pub refill_slots_interval: Duration,
-    /// Restrictions on connections
+    /// Restrictions on connections.
     pub connection_info: ConnectionInfo,
-    /// How to weigh reputation changes
+    /// How to weigh reputation changes.
     pub reputation_weights: ReputationChangeWeights,
-    /// Restrictions on PeerIds and Ips
+    /// Restrictions on PeerIds and Ips.
     pub ban_list: BanList,
+    /// How long to ban bad peers.
+    pub ban_duration: Duration,
 }
 
 impl Default for PeersConfig {
     fn default() -> Self {
         Self {
             refill_slots_interval: Duration::from_millis(1_000),
-            connection_info: ConnectionInfo {
-                num_outbound: 0,
-                num_inbound: 0,
-                max_outbound: 70,
-                max_inbound: 30,
-            },
+            connection_info: Default::default(),
             reputation_weights: Default::default(),
             ban_list: Default::default(),
+            // Ban peers for 12h
+            ban_duration: Duration::from_secs(60 * 60 * 12),
         }
     }
 }
@@ -522,7 +678,7 @@ impl PeersConfig {
 
     /// Maximum occupied slots for outbound connections.
     pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
-        self.connection_info.num_inbound = num_outbound;
+        self.connection_info.num_outbound = num_outbound;
         self
     }
 
@@ -549,40 +705,6 @@ impl PeersConfig {
     }
 }
 
-/// Configuration for the automatic removal of unwanted peers
-#[derive(Debug, Default)]
-pub struct BanList {
-    /// banned peer ids
-    banned_peers: HashSet<PeerId>,
-    /// banned ips
-    banned_ips: HashSet<IpAddr>,
-}
-
-impl BanList {
-    /// creates a new instance from existing values
-    pub fn new(banned_peers: HashSet<PeerId>, banned_ips: HashSet<IpAddr>) -> Self {
-        Self { banned_ips, banned_peers }
-    }
-
-    /// checks the ban list to see if it contains the given ip
-    #[inline]
-    pub(self) fn banned_ip(&self, ip: &IpAddr) -> bool {
-        self.banned_ips.contains(ip)
-    }
-
-    /// checks the banned list to see if it contains the given peer id
-    #[inline]
-    pub(self) fn banned_peer(&self, peer_id: &PeerId) -> bool {
-        self.banned_peers.contains(peer_id)
-    }
-    /// checks the ban list for the given ip address and peer_id and returns true
-    /// if the address is in the ban list
-    #[inline]
-    pub(self) fn is_banned(&self, ip: &IpAddr, peer_id: &PeerId) -> bool {
-        self.banned_ip(ip) || self.banned_peer(peer_id)
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum InboundConnectionError {
     ExceedsLimit(usize),
@@ -595,44 +717,162 @@ impl Display for InboundConnectionError {
     }
 }
 
-/// Returns true if the error indicates that we'll never be able to establish a connection to that
-/// peer. For example, not matching capabilities or a mismatch in protocols.
-fn is_fatal_protocol_error(err: &EthStreamError) -> bool {
-    match err {
-        EthStreamError::P2PStreamError(err) => {
-            matches!(
-                err,
-                P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities) |
-                    P2PStreamError::UnknownReservedMessageId(_) |
-                    P2PStreamError::EmptyProtocolMessage |
-                    P2PStreamError::ParseVersionError(_) |
-                    P2PStreamError::Disconnected(DisconnectReason::UselessPeer) |
-                    P2PStreamError::MismatchedProtocolVersion { .. }
-            )
-        }
-        EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use super::PeersManager;
+    use crate::{
+        peers::{
+            manager::{ConnectionInfo, PeerConnectionState},
+            PeerAction, ReputationChangeKind,
+        },
+        PeersConfig,
+    };
+    use reth_net_common::ban_list::BanList;
+    use reth_primitives::{PeerId, H512};
     use std::{
         collections::HashSet,
+        future::{poll_fn, Future},
         net::{IpAddr, Ipv4Addr, SocketAddr},
+        pin::Pin,
+        task::{Context, Poll},
     };
 
-    use reth_primitives::{PeerId, H512};
+    struct PeerActionFuture<'a> {
+        peers: &'a mut PeersManager,
+    }
 
-    use crate::{peers::PeerAction, BanList, PeersConfig};
+    impl<'a> Future for PeerActionFuture<'a> {
+        type Output = PeerAction;
 
-    use super::PeersManager;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            self.get_mut().peers.poll(cx)
+        }
+    }
+
+    macro_rules! event {
+        ($peers:expr) => {
+            PeerActionFuture { peers: &mut $peers }.await
+        };
+    }
+
+    #[tokio::test]
+    async fn test_insert() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ban() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.ban_peer(peer);
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::BanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_reputation_change() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::BadProtocol);
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert!(p.is_banned());
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+
+        match event!(peers) {
+            PeerAction::BanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reputation_change_connected() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        let p = peers.peers.get_mut(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::Out);
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::BadProtocol);
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
+        assert!(p.is_banned());
+
+        peers.on_disconnected(&peer);
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::Idle);
+        assert!(p.is_banned());
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+    }
 
     #[tokio::test]
     async fn test_discovery_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![ip]));
+        let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         peer_manager.add_discovered_node(H512::default(), socket_addr);
@@ -644,7 +884,7 @@ mod test {
     async fn test_on_pending_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let ban_list = BanList::new(HashSet::default(), HashSet::from_iter(vec![ip]));
+        let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         let a = peer_manager.on_inbound_pending_session(socket_addr.ip());
@@ -665,7 +905,7 @@ mod test {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
         let given_peer_id: PeerId = H512::from_low_u64_ne(123403423412);
-        let ban_list = BanList::new(HashSet::from_iter(vec![given_peer_id]), HashSet::default());
+        let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         peer_manager.on_active_inbound_session(given_peer_id, socket_addr);
@@ -673,5 +913,43 @@ mod test {
         let Some(PeerAction::DisconnectBannedIncoming { peer_id }) = peer_manager.queued_actions.pop_front() else { panic!() };
 
         assert_eq!(peer_id, given_peer_id)
+    }
+
+    #[test]
+    fn test_connection_limits() {
+        let mut info = ConnectionInfo::default();
+        info.inc_in();
+        assert_eq!(info.num_inbound, 1);
+        assert_eq!(info.num_outbound, 0);
+        assert!(info.has_in_capacity());
+
+        info.decr_in();
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
+
+        info.inc_out();
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 1);
+        assert!(info.has_out_capacity());
+
+        info.decr_out();
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
+    }
+
+    #[test]
+    fn test_connection_peer_state() {
+        let mut info = ConnectionInfo::default();
+        info.inc_in();
+
+        info.decr_state(PeerConnectionState::In);
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
+
+        info.inc_out();
+
+        info.decr_state(PeerConnectionState::Out);
+        assert_eq!(info.num_inbound, 0);
+        assert_eq!(info.num_outbound, 0);
     }
 }

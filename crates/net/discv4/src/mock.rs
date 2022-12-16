@@ -9,7 +9,7 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::H256;
+use reth_primitives::{hex_literal::hex, ForkHash, ForkId, H256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -154,7 +154,12 @@ impl Stream for MockDiscovery {
                 IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => match msg {
                     Message::Ping(ping) => {
                         if this.pending_pongs.remove(&node_id) {
-                            let pong = Pong { to: ping.from, echo: hash, expire: ping.expire };
+                            let pong = Pong {
+                                to: ping.from,
+                                echo: hash,
+                                expire: ping.expire,
+                                enr_sq: None,
+                            };
                             let msg = Message::Pong(pong.clone());
                             this.send_packet(msg, remote_addr);
                             return Poll::Ready(Some(MockEvent::Pong {
@@ -179,6 +184,7 @@ impl Stream for MockDiscovery {
                         }
                     }
                     Message::Neighbours(_) => {}
+                    Message::EnrRequest(_) | Message::EnrResponse(_) => todo!(),
                 },
             }
         }
@@ -201,7 +207,8 @@ pub enum MockCommand {
 
 /// Creates a new testing instance for [`Discv4`] and its service
 pub async fn create_discv4() -> (Discv4, Discv4Service) {
-    create_discv4_with_config(Default::default()).await
+    let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
+    create_discv4_with_config(Discv4Config::builder().add_eip868_pair("eth", fork_id).build()).await
 }
 
 /// Creates a new testing instance for [`Discv4`] and its service with the given config.
@@ -254,8 +261,14 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
             expire: rng.gen(),
+            enr_sq: None,
         }),
-        2 => Message::Pong(Pong { to: rng_endpoint(rng), echo: H256::random(), expire: rng.gen() }),
+        2 => Message::Pong(Pong {
+            to: rng_endpoint(rng),
+            echo: H256::random(),
+            expire: rng.gen(),
+            enr_sq: None,
+        }),
         3 => Message::FindNode(FindNode { id: PeerId::random(), expire: rng.gen() }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
@@ -272,6 +285,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 mod tests {
     use super::*;
     use crate::{Discv4Event, PingReason};
+    use reth_primitives::{hex_literal::hex, ForkHash, ForkId};
     use std::net::{IpAddr, Ipv4Addr};
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific
@@ -297,7 +311,7 @@ mod tests {
         mockv4.queue_pong(discv_enr.id);
 
         // This sends a ping to the mock service
-        let echo_hash = service.send_ping(mock_enr, PingReason::Normal);
+        let echo_hash = service.send_ping(mock_enr, PingReason::Initial);
 
         // process the mock pong
         let event = mockv4.next().await.unwrap();

@@ -1160,6 +1160,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
+ "secp256k1",
  "serde",
  "sha3",
  "zeroize",
@@ -3057,11 +3058,10 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.6.0"
+version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e060280438193c554f654141c9ea9417886713b7acd75974c85b18a69a88e0b"
+checksum = "6db3a213adf02b3bcfd2d3846bb41cb22857d131789e01df434fb7e7bc0759b7"
 dependencies = [
- "crossbeam-deque",
  "either",
  "rayon-core",
 ]
@@ -3173,11 +3173,16 @@ version = "0.1.0"
 dependencies = [
  "clap 4.0.22",
  "eyre",
+ "futures",
  "reth-consensus",
  "reth-db",
+ "reth-downloaders",
+ "reth-executor",
  "reth-interfaces",
+ "reth-network",
  "reth-primitives",
  "reth-provider",
+ "reth-rlp",
  "reth-rpc",
  "reth-stages",
  "reth-transaction-pool",
@@ -3260,10 +3265,12 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "discv5",
+ "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "generic-array",
  "hex",
  "public-ip",
  "rand 0.8.5",
+ "reth-net-common",
  "reth-primitives",
  "reth-rlp",
  "reth-rlp-derive",
@@ -3291,6 +3298,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3370,6 +3378,8 @@ dependencies = [
  "rlp",
  "sha3",
  "thiserror",
+ "tokio",
+ "tracing",
  "triehash",
 ]
 
@@ -3448,6 +3458,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-net-common"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-network"
 version = "0.1.0"
 dependencies = [
@@ -3469,6 +3486,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
+ "reth-net-common",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3549,11 +3567,15 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
+ "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ethereum-types",
  "ethnum",
  "hex-literal",
+ "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
+ "rlp",
+ "secp256k1",
  "smol_str",
 ]
 
@@ -3623,6 +3645,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
+ "reth-network",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3934,9 +3957,9 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.24.1"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff55dc09d460954e9ef2fa8a7ced735a964be9981fd50e870b2b3b0705e14964"
+checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "rand 0.8.5",
  "secp256k1-sys",

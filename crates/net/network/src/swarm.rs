@@ -1,15 +1,15 @@
 use crate::{
-    fetch::StatusUpdate,
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
     peers::InboundConnectionError,
-    session::{Direction, SessionEvent, SessionId, SessionManager},
+    session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
 use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
+    Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -133,6 +133,7 @@ where
                     remote_addr,
                     capabilities,
                     messages,
+                    status,
                     direction,
                 })
             }
@@ -221,7 +222,6 @@ where
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
             }
-            StateAction::StatusUpdate(status) => return Some(SwarmEvent::StatusUpdate(status)),
         }
         None
     }
@@ -279,8 +279,6 @@ where
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
 pub(crate) enum SwarmEvent {
-    /// Received a node status update.
-    StatusUpdate(StatusUpdate),
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
@@ -329,6 +327,7 @@ pub(crate) enum SwarmEvent {
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
+        status: Status,
         direction: Direction,
     },
     SessionClosed {
@@ -338,12 +337,15 @@ pub(crate) enum SwarmEvent {
         error: Option<EthStreamError>,
     },
     /// Closed an incoming pending session during authentication.
-    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
+    IncomingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        error: Option<PendingSessionHandshakeError>,
+    },
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
         peer_id: PeerId,
-        error: Option<EthStreamError>,
+        error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },

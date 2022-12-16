@@ -2,19 +2,18 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadStream, Downloader},
-        error::{PeerRequestResult, RequestError},
+        downloader::{DownloadClient, DownloadStream, Downloader},
+        error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
-            client::{HeadersClient, HeadersRequest},
+            client::{HeadersClient, HeadersRequest, StatusUpdater},
             downloader::HeaderDownloader,
-            error::DownloadError,
         },
     },
 };
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockLocked, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256, U256,
+    BlockLocked, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -68,11 +67,7 @@ impl Downloader for TestHeaderDownloader {
 
 #[async_trait::async_trait]
 impl HeaderDownloader for TestHeaderDownloader {
-    fn stream(
-        &self,
-        _head: SealedHeader,
-        _forkchoice: ForkchoiceState,
-    ) -> DownloadStream<SealedHeader> {
+    fn stream(&self, _head: SealedHeader, _tip: H256) -> DownloadStream<'_, SealedHeader> {
         Box::pin(self.create_download())
     }
 }
@@ -104,7 +99,7 @@ impl TestDownload {
 }
 
 impl Stream for TestDownload {
-    type Item = Result<SealedHeader, DownloadError>;
+    type Item = DownloadResult<SealedHeader>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -168,10 +163,14 @@ impl TestHeadersClient {
     }
 }
 
+impl DownloadClient for TestHeadersClient {
+    fn report_bad_message(&self, _peer_id: PeerId) {
+        // noop
+    }
+}
+
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    fn update_status(&self, _height: u64, _hash: H256, _td: U256) {}
-
     async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
         if let Some(err) = &mut *self.error.lock().await {
             return Err(err.clone())
@@ -226,6 +225,14 @@ impl TestConsensus {
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
     }
+}
+
+/// Nil status updater for testing
+#[derive(Debug, Clone, Default)]
+pub struct TestStatusUpdater;
+
+impl StatusUpdater for TestStatusUpdater {
+    fn update_status(&self, _height: u64, _hash: H256, _total_difficulty: reth_primitives::U256) {}
 }
 
 #[async_trait::async_trait]

@@ -3,7 +3,7 @@
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, H256};
-use tokio::sync::watch;
+use tokio::sync::{watch, watch::error::SendError};
 
 /// Ethereum consensus
 pub struct EthConsensus {
@@ -14,7 +14,7 @@ pub struct EthConsensus {
 }
 
 impl EthConsensus {
-    /// Create new object
+    /// Create a new instance of [EthConsensus]
     pub fn new(config: Config) -> Self {
         Self {
             channel: watch::channel(ForkchoiceState {
@@ -24,6 +24,14 @@ impl EthConsensus {
             }),
             config,
         }
+    }
+
+    /// Notifies all listeners of the latest [ForkchoiceState].
+    pub fn notify_fork_choice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), SendError<ForkchoiceState>> {
+        self.channel.0.send(state)
     }
 }
 

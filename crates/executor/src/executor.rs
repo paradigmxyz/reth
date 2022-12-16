@@ -12,7 +12,8 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database, EVM,
+    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
+    Return, EVM,
 };
 use std::collections::BTreeMap;
 
@@ -52,9 +53,9 @@ impl AccountInfoChangeSet {
     /// Apply the changes from the changeset to a database transaction.
     pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
         self,
+        tx: &TX,
         address: Address,
         tx_index: u64,
-        tx: &TX,
     ) -> Result<(), DbError> {
         match self {
             AccountInfoChangeSet::Changed { old, new } => {
@@ -104,6 +105,7 @@ pub struct AccountChangeSet {
 
 /// Execution Result containing vector of transaction changesets
 /// and block reward if present
+#[derive(Debug)]
 pub struct ExecutionResult {
     /// Transaction changeest contraining [Receipt], changed [Accounts][Account] and Storages.
     pub changeset: Vec<TransactionChangeSet>,
@@ -248,7 +250,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
-    db: &mut SubState<DB>,
+    db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, config, db)?;
 
@@ -289,7 +291,7 @@ pub fn execute<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     config: &Config,
-    db: &mut SubState<DB>,
+    db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut evm = EVM::new();
     evm.database(db);
@@ -319,7 +321,10 @@ pub fn execute<DB: StateProvider>(
         revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
 
         // Execute transaction.
-        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = evm.transact();
+        let (revm::ExecutionResult { exit_reason, gas_used, logs, gas_refunded, .. }, state) =
+            evm.transact();
+
+        tracing::trace!(target:"evm","Executing transaction {:?}, gas:{gas_used} refund:{gas_refunded}",transaction.hash());
 
         // Fatal internal error.
         if exit_reason == revm::Return::FatalExternalError {
@@ -327,15 +332,11 @@ pub fn execute<DB: StateProvider>(
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
-        let is_success = matches!(
-            exit_reason,
-            revm::Return::Continue |
-                revm::Return::Stop |
-                revm::Return::Return |
-                revm::Return::SelfDestruct
-        );
-
-        // TODO add handling of other errors
+        let is_success = match exit_reason {
+            revm::return_ok!() => true,
+            revm::return_revert!() => false,
+            e => return Err(Error::EVMError { error_code: e as u32 }),
+        };
 
         // Add spend gas.
         cumulative_gas_used += gas_used;
@@ -509,13 +510,12 @@ mod tests {
         // make it berlin fork
         config.spec_upgrades = SpecUpgrades::new_berlin_activated();
 
-        let mut db = SubState::new(State::new(db));
+        let db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
             block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block.header, &transactions, &config, &mut db).unwrap();
+        let out = execute_and_verify_receipt(&block.header, &transactions, &config, db).unwrap();
 
         assert_eq!(out.changeset.len(), 1, "Should executed one transaction");
 
@@ -587,7 +587,7 @@ mod tests {
 
         // check Changed changeset
         AccountInfoChangeSet::Changed { new: acc1, old: acc2 }
-            .apply_to_db(address, tx_num, &tx)
+            .apply_to_db(&tx, address, tx_num)
             .unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
@@ -595,7 +595,7 @@ mod tests {
         );
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
 
-        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(address, tx_num, &tx).unwrap();
+        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(&tx, address, tx_num).unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
             Ok(Some(AccountBeforeTx { address, info: None }))
@@ -605,7 +605,7 @@ mod tests {
         // delete old value, as it is dupsorted
         tx.delete::<tables::AccountChangeSet>(tx_num, None).unwrap();
 
-        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(address, tx_num, &tx).unwrap();
+        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(&tx, address, tx_num).unwrap();
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(None));
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),

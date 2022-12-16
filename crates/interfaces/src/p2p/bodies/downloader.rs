@@ -1,21 +1,30 @@
-use super::client::BodiesClient;
-use crate::p2p::error::RequestResult;
-use reth_eth_wire::BlockBody;
-use reth_primitives::{BlockNumber, H256};
-use std::pin::Pin;
-use tokio_stream::Stream;
+use crate::p2p::downloader::{DownloadStream, Downloader};
+use reth_primitives::{BlockLocked, SealedHeader};
+
+/// The block response
+#[derive(PartialEq, Eq, Debug)]
+pub enum BlockResponse {
+    /// Full block response (with transactions or ommers)
+    Full(BlockLocked),
+    /// The empty block response
+    Empty(SealedHeader),
+}
+
+impl BlockResponse {
+    /// Return the reference to the response header
+    pub fn header(&self) -> &SealedHeader {
+        match self {
+            BlockResponse::Full(block) => &block.header,
+            BlockResponse::Empty(header) => header,
+        }
+    }
+}
 
 /// A downloader capable of fetching block bodies from header hashes.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block bodies,
 /// while a [BodiesClient] represents a client capable of fulfilling these requests.
-pub trait BodyDownloader: Sync + Send {
-    /// The [BodiesClient] used to fetch the block bodies
-    type Client: BodiesClient;
-
-    /// The block bodies client
-    fn client(&self) -> &Self::Client;
-
+pub trait BodyDownloader: Downloader {
     /// Download the bodies from `starting_block` (inclusive) up until `target_block` (inclusive).
     ///
     /// The returned stream will always emit bodies in the order they were requested, but multiple
@@ -29,13 +38,9 @@ pub trait BodyDownloader: Sync + Send {
     ///
     /// It is *not* guaranteed that all the requested bodies are fetched: the downloader may close
     /// the stream before the entire range has been fetched for any reason
-    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> BodiesStream<'a>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockResponse>
     where
-        I: IntoIterator<Item = &'b (BlockNumber, H256)>,
+        I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,
         'b: 'a;
 }
-
-/// A stream of block bodies.
-pub type BodiesStream<'a> =
-    Pin<Box<dyn Stream<Item = RequestResult<(BlockNumber, H256, BlockBody)>> + Send + 'a>>;

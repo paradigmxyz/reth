@@ -6,9 +6,9 @@ use crate::{
     session::SessionsConfig,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, ForkId, H256};
+use reth_primitives::{Chain, ForkFilter, Hardfork, PeerId, H256, MAINNET_GENESIS};
 use reth_tasks::TaskExecutor;
-use secp256k1::SecretKey;
+use secp256k1::{SecretKey, SECP256K1};
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
@@ -21,6 +21,8 @@ mod __reexport {
     pub use secp256k1::SecretKey;
 }
 pub use __reexport::*;
+use reth_ecies::util::pk2id;
+use reth_eth_wire::{HelloMessage, Status};
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
@@ -45,19 +47,27 @@ pub struct NetworkConfig<C> {
     pub peers_config: PeersConfig,
     /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// A fork identifier as defined by EIP-2124.
-    /// Serves as the chain compatibility identifier.
-    pub fork_id: Option<ForkId>,
     /// The id of the network
     pub chain: Chain,
     /// Genesis hash of the network
     pub genesis_hash: H256,
+    /// The [`ForkFilter`] to use at launch for authenticating sessions.
+    ///
+    /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
+    ///
+    /// For sync from block `0`, this should be the default chain [`ForkFilter`] beginning at the
+    /// first hardfork, `Frontier` for mainnet.
+    pub fork_filter: ForkFilter,
     /// The block importer type.
     pub block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
     pub executor: Option<TaskExecutor>,
+    /// The `Status` message to send to peers at the beginning.
+    pub status: Status,
+    /// Sets the hello message for the p2p handshake in RLPx
+    pub hello_message: HelloMessage,
 }
 
 // === impl NetworkConfig ===
@@ -105,9 +115,6 @@ pub struct NetworkConfigBuilder<C> {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-    /// A fork identifier as defined by EIP-2124.
-    /// Serves as the chain compatibility identifier.
-    fork_id: Option<ForkId>,
     /// The network's chain id
     chain: Chain,
     /// Network genesis hash
@@ -118,6 +125,14 @@ pub struct NetworkConfigBuilder<C> {
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
     executor: Option<TaskExecutor>,
+    /// The `Status` message to send to peers at the beginning.
+    status: Option<Status>,
+    /// Sets the hello message for the p2p handshake in RLPx
+    hello_message: Option<HelloMessage>,
+    /// The [`ForkFilter`] to use at launch for authenticating sessions.
+    fork_filter: Option<ForkFilter>,
+    /// Head used to start set for the fork filter
+    head: Option<u64>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -134,16 +149,57 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            fork_id: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
-            genesis_hash: Default::default(),
+            genesis_hash: MAINNET_GENESIS,
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
+            status: None,
+            hello_message: None,
+            fork_filter: None,
+            head: None,
         }
     }
 
-    /// set a custom peer config for how peers are handled
+    /// Returns the configured [`PeerId`]
+    pub fn get_peer_id(&self) -> PeerId {
+        pk2id(&self.secret_key.public_key(SECP256K1))
+    }
+
+    /// Sets the `Status` message to send when connecting to peers.
+    ///
+    /// ```
+    /// # use reth_eth_wire::Status;
+    /// # use reth_network::NetworkConfigBuilder;
+    /// # fn builder<C>(builder: NetworkConfigBuilder<C>) {
+    ///     builder.status(
+    ///         Status::builder().build()
+    /// );
+    /// # }
+    /// ```
+    pub fn status(mut self, status: Status) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    /// Sets the `HelloMessage` to send when connecting to peers.
+    ///
+    /// ```
+    /// # use reth_eth_wire::HelloMessage;
+    /// # use reth_network::NetworkConfigBuilder;
+    /// # fn builder<C>(builder: NetworkConfigBuilder<C>) {
+    ///    let peer_id = builder.get_peer_id();
+    ///     builder.hello_message(
+    ///         HelloMessage::builder(peer_id).build()
+    /// );
+    /// # }
+    /// ```
+    pub fn hello_message(mut self, hello_message: HelloMessage) -> Self {
+        self.hello_message = Some(hello_message);
+        self
+    }
+
+    /// Set a custom peer config for how peers are handled
     pub fn peer_config(mut self, config: PeersConfig) -> Self {
         self.peers_config = Some(config);
         self
@@ -199,6 +255,7 @@ impl<C> NetworkConfigBuilder<C> {
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
     pub fn build(self) -> NetworkConfig<C> {
+        let peer_id = self.get_peer_id();
         let Self {
             client,
             secret_key,
@@ -208,13 +265,32 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr,
             peers_config,
             sessions_config,
-            fork_id,
             chain,
             genesis_hash,
             block_import,
             network_mode,
             executor,
+            status,
+            hello_message,
+            fork_filter,
+            head,
         } = self;
+
+        let listener_addr = listener_addr.unwrap_or_else(|| {
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
+        });
+
+        let mut hello_message =
+            hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
+        hello_message.port = listener_addr.port();
+
+        // get the fork filter
+        let fork_filter = fork_filter.unwrap_or_else(|| {
+            let head = head.unwrap_or_default();
+            // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
+            ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
+        });
+
         NetworkConfig {
             client,
             secret_key,
@@ -223,17 +299,17 @@ impl<C> NetworkConfigBuilder<C> {
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
             }),
-            listener_addr: listener_addr.unwrap_or_else(|| {
-                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
-            }),
+            listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
-            fork_id,
             chain,
             genesis_hash,
             block_import,
             network_mode,
             executor,
+            status: status.unwrap_or_default(),
+            hello_message,
+            fork_filter,
         }
     }
 }
