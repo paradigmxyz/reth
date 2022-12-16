@@ -54,7 +54,7 @@ How the metrics are exposed to the end-user is determined by the CLI.
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
 
 ### Current metrics
-#### Headers
+#### StagedSync Headers
 - `stages.headers.counter`: Number of headers successfully retrived
 - `stages.headers.timeout_error`: Number of timeout errors while requesting headers
 - `stages.headers.validation_errors`: Number of validation errores while requesting headers
