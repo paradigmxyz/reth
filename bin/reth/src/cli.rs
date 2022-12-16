@@ -1,9 +1,9 @@
 //! CLI definition and entrypoint to executable
 
 use clap::{ArgAction, Parser, Subcommand};
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::{PrefixLayer, Stack};
 use tracing_subscriber::util::SubscriberInitExt;
+use crate::prometheus_exporter;
+use crate::metrics_describer;
 
 use crate::{
     db, node, test_eth_chain,
@@ -21,13 +21,8 @@ pub async fn run() -> eyre::Result<()> {
     .init();
 
     if opt.metrics {
-        let (recorder, exporter) =
-            PrometheusBuilder::new().build().expect("couldn't build Prometheus");
-        tokio::task::spawn(exporter);
-        Stack::new(recorder)
-            .push(PrefixLayer::new("reth"))
-            .install()
-            .expect("couldn't install metrics recorder");
+        prometheus_exporter::initialize_prometheus_exporter();
+        metrics_describer::describe_metrics();
     }
 
     match opt.command {

@@ -23,7 +23,7 @@ use reth_interfaces::{
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
-use metrics::{counter, histogram};
+use metrics::{counter, increment_counter, histogram};
 
 const HEADERS: StageId = StageId("Headers");
 
@@ -102,17 +102,17 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 }
                 Err(e) => match e {
                     DownloadError::Timeout => {
-                        counter!("stages.headers.timeout_errors", 1);
+                        increment_counter!("stages.headers.timeout_errors");
                         warn!(target: "sync::stages::headers", "No response for header request");
                         return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        counter!("stages.headers.validation_errors", 1);
+                        increment_counter!("stages.headers.validation_errors");
                         error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        counter!("stages.headers.unexpected_errors", 1);
+                        increment_counter!("stages.headers.unexpected_errors");
                         error!(target: "sync::stages::headers", ?error, "Unexpected error");
                         return Err(StageError::Recoverable(error.into()))
                     }
