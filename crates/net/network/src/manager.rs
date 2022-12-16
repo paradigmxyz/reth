@@ -603,9 +603,9 @@ where
                         ?error,
                         "Outgoing pending session failed"
                     );
-                    let swarm = this.swarm.state_mut().peers_mut();
-                    swarm.on_closed_outgoing_pending_session();
-                    swarm.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                    let peers = this.swarm.state_mut().peers_mut();
+                    peers.on_closed_outgoing_pending_session(&peer_id);
+                    peers.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
 
                     if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
                         this.swarm.state_mut().ban_discovery(peer_id, remote_addr.ip());

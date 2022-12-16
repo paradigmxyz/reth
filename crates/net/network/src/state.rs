@@ -285,6 +285,8 @@ where
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
             PeerAction::DiscoveryBan { peer_id, ip_addr } => self.ban_discovery(peer_id, ip_addr),
+            PeerAction::BanPeer { .. } => {}
+            PeerAction::UnBanPeer { .. } => {}
         }
     }
 
