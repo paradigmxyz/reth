@@ -11,10 +11,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{consensus::Consensus, p2p::bodies::downloader::BodyDownloader};
-use reth_primitives::{
-    proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockNumber, SealedHeader,
-};
+use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{error, warn};
 
@@ -257,14 +254,6 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
             let (_, header) = header_cursor.seek_exact((block_number, header_hash).into())?.ok_or(
                 DatabaseIntegrityError::Header { number: block_number, hash: header_hash },
             )?;
-
-            if header.ommers_hash == EMPTY_LIST_HASH && header.transactions_root == EMPTY_ROOT {
-                // TODO: fix this
-                // If we indeed move to the new changeset structure let's not forget to add a note
-                // that the gaps issue with the returned empty bodies stream is no longer present
-                continue
-            }
-
             bodies_to_download.push(SealedHeader::new(header, header_hash));
         }
 

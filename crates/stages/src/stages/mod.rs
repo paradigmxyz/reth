@@ -1,6 +1,6 @@
 /// The bodies stage.
 pub mod bodies;
-// TODO: /// The execution stage that generates state diff.
+// /// The execution stage that generates state diff.
 // pub mod execution;
 /// The headers stage.
 pub mod headers;

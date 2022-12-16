@@ -115,7 +115,7 @@ where
         Ok((number, self.get_block_hash(number)?).into())
     }
 
-    /// Query the block body by [BlockNumHash]
+    /// Query the block body by [BlockNumHash] key
     pub(crate) fn get_block_body(&self, key: BlockNumHash) -> Result<StoredBlockBody, StageError> {
         let body = self
             .get::<tables::BlockBodies>(key)?
@@ -130,6 +130,26 @@ where
     ) -> Result<StoredBlockBody, StageError> {
         let key = self.get_block_numhash(number)?;
         self.get_block_body(key)
+    }
+
+    /// Query the last transition of the block by [BlockNumHash] key
+    pub(crate) fn get_last_block_transition(
+        &self,
+        key: BlockNumHash,
+    ) -> Result<TransitionId, StageError> {
+        let last_transition_id = self.get::<tables::BlockTransitionIndex>(key)?.ok_or(
+            DatabaseIntegrityError::BlockTransition { number: key.number(), hash: key.hash() },
+        )?;
+        Ok(last_transition_id)
+    }
+
+    /// Query the last transition of the block by number
+    pub(crate) fn get_last_block_transition_by_num(
+        &self,
+        number: BlockNumber,
+    ) -> Result<TransitionId, StageError> {
+        let key = self.get_block_numhash(number)?;
+        self.get_last_block_transition(key)
     }
 
     /// Get the next start transaction id for the `block` by looking the previous block

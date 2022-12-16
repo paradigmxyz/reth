@@ -86,8 +86,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
         let mut headers = db_tx.cursor::<tables::Headers>()?;
-        // Get bodies (to get tx index) with canonical hashes.
-        let mut cumulative_tx_count = db_tx.cursor::<tables::CumulativeTxCount>()?;
+        // Get bodies with canonical hashes.
+        let mut bodies = db_tx.cursor::<tables::BlockBodies>()?;
         // Get transaction of the block that we are executing.
         let mut tx = db_tx.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -96,13 +96,13 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
             .walk(start_block)?
-            .take(BATCH_SIZE as usize)
+            .take(BATCH_SIZE as usize) // TODO: commit_threshold
             .map(|i| i.map(BlockNumHash))
             .collect::<Result<Vec<_>, _>>()?;
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
-            return Ok(ExecOutput { done: true, reached_tip: true, stage_progress: last_block })
+            return Ok(ExecOutput { stage_progress: last_block, done: true, reached_tip: true })
         }
 
         // get headers from canonical numbers
@@ -123,20 +123,22 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // get last tx count so that we can know amount of transaction in the block.
+        let start_transition = db.get_last_block_transition_by_num(last_block)? + 1;
+
+        // Get last tx count so that we can know amount of transaction in the block.
         let mut last_tx_index = if last_block == 0 {
             0u64
         } else {
             // headers_batch is not empty,
             let parent_hash = headers_batch[0].parent_hash;
 
-            let (_, tx_cnt) = cumulative_tx_count
+            let (_, tx_count) = cumulative_tx_count
                 .seek_exact(BlockNumHash((last_block, parent_hash)))?
                 .ok_or(DatabaseIntegrityError::CumulativeTxCount {
                     number: last_block,
                     hash: parent_hash,
                 })?;
-            tx_cnt
+            tx_count
         };
 
         let tx_index_ranges = canonical_batch
@@ -309,66 +311,37 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db_tx: &mut StageDB<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let unwind_from = input.stage_progress;
-        let unwind_to = input.unwind_to;
-        let _bad_block = input.bad_block;
-
-        // get block body tx indexes
-        let db_tx = db.deref_mut();
-
-        // Get transaction of the block that we are executing.
+        // Acquire changeset cursors
         let mut account_changeset = db_tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
-        // Skip sender recovery and load signer from database.
         let mut storage_changeset = db_tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        // get from tx_number
-        let unwind_from_hash = db_tx
-            .get::<tables::CanonicalHeaders>(unwind_from)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: unwind_from })?;
+        let from_transition = db_tx.get_last_block_transition_by_num(input.stage_progress)?;
 
-        let from_tx_number = db_tx
-            .get::<tables::CumulativeTxCount>((unwind_from, unwind_from_hash).into())?
-            .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                number: unwind_from,
-                hash: unwind_from_hash,
-            })?;
-
-        // get to tx_number
-        let to_tx_number = if unwind_to == 0 {
-            0
+        let to_transition = if input.unwind_to != 0 {
+            db_tx.get_last_block_transition_by_num(input.unwind_to - 1)?
         } else {
-            let parent_number = unwind_to - 1;
-            let parent_hash = db_tx
-                .get::<tables::CanonicalHeaders>(parent_number)?
-                .ok_or(DatabaseIntegrityError::CanonicalHeader { number: parent_number })?;
-
-            db_tx
-                .get::<tables::CumulativeTxCount>(BlockNumHash((parent_number, parent_hash)))?
-                .ok_or(DatabaseIntegrityError::CumulativeTxCount {
-                    number: parent_number,
-                    hash: parent_hash,
-                })?
+            0
         };
 
-        if to_tx_number > from_tx_number {
-            panic!("Parents CumulativeTxCount {to_tx_number} is higer then present block #{unwind_to} TxCount {from_tx_number}")
+        if to_transition > from_transition {
+            panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", to_transition, input.stage_progress, from_transition, input.unwind_to);
         }
-        let num_of_tx = (from_tx_number - to_tx_number) as usize;
+        let num_of_tx = (from_transition - to_transition) as usize;
 
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: unwind_to })
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
         let account_changeset_batch = account_changeset
-            .walk_dup(to_tx_number, Address::zero())?
-            .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= from_tx_number))
+            .walk_dup(to_transition, Address::zero())?
+            .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= from_transition))
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
@@ -383,9 +356,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get all batches for storage change
         let storage_chageset_batch = storage_changeset
-            .walk_dup(TxNumberAddress((to_tx_number, Address::zero())), H256::zero())?
+            .walk_dup(TxNumberAddress((to_transition, Address::zero())), H256::zero())?
             .take_while(|item| {
-                item.as_ref().map_or(false, |(TxNumberAddress((num, _)), _)| *num <= from_tx_number)
+                item.as_ref()
+                    .map_or(false, |(TxNumberAddress((num, _)), _)| *num <= from_transition)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -401,7 +375,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Discard unwinded changesets
         let mut entry = account_changeset.last()?;
         while let Some((tx_number, _)) = entry {
-            if tx_number < to_tx_number {
+            if tx_number < to_transition {
                 break
             }
             account_changeset.delete_current()?;
@@ -410,7 +384,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         let mut entry = storage_changeset.last()?;
         while let Some((TxNumberAddress((tx_number, _)), _)) = entry {
-            if tx_number < to_tx_number {
+            if tx_number < to_transition {
                 break
             }
             storage_changeset.delete_current()?;

@@ -3,12 +3,18 @@ use futures_util::{stream, StreamExt};
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
+        bodies::{
+            client::BodiesClient,
+            downloader::{BlockResponse, BodyDownloader},
+        },
         downloader::{DownloadStream, Downloader},
         error::{DownloadError, DownloadResult},
     },
 };
-use reth_primitives::{BlockLocked, SealedHeader};
+use reth_primitives::{
+    proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
+    BlockLocked, SealedHeader,
+};
 use std::{borrow::Borrow, sync::Arc};
 
 /// Downloads bodies in batches.
@@ -92,6 +98,14 @@ where
 
     /// Fetch a single block body.
     async fn fetch_body(&self, header: &SealedHeader) -> DownloadResult<BlockLocked> {
+        // if header.ommers_hash == EMPTY_LIST_HASH && header.transactions_root == EMPTY_ROOT {
+        //     // TODO: fix this
+        //     // If we indeed move to the new changeset structure let's not forget to add a note
+        //     // that the gaps issue with the returned empty bodies stream is no longer present
+        //     // continue
+        //     return Ok(BlockResponse::Empty(header.clone()))
+        // }
+
         let (peer_id, mut response) =
             self.client.get_block_body(vec![header.hash()]).await?.split();
 

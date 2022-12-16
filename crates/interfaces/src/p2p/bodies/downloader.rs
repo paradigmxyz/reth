@@ -1,6 +1,15 @@
 use crate::p2p::downloader::{DownloadStream, Downloader};
 use reth_primitives::{BlockLocked, SealedHeader};
 
+/// TODO: docs
+#[derive(PartialEq, Eq, Debug)]
+pub enum BlockResponse {
+    /// TODO:
+    Empty(SealedHeader),
+    /// TODO:
+    Full(BlockLocked),
+}
+
 /// A downloader capable of fetching block bodies from header hashes.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block bodies,
