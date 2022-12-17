@@ -272,9 +272,18 @@ mod tests {
     fn test_decode_known_reasons() {
         let all_reasons = vec![
             // snappy, compressing a single byte
+            "010080",
+            "010001",
+            "010002",
             "010003",
             "010004",
+            "010005",
+            "010006",
+            "010007",
             "010008",
+            "010009",
+            "01000a",
+            "01000b",
             "010010",
             // snappy, encoded the disconnect reason as a list
             "010204c180",
@@ -291,9 +300,33 @@ mod tests {
             "010204c10b",
             "010204c110",
             // non-snappy, encoding the disconnect reason as a single byte
+            "0180",
+            "0101",
+            "0102",
+            "0103",
             "0104",
+            "0105",
+            "0106",
+            "0107",
+            "0108",
+            "0109",
+            "010a",
+            "010b",
+            "0110",
             // non-snappy, encoding the disconnect reason in a list
+            "01c180",
+            "01c101",
+            "01c102",
+            "01c103",
             "01c104",
+            "01c105",
+            "01c106",
+            "01c107",
+            "01c108",
+            "01c109",
+            "01c10a",
+            "01c10b",
+            "01c110",
         ];
 
         for reason in all_reasons {
