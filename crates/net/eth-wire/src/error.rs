@@ -120,6 +120,8 @@ pub enum P2PHandshakeError {
     Timeout,
     #[error("Disconnected by peer: {0}")]
     Disconnected(DisconnectReason),
+    #[error("error decoding a message during handshake: {0}")]
+    DecodeError(#[from] reth_rlp::DecodeError),
 }
 
 /// An error that can occur when interacting with a [`Pinger`].
