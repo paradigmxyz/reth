@@ -114,7 +114,7 @@ where
             }
             Err(e) => {
                 let hex_msg = hex::encode(&first_message_bytes);
-                tracing::error!("Failed to decode Hello message from peer ({hex_msg}): {e}");
+                tracing::error!("Failed to decode first message from peer ({hex_msg}): {e}");
                 Err(P2PStreamError::HandshakeError(e.into()))
             }
             Ok(msg) => {
