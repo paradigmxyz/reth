@@ -3,6 +3,9 @@
 //! Starts the client
 use crate::util::chainspec::Genesis;
 use clap::{crate_version, Parser};
+use eyre::WrapErr;
+use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_util::layers::{PrefixLayer, Stack};
 use reth_consensus::EthConsensus;
 use reth_db::{
     cursor::DbCursorRO,
@@ -22,6 +25,7 @@ use reth_primitives::{hex_literal::hex, Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
 use std::{
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -37,6 +41,10 @@ pub struct Command {
     // TODO: This should use dirs-next
     #[arg(long, default_value = "~/.reth/db")]
     db: String,
+
+    /// Enable Prometheus metrics. The metrics will be served at the given interface and port.
+    #[clap(long)]
+    metrics: Option<SocketAddr>,
 }
 
 impl Command {
@@ -49,6 +57,19 @@ impl Command {
         info!("Opening database at {}", db_path.display());
         let db = Arc::new(init_db(db_path)?);
         info!("Database open");
+
+        if let Some(listen_addr) = self.metrics {
+            info!("Starting metrics endpoint at {}", listen_addr);
+            let (recorder, exporter) = PrometheusBuilder::new()
+                .with_http_listener(listen_addr)
+                .build()
+                .wrap_err("Could not build Prometheus endpoint.")?;
+            tokio::task::spawn(exporter);
+            Stack::new(recorder)
+                .push(PrefixLayer::new("reth"))
+                .install()
+                .wrap_err("Couldn't set metrics recorder.")?;
+        }
 
         // TODO: More info from chainspec (chain ID etc.)
         let consensus = Arc::new(EthConsensus::new(consensus_config()));
