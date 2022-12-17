@@ -268,4 +268,16 @@ mod tests {
 
         assert_eq!(decompressed, disconnect_raw);
     }
+
+    #[test]
+    fn test_decode_known_reasons() {
+        let all_reasons = vec![
+            b"010003",
+        ];
+
+        for reason in all_reasons {
+            let reason = hex::decode(reason).unwrap();
+            _ = DisconnectReason::decode(&mut &reason[..]).unwrap();
+        }
+    }
 }
