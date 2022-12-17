@@ -311,6 +311,7 @@ mod tests {
             "010010",
             // TODO: just saw this format once, not really sure what this format even is
             "01010003",
+            "01010000",
             // snappy, encoded the disconnect reason as a list
             "010204c180",
             "010204c101",
