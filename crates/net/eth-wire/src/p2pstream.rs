@@ -123,8 +123,6 @@ where
             }
         }?;
 
-        tracing::trace!("Received a valid Hello: {:?}", their_hello);
-
         // TODO: explicitly document that we only support v5.
         if their_hello.protocol_version != ProtocolVersion::V5 {
             // TODO: do we want to send a `Disconnect` message here?
@@ -292,7 +290,12 @@ where
                     this.outgoing_messages.push_back(pong_bytes.into());
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-                    let reason = DisconnectReason::decode(&mut &bytes[1..])?;
+
+                    let reason = DisconnectReason::decode(&mut &bytes[1..]).map_err(|e| {
+                        let hex_msg = hex::encode(&bytes[1..]);
+                        tracing::warn!("Failed to decode disconnect message from peer ({hex_msg}): {e}");
+                        e
+                    })?;
                     return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
                 }
                 _ if id == P2PMessageID::Hello as u8 => {
