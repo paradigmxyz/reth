@@ -1,11 +1,14 @@
 //! Utility functions.
-
-use std::path::{Path, PathBuf};
+use std::{
+    env::VarError,
+    path::{Path, PathBuf},
+};
 use walkdir::{DirEntry, WalkDir};
 
 /// Utilities for parsing chainspecs
 pub mod chainspec;
 
+/// Finds all files in a directory with a given postfix.
 pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<PathBuf> {
     WalkDir::new(path)
         .into_iter()
@@ -13,6 +16,12 @@ pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<Pat
         .filter(|e| e.file_name().to_string_lossy().ends_with(postfix))
         .map(DirEntry::into_path)
         .collect::<Vec<PathBuf>>()
+}
+
+/// Parses a user-specified path with support for environment variables and common shorthands (e.g.
+/// ~ for the user's home directory).
+pub(crate) fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
+    shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
 }
 
 /// Tracing utility

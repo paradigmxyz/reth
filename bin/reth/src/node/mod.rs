@@ -1,7 +1,7 @@
 //! Main node command
 //!
 //! Starts the client
-use crate::util::chainspec::Genesis;
+use crate::util::{chainspec::Genesis, parse_path};
 use clap::{crate_version, Parser};
 use eyre::WrapErr;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -39,8 +39,8 @@ const MAINNET_GENESIS: &str = include_str!("../../res/chainspec/mainnet.json");
 pub struct Command {
     /// The path to the database folder.
     // TODO: This should use dirs-next
-    #[arg(long, value_name = "PATH", default_value = "~/.reth/db")]
-    db: String,
+    #[arg(long, value_name = "PATH", default_value = "~/.reth/db", value_parser = parse_path)]
+    db: PathBuf,
 
     /// Enable Prometheus metrics.
     ///
@@ -55,9 +55,8 @@ impl Command {
     pub async fn execute(&self) -> eyre::Result<()> {
         info!("reth {} starting", crate_version!());
 
-        let db_path = PathBuf::from(shellexpand::full(&self.db)?.into_owned());
-        info!("Opening database at {}", db_path.display());
-        let db = Arc::new(init_db(db_path)?);
+        info!("Opening database at {}", &self.db.display());
+        let db = Arc::new(init_db(&self.db)?);
         info!("Database open");
 
         if let Some(listen_addr) = self.metrics {
