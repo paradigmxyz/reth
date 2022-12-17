@@ -15,6 +15,7 @@ use reth_primitives::{PeerId, WithPeerId, H256};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Front-end API for fetching data from the network.
+// ANCHOR: struct-FetchClient
 #[derive(Debug)]
 pub struct FetchClient {
     /// Sender half of the request channel.
@@ -22,6 +23,7 @@ pub struct FetchClient {
     /// The handle to the peers
     pub(crate) peers_handle: PeersHandle,
 }
+// ANCHOR_END: struct-FetchClient
 
 impl DownloadClient for FetchClient {
     fn report_bad_message(&self, peer_id: PeerId) {

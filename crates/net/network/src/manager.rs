@@ -80,6 +80,7 @@ use tracing::{error, info, trace, warn};
 ///   ethrequest <--> |ETH request handing| NetworkManager
 ///   discovery --> |Discovered peers| NetworkManager
 /// ```
+// ANCHOR: struct-NetworkManager
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
@@ -104,6 +105,7 @@ pub struct NetworkManager<C> {
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
 }
+// ANCHOR_END: struct-NetworkManager
 
 // === impl NetworkManager ===
 impl<C> NetworkManager<C> {

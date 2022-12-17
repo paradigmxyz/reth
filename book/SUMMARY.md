@@ -16,7 +16,7 @@
     - [db]()
 - [Networking]()
     - [P2P]()
-        - [network](./networking/network.md)
+        - [network](./networking/p2p/network/README.md)
         - [eth-wire]()
         - [discv4]()
         - [ipc]()

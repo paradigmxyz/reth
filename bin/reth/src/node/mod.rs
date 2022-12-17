@@ -56,6 +56,7 @@ impl Command {
             init_genesis(db.clone(), serde_json::from_str(MAINNET_GENESIS).unwrap())?;
 
         info!("Connecting to p2p");
+        // ANCHOR: snippet-execute
         let network = start_network(network_config(db.clone(), genesis_hash)).await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
@@ -86,6 +87,7 @@ impl Command {
                 false,
             )
             .push(SendersStage { batch_size: 100, commit_threshold: 1000 }, false);
+        // ANCHOR_END: snippet-execute
 
         // Run pipeline
         info!("Starting pipeline");
