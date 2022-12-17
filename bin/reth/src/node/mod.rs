@@ -39,11 +39,13 @@ const MAINNET_GENESIS: &str = include_str!("../../res/chainspec/mainnet.json");
 pub struct Command {
     /// The path to the database folder.
     // TODO: This should use dirs-next
-    #[arg(long, default_value = "~/.reth/db")]
+    #[arg(long, value_name = "PATH", default_value = "~/.reth/db")]
     db: String,
 
-    /// Enable Prometheus metrics. The metrics will be served at the given interface and port.
-    #[clap(long)]
+    /// Enable Prometheus metrics.
+    ///
+    /// The metrics will be served at the given interface and port.
+    #[clap(long, value_name = "SOCKET")]
     metrics: Option<SocketAddr>,
 }
 

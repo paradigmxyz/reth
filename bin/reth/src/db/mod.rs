@@ -18,7 +18,7 @@ use tracing::info;
 #[derive(Debug, Parser)]
 pub struct Command {
     /// Path to database folder
-    #[arg(long, default_value = "~/.reth/db")]
+    #[arg(long, value_name = "PATH", default_value = "~/.reth/db")]
     db: String,
 
     #[clap(subcommand)]
