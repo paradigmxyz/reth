@@ -112,10 +112,9 @@ where
                 counter!("p2pstream.disconnected_errors", 1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
-            Err(e) => {
-                let hex_msg = hex::encode(&first_message_bytes);
-                tracing::warn!("Failed to decode first message from peer ({hex_msg}): {e}");
-                Err(P2PStreamError::HandshakeError(e.into()))
+            Err(err) => {
+                tracing::warn!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {
                 tracing::error!("expected hello message but received: {:?}", msg);
@@ -290,12 +289,11 @@ where
                     this.outgoing_messages.push_back(pong_bytes.into());
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-                    let reason = DisconnectReason::decode(&mut &bytes[1..]).map_err(|e| {
-                        let hex_msg = hex::encode(&bytes[..]);
+                    let reason = DisconnectReason::decode(&mut &bytes[1..]).map_err(|err| {
                         tracing::warn!(
-                            "Failed to decode disconnect message from peer ({hex_msg}): {e}"
+                            ?err, msg=%hex::encode(&bytes[..]), "Failed to decode disconnect message from peer"
                         );
-                        e
+                        err
                     })?;
                     return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
                 }
