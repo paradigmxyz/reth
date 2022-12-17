@@ -1,0 +1,7 @@
+bin/                        @onbjerg
+crates/net/                 @mattsse @Rjected
+crates/net/downloaders/     @onbjerg @rkrasiuk
+crates/executor/            @rakita
+crates/stages/              @onbjerg @rkrasiuk
+crates/storage/             @rakita @joshieDo
+crates/transaction-pool/    @mattsse
