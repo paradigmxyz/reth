@@ -124,22 +124,17 @@ impl Encodable for DisconnectReason {
 /// input is snappy compressed.
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        println!("buf: {:x?}", buf);
         let first = *buf.first().ok_or(DecodeError::InputTooShort)?;
 
         // encoded as a single byte
         let reason_byte = if buf.len() == 1 {
-            println!("single byte: {:x?}", buf);
             u8::decode(buf)?
         } else if buf.len() == 2 {
             if first == 0x00 {
                 // snappy encoded containing single byte
-                println!("snappy single byte: {:x?}", buf);
                 buf.advance(1);
-                println!("snappy last byte: {:x?}", buf);
                 u8::decode(&mut &buf[..])?
             } else {
-                println!("rlp single byte: {:x?}", buf);
                 // rlp encoded as a list containing a single byte
                 let _header = Header::decode(buf)?;
                 u8::decode(buf)?
@@ -148,11 +143,9 @@ impl Decodable for DisconnectReason {
             // snappy encoded as a rlp list containing a single byte
             // [2, 4, list header, rlp(reason)]
             buf.advance(2); // safe, we have three bytes left
-            println!("snappy rlp first: {:x?}", buf);
 
             // advance the buffer to the end, one byte left
             buf.advance(1);
-            println!("snappy rlp second: {:x?}", buf);
 
             // the reason is encoded at the end of the snappy encoded bytes
             u8::decode(buf)?
