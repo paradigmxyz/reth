@@ -274,6 +274,8 @@ mod tests {
             // snappy, compressing a single byte
             "010003",
             "010004",
+            "010008",
+            "010010",
             // snappy, encoded the disconnect reason as a list
             "010204c180",
             "010204c101",
