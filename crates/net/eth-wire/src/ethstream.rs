@@ -74,7 +74,7 @@ where
         let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::warn!("rlp decode error in handshake: msg={their_msg:x}");
+                tracing::warn!("rlp decode error in eth handshake: msg={their_msg:x}");
                 return Err(err.into())
             }
         };
