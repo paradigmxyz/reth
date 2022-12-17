@@ -16,6 +16,7 @@ enr = { version = "0.7", default-features = false, optional = true }
 rlp = { version = "0.5.2", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
+tracing = "0.1.37"
 
 [dev-dependencies]
 reth-rlp = { path = ".", package = "reth-rlp", features = [

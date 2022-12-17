@@ -3660,6 +3660,7 @@ dependencies = [
  "rlp",
  "secp256k1",
  "smol_str",
+ "tracing",
 ]
 
 [[package]]
