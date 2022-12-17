@@ -298,6 +298,9 @@ async fn test_geth_disconnect() {
         panic!("Expected a session established event");
     }
 
+    // remove geth as a peer deliberately
+    handle.disconnect_peer(geth_peer_id);
+
     // wait for a disconnect from geth
     if let Some(NetworkEvent::SessionClosed { peer_id }) = events.next().await {
         assert_eq!(peer_id, geth_peer_id);
