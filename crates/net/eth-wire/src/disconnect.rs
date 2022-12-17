@@ -1,7 +1,7 @@
 //! Disconnect
 
 use bytes::Buf;
-use reth_rlp::{Decodable, DecodeError, Encodable, Header};
+use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
@@ -124,30 +124,17 @@ impl Encodable for DisconnectReason {
 /// input is snappy compressed.
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let first = *buf.first().ok_or(DecodeError::InputTooShort)?;
+        if buf.is_empty() {
+            return Err(DecodeError::InputTooShort)
+        }
 
         // encoded as a single byte
         let reason_byte = if buf.len() == 1 {
             u8::decode(buf)?
-        } else if buf.len() == 2 {
-            if first == 0x00 {
-                // snappy encoded containing single byte
-                buf.advance(1);
-                u8::decode(&mut &buf[..])?
-            } else {
-                // rlp encoded as a list containing a single byte
-                let _header = Header::decode(buf)?;
-                u8::decode(buf)?
-            }
-        } else if buf.len() == 4 {
-            // snappy encoded as a rlp list containing a single byte
-            // [2, 4, list header, rlp(reason)]
-            //  ^
-
-            // advance the buffer to the end, one byte left
-            // [2, 4, list header, rlp(reason)]
-            //                     ^
-            buf.advance(3); // safe, we have three bytes left
+        } else if buf.len() <= 4 {
+            // in any disconnect encoding, headers precede and do not wrap the reason, so we should
+            // advance to the end of the buffer
+            buf.advance(buf.len() - 1);
 
             // the reason is encoded at the end of the snappy encoded bytes
             u8::decode(buf)?
@@ -322,6 +309,8 @@ mod tests {
             "01000a",
             "01000b",
             "010010",
+            // TODO: just saw this format once, not really sure what this format even is
+            "01010003",
             // snappy, encoded the disconnect reason as a list
             "010204c180",
             "010204c101",

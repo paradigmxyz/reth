@@ -291,7 +291,7 @@ where
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &bytes[1..]).map_err(|e| {
-                        let hex_msg = hex::encode(&bytes[1..]);
+                        let hex_msg = hex::encode(&bytes[..]);
                         tracing::warn!(
                             "Failed to decode disconnect message from peer ({hex_msg}): {e}"
                         );
