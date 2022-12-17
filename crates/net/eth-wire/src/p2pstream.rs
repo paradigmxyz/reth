@@ -290,10 +290,11 @@ where
                     this.outgoing_messages.push_back(pong_bytes.into());
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-
                     let reason = DisconnectReason::decode(&mut &bytes[1..]).map_err(|e| {
                         let hex_msg = hex::encode(&bytes[1..]);
-                        tracing::warn!("Failed to decode disconnect message from peer ({hex_msg}): {e}");
+                        tracing::warn!(
+                            "Failed to decode disconnect message from peer ({hex_msg}): {e}"
+                        );
                         e
                     })?;
                     return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
