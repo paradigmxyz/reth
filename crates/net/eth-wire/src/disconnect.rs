@@ -124,7 +124,6 @@ impl Encodable for DisconnectReason {
 /// input is snappy compressed.
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        tracing::trace!("Decoding disconnect reason: {}", hex::encode(&buf));
         if buf.len() < 4 {
             return Err(DecodeError::Custom("disconnect reason should have 4 bytes"))
         }
@@ -272,7 +271,27 @@ mod tests {
     #[test]
     fn test_decode_known_reasons() {
         let all_reasons = vec![
-            b"010003",
+            // snappy, compressing a single byte
+            "010003",
+            "010004",
+            // snappy, encoded the disconnect reason as a list
+            "010204c180",
+            "010204c101",
+            "010204c102",
+            "010204c103",
+            "010204c104",
+            "010204c105",
+            "010204c106",
+            "010204c107",
+            "010204c108",
+            "010204c109",
+            "010204c10a",
+            "010204c10b",
+            "010204c110",
+            // non-snappy, encoding the disconnect reason as a single byte
+            "0104",
+            // non-snappy, encoding the disconnect reason in a list
+            "01c104",
         ];
 
         for reason in all_reasons {
