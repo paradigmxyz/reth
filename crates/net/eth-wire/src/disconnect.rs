@@ -157,7 +157,7 @@ impl Decodable for DisconnectReason {
             // the reason is encoded at the end of the snappy encoded bytes
             u8::decode(buf)?
         } else {
-            return Err(DecodeError::Custom("disconnect reason too long"))
+            return Err(DecodeError::Custom("invalid disconnect reason length"))
         };
 
         let reason = DisconnectReason::try_from(reason_byte)
@@ -285,34 +285,6 @@ mod tests {
     #[test]
     fn test_decode_known_reasons() {
         let all_reasons = vec![
-            // snappy, compressing a single byte
-            "010080",
-            "010001",
-            "010002",
-            "010003",
-            "010004",
-            "010005",
-            "010006",
-            "010007",
-            "010008",
-            "010009",
-            "01000a",
-            "01000b",
-            "010010",
-            // snappy, encoded the disconnect reason as a list
-            "010204c180",
-            "010204c101",
-            "010204c102",
-            "010204c103",
-            "010204c104",
-            "010204c105",
-            "010204c106",
-            "010204c107",
-            "010204c108",
-            "010204c109",
-            "010204c10a",
-            "010204c10b",
-            "010204c110",
             // non-snappy, encoding the disconnect reason as a single byte
             "0180",
             "0101",
@@ -341,6 +313,34 @@ mod tests {
             "01c10a",
             "01c10b",
             "01c110",
+            // snappy, compressing a single byte
+            "010080",
+            "010001",
+            "010002",
+            "010003",
+            "010004",
+            "010005",
+            "010006",
+            "010007",
+            "010008",
+            "010009",
+            "01000a",
+            "01000b",
+            "010010",
+            // snappy, encoded the disconnect reason as a list
+            "010204c180",
+            "010204c101",
+            "010204c102",
+            "010204c103",
+            "010204c104",
+            "010204c105",
+            "010204c106",
+            "010204c107",
+            "010204c108",
+            "010204c109",
+            "010204c10a",
+            "010204c10b",
+            "010204c110",
         ];
 
         for reason in all_reasons {
