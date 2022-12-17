@@ -142,10 +142,12 @@ impl Decodable for DisconnectReason {
         } else if buf.len() == 4 {
             // snappy encoded as a rlp list containing a single byte
             // [2, 4, list header, rlp(reason)]
-            buf.advance(2); // safe, we have three bytes left
+            //  ^
 
             // advance the buffer to the end, one byte left
-            buf.advance(1);
+            // [2, 4, list header, rlp(reason)]
+            //                     ^
+            buf.advance(3); // safe, we have three bytes left
 
             // the reason is encoded at the end of the snappy encoded bytes
             u8::decode(buf)?
