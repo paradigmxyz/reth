@@ -1,5 +1,6 @@
 //! Database debugging tool
 
+use crate::util::parse_path;
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -11,15 +12,16 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::path::Path;
+use std::path::PathBuf;
 use tracing::info;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Path to database folder
-    #[arg(long, default_value = "~/.reth/db")]
-    db: String,
+    /// The path to the database folder.
+    // TODO: This should use dirs-next
+    #[arg(long, value_name = "PATH", default_value = "~/.reth/db", value_parser = parse_path)]
+    db: PathBuf,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -58,13 +60,11 @@ pub struct ListArgs {
 impl Command {
     /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        let path = shellexpand::full(&self.db)?.into_owned();
-        let expanded_db_path = Path::new(&path);
-        std::fs::create_dir_all(expanded_db_path)?;
+        std::fs::create_dir_all(&self.db)?;
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            expanded_db_path,
+            &self.db,
             reth_db::mdbx::EnvKind::RW,
         )?;
 
