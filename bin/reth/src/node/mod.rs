@@ -1,9 +1,9 @@
 //! Main node command
 //!
 //! Starts the client
-use crate::util::{
-    chainspec::{ChainSpecification, Genesis},
-    parse_path,
+use crate::{
+    dirs::DbPath,
+    util::chainspec::{ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
 use eyre::WrapErr;
@@ -27,11 +27,7 @@ use reth_network::{
 use reth_primitives::{hex_literal::hex, Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
 
 // TODO: Move this out somewhere
@@ -41,9 +37,14 @@ const MAINNET: &str = include_str!("../../res/chainspec/mainnet.json");
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the database folder.
-    // TODO: This should use dirs-next
-    #[arg(long, value_name = "PATH", default_value = "~/.reth/db", value_parser = parse_path)]
-    db: PathBuf,
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
+    /// - macOS: `$HOME/Library/Application Support/reth/db`
+    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
+    db: DbPath,
 
     // chain: name or path to chainspec
     // hidden testing option for setting chain tip
@@ -60,7 +61,7 @@ impl Command {
     pub async fn execute(&self) -> eyre::Result<()> {
         info!("reth {} starting", crate_version!());
 
-        info!("Opening database at {}", &self.db.display());
+        info!("Opening database at {}", &self.db);
         let db = Arc::new(init_db(&self.db)?);
         info!("Database open");
 
