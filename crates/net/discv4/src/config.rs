@@ -134,7 +134,7 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Sets the channel size for incoming messages
+    /// Sets the channel size for outgoing messages
     pub fn udp_egress_message_buffer(&mut self, udp_egress_message_buffer: usize) -> &mut Self {
         self.config.udp_egress_message_buffer = udp_egress_message_buffer;
         self
