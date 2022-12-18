@@ -44,7 +44,7 @@ impl Consensus for EthConsensus {
         verification::validate_header_standalone(header, &self.config)?;
         verification::validate_header_regarding_parent(parent, header, &self.config)?;
 
-        if header.number < self.config.paris_hard_fork_block {
+        if header.number < self.config.paris_block {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
@@ -57,6 +57,6 @@ impl Consensus for EthConsensus {
     }
 
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        block_num <= self.config.paris_hard_fork_block
+        block_num <= self.config.paris_block
     }
 }
