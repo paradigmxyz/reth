@@ -3,7 +3,7 @@
 //! Starts the client
 use crate::{
     dirs::DbPath,
-    util::chainspec::{ChainSpecification, Genesis},
+    util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
 use eyre::WrapErr;
@@ -30,9 +30,6 @@ use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::Send
 use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
 
-// TODO: Move this out somewhere
-const MAINNET: &str = include_str!("../../res/chainspec/mainnet.json");
-
 /// Start the client
 #[derive(Debug, Parser)]
 pub struct Command {
@@ -46,7 +43,17 @@ pub struct Command {
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: DbPath,
 
-    // chain: name or path to chainspec
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(long, value_name = "CHAIN_OR_PATH", verbatim_doc_comment, default_value = "mainnet", value_parser = chain_spec_value_parser)]
+    chain: ChainSpecification,
+
     // hidden testing option for setting chain tip
     /// Enable Prometheus metrics.
     ///
@@ -79,10 +86,9 @@ impl Command {
         }
 
         // TODO: More info from chainspec (chain ID etc.)
-        let chain_specification: ChainSpecification = serde_json::from_str(MAINNET).unwrap();
-        let chain_id = chain_specification.consensus.chain_id;
-        let consensus = Arc::new(EthConsensus::new(chain_specification.consensus));
-        let genesis_hash = init_genesis(db.clone(), chain_specification.genesis)?;
+        let chain_id = self.chain.consensus.chain_id;
+        let consensus = Arc::new(EthConsensus::new(self.chain.consensus.clone()));
+        let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         info!("Connecting to p2p");
         let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
