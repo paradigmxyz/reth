@@ -24,7 +24,7 @@ use reth_network::{
     error::NetworkError,
     NetworkConfig, NetworkHandle, NetworkManager,
 };
-use reth_primitives::{hex_literal::hex, Account, Header, H256};
+use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
 use std::{net::SocketAddr, path::Path, sync::Arc};
@@ -51,15 +51,26 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
-    #[arg(long, value_name = "CHAIN_OR_PATH", verbatim_doc_comment, default_value = "mainnet", value_parser = chain_spec_value_parser)]
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = chain_spec_value_parser
+    )]
     chain: ChainSpecification,
 
-    // hidden testing option for setting chain tip
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
     #[clap(long, value_name = "SOCKET")]
     metrics: Option<SocketAddr>,
+
+    /// Set the chain tip manually for testing purposes.
+    ///
+    /// NOTE: This is a temporary flag
+    #[arg(long = "debug.tip")]
+    tip: Option<H256>,
 }
 
 impl Command {
@@ -85,7 +96,6 @@ impl Command {
                 .wrap_err("Couldn't set metrics recorder.")?;
         }
 
-        // TODO: More info from chainspec (chain ID etc.)
         let chain_id = self.chain.consensus.chain_id;
         let consensus = Arc::new(EthConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
@@ -122,22 +132,17 @@ impl Command {
             )
             .push(SendersStage { batch_size: 100, commit_threshold: 1000 }, false);
 
+        if let Some(tip) = self.tip {
+            debug!("Tip manually set: {}", tip);
+            consensus.notify_fork_choice_state(ForkchoiceState {
+                head_block_hash: tip,
+                safe_block_hash: tip,
+                finalized_block_hash: tip,
+            })?;
+        }
+
         // Run pipeline
         info!("Starting pipeline");
-        // TODO: This is a temporary measure to set the fork choice state, but this should be
-        // handled by the engine API
-        consensus.notify_fork_choice_state(ForkchoiceState {
-            // NOTE: This is block 50,000. The first transaction ever is in block 46,147
-            head_block_hash: H256(hex!(
-                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
-            )),
-            safe_block_hash: H256(hex!(
-                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
-            )),
-            finalized_block_hash: H256(hex!(
-                "0e30a7c0c1cee426011e274abc746c1ad3c48757433eb0139755658482498aa9"
-            )),
-        })?;
         pipeline.run(db.clone()).await?;
 
         info!("Finishing up");
