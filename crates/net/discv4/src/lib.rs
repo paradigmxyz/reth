@@ -373,13 +373,9 @@ impl Discv4Service {
         config: Discv4Config,
         commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     ) -> Self {
-        // Heuristic limit for channel buffer size, which is correlated with the number of
-        // concurrent requests and bucket size. This should be large enough to cover multiple
-        // lookups while also anticipating incoming requests.
-        const UDP_CHANNEL_BUFFER: usize = MAX_NODES_PER_BUCKET * ALPHA * (ALPHA * 2);
         let socket = Arc::new(socket);
-        let (ingress_tx, ingress_rx) = mpsc::channel(UDP_CHANNEL_BUFFER);
-        let (egress_tx, egress_rx) = mpsc::channel(UDP_CHANNEL_BUFFER);
+        let (ingress_tx, ingress_rx) = mpsc::channel(config.udp_ingress_message_buffer);
+        let (egress_tx, egress_rx) = mpsc::channel(config.udp_egress_message_buffer);
         let mut tasks = JoinSet::<()>::new();
 
         let udp = Arc::clone(&socket);
