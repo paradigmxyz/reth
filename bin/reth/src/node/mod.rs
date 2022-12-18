@@ -2,6 +2,7 @@
 //!
 //! Starts the client
 use crate::{
+    config::Config,
     dirs::DbPath,
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
@@ -27,7 +28,11 @@ use reth_network::{
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
-use std::{net::SocketAddr, path::Path, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::{debug, info};
 
 /// Start the client
@@ -42,6 +47,10 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: DbPath,
+
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -75,8 +84,16 @@ pub struct Command {
 
 impl Command {
     /// Execute `node` command
-    // TODO: RPC, metrics
+    // TODO: RPC
     pub async fn execute(&self) -> eyre::Result<()> {
+        let config = if let Some(path) = &self.config {
+            // TODO: Use TOML
+            // TODO: Better error
+            serde_json::from_str(std::fs::read_to_string(path)?.as_str())?
+        } else {
+            Config::default()
+        };
+
         info!("reth {} starting", crate_version!());
 
         info!("Opening database at {}", &self.db);
@@ -111,26 +128,40 @@ impl Command {
             .push(
                 HeaderStage {
                     downloader: headers::linear::LinearDownloadBuilder::default()
+                        .batch_size(config.stage.headers.downloader_batch_size)
+                        .timeout(config.stage.headers.downloader_timeout)
+                        .retries(config.stage.headers.downloader_retries)
                         .build(consensus.clone(), fetch_client.clone()),
                     consensus: consensus.clone(),
                     client: fetch_client.clone(),
                     network_handle: network.clone(),
-                    commit_threshold: 100,
+                    commit_threshold: config.stage.headers.commit_threshold,
                 },
                 false,
             )
             .push(
                 BodyStage {
-                    downloader: Arc::new(bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        consensus.clone(),
-                    )),
+                    downloader: Arc::new(
+                        bodies::concurrent::ConcurrentDownloader::new(
+                            fetch_client.clone(),
+                            consensus.clone(),
+                        )
+                        .with_batch_size(config.stage.bodies.downloader_batch_size)
+                        .with_retries(config.stage.bodies.downloader_retries)
+                        .with_concurrency(config.stage.bodies.downloader_concurrency),
+                    ),
                     consensus: consensus.clone(),
-                    commit_threshold: 100,
+                    commit_threshold: config.stage.bodies.commit_threshold,
                 },
                 false,
             )
-            .push(SendersStage { batch_size: 100, commit_threshold: 1000 }, false);
+            .push(
+                SendersStage {
+                    batch_size: config.stage.senders.batch_size,
+                    commit_threshold: config.stage.senders.commit_threshold,
+                },
+                false,
+            );
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);
