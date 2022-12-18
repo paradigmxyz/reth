@@ -3337,6 +3337,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "serde",
  "thiserror",
  "tokio",
 ]
