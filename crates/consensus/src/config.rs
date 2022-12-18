@@ -14,6 +14,7 @@ pub const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
 /// Common configuration for consensus algorithms.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct Config {
     /// Blockchain identifier introduced in EIP-155: Simple replay attack protection.
     pub chain_id: u64,
@@ -49,6 +50,7 @@ pub struct Config {
     pub paris_block: BlockNumber,
     /// Terminal total difficulty after the paris hard-fork to reach before The Merge is considered
     /// activated.
+    #[cfg_attr(feature = "serde", serde(rename = "terminalTotalDifficulty"))]
     pub merge_terminal_total_difficulty: u128,
 }
 

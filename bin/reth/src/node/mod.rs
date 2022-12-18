@@ -1,7 +1,10 @@
 //! Main node command
 //!
 //! Starts the client
-use crate::util::{chainspec::Genesis, parse_path};
+use crate::util::{
+    chainspec::{ChainSpecification, Genesis},
+    parse_path,
+};
 use clap::{crate_version, Parser};
 use eyre::WrapErr;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -32,7 +35,7 @@ use std::{
 use tracing::{debug, info};
 
 // TODO: Move this out somewhere
-const MAINNET_GENESIS: &str = include_str!("../../res/chainspec/mainnet.json");
+const MAINNET: &str = include_str!("../../res/chainspec/mainnet.json");
 
 /// Start the client
 #[derive(Debug, Parser)]
@@ -42,6 +45,8 @@ pub struct Command {
     #[arg(long, value_name = "PATH", default_value = "~/.reth/db", value_parser = parse_path)]
     db: PathBuf,
 
+    // chain: name or path to chainspec
+    // hidden testing option for setting chain tip
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -73,12 +78,13 @@ impl Command {
         }
 
         // TODO: More info from chainspec (chain ID etc.)
-        let consensus = Arc::new(EthConsensus::new(consensus_config()));
-        let genesis_hash =
-            init_genesis(db.clone(), serde_json::from_str(MAINNET_GENESIS).unwrap())?;
+        let chain_specification: ChainSpecification = serde_json::from_str(MAINNET).unwrap();
+        let chain_id = chain_specification.consensus.chain_id;
+        let consensus = Arc::new(EthConsensus::new(chain_specification.consensus));
+        let genesis_hash = init_genesis(db.clone(), chain_specification.genesis)?;
 
         info!("Connecting to p2p");
-        let network = start_network(network_config(db.clone(), genesis_hash)).await?;
+        let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own
@@ -183,17 +189,14 @@ fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, ret
 // TODO: This should be based on some external config
 fn network_config<DB: Database>(
     db: Arc<DB>,
+    chain_id: u64,
     genesis_hash: H256,
 ) -> NetworkConfig<ProviderImpl<DB>> {
     NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
         .boot_nodes(mainnet_nodes())
         .genesis_hash(genesis_hash)
+        .chain_id(chain_id)
         .build()
-}
-
-// TODO: This should be based on some external config
-fn consensus_config() -> reth_consensus::Config {
-    reth_consensus::Config::default()
 }
 
 /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.

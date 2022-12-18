@@ -5,6 +5,17 @@ use reth_primitives::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Defines a chain, including it's genesis block, chain ID and fork block numbers.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChainSpecification {
+    /// Consensus configuration.
+    #[serde(rename = "config")]
+    pub consensus: reth_consensus::Config,
+    /// The genesis block of the chain.
+    #[serde(flatten)]
+    pub genesis: Genesis,
+}
+
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
