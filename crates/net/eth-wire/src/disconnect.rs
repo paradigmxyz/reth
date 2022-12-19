@@ -136,8 +136,14 @@ impl Decodable for DisconnectReason {
             // advance to the end of the buffer
             buf.advance(buf.len() - 1);
 
-            // the reason is encoded at the end of the snappy encoded bytes
-            u8::decode(buf)?
+            // geth rlp encodes [`DisconnectReason::DisconnectRequested`] as 0x00 and not as empty
+            // string 0x80
+            if buf[0] == 0x00 {
+                DisconnectReason::DisconnectRequested as u8
+            } else {
+                // the reason is encoded at the end of the snappy encoded bytes
+                u8::decode(buf)?
+            }
         } else {
             return Err(DecodeError::Custom("invalid disconnect reason length"))
         };
@@ -334,6 +340,18 @@ mod tests {
             let P2PMessage::Disconnect(_) = message else {
                 panic!("expected a disconnect message");
             };
+        }
+    }
+
+    #[test]
+    fn test_decode_disconnect_requested() {
+        let reason = "01010000";
+        let reason = hex::decode(reason).unwrap();
+        match P2PMessage::decode(&mut &reason[..]).unwrap() {
+            P2PMessage::Disconnect(DisconnectReason::DisconnectRequested) => {}
+            _ => {
+                unreachable!()
+            }
         }
     }
 }
