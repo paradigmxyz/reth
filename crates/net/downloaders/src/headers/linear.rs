@@ -18,7 +18,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 /// Download headers in batches
@@ -380,15 +379,13 @@ where
 pub struct LinearDownloadBuilder {
     /// The batch size per one request
     batch_size: u64,
-    /// A single request timeout
-    request_timeout: Duration,
     /// The number of retries for downloading
     request_retries: usize,
 }
 
 impl Default for LinearDownloadBuilder {
     fn default() -> Self {
-        Self { batch_size: 100, request_timeout: Duration::from_millis(100), request_retries: 5 }
+        Self { batch_size: 100, request_retries: 5 }
     }
 }
 
@@ -396,12 +393,6 @@ impl LinearDownloadBuilder {
     /// Set the request batch size
     pub fn batch_size(mut self, size: u64) -> Self {
         self.batch_size = size;
-        self
-    }
-
-    /// Set the request timeout
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.request_timeout = timeout;
         self
     }
 
