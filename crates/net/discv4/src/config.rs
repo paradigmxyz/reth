@@ -17,6 +17,10 @@ use std::{
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
+    /// Size of the channel buffer for outgoing messages.
+    pub udp_egress_message_buffer: usize,
+    /// Size of the channel buffer for incoming messages.
+    pub udp_ingress_message_buffer: usize,
     /// The number of retries for each UDP request. Default: 1.
     pub request_retries: u8,
     /// The time between pings to ensure connectivity amongst connected nodes. Default: 300
@@ -87,6 +91,12 @@ impl Default for Discv4Config {
     fn default() -> Self {
         Self {
             enable_packet_filter: false,
+            /// This should be high enough to cover an entire recursive FindNode lookup which is
+            /// includes sending FindNode to nodes it discovered in the rounds using the
+            /// concurrency factor ALPHA
+            udp_egress_message_buffer: 1024,
+            /// Every outgoing request will eventually lead to an incoming response
+            udp_ingress_message_buffer: 1024,
             request_retries: 1,
             ping_interval: Duration::from_secs(300),
             ping_timeout: Duration::from_secs(5),
@@ -115,6 +125,18 @@ impl Discv4ConfigBuilder {
     /// Whether to enable the incoming packet filter.
     pub fn enable_packet_filter(&mut self) -> &mut Self {
         self.config.enable_packet_filter = true;
+        self
+    }
+
+    /// Sets the channel size for incoming messages
+    pub fn udp_ingress_message_buffer(&mut self, udp_ingress_message_buffer: usize) -> &mut Self {
+        self.config.udp_ingress_message_buffer = udp_ingress_message_buffer;
+        self
+    }
+
+    /// Sets the channel size for outgoing messages
+    pub fn udp_egress_message_buffer(&mut self, udp_egress_message_buffer: usize) -> &mut Self {
+        self.config.udp_egress_message_buffer = udp_egress_message_buffer;
         self
     }
 

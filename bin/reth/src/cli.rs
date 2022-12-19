@@ -1,8 +1,6 @@
 //! CLI definition and entrypoint to executable
 
 use clap::{ArgAction, Parser, Subcommand};
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::{PrefixLayer, Stack};
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{
@@ -13,20 +11,8 @@ use crate::{
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
-
-    let tracing = if opt.silent { TracingMode::Silent } else { TracingMode::All };
-
-    reth_tracing::build_subscriber(tracing).init();
-
-    if opt.metrics {
-        let (recorder, exporter) =
-            PrometheusBuilder::new().build().expect("couldn't build Prometheus");
-        tokio::task::spawn(exporter);
-        Stack::new(recorder)
-            .push(PrefixLayer::new("reth"))
-            .install()
-            .expect("couldn't install metrics recorder");
-    }
+    reth_tracing::build_subscriber(if opt.silent { TracingMode::Silent } else { TracingMode::All })
+        .init();
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -63,7 +49,4 @@ struct Cli {
     /// Silence all output
     #[clap(long, global = true)]
     silent: bool,
-
-    #[clap(long, global = true)]
-    metrics: bool,
 }
