@@ -183,9 +183,14 @@ impl<DB: Database> Pipeline<DB> {
         let mut previous_stage = None;
         for (_, queued_stage) in self.stages.iter_mut().enumerate() {
             let stage_id = queued_stage.stage.id();
+            trace!(
+                target: "sync::pipeline",
+                stage = %stage_id,
+                "Executing stage"
+            );
             let next = queued_stage
                 .execute(state, previous_stage, db)
-                .instrument(info_span!("Running", stage = %stage_id))
+                .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
             match next {
@@ -224,14 +229,14 @@ impl<DB: Database> Pipeline<DB> {
         };
 
         // Unwind stages in reverse order of priority (i.e. higher priority = first)
-        let mut db = Transaction::new(db)?;
+        let mut tx = Transaction::new(db)?;
 
         for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = stage_id.get_progress(db.deref())?.unwrap_or_default();
+            let mut stage_progress = stage_id.get_progress(tx.deref())?.unwrap_or_default();
             if stage_progress < to {
                 debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                 self.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
@@ -243,11 +248,11 @@ impl<DB: Database> Pipeline<DB> {
                 let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
                 self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
 
-                let output = stage.unwind(&mut db, input).await;
+                let output = stage.unwind(&mut tx, input).await;
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
-                        stage_id.save_progress(db.deref(), stage_progress)?;
+                        stage_id.save_progress(tx.deref(), stage_progress)?;
 
                         self.events_sender
                             .send(PipelineEvent::Unwound { stage_id, result: unwind_output })
@@ -261,7 +266,7 @@ impl<DB: Database> Pipeline<DB> {
             }
         }
 
-        db.commit()?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -287,7 +292,11 @@ impl<DB: Database> QueuedStage<DB> {
     ) -> Result<ControlFlow, PipelineError> {
         let stage_id = self.stage.id();
         if self.require_tip && !state.reached_tip() {
-            warn!(stage = %stage_id, "Tip not reached as required by stage, skipping.");
+            warn!(
+                target: "sync::pipeline",
+                stage = %stage_id,
+                "Tip not reached as required by stage, skipping."
+            );
             state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
             // Stage requires us to reach the tip of the chain first, but we have
@@ -296,15 +305,19 @@ impl<DB: Database> QueuedStage<DB> {
         }
 
         loop {
-            let mut db = Transaction::new(db)?;
+            let mut tx = Transaction::new(db)?;
 
-            let prev_progress = stage_id.get_progress(db.deref())?;
+            let prev_progress = stage_id.get_progress(tx.deref())?;
 
             let stage_reached_max_block = prev_progress
                 .zip(state.max_block)
                 .map_or(false, |(prev_progress, target)| prev_progress >= target);
             if stage_reached_max_block {
-                warn!(stage = %stage_id, "Stage reached maximum block, skipping.");
+                warn!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    "Stage reached maximum block, skipping."
+                );
                 state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
                 // We reached the maximum block, so we skip the stage
@@ -319,12 +332,18 @@ impl<DB: Database> QueuedStage<DB> {
 
             match self
                 .stage
-                .execute(&mut db, ExecInput { previous_stage, stage_progress: prev_progress })
+                .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
                 Ok(out @ ExecOutput { stage_progress, done, reached_tip }) => {
-                    info!(stage = %stage_id, %stage_progress, %done, "Stage made progress");
-                    stage_id.save_progress(db.deref(), stage_progress)?;
+                    info!(
+                        target: "sync::pipeline",
+                        stage = %stage_id,
+                        %stage_progress,
+                        %done,
+                        "Stage made progress"
+                    );
+                    stage_id.save_progress(tx.deref(), stage_progress)?;
 
                     state
                         .events_sender
@@ -332,7 +351,7 @@ impl<DB: Database> QueuedStage<DB> {
                         .await?;
 
                     // TODO: Make the commit interval configurable
-                    db.commit()?;
+                    tx.commit()?;
 
                     state.record_progress_outliers(stage_progress);
                     state.set_reached_tip(reached_tip);
@@ -345,7 +364,12 @@ impl<DB: Database> QueuedStage<DB> {
                     state.events_sender.send(PipelineEvent::Error { stage_id }).await?;
 
                     return if let StageError::Validation { block, error } = err {
-                        warn!(stage = %stage_id, bad_block = %block, "Stage encountered a validation error: {error}");
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            bad_block = %block,
+                            "Stage encountered a validation error: {error}"
+                        );
 
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the
@@ -355,12 +379,20 @@ impl<DB: Database> QueuedStage<DB> {
                             bad_block: Some(block),
                         })
                     } else if err.is_fatal() {
-                        error!(stage = %stage_id, "Stage encountered a fatal error: {err}.");
+                        error!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            "Stage encountered a fatal error: {err}."
+                        );
                         Err(err.into())
                     } else {
                         // On other errors we assume they are recoverable if we discard the
                         // transaction and run the stage again.
-                        warn!(stage = %stage_id, "Stage encountered a non-fatal error: {err}. Retrying");
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            "Stage encountered a non-fatal error: {err}. Retrying"
+                        );
                         continue
                     }
                 }

@@ -53,9 +53,9 @@ impl AccountInfoChangeSet {
     /// Apply the changes from the changeset to a database transaction.
     pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
         self,
+        tx: &TX,
         address: Address,
         tx_index: u64,
-        tx: &TX,
     ) -> Result<(), DbError> {
         match self {
             AccountInfoChangeSet::Changed { old, new } => {
@@ -105,6 +105,7 @@ pub struct AccountChangeSet {
 
 /// Execution Result containing vector of transaction changesets
 /// and block reward if present
+#[derive(Debug)]
 pub struct ExecutionResult {
     /// Transaction changeest contraining [Receipt], changed [Accounts][Account] and Storages.
     pub changeset: Vec<TransactionChangeSet>,
@@ -586,7 +587,7 @@ mod tests {
 
         // check Changed changeset
         AccountInfoChangeSet::Changed { new: acc1, old: acc2 }
-            .apply_to_db(address, tx_num, &tx)
+            .apply_to_db(&tx, address, tx_num)
             .unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
@@ -594,7 +595,7 @@ mod tests {
         );
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
 
-        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(address, tx_num, &tx).unwrap();
+        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(&tx, address, tx_num).unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
             Ok(Some(AccountBeforeTx { address, info: None }))
@@ -604,7 +605,7 @@ mod tests {
         // delete old value, as it is dupsorted
         tx.delete::<tables::AccountChangeSet>(tx_num, None).unwrap();
 
-        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(address, tx_num, &tx).unwrap();
+        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(&tx, address, tx_num).unwrap();
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(None));
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),

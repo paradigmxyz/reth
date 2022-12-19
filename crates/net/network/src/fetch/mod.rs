@@ -23,6 +23,8 @@ pub use client::FetchClient;
 ///
 /// This type is hooked into the staged sync pipeline and delegates download request to available
 /// peers and sends the response once ready.
+///
+/// This type maintains a list of connected peers that are available for requests.
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
     inflight_headers_requests:
@@ -30,7 +32,7 @@ pub struct StateFetcher {
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests:
         HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
-    /// The list of available peers for requests.
+    /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
     peers_handle: PeersHandle,
@@ -63,6 +65,9 @@ impl StateFetcher {
         self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
     }
 
+    /// Removes the peer from the peer list, after which it is no longer available for future
+    /// requests.
+    ///
     /// Invoked when an active session was closed.
     ///
     /// This cancels als inflight request and sends an error to the receiver.
@@ -97,7 +102,7 @@ impl StateFetcher {
         }
     }
 
-    /// Returns the next idle peer that's ready to accept a request
+    /// Returns the _next_ idle peer that's ready to accept a request.
     fn next_peer(&mut self) -> Option<(&PeerId, &mut Peer)> {
         self.peers.iter_mut().find(|(_, peer)| peer.state.is_idle())
     }
@@ -181,7 +186,7 @@ impl StateFetcher {
 
     /// Returns a new followup request for the peer.
     ///
-    /// Caution: this expects that the peer is _not_ closed
+    /// Caution: this expects that the peer is _not_ closed.
     fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
         let req = self.queued_requests.pop_front()?;
         let req = self.prepare_block_request(peer_id, req);

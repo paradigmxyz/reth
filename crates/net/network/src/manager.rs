@@ -151,6 +151,7 @@ where
             executor,
             hello_message,
             status,
+            fork_filter,
             ..
         } = config;
 
@@ -162,12 +163,20 @@ where
 
         // merge configured boot nodes
         discovery_v4_config.bootstrap_nodes.extend(boot_nodes.clone());
+        discovery_v4_config.add_eip868_pair("eth", status.forkid);
+
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let sessions =
-            SessionManager::new(secret_key, sessions_config, executor, status, hello_message);
+        let sessions = SessionManager::new(
+            secret_key,
+            sessions_config,
+            executor,
+            status,
+            hello_message,
+            fork_filter,
+        );
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
@@ -594,9 +603,9 @@ where
                         ?error,
                         "Outgoing pending session failed"
                     );
-                    let swarm = this.swarm.state_mut().peers_mut();
-                    swarm.on_closed_outgoing_pending_session();
-                    swarm.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                    let peers = this.swarm.state_mut().peers_mut();
+                    peers.on_closed_outgoing_pending_session(&peer_id);
+                    peers.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
 
                     if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
                         this.swarm.state_mut().ban_discovery(peer_id, remote_addr.ip());

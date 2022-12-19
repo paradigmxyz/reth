@@ -12,33 +12,33 @@ use std::{borrow::Borrow, sync::Arc};
 
 use crate::db::Transaction;
 
-/// The [StageTestDB] is used as an internal
+/// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
 ///
 /// ```rust
-/// let db = StageTestDB::default();
-/// stage.execute(&mut db.container(), input);
+/// let tx = TestTransaction::default();
+/// stage.execute(&mut tx.container(), input);
 /// ```
 pub(crate) struct TestTransaction {
-    db: Arc<Env<WriteMap>>,
+    tx: Arc<Env<WriteMap>>,
 }
 
 impl Default for TestTransaction {
-    /// Create a new instance of [StageTestDB]
+    /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { db: create_test_db::<WriteMap>(EnvKind::RW) }
+        Self { tx: create_test_db::<WriteMap>(EnvKind::RW) }
     }
 }
 
 impl TestTransaction {
     /// Return a database wrapped in [Transaction].
     pub(crate) fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
-        Transaction::new(self.db.borrow()).expect("failed to create db container")
+        Transaction::new(self.tx.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
     pub(crate) fn inner_raw(&self) -> Arc<Env<WriteMap>> {
-        self.db.clone()
+        self.tx.clone()
     }
 
     /// Invoke a callback with transaction committing it afterwards
@@ -46,9 +46,9 @@ impl TestTransaction {
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
-        let mut db = self.inner();
-        f(&mut db)?;
-        db.commit()?;
+        let mut tx = self.inner();
+        f(&mut tx)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -72,8 +72,8 @@ impl TestTransaction {
     /// This function commits the transaction before exiting.
     ///
     /// ```rust
-    /// let db = StageTestDB::default();
-    /// db.map_put::<Table, _, _>(&items, |item| item)?;
+    /// let tx = TestTransaction::default();
+    /// tx.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
     #[allow(dead_code)]
     pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
@@ -96,8 +96,8 @@ impl TestTransaction {
     /// This function commits the transaction before exiting.
     ///
     /// ```rust
-    /// let db = StageTestDB::default();
-    /// db.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
+    /// let tx = TestTransaction::default();
+    /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
     #[allow(dead_code)]
     pub(crate) fn transform_append<T, S, F>(

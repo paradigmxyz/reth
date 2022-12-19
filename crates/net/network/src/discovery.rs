@@ -3,7 +3,7 @@
 use crate::error::NetworkError;
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, NodeRecord};
-use reth_primitives::PeerId;
+use reth_primitives::{ForkId, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -66,6 +66,12 @@ impl Discovery {
         })
     }
 
+    /// Updates the `eth:ForkId` field in discv4.
+    #[allow(unused)]
+    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
+        self.discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
+    }
+
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip(&self, ip: IpAddr) {
         self.discv4.ban_ip(ip)
@@ -83,7 +89,7 @@ impl Discovery {
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            DiscoveryUpdate::Added(node) | DiscoveryUpdate::Discovered(node) => {
+            DiscoveryUpdate::Added(node) => {
                 let id = node.id;
                 let addr = node.tcp_addr();
                 match self.discovered_nodes.entry(id) {
@@ -93,6 +99,9 @@ impl Discovery {
                         self.queued_events.push_back(DiscoveryEvent::Discovered(id, addr))
                     }
                 }
+            }
+            DiscoveryUpdate::EnrForkId(node, fork_id) => {
+                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
             DiscoveryUpdate::Removed(node) => {
                 self.discovered_nodes.remove(&node);
@@ -128,6 +137,8 @@ impl Discovery {
 pub enum DiscoveryEvent {
     /// A new node was discovered
     Discovered(PeerId, SocketAddr),
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(PeerId, ForkId),
 }
 
 #[cfg(test)]
