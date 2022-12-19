@@ -16,6 +16,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -226,10 +227,20 @@ impl PeersManager {
     }
 
     /// Gracefully disconnected
-    pub(crate) fn on_disconnected(&mut self, peer_id: &PeerId) {
-        if let Some(mut peer) = self.peers.get_mut(peer_id) {
-            self.connection_info.decr_state(peer.state);
-            peer.state = PeerConnectionState::Idle;
+    pub(crate) fn on_disconnected(&mut self, peer_id: PeerId) {
+        match self.peers.entry(peer_id) {
+            Entry::Occupied(mut entry) => {
+                self.connection_info.decr_state(entry.get().state);
+
+                if entry.get().remove_after_disconnect {
+                    // this peer should be removed from the set
+                    entry.remove();
+                } else {
+                    entry.get_mut().state = PeerConnectionState::Idle;
+                    return
+                }
+            }
+            Entry::Vacant(_) => return,
         }
 
         self.fill_outbound_slots();
@@ -311,13 +322,11 @@ impl PeersManager {
 
             if peer.state.is_connected() {
                 debug!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
-                // we terminate the session here, so we don't need to keep track of an additional
-                // state where the peer is connected but not in the set. Otherwise, there could be a
-                // scenario in which the peer is discovered again, added to the set again and ready
-                // to make an outgoing connection, even though we might still be connected.
-                // We only mark the peer as disconnecting and add it back to prevent an edge case
-                // where we're disconnecting but the peer is discovered again
-                // immediately.
+                // we terminate the active session here, but only remove the peer after the session
+                // was disconnected, this prevents the case where the session is scheduled for
+                // disconnect but the node is immediately rediscovered, See also
+                // [`Self::on_disconnected()`]
+                peer.remove_after_disconnect = true;
                 peer.state.disconnect();
                 self.peers.insert(peer_id, peer);
                 self.queued_actions.push_back(PeerAction::Disconnect {
@@ -509,6 +518,8 @@ pub struct Peer {
     state: PeerConnectionState,
     /// The [`ForkId`] that the peer announced via discovery.
     fork_id: Option<ForkId>,
+    /// Whether the entry should be removed after an existing session was terminated.
+    remove_after_disconnect: bool,
 }
 
 // === impl Peer ===
@@ -519,7 +530,13 @@ impl Peer {
     }
 
     fn with_state(addr: SocketAddr, state: PeerConnectionState) -> Self {
-        Self { addr, state, reputation: DEFAULT_REPUTATION, fork_id: None }
+        Self {
+            addr,
+            state,
+            reputation: DEFAULT_REPUTATION,
+            fork_id: None,
+            remove_after_disconnect: false,
+        }
     }
 
     /// Applies a reputation change to the peer and returns what action should be taken.
@@ -866,7 +883,7 @@ mod test {
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
         assert!(p.is_banned());
 
-        peers.on_disconnected(&peer);
+        peers.on_disconnected(peer);
 
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::Idle);
@@ -878,6 +895,44 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_remove_discovered_active() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::Out);
+
+        peers.remove_discovered_node(peer);
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
+
+        peers.add_discovered_node(peer, socket_addr);
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
+
+        peers.on_disconnected(peer);
+        assert!(peers.peers.get(&peer).is_none());
     }
 
     #[tokio::test]

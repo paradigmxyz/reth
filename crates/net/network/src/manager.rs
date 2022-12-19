@@ -577,7 +577,7 @@ where
                         );
                     } else {
                         // Gracefully disconnected
-                        this.swarm.state_mut().peers_mut().on_disconnected(&peer_id);
+                        this.swarm.state_mut().peers_mut().on_disconnected(peer_id);
                     }
 
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id });
