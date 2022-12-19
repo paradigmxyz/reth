@@ -255,3 +255,56 @@ async fn test_outgoing_connect_with_single_geth() {
     let incoming_peer_id = event_stream.next_session_established().await.unwrap();
     assert_eq!(incoming_peer_id, geth_peer_id);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_geth_disconnect() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+    let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30309);
+    let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30310);
+    let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        .listener_addr(reth_p2p_socket)
+        .discovery_addr(reth_disc_socket)
+        .build();
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // instantiate geth and add ourselves as a peer
+    let temp_dir = tempfile::tempdir().unwrap().into_path();
+    let geth = Geth::new().disable_discovery().data_dir(temp_dir).spawn();
+
+    let geth_p2p_port = geth.p2p_port().unwrap();
+    let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
+    let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
+
+    let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+
+    // get the peer id we should be expecting
+    let geth_peer_id: PeerId =
+        provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+
+    // add geth as a peer then wait for a `SessionEstablished` event
+    handle.add_peer(geth_peer_id, geth_socket);
+
+    // create networkeventstream to get the next session established event easily
+    let mut events = handle.event_listener();
+
+    if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
+        assert_eq!(peer_id, geth_peer_id);
+    } else {
+        panic!("Expected a session established event");
+    }
+
+    // remove geth as a peer deliberately
+    handle.disconnect_peer(geth_peer_id);
+
+    // wait for a disconnect from geth
+    if let Some(NetworkEvent::SessionClosed { peer_id }) = events.next().await {
+        assert_eq!(peer_id, geth_peer_id);
+    } else {
+        panic!("Expected a session closed event");
+    }
+}

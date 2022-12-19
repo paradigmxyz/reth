@@ -99,42 +99,24 @@ where
             })
         }
 
-        // the u8::decode implementation handles the 0x80 case for P2PMessageID::Hello, and the
-        // TryFrom implementation ensures that the message id is known.
-        let message_id = u8::decode(&mut &first_message_bytes[..])?;
-        let id = P2PMessageID::try_from(message_id)?;
-
         // The first message sent MUST be a hello OR disconnect message
         //
         // If the first message is a disconnect message, we should not decode using
         // Decodable::decode, because the first message (either Disconnect or Hello) is not snappy
         // compressed, and the Decodable implementation assumes that non-hello messages are snappy
         // compressed.
-        match id {
-            P2PMessageID::Hello => {}
-            P2PMessageID::Disconnect => {
-                // the u8::decode implementation handles the 0x80 case for
-                // DisconnectReason::DisconnectRequested, and the TryFrom implementation ensures
-                // that the disconnect reason is known.
-                let disconnect_id = u8::decode(&mut &first_message_bytes[1..])?;
-                let reason = DisconnectReason::try_from(disconnect_id)?;
-
+        let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..]) {
+            Ok(P2PMessage::Hello(hello)) => Ok(hello),
+            Ok(P2PMessage::Disconnect(reason)) => {
                 tracing::error!("Disconnected by peer during handshake: {}", reason);
                 counter!("p2pstream.disconnected_errors", 1);
-                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
+                Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
-            id => {
-                tracing::error!("expected hello message but received: {:?}", id);
-                return Err(P2PStreamError::HandshakeError(
-                    P2PHandshakeError::NonHelloMessageInHandshake,
-                ))
+            Err(err) => {
+                tracing::warn!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                Err(P2PStreamError::HandshakeError(err.into()))
             }
-        }
-
-        let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..])? {
-            P2PMessage::Hello(hello) => Ok(hello),
-            msg => {
-                // Note: this should never occur due to the id check
+            Ok(msg) => {
                 tracing::error!("expected hello message but received: {:?}", msg);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
             }
@@ -308,7 +290,12 @@ where
                     this.outgoing_messages.push_back(pong_bytes.into());
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-                    let reason = DisconnectReason::decode(&mut &bytes[1..])?;
+                    let reason = DisconnectReason::decode(&mut &bytes[1..]).map_err(|err| {
+                        tracing::warn!(
+                            ?err, msg=%hex::encode(&bytes[1..]), "Failed to decode disconnect message from peer"
+                        );
+                        err
+                    })?;
                     return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
                 }
                 _ if id == P2PMessageID::Hello as u8 => {
