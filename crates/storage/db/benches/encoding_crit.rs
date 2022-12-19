@@ -1,5 +1,12 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use reth_db::{table::*, tables::*};
+use reth_db::{
+    cursor::DbCursorRW,
+    database::Database,
+    mdbx::{test_utils::create_test_rw_db, WriteMap},
+    table::*,
+    tables::*,
+    transaction::DbTxMut,
+};
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
 fn load_vectors<T>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
@@ -18,15 +25,47 @@ where
 
 macro_rules! impl_criterion {
     ($($name:tt),+) => {
-        pub fn bench_ser(c: &mut Criterion) {
-            let mut group = c.benchmark_group("table_key_value");
-            group.warm_up_time(std::time::Duration::from_secs(1));
-            group.measurement_time(std::time::Duration::from_secs(1));
+
+        pub fn db(c: &mut Criterion) {
+            let mut db_group = c.benchmark_group("tables_db");
+            db_group.measurement_time(std::time::Duration::from_millis(100));
+            db_group.warm_up_time(std::time::Duration::from_millis(100));
+
+            $(
+                let pair = &load_vectors::<$name>();
+                db_group.bench_function(stringify!($name.SeqWrite), |b| {
+                    b.iter(|| {
+                        // TODO generic test db
+                        let db = create_test_rw_db::<WriteMap>();
+
+                        let tx = db.tx_mut().expect("tx");
+                        let mut crsr = tx.cursor_mut::<reth_db::tables::$name>().expect("cursor");
+
+                        // TODO sort kv before
+                        // placeholder: cant insert multiple default values, that's why we're limiting to one for now.
+                        for (k, _, v, _) in &pair[..1] {
+                            crsr.insert(k.clone(), v.clone()).expect("submit");
+                        }
+
+                        tx.inner.commit().unwrap();
+
+                    })
+                });
+
+            )+
+            db_group.finish();
+
+        }
+
+        pub fn tables(c: &mut Criterion) {
+            let mut ser_group = c.benchmark_group("tables_key_value");
+            ser_group.warm_up_time(std::time::Duration::from_secs(1));
+            ser_group.measurement_time(std::time::Duration::from_secs(1));
 
             $(
 
                 let pair = &load_vectors::<$name>();
-                group.bench_function(stringify!($name.KeyEncode), |b| {
+                ser_group.bench_function(stringify!($name.KeyEncode), |b| {
                     b.iter(|| {
                         for (k, _, _, _) in pair {
                             k.clone().encode();
@@ -34,7 +73,7 @@ macro_rules! impl_criterion {
                     })
                 });
 
-                group.bench_function(stringify!($name.KeyDecode), |b| {
+                ser_group.bench_function(stringify!($name.KeyDecode), |b| {
                     b.iter(|| {
                         for (_, k, _, _) in pair {
                             let _ = <$name as Table>::Key::decode(k.clone());
@@ -42,7 +81,7 @@ macro_rules! impl_criterion {
                     })
                 });
 
-                group.bench_function(stringify!($name.ValueCompress), move |b| {
+                ser_group.bench_function(stringify!($name.ValueCompress), move |b| {
                     b.iter(move || {
                         for (_, _, v, _) in pair {
                             v.clone().compress();
@@ -50,27 +89,15 @@ macro_rules! impl_criterion {
                     })
                 });
 
-                group.bench_function(stringify!($name.ValueDecompress), |b| {
+                ser_group.bench_function(stringify!($name.ValueDecompress), |b| {
                     b.iter(|| {
                         for (_, _, _, v) in pair {
                             let _ = <$name as Table>::Value::decompress(v.clone());
                         }
                     })
                 });
-
-                // // TODO placeholder sort: fix
-                // let db = mdbx::test_utils::create_test_rw_db();
-                // let seq = pair.clone().sort();
-                // let tx = db.tx_mut();
-                // c.bench_function(stringify!($name.SeqWrite), |b| {
-                //     b.iter(|| {
-                //         for (k, _, v, _) in pair {
-                //             <$name as Table>::Value::decompress(v.clone());
-                //         }
-                //     })
-                // });
             )+
-            group.finish();
+            ser_group.finish();
 
         }
 
@@ -79,5 +106,5 @@ macro_rules! impl_criterion {
 
 impl_criterion!(AccountHistory);
 
-criterion_group!(benches, bench_ser);
+criterion_group!(benches, db, serialization);
 criterion_main!(benches);
