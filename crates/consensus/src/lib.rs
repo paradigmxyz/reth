@@ -4,8 +4,11 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-
-//! Reth consensus.
+//! Consensus algorithms for Ethereum.
+//!
+//! # Features
+//!
+//! - `serde`: Enable serde support for configuration types.
 pub mod config;
 pub mod consensus;
 pub mod verification;

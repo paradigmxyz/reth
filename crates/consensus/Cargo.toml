@@ -19,3 +19,9 @@ thiserror = "1.0.37"
 eyre = "0.6.8"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
+
+# io
+serde = { version = "1.0", optional = true }
+
+[features]
+serde = ["dep:serde"]

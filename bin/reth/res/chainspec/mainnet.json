@@ -1,4 +1,22 @@
 {
+  "config": {
+    "chainId": 1,
+    "homesteadBlock": 1150000,
+    "daoForkBlock": 1920000,
+    "daoForkSupport": true,
+    "eip150Block": 2463000,
+    "eip155Block": 2675000,
+    "eip158Block": 2675000,
+    "byzantiumBlock": 4370000,
+    "constantinopleBlock": 7280000,
+    "petersburgBlock": 7280000,
+    "istanbulBlock": 9069000,
+    "muirGlacierBlock": 9200000,
+    "berlinBlock": 12244000,
+    "londonBlock": 12965000,
+    "parisBlock": 15537394,
+    "terminalTotalDifficulty": 58750000000000000000000
+  },
   "nonce": "0x42",
   "timestamp": "0x0",
   "extraData": "0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa",

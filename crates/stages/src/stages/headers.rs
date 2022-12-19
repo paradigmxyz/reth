@@ -52,7 +52,7 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
     /// Network handle for updating status
     pub network_handle: S,
     /// The number of block headers to commit at once
-    pub commit_threshold: usize,
+    pub commit_threshold: u64,
 }
 
 #[async_trait::async_trait]
@@ -84,7 +84,8 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         );
 
         let mut current_progress = stage_progress;
-        let mut stream = self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold);
+        let mut stream =
+            self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold as usize);
 
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
@@ -102,7 +103,6 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                     self.validate_header_response(&res)?;
                     let write_progress =
                         self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
-                    tx.commit()?;
                     current_progress = current_progress.max(write_progress);
                 }
                 Err(e) => match e {
