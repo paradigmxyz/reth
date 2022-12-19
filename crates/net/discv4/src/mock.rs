@@ -311,14 +311,13 @@ mod tests {
         mockv4.queue_pong(discv_enr.id);
 
         // This sends a ping to the mock service
-        let echo_hash = service.send_ping(mock_enr, PingReason::Initial);
+        service.add_node(mock_enr);
 
         // process the mock pong
         let event = mockv4.next().await.unwrap();
         match event {
             MockEvent::Pong { ping, pong, to } => {
                 assert_eq!(to, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port()));
-                assert_eq!(pong.echo, echo_hash);
             }
             MockEvent::Neighbours { .. } => {
                 unreachable!("invalid response")

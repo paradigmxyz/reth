@@ -236,7 +236,7 @@ where
 
     /// Validate whether the header is valid in relation to it's parent
     ///
-    /// Returns Ok(false) if the
+    /// Returns and `Err` if the header does not conform to consensus rules.
     #[allow(clippy::result_large_err)]
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(&self.consensus, header, parent)?;
@@ -456,6 +456,7 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await;
         assert!(result.is_err());
+        assert_eq!(client.request_attempts(), downloader.request_retries as u64);
     }
 
     #[tokio::test]
@@ -482,6 +483,7 @@ mod tests {
         let result = downloader.stream(p0.clone(), p0.hash_slow()).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert!(headers.is_empty());
+        assert_eq!(client.request_attempts(), 1);
     }
 
     #[tokio::test]
@@ -511,47 +513,7 @@ mod tests {
         assert_eq!(headers[0], p0);
         assert_eq!(headers[1], p1);
         assert_eq!(headers[2], p2);
-    }
-
-    #[tokio::test]
-    async fn download_empty_stream() {
-        let client = Arc::new(TestHeadersClient::default());
-        let downloader =
-            LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
-
-        let result = downloader
-            .stream(SealedHeader::default(), H256::default())
-            .try_collect::<Vec<_>>()
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn download_stream() {
-        let client = Arc::new(TestHeadersClient::default());
-        let downloader = LinearDownloadBuilder::default()
-            .batch_size(3)
-            .build(CONSENSUS.clone(), Arc::clone(&client));
-
-        let p3 = SealedHeader::default();
-        let p2 = child_header(&p3);
-        let p1 = child_header(&p2);
-        let p0 = child_header(&p1);
-
-        client
-            .extend(vec![
-                p0.as_ref().clone(),
-                p1.as_ref().clone(),
-                p2.as_ref().clone(),
-                p3.as_ref().clone(),
-            ])
-            .await;
-
-        let result = downloader.stream(p3, p0.hash_slow()).try_collect::<Vec<_>>().await;
-        let headers = result.unwrap();
-        assert_eq!(headers.len(), 3);
-        assert_eq!(headers[0], p0);
-        assert_eq!(headers[1], p1);
-        assert_eq!(headers[2], p2);
+        // stream has to poll twice because of the batch size
+        assert_eq!(client.request_attempts(), 2);
     }
 }
