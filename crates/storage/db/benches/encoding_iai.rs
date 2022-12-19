@@ -1,21 +1,56 @@
-use iai::{black_box, main};
-use reth_db::tables::codecs;
+#![allow(non_snake_case)]
 
-/// Benchmarks the encoding and decoding of `Header` using iai.
-macro_rules! impl_iai_encoding_benchmark {
-    ($name:tt) => {
-        fn $name() {
-            codecs::fuzz::IntegerList::encode_and_decode(black_box(
-                reth_primitives::IntegerList::default(),
-            ));
-        }
+use iai::main;
+use reth_db::table::*;
 
-        main!($name);
+/// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
+fn load_vectors<T>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
+where
+    T: Table + Default,
+    T::Key: Default + Clone,
+    T::Value: Default + Clone,
+{
+    let encoded: bytes::Bytes = bytes::Bytes::copy_from_slice(T::Key::default().encode().as_ref());
+    let compressed: bytes::Bytes =
+        bytes::Bytes::copy_from_slice(T::Value::default().compress().as_ref());
+
+    let row = (T::Key::default(), encoded, T::Value::default(), compressed);
+    vec![row.clone(), row.clone(), row]
+}
+
+macro_rules! impl_iai {
+    ($($name:tt),+) => {
+        $(
+            mod $name {
+                use crate::load_vectors;
+                use reth_db::{table::*};
+                use iai::{black_box};
+
+                pub fn encode() {
+                    let pair = load_vectors::<reth_db::tables::$name>();
+
+                    black_box(
+                        for (k, enc, v, comp) in pair.into_iter() {
+                            k.encode();
+                            let _ = <reth_db::tables::$name as Table>::Key::decode(enc);
+                            v.compress();
+                            let _ = <reth_db::tables::$name as Table>::Value::decompress(comp);
+                        }
+                    );
+                }
+            }
+        )+
+
+        $(
+            use $name::{encode as $name};
+        )+
+
+        main!(
+            $(
+                $name,
+            )+
+        );
     };
 }
 
-#[cfg(not(feature = "bench-postcard"))]
-impl_iai_encoding_benchmark!(scale);
-
-#[cfg(feature = "bench-postcard")]
-impl_iai_encoding_benchmark!(postcard);
+impl_iai!(AccountHistory, Headers);
