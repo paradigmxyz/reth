@@ -58,3 +58,38 @@ impl AsRef<Path> for DbPath {
         self.0.as_path()
     }
 }
+
+/// A wrapper type that either parses a user-given path for the reth config or defaults to an
+/// OS-specific path.
+#[derive(Clone, Debug)]
+pub struct ConfigPath(PathBuf);
+
+impl Display for ConfigPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.display())
+    }
+}
+
+impl Default for ConfigPath {
+    fn default() -> Self {
+        Self(
+            config_dir()
+                .expect("Could not determine default database path. Set one manually.")
+                .join("reth.toml"),
+        )
+    }
+}
+
+impl FromStr for ConfigPath {
+    type Err = shellexpand::LookupError<VarError>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(parse_path(s)?))
+    }
+}
+
+impl AsRef<Path> for ConfigPath {
+    fn as_ref(&self) -> &Path {
+        self.0.as_path()
+    }
+}

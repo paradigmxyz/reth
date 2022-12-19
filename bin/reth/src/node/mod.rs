@@ -3,7 +3,7 @@
 //! Starts the client
 use crate::{
     config::Config,
-    dirs::DbPath,
+    dirs::{ConfigPath, DbPath},
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
@@ -28,11 +28,7 @@ use reth_network::{
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
 
 /// Start the client
@@ -49,8 +45,8 @@ pub struct Command {
     db: DbPath,
 
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    config: Option<PathBuf>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
+    config: ConfigPath,
 
     /// The chain this node is running.
     ///
@@ -86,14 +82,7 @@ impl Command {
     /// Execute `node` command
     // TODO: RPC
     pub async fn execute(&self) -> eyre::Result<()> {
-        let config = if let Some(path) = &self.config {
-            // TODO: Use TOML
-            // TODO: Better error
-            serde_json::from_str(std::fs::read_to_string(path)?.as_str())?
-        } else {
-            Config::default()
-        };
-
+        let config: Config = confy::load_path(&self.config)?;
         info!("reth {} starting", crate_version!());
 
         info!("Opening database at {}", &self.db);
