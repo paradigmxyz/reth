@@ -126,7 +126,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 mod tests {
     use assert_matches::assert_matches;
     use reth_db::models::StoredBlockBody;
-    use reth_interfaces::test_utils::generators::random_block_range;
+    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{BlockLocked, BlockNumber, H256};
 
     use super::*;
@@ -137,6 +137,46 @@ mod tests {
 
     stage_test_suite_ext!(SendersTestRunner);
 
+    /// Execute a block range with a single transaction
+    #[tokio::test]
+    async fn execute_single_transaction() {
+        let (previous_stage, stage_progress) = (500, 100);
+
+        // Set up the runner
+        let runner = SendersTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        let mut current_tx_id = 0;
+        let stage_progress = input.stage_progress.unwrap_or_default();
+        // Insert blocks with a single transaction at block `stage_progress + 10`
+        (stage_progress..input.previous_stage_progress() + 1)
+            .map(|number| -> Result<BlockLocked, TestRunnerError> {
+                let tx_count = Some((number == stage_progress + 10) as u8);
+                let block = random_block(number, None, tx_count);
+                current_tx_id = runner.insert_block(current_tx_id, &block, false)?;
+                Ok(block)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .expect("failed to insert blocks");
+
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, reached_tip, stage_progress })
+                if done && reached_tip && stage_progress == previous_stage
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// Execute the stage twice with input range that exceeds the commit threshold
     #[tokio::test]
     async fn execute_intermediate_commit() {
         let threshold = 50;
@@ -213,35 +253,11 @@ mod tests {
 
             let blocks = random_block_range(stage_progress..end, H256::zero());
 
-            self.tx.commit(|tx| {
-                let mut current_tx_id = 0;
-                blocks.iter().try_for_each(|b| {
-                    let txs = b.body.clone();
-
-                    let num_hash = (b.number, b.hash()).into();
-                    tx.put::<tables::CanonicalHeaders>(b.number, b.hash())?;
-                    tx.put::<tables::BlockBodies>(
-                        num_hash,
-                        StoredBlockBody { start_tx_id: current_tx_id, tx_count: txs.len() as u64 },
-                    )?;
-
-                    for body_tx in txs {
-                        // Insert senders for previous stage progress
-                        if b.number == stage_progress {
-                            tx.put::<tables::TxSenders>(
-                                current_tx_id,
-                                body_tx.recover_signer().expect("failed to recover sender"),
-                            )?;
-                        }
-                        tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
-                        current_tx_id += 1;
-                    }
-
-                    Ok(())
-                })?;
+            let mut current_tx_id = 0;
+            blocks.iter().try_for_each(|b| -> Result<(), TestRunnerError> {
+                current_tx_id = self.insert_block(current_tx_id, b, b.number == stage_progress)?;
                 Ok(())
             })?;
-
             Ok(blocks)
         }
 
@@ -305,6 +321,40 @@ mod tests {
             };
 
             Ok(())
+        }
+
+        fn insert_block(
+            &self,
+            tx_offset: u64,
+            block: &BlockLocked,
+            insert_senders: bool,
+        ) -> Result<u64, TestRunnerError> {
+            let mut current_tx_id = tx_offset;
+            let txs = block.body.clone();
+
+            self.tx.commit(|tx| {
+                let numhash = block.header.num_hash().into();
+                tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
+                tx.put::<tables::BlockBodies>(
+                    numhash,
+                    StoredBlockBody { start_tx_id: current_tx_id, tx_count: txs.len() as u64 },
+                )?;
+
+                for body_tx in txs {
+                    // Insert senders for previous stage progress
+                    if insert_senders {
+                        tx.put::<tables::TxSenders>(
+                            current_tx_id,
+                            body_tx.recover_signer().expect("failed to recover sender"),
+                        )?;
+                    }
+                    tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
+                    current_tx_id += 1;
+                }
+                Ok(())
+            })?;
+
+            Ok(current_tx_id)
         }
     }
 }

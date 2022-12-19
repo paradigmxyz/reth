@@ -86,8 +86,9 @@ pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1:
     })
 }
 
-/// Generate a random block filled with a random number of signed transactions (generated using
-/// [random_signed_tx]).
+/// Generate a random block filled with signed transactions (generated using
+/// [random_signed_tx]). If no transaction count is provided, the number of transactions
+/// will be random, otherwise the provided count will be used.
 ///
 /// All fields use the default values (and are assumed to be invalid) except for:
 ///
@@ -99,12 +100,13 @@ pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1:
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block(number: u64, parent: Option<H256>) -> BlockLocked {
+pub fn random_block(number: u64, parent: Option<H256>, tx_count: Option<u8>) -> BlockLocked {
     let mut rng = thread_rng();
 
     // Generate transactions
+    let tx_count = tx_count.unwrap_or(rand::random::<u8>());
     let transactions: Vec<TransactionSigned> =
-        (0..rand::random::<u8>()).into_iter().map(|_| random_signed_tx()).collect();
+        (0..tx_count).into_iter().map(|_| random_signed_tx()).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
@@ -145,6 +147,7 @@ pub fn random_block_range(rng: std::ops::Range<u64>, head: H256) -> Vec<BlockLoc
         blocks.push(random_block(
             idx,
             Some(blocks.last().map(|block: &BlockLocked| block.header.hash()).unwrap_or(head)),
+            None,
         ));
     }
     blocks
