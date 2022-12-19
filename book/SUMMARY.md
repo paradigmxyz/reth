@@ -15,7 +15,7 @@
     - [libmdbx-rs]()
     - [db]()
 - [Networking]()
-    - [P2P]()
+    - [P2P](./networking/p2p/README.md)
         - [network](./networking/p2p/network/README.md)
         - [eth-wire]()
         - [discv4]()

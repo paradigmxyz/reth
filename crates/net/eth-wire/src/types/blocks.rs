@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
+// ANCHOR: struct-GetBlockHeaders
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -33,6 +34,7 @@ pub struct GetBlockHeaders {
     /// The direction in which the headers should be returned in.
     pub direction: HeadersDirection,
 }
+// ANCHOR_END: struct-GetBlockHeaders
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(
@@ -69,10 +71,12 @@ impl From<Vec<Header>> for BlockHeaders {
     Deserialize,
     Default,
 )]
+// ANCHOR: struct-GetBlockBodies
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<H256>,
 );
+// ANCHOR_END: struct-GetBlockBodies
 
 impl From<Vec<H256>> for GetBlockBodies {
     fn from(hashes: Vec<H256>) -> Self {
