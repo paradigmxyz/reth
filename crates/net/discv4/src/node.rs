@@ -62,9 +62,9 @@ impl NodeRecord {
         Self::new(addr, id)
     }
 
-    /// Creates a new record
+    /// Creates a new record from a socket addr and peer id.
     #[allow(unused)]
-    pub(crate) fn new(addr: SocketAddr, id: PeerId) -> Self {
+    pub fn new(addr: SocketAddr, id: PeerId) -> Self {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
     }
 

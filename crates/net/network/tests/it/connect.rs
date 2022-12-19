@@ -7,7 +7,7 @@ use enr::EnrPublicKey;
 use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
-use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
+use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config, NodeRecord};
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::PeerId;
@@ -163,10 +163,9 @@ async fn test_incoming_node_id_blacklist() {
         tokio::task::spawn(network);
 
         // make geth connect to us
-        let our_peer_id = handle.peer_id();
-        let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), reth_p2p_socket);
+        let our_enode = NodeRecord::new(reth_p2p_socket, *handle.peer_id());
 
-        provider.add_peer(our_enode).await.unwrap();
+        provider.add_peer(our_enode.to_string()).await.unwrap();
 
         let mut event_stream = NetworkEventStream::new(events);
 
@@ -212,10 +211,9 @@ async fn test_incoming_connect_with_single_geth() {
         tokio::task::spawn(network);
 
         // make geth connect to us
-        let our_peer_id = handle.peer_id();
-        let our_enode = format!("enode://{}@{}", hex::encode(our_peer_id.0), reth_p2p_socket);
+        let our_enode = NodeRecord::new(reth_p2p_socket, *handle.peer_id());
 
-        provider.add_peer(our_enode).await.unwrap();
+        provider.add_peer(our_enode.to_string()).await.unwrap();
 
         let events = handle.event_listener();
         let mut event_stream = NetworkEventStream::new(events);
