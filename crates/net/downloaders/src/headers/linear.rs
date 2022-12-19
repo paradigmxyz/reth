@@ -22,6 +22,7 @@ use std::{
 };
 
 /// Download headers in batches
+// ANCHOR: struct-LinearDownloader
 #[derive(Debug)]
 pub struct LinearDownloader<C, H> {
     /// The consensus client
@@ -33,6 +34,7 @@ pub struct LinearDownloader<C, H> {
     /// The number of retries for downloading
     pub request_retries: usize,
 }
+// ANCHOR_END: struct-LinearDownloader
 
 impl<C, H> Downloader for LinearDownloader<C, H>
 where

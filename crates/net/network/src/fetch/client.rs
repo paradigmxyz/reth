@@ -31,6 +31,7 @@ impl DownloadClient for FetchClient {
     }
 }
 
+// ANCHOR: trait-HeadersClient-BodiesClient
 #[async_trait::async_trait]
 impl HeadersClient for FetchClient {
     /// Sends a `GetBlockHeaders` request to an available peer.
@@ -49,3 +50,4 @@ impl BodiesClient for FetchClient {
         rx.await?
     }
 }
+// ANCHOR_END: trait-HeadersClient-BodiesClient

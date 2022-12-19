@@ -177,6 +177,7 @@ fn consensus_config() -> reth_consensus::Config {
 }
 
 /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
+// ANCHOR: fn-start_network
 async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
 where
     C: BlockProvider + HeaderProvider + 'static,
@@ -190,3 +191,4 @@ where
     tokio::task::spawn(eth);
     Ok(handle)
 }
+// ANCHOR_END: fn-start_network

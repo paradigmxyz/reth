@@ -39,6 +39,7 @@ const PEER_BLOCK_CACHE_LIMIT: usize = 512;
 ///     then send to the session of the peer.
 ///
 /// This type is also responsible for responding for received request.
+// ANCHOR: struct-NetworkState
 pub struct NetworkState<C> {
     /// All active peers and their state.
     active_peers: HashMap<PeerId, ActivePeer>,
@@ -58,6 +59,7 @@ pub struct NetworkState<C> {
     /// then queue in the request and notify the fetcher once the result has been received.
     state_fetcher: StateFetcher,
 }
+// ANCHOR_END: struct-NetworkState
 
 impl<C> NetworkState<C>
 where

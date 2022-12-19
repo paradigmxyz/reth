@@ -46,6 +46,7 @@ const APPROX_HEADER_SIZE: usize = 500;
 /// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
+// ANCHOR: struct-EthRequestHandler
 #[must_use = "Manager does nothing unless polled."]
 pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
@@ -57,6 +58,7 @@ pub struct EthRequestHandler<C> {
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
 }
+// ANCHOR_END: struct-EthRequestHandler
 
 // === impl EthRequestHandler ===
 impl<C> EthRequestHandler<C> {
