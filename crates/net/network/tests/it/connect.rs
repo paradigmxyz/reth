@@ -154,6 +154,8 @@ async fn test_incoming_node_id_blacklist() {
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
+    let events = handle.event_listener();
+
     tokio::task::spawn(network);
 
     // make geth connect to us
@@ -162,12 +164,12 @@ async fn test_incoming_node_id_blacklist() {
 
     provider.add_peer(our_enode).await.unwrap();
 
-    let events = handle.event_listener();
     let mut event_stream = NetworkEventStream::new(events);
 
     // check for session to be opened
     let incoming_peer_id = event_stream.next_session_established().await.unwrap();
     assert_eq!(incoming_peer_id, geth_peer_id);
+
     // check to see that the session was closed
     let incoming_peer_id = event_stream.next_session_closed().await.unwrap();
     assert_eq!(incoming_peer_id, geth_peer_id);

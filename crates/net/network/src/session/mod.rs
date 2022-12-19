@@ -165,6 +165,14 @@ impl SessionManager {
         self.counter.ensure_pending_inbound()?;
 
         let session_id = self.next_id();
+
+        trace!(
+            target : "net::session",
+            ?remote_addr,
+            ?session_id,
+            "new pending incoming session"
+        );
+
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         self.spawn(start_pending_incoming_session(
@@ -308,6 +316,30 @@ impl SessionManager {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
 
+                // If there's already a session to the peer then we disconnect right away
+                if self.active_sessions.contains_key(&peer_id) {
+                    trace!(
+                        target : "net::session",
+                        ?session_id,
+                        ?remote_addr,
+                        ?peer_id,
+                        ?direction,
+                        "already connected"
+                    );
+
+                    self.spawn(async move {
+                        // send a disconnect message
+                        let _ =
+                            conn.into_inner().disconnect(DisconnectReason::AlreadyConnected).await;
+                    });
+
+                    return Poll::Ready(SessionEvent::AlreadyConnected {
+                        peer_id,
+                        remote_addr,
+                        direction,
+                    })
+                }
+
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
 
                 let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
@@ -427,6 +459,7 @@ impl SessionManager {
 }
 
 /// Events produced by the [`SessionManager`]
+#[derive(Debug)]
 pub(crate) enum SessionEvent {
     /// A new session was successfully authenticated.
     ///
@@ -437,6 +470,11 @@ pub(crate) enum SessionEvent {
         capabilities: Arc<Capabilities>,
         status: Status,
         messages: PeerRequestSender,
+        direction: Direction,
+    },
+    AlreadyConnected {
+        peer_id: PeerId,
+        remote_addr: SocketAddr,
         direction: Direction,
     },
     /// A session received a valid message via RLPx.
@@ -470,7 +508,11 @@ pub(crate) enum SessionEvent {
         error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream
-    OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
+    OutgoingConnectionError {
+        remote_addr: SocketAddr,
+        peer_id: PeerId,
+        error: io::Error,
+    },
     /// Session was closed due to an error
     SessionClosedOnConnectionError {
         /// The id of the remote peer.
@@ -481,7 +523,10 @@ pub(crate) enum SessionEvent {
         error: EthStreamError,
     },
     /// Active session was gracefully disconnected.
-    Disconnected { peer_id: PeerId, remote_addr: SocketAddr },
+    Disconnected {
+        peer_id: PeerId,
+        remote_addr: SocketAddr,
+    },
 }
 
 /// Errors that can occur during handshaking/authenticating the underlying streams.

@@ -137,7 +137,7 @@ where
         );
     }
 
-    /// Event hook for a disconnected session for the peer.
+    /// Event hook for a disconnected session for the given peer.
     pub(crate) fn on_session_closed(&mut self, peer: PeerId) {
         self.active_peers.remove(&peer);
         self.state_fetcher.on_session_closed(&peer);
