@@ -49,9 +49,6 @@ jobs:
           command: nextest
           args: run --locked --workspace --all-features
 
-      - name: Install fuzzer
-        run: cargo install cargo-test-fuzz afl
-
   fuzz:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
