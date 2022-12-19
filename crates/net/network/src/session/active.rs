@@ -294,6 +294,16 @@ impl ActiveSession {
         self.conn.inner_mut().start_disconnect(reason);
     }
 
+    /// Flushes the disconnect message and emits the corresponding message
+    fn poll_disconnect(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        debug_assert!(self.is_disconnecting(), "not disconnecting");
+
+        // try to close the flush out the remaining Disconnect message
+        let _ = ready!(self.conn.poll_close_unpin(cx));
+        self.emit_disconnect();
+        Poll::Ready(())
+    }
+
     /// Removes all timed out requests
     fn evict_timed_out_requests(&mut self, now: Instant) {
         let mut timedout = Vec::new();
@@ -317,10 +327,7 @@ impl Future for ActiveSession {
         let this = self.get_mut();
 
         if this.is_disconnecting() {
-            // try to close the flush out the remaining Disconnect message
-            let _ = ready!(this.conn.poll_close_unpin(cx));
-            this.emit_disconnect();
-            return Poll::Ready(())
+            return this.poll_disconnect(cx)
         }
 
         loop {
@@ -342,6 +349,7 @@ impl Future for ActiveSession {
                                 let reason =
                                     reason.unwrap_or(DisconnectReason::DisconnectRequested);
                                 this.start_disconnect(reason);
+                                return this.poll_disconnect(cx)
                             }
                             SessionCommand::Message(msg) => {
                                 this.on_peer_message(msg);
@@ -729,7 +737,7 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-            let _ = tokio::time::timeout(Duration::from_secs(60), client_stream.next()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(25), client_stream.next()).await;
             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
 

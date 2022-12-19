@@ -4,6 +4,7 @@ use crate::{
         reputation::{is_banned_reputation, DEFAULT_REPUTATION},
         ReputationChangeKind, ReputationChangeWeights,
     },
+    session::Direction,
 };
 use futures::StreamExt;
 use reth_eth_wire::{error::EthStreamError, DisconnectReason};
@@ -233,6 +234,20 @@ impl PeersManager {
         }
 
         self.fill_outbound_slots();
+    }
+
+    /// Invoked if a session was disconnected because there's already a connection to the peer.
+    ///
+    /// If the session was an outgoing connection, this means that the peer initiated a connection
+    /// to us at the same time and this connection is already established.
+    pub(crate) fn on_already_connected(&mut self, direction: Direction) {
+        match direction {
+            Direction::Incoming => {}
+            Direction::Outgoing(_) => {
+                // need to decrement the outgoing counter
+                self.connection_info.decr_out();
+            }
+        }
     }
 
     /// Called when a session to a peer was forcefully disconnected.
