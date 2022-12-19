@@ -236,7 +236,7 @@ where
 
     /// Validate whether the header is valid in relation to it's parent
     ///
-    /// Returns Ok(false) if the header does not conform to consensus rules.
+    /// Returns and `Err` if the header does not conform to consensus rules.
     #[allow(clippy::result_large_err)]
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(&self.consensus, header, parent)?;
