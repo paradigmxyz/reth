@@ -338,9 +338,7 @@ mod tests {
         // start lookup
         service.lookup_self();
 
-        dbg!("try neighbours");
         let event = mockv4.next().await.unwrap();
-        dbg!("neighbours mock");
         match event {
             MockEvent::Pong { .. } => {
                 unreachable!("invalid response")

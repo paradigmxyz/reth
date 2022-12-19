@@ -576,16 +576,8 @@ impl Discv4Service {
             tx,
         );
 
-        let vals = self.kbuckets
-            .closest_values(&key)
-            .take(MAX_NODES_PER_BUCKET).map(|n|n.value).collect::<Vec<_>>();
-        dbg!(&vals);
-
         // From those 16, pick the 3 closest to start the lookup.
         let closest = ctx.closest(ALPHA);
-
-        self.kbuckets.iter_ref().for_each(|e| {
-        });
 
         trace!(target : "net::discv4", ?target, num = closest.len(), "Start lookup closest nodes");
 
@@ -696,7 +688,6 @@ impl Discv4Service {
     }
 
     fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
-        dbg!("on pong");
         if record.id == self.local_node_record.id {
             return
         }
