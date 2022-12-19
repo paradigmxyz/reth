@@ -1173,25 +1173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enr"
-version = "0.7.0"
-source = "git+https://github.com/sigp/enr#e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840"
-dependencies = [
- "base64 0.13.1",
- "bs58",
- "bytes",
- "hex",
- "k256",
- "log",
- "rand 0.8.5",
- "rlp",
- "secp256k1",
- "serde",
- "sha3",
- "zeroize",
-]
-
-[[package]]
 name = "enum-as-inner"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1319,7 +1300,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "base64 0.20.0",
- "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "enr 0.7.0",
  "ethers-core",
  "futures-core",
  "futures-timer",
@@ -3405,7 +3386,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "discv5",
- "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "enr 0.7.0",
  "generic-array",
  "hex",
  "public-ip",
@@ -3613,7 +3594,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "either",
- "enr 0.7.0 (git+https://github.com/sigp/enr)",
+ "enr 0.7.0",
  "ethers-core",
  "ethers-providers",
  "fnv",
@@ -3709,7 +3690,7 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
- "enr 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "enr 0.7.0",
  "ethereum-types",
  "ethnum",
  "hex-literal",
