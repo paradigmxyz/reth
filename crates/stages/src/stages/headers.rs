@@ -111,14 +111,14 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                             target: "sync::stages::headers",
                             "No response for header request"
                         );
-                        return Err(StageError::Recoverable(DownloadError::Timeout.into()));
+                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
                         error!(
                             target: "sync::stages::headers",
                             "Validation error for header {hash}: {error}"
                         );
-                        return Err(StageError::Validation { block: stage_progress, error });
+                        return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
                         error!(
@@ -126,7 +126,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                             ?error,
                             "An unexpected error occurred"
                         );
-                        return Err(StageError::Recoverable(error.into()));
+                        return Err(StageError::Recoverable(error.into()))
                     }
                 },
             }
@@ -229,7 +229,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
             if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
-                return forkchoice.clone();
+                return forkchoice.clone()
             }
         }
     }
@@ -261,7 +261,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         // iterate them in the reverse order
         for header in headers.into_iter().rev() {
             if header.number == 0 {
-                continue;
+                continue
             }
 
             let block_hash = header.hash();
@@ -537,7 +537,7 @@ mod tests {
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
 
                 if start + 1 >= end {
-                    return Ok(Vec::default());
+                    return Ok(Vec::default())
                 }
 
                 let mut headers = random_header_range(start + 1..end, head.hash());

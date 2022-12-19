@@ -1,6 +1,5 @@
 //! Configuration files.
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -28,20 +27,13 @@ pub struct HeadersConfig {
     pub commit_threshold: u64,
     /// The maximum number of headers to request from a peer at a time.
     pub downloader_batch_size: u64,
-    /// The duration to wait for peers to respond.
-    pub downloader_timeout: Duration,
     /// The number of times to retry downloading a set of headers.
     pub downloader_retries: usize,
 }
 
 impl Default for HeadersConfig {
     fn default() -> Self {
-        Self {
-            commit_threshold: 10_000,
-            downloader_batch_size: 1000,
-            downloader_timeout: Duration::from_secs(2),
-            downloader_retries: 5,
-        }
+        Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
     }
 }
 

@@ -129,7 +129,6 @@ impl Command {
                 HeaderStage {
                     downloader: headers::linear::LinearDownloadBuilder::default()
                         .batch_size(config.stage.headers.downloader_batch_size)
-                        .timeout(config.stage.headers.downloader_timeout)
                         .retries(config.stage.headers.downloader_retries)
                         .build(consensus.clone(), fetch_client.clone()),
                     consensus: consensus.clone(),
