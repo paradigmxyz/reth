@@ -117,13 +117,13 @@ impl Command {
             .push(
                 HeaderStage {
                     downloader: headers::linear::LinearDownloadBuilder::default()
-                        .batch_size(config.stage.headers.downloader_batch_size)
-                        .retries(config.stage.headers.downloader_retries)
+                        .batch_size(config.stages.headers.downloader_batch_size)
+                        .retries(config.stages.headers.downloader_retries)
                         .build(consensus.clone(), fetch_client.clone()),
                     consensus: consensus.clone(),
                     client: fetch_client.clone(),
                     network_handle: network.clone(),
-                    commit_threshold: config.stage.headers.commit_threshold,
+                    commit_threshold: config.stages.headers.commit_threshold,
                 },
                 false,
             )
@@ -134,19 +134,19 @@ impl Command {
                             fetch_client.clone(),
                             consensus.clone(),
                         )
-                        .with_batch_size(config.stage.bodies.downloader_batch_size)
-                        .with_retries(config.stage.bodies.downloader_retries)
-                        .with_concurrency(config.stage.bodies.downloader_concurrency),
+                        .with_batch_size(config.stages.bodies.downloader_batch_size)
+                        .with_retries(config.stages.bodies.downloader_retries)
+                        .with_concurrency(config.stages.bodies.downloader_concurrency),
                     ),
                     consensus: consensus.clone(),
-                    commit_threshold: config.stage.bodies.commit_threshold,
+                    commit_threshold: config.stages.bodies.commit_threshold,
                 },
                 false,
             )
             .push(
                 SendersStage {
-                    batch_size: config.stage.senders.batch_size,
-                    commit_threshold: config.stage.senders.commit_threshold,
+                    batch_size: config.stages.senders.batch_size,
+                    commit_threshold: config.stages.senders.commit_threshold,
                 },
                 false,
             );

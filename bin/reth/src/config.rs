@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
-    pub stage: StageConfig,
+    pub stages: StageConfig,
 }
 
 /// Configuration for each stage in the pipeline.
