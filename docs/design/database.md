@@ -59,7 +59,7 @@ AccountHistory {
 StorageHistory {
     H256 Account "PK"
     H256 StorageKey "PK"
-    TransitionList TransitionIdList "u64 list of transitions where account storage entry was changed"
+    TransitionList TransitionIdList "List of transitions where account storage entry was changed"
 }
 AccountChangeSet {
     u64 TransitionId "PK"
