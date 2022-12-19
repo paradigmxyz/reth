@@ -63,7 +63,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
 
         if max_block_num <= stage_progress {
-            return Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+            return Ok(ExecOutput { stage_progress, done: true })
         }
 
         // Look up the start index for the transaction range
@@ -74,7 +74,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
-            return Ok(ExecOutput { stage_progress: max_block_num, done: true, reached_tip: true })
+            return Ok(ExecOutput { stage_progress: max_block_num, done: true })
         }
 
         // Acquire the cursor for inserting elements
@@ -106,7 +106,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         }
 
         let done = max_block_num >= previous_stage_progress;
-        Ok(ExecOutput { stage_progress: max_block_num, done, reached_tip: done })
+        Ok(ExecOutput { stage_progress: max_block_num, done })
     }
 
     /// Unwind the stage.
@@ -168,8 +168,8 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done, reached_tip, stage_progress })
-                if done && reached_tip && stage_progress == previous_stage
+            Ok(ExecOutput { done, stage_progress })
+                if done && stage_progress == previous_stage
         );
 
         // Validate the stage execution
@@ -196,7 +196,7 @@ mod tests {
         let expected_progress = stage_progress + threshold;
         assert_matches!(
             result,
-            Ok(ExecOutput { done: false, reached_tip: false, stage_progress })
+            Ok(ExecOutput { done: false, stage_progress })
                 if stage_progress == expected_progress
         );
 
@@ -208,7 +208,7 @@ mod tests {
         let result = runner.execute(second_input).await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done: true, reached_tip: true, stage_progress })
+            Ok(ExecOutput { done: true, stage_progress })
                 if stage_progress == previous_stage
         );
 

@@ -142,7 +142,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 .unwrap_or_default(),
         );
 
-        Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+        Ok(ExecOutput { stage_progress, done: true })
     }
 
     /// Unwind the stage.
@@ -403,7 +403,7 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done: true, reached_tip: true, stage_progress })
+            Ok(ExecOutput { done: true, stage_progress })
                 if stage_progress == tip.number
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");

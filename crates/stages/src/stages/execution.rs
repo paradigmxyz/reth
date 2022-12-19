@@ -108,7 +108,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
-            return Ok(ExecOutput { stage_progress: last_block, done: true, reached_tip: true })
+            return Ok(ExecOutput { stage_progress: last_block, done: true })
         }
 
         // Get block headers and bodies from canonical hashes
@@ -262,7 +262,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         let last_block = last_block + canonical_batch.len() as u64;
         let is_done = canonical_batch.len() < BATCH_SIZE as usize;
-        Ok(ExecOutput { done: is_done, reached_tip: true, stage_progress: last_block })
+        Ok(ExecOutput { done: is_done, stage_progress: last_block })
     }
 
     /// Unwind the stage.
@@ -414,7 +414,7 @@ mod tests {
         execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
-        assert_eq!(output, ExecOutput { stage_progress: 1, done: true, reached_tip: true });
+        assert_eq!(output, ExecOutput { stage_progress: 1, done: true });
         let tx = tx.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));

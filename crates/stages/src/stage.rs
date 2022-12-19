@@ -37,8 +37,6 @@ pub struct ExecOutput {
     pub stage_progress: BlockNumber,
     /// Whether or not the stage is done.
     pub done: bool,
-    /// Whether or not the stage reached the tip of the chain.
-    pub reached_tip: bool,
 }
 
 /// The output of a stage unwinding.
