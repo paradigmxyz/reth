@@ -460,8 +460,8 @@ where
             NetworkHandleMessage::AddPeerAddress(peer, addr) => {
                 self.swarm.state_mut().add_peer_address(peer, addr);
             }
-            NetworkHandleMessage::DisconnectPeer(peer_id) => {
-                self.swarm.sessions_mut().disconnect(peer_id, None);
+            NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
+                self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
