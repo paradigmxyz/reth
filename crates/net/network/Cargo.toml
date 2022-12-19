@@ -53,8 +53,11 @@ reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+
 enr = { git = "https://github.com/sigp/enr", features = ["serde", "rust-secp256k1"] }
+
+# misc
 hex = "0.4"
 tempfile = "3.3"
-
+serial_test = "0.10"
 
