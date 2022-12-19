@@ -9,6 +9,8 @@ use reth_db::{
 };
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
+///
+/// TBD, so for now only loads 3 default values.
 fn load_vectors<T>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
 where
     T: Table + Default,
@@ -57,7 +59,7 @@ macro_rules! impl_criterion {
 
         }
 
-        pub fn tables(c: &mut Criterion) {
+        pub fn serialization(c: &mut Criterion) {
             let mut ser_group = c.benchmark_group("tables_key_value");
             ser_group.warm_up_time(std::time::Duration::from_secs(1));
             ser_group.measurement_time(std::time::Duration::from_secs(1));
@@ -104,7 +106,29 @@ macro_rules! impl_criterion {
     };
 }
 
-impl_criterion!(AccountHistory);
+impl_criterion!(
+    CanonicalHeaders,
+    HeaderTD,
+    HeaderNumbers,
+    Headers,
+    BlockOmmers,
+    CumulativeTxCount,
+    NonCanonicalTransactions,
+    Transactions,
+    TxHashNumber,
+    Receipts,
+    Logs,
+    PlainAccountState,
+    PlainStorageState,
+    Bytecodes,
+    AccountHistory,
+    StorageHistory,
+    AccountChangeSet,
+    StorageChangeSet,
+    TxSenders,
+    Config,
+    SyncStage
+);
 
 criterion_group!(benches, db, serialization);
 criterion_main!(benches);

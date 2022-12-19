@@ -58,9 +58,9 @@ mdbx = ["reth-libmdbx"]
 bench = []
 
 [[bench]]
-name = "encoding_crit"
+name = "criterion"
 harness = false
 
 [[bench]]
-name = "encoding_iai"
+name = "iai"
 harness = false

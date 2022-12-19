@@ -53,4 +53,26 @@ macro_rules! impl_iai {
     };
 }
 
-impl_iai!(AccountHistory, Headers);
+impl_iai!(
+    CanonicalHeaders,
+    HeaderTD,
+    HeaderNumbers,
+    Headers,
+    BlockOmmers,
+    CumulativeTxCount,
+    NonCanonicalTransactions,
+    Transactions,
+    TxHashNumber,
+    Receipts,
+    Logs,
+    PlainAccountState,
+    PlainStorageState,
+    Bytecodes,
+    AccountHistory,
+    StorageHistory,
+    AccountChangeSet,
+    StorageChangeSet,
+    TxSenders,
+    Config,
+    SyncStage
+);
