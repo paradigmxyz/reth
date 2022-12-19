@@ -52,30 +52,35 @@ BlockTransitionIdIndex {
     u64 BlockNumber "PK"
     u64 TransitionId
 }
-History {
+AccountHistory {
     H256 Account "PK"
-    u64 TransitionIdList "TransitionId[] (transitions where account changed)"
+    u64[] TransitionIdList "List of transitions where account was changed"
+}
+StorageHistory {
+    H256 Account "PK"
+    H256 StorageKey "PK"
+    u64[] TransitionIdList "List of transitions where account storage entry was changed"
 }
 AccountChangeSet {
     u64 TransitionId "PK"
-    address Address "PK"
+    H256 Account "PK"
     ChangeSet AccountChangeSet "Account before transition"
 }
 StorageChangeSet {
     u64 TransitionId "PK"
-    address Address "PK"
-    H256 StorageEntry "PK"
+    H256 Account "PK"
+    H256 StorageKey "PK"
     ChangeSet StorageChangeSet "Storage entry before transition"
 }
-EVM ||--o{ History: "Load Account by finding first bigger TransitionId in List, and index it in ChangeSet table"
-BlockTransitionIdIndex ||--o{ EVM : "Use state (by block TransitionId)"
-TxTransitionIdIndex ||--o{ EVM : "Use state (by tx TransitionId)"
+EVM ||--o{ AccountHistory: "Load Account by first greater TransitionId"
+EVM ||--o{ StorageHistory: "Load Storage Entry by first greater TransitionId"
 TransactionHash ||--o{ Transactions : index
-TransactionHash ||--o{ TxTransitionIdIndex : index
-History ||--o{ AccountChangeSet : index
+Transactions ||--o{ TxTransitionIdIndex : index
+AccountHistory ||--o{ AccountChangeSet : index
 BlockTransitionIdIndex ||--o{ AccountChangeSet : "unique index"
 TxTransitionIdIndex ||--o{ AccountChangeSet : "unique index"
-History ||--o{ StorageChangeSet : index
+StorageHistory ||--o{ StorageChangeSet : index
 BlockTransitionIdIndex ||--o{ StorageChangeSet : "unique index"
 TxTransitionIdIndex ||--o{ StorageChangeSet : "unique index"
+
 ```
