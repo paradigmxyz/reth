@@ -216,13 +216,13 @@ async fn test_incoming_connect_with_single_geth() {
         let handle = network.handle().clone();
         tokio::task::spawn(network);
 
+        let events = handle.event_listener();
+        let mut event_stream = NetworkEventStream::new(events);
+
         // make geth connect to us
         let our_enode = NodeRecord::new(reth_p2p_socket, *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
-
-        let events = handle.event_listener();
-        let mut event_stream = NetworkEventStream::new(events);
 
         // check for a sessionestablished event
         let incoming_peer_id = event_stream.next_session_established().await.unwrap();
@@ -250,6 +250,10 @@ async fn test_outgoing_connect_with_single_geth() {
         let handle = network.handle().clone();
         tokio::task::spawn(network);
 
+        // create networkeventstream to get the next session established event easily
+        let events = handle.event_listener();
+        let mut event_stream = NetworkEventStream::new(events);
+
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().disable_discovery().data_dir(temp_dir).spawn();
@@ -266,10 +270,6 @@ async fn test_outgoing_connect_with_single_geth() {
 
         // add geth as a peer then wait for a `SessionEstablished` event
         handle.add_peer(geth_peer_id, geth_socket);
-
-        // create networkeventstream to get the next session established event easily
-        let events = handle.event_listener();
-        let mut event_stream = NetworkEventStream::new(events);
 
         // check for a sessionestablished event
         let incoming_peer_id = event_stream.next_session_established().await.unwrap();
@@ -297,6 +297,9 @@ async fn test_geth_disconnect() {
         let handle = network.handle().clone();
         tokio::task::spawn(network);
 
+        // create networkeventstream to get the next session established event easily
+        let mut events = handle.event_listener();
+
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().disable_discovery().data_dir(temp_dir).spawn();
@@ -313,9 +316,6 @@ async fn test_geth_disconnect() {
 
         // add geth as a peer then wait for a `SessionEstablished` event
         handle.add_peer(geth_peer_id, geth_socket);
-
-        // create networkeventstream to get the next session established event easily
-        let mut events = handle.event_listener();
 
         if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
             assert_eq!(peer_id, geth_peer_id);
