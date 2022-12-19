@@ -6,7 +6,7 @@ use crate::{
     FetchClient,
 };
 use parking_lot::Mutex;
-use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::p2p::headers::client::StatusUpdater;
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
@@ -124,7 +124,13 @@ impl NetworkHandle {
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
     /// connection to the given peer.
     pub fn disconnect_peer(&self, peer: PeerId) {
-        self.send_message(NetworkHandleMessage::DisconnectPeer(peer))
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, None))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer using the provided reason
+    pub fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason) {
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
     }
 
     /// Send a reputation change for the given peer.
@@ -183,7 +189,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, SocketAddr),
     /// Disconnect a connection to a peer if it exists.
-    DisconnectPeer(PeerId),
+    DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
