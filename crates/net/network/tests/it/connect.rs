@@ -176,6 +176,7 @@ async fn test_incoming_node_id_blacklist() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -217,6 +218,7 @@ async fn test_incoming_connect_with_single_geth() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -259,6 +261,7 @@ async fn test_outgoing_connect_with_single_geth() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn test_geth_disconnect() {
     reth_tracing::init_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
