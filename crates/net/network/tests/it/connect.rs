@@ -248,12 +248,19 @@ async fn test_outgoing_connect_with_single_geth() {
     handle.add_peer(geth_peer_id, geth_socket);
 
     // create networkeventstream to get the next session established event easily
-    let events = handle.event_listener();
-    let mut event_stream = NetworkEventStream::new(events);
+    let mut events = handle.event_listener();
+    let next_event = events.next().await;
 
     // check for a sessionestablished event
-    let incoming_peer_id = event_stream.next_session_established().await.unwrap();
-    assert_eq!(incoming_peer_id, geth_peer_id);
+    match next_event {
+        Some(NetworkEvent::SessionEstablished { peer_id, .. }) => {
+            assert_eq!(peer_id, geth_peer_id);
+        }
+        Some(NetworkEvent::SessionClosed { peer_id }) => {
+            panic!("Session closed before it was established: {}", peer_id);
+        }
+        _ => panic!("No more events, expected a SessionEstablished event"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
