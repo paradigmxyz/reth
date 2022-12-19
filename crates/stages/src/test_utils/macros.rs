@@ -40,8 +40,8 @@ macro_rules! stage_test_suite {
             let result = rx.await.unwrap();
             assert_matches::assert_matches!(
                 result,
-                Ok(ExecOutput { done, reached_tip, stage_progress })
-                    if done && reached_tip && stage_progress == previous_stage
+                Ok(ExecOutput { done, stage_progress })
+                    if done && stage_progress == previous_stage
             );
 
             // Validate the stage execution
@@ -90,8 +90,8 @@ macro_rules! stage_test_suite {
             let result = rx.await.unwrap();
             assert_matches::assert_matches!(
                 result,
-                Ok(ExecOutput { done, reached_tip, stage_progress })
-                    if done && reached_tip && stage_progress == previous_stage
+                Ok(ExecOutput { done, stage_progress })
+                    if done && stage_progress == previous_stage
             );
             assert!(runner.validate_execution(execute_input, result.ok()).is_ok(), "execution validation");
 
@@ -142,8 +142,8 @@ macro_rules! stage_test_suite_ext {
             let result = rx.await.unwrap();
             assert_matches::assert_matches!(
                 result,
-                Ok(ExecOutput { done, reached_tip, stage_progress })
-                    if done && reached_tip && stage_progress == stage_progress
+                Ok(ExecOutput { done, stage_progress })
+                    if done && stage_progress == stage_progress
             );
 
             // Validate the stage execution

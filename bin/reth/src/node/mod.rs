@@ -114,42 +114,33 @@ impl Command {
         // TODO: Remove magic numbers
         let fetch_client = Arc::new(network.fetch_client().await?);
         let mut pipeline = reth_stages::Pipeline::new()
-            .push(
-                HeaderStage {
-                    downloader: headers::linear::LinearDownloadBuilder::default()
-                        .batch_size(config.stages.headers.downloader_batch_size)
-                        .retries(config.stages.headers.downloader_retries)
-                        .build(consensus.clone(), fetch_client.clone()),
-                    consensus: consensus.clone(),
-                    client: fetch_client.clone(),
-                    network_handle: network.clone(),
-                    commit_threshold: config.stages.headers.commit_threshold,
-                },
-                false,
-            )
-            .push(
-                BodyStage {
-                    downloader: Arc::new(
-                        bodies::concurrent::ConcurrentDownloader::new(
-                            fetch_client.clone(),
-                            consensus.clone(),
-                        )
-                        .with_batch_size(config.stages.bodies.downloader_batch_size)
-                        .with_retries(config.stages.bodies.downloader_retries)
-                        .with_concurrency(config.stages.bodies.downloader_concurrency),
-                    ),
-                    consensus: consensus.clone(),
-                    commit_threshold: config.stages.bodies.commit_threshold,
-                },
-                false,
-            )
-            .push(
-                SendersStage {
-                    batch_size: config.stages.senders.batch_size,
-                    commit_threshold: config.stages.senders.commit_threshold,
-                },
-                false,
-            );
+            .push(HeaderStage {
+                downloader: headers::linear::LinearDownloadBuilder::default()
+                    .batch_size(config.stages.headers.downloader_batch_size)
+                    .retries(config.stages.headers.downloader_retries)
+                    .build(consensus.clone(), fetch_client.clone()),
+                consensus: consensus.clone(),
+                client: fetch_client.clone(),
+                network_handle: network.clone(),
+                commit_threshold: config.stages.headers.commit_threshold,
+            })
+            .push(BodyStage {
+                downloader: Arc::new(
+                    bodies::concurrent::ConcurrentDownloader::new(
+                        fetch_client.clone(),
+                        consensus.clone(),
+                    )
+                    .with_batch_size(config.stages.bodies.downloader_batch_size)
+                    .with_retries(config.stages.bodies.downloader_retries)
+                    .with_concurrency(config.stages.bodies.downloader_concurrency),
+                ),
+                consensus: consensus.clone(),
+                commit_threshold: config.stages.bodies.commit_threshold,
+            })
+            .push(SendersStage {
+                batch_size: config.stages.senders.batch_size,
+                commit_threshold: config.stages.senders.commit_threshold,
+            });
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);
