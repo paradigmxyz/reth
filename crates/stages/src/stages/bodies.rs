@@ -93,7 +93,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.commit_threshold);
         if target <= stage_progress {
-            return Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+            return Ok(ExecOutput { stage_progress, done: true })
         }
 
         let bodies_to_download = self.bodies_to_download::<DB>(tx, starting_block, target)?;
@@ -124,7 +124,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                 return Ok(ExecOutput {
                     stage_progress: highest_block,
                     done: false,
-                    reached_tip: false,
                 })
             };
 
@@ -190,7 +189,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let capped = target < previous_stage_progress;
         let done = highest_block < target || !capped;
 
-        Ok(ExecOutput { stage_progress: highest_block, reached_tip: true, done })
+        Ok(ExecOutput { stage_progress: highest_block, done })
     }
 
     /// Unwind the stage.
@@ -321,7 +320,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress < 200
+            Ok(ExecOutput { stage_progress, done: false }) if stage_progress < 200
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -348,10 +347,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        assert_matches!(
-            output,
-            Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
-        );
+        assert_matches!(output, Ok(ExecOutput { stage_progress: 20, done: true }));
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
@@ -377,7 +373,7 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress >= 10
+            Ok(ExecOutput { stage_progress, done: false }) if stage_progress >= 10
         );
         let first_run_progress = first_run.unwrap().stage_progress;
 
@@ -392,7 +388,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress > first_run_progress
+            Ok(ExecOutput { stage_progress, done: true }) if stage_progress > first_run_progress
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -432,7 +428,7 @@ mod tests {
         // Check that the error bubbles up
         assert_matches!(
             rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: out_stage_progress, done: false, reached_tip: false })
+            Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
                 if out_stage_progress == stage_progress
         );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
@@ -462,7 +458,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress == previous_stage
+            Ok(ExecOutput { stage_progress, done: true }) if stage_progress == previous_stage
         );
         let stage_progress = output.unwrap().stage_progress;
         runner
@@ -521,7 +517,7 @@ mod tests {
         // Check that the error bubbles up
         assert_matches!(
             rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: out_stage_progress, done: false, reached_tip: false })
+            Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
                 if out_stage_progress == stage_progress
         );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
