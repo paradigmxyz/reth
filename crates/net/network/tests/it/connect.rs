@@ -168,6 +168,9 @@ async fn test_incoming_node_id_blacklist() {
     // check for session to be opened
     let incoming_peer_id = event_stream.next_session_established().await.unwrap();
     assert_eq!(incoming_peer_id, geth_peer_id);
+
+    handle.disconnect_peer(incoming_peer_id);
+
     // check to see that the session was closed
     let incoming_peer_id = event_stream.next_session_closed().await.unwrap();
     assert_eq!(incoming_peer_id, geth_peer_id);

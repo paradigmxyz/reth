@@ -137,6 +137,11 @@ where
                     direction,
                 })
             }
+            SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
+                trace!( target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
+                self.state.peers_mut().on_already_connected(direction);
+                None
+            }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
             }
