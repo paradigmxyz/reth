@@ -21,8 +21,8 @@ pub struct Discv4Config {
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
     pub udp_ingress_message_buffer: usize,
-    /// The number of retries for each UDP request. Default: 1.
-    pub request_retries: u8,
+    /// The number of allowed failures for `FindNode` requests. Default: 1.
+    pub max_find_node_failures: u8,
     /// The time between pings to ensure connectivity amongst connected nodes. Default: 300
     /// seconds.
     pub ping_interval: Duration,
@@ -97,7 +97,7 @@ impl Default for Discv4Config {
             udp_egress_message_buffer: 1024,
             /// Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
-            request_retries: 1,
+            max_find_node_failures: 2,
             ping_interval: Duration::from_secs(300),
             ping_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(20),
@@ -140,9 +140,9 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// The number of retries for each UDP request.
-    pub fn request_retries(&mut self, retries: u8) -> &mut Self {
-        self.config.request_retries = retries;
+    /// The number of allowed request failures for `findNode` requests.
+    pub fn max_find_node_failures(&mut self, max_find_node_failures: u8) -> &mut Self {
+        self.config.max_find_node_failures = max_find_node_failures;
         self
     }
 
