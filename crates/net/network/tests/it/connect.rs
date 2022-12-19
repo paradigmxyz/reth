@@ -3,7 +3,7 @@
 use crate::NetworkEventStream;
 
 use super::testnet::Testnet;
-use enr::EnrPublicKey;
+use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
@@ -18,6 +18,14 @@ use tokio::task;
 
 // The timeout for tests that create a GethInstance
 const GETH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Obtains a PeerId from an ENR. In this case, the PeerId represents the public key contained in
+/// the ENR.
+fn enr_to_peer_id(enr: Enr<SigningKey>) -> PeerId {
+    // In the following tests, methods which accept a public key expect it to contain the public
+    // key in its 64-byte encoded (uncompressed) form.
+    enr.public_key().encode_uncompressed().into()
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -141,8 +149,7 @@ async fn test_incoming_node_id_blacklist() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId =
-            provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+        let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
@@ -195,8 +202,7 @@ async fn test_incoming_connect_with_single_geth() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId =
-            provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+        let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30306);
