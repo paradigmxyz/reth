@@ -224,6 +224,7 @@ impl<S> P2PStream<S> {
         let mut buf = BytesMut::with_capacity(disconnect.length());
         disconnect.encode(&mut buf);
         self.outgoing_messages.push_back(buf.freeze());
+        self.disconnecting = true;
     }
 }
 
