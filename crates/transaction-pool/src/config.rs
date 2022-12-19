@@ -28,9 +28,9 @@ impl Default for PoolConfig {
 /// Size limits for a sub-pool.
 #[derive(Debug, Clone)]
 pub struct SubPoolLimit {
-    /// Max. amount of transaction in the pool.
+    /// Maximum amount of transaction in the pool.
     pub max_txs: usize,
-    /// Max. combined size of transactions in the pool.
+    /// Maximum combined size (in bytes) of transactions in the pool.
     pub max_size: usize,
 }
 

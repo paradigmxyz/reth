@@ -9,34 +9,39 @@ readme = "README.md"
 [dependencies]
 # reth
 reth-primitives = { path = "../../crates/primitives" }
-reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"]}
+reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
-reth-provider = {path = "../../crates/storage/provider", features = ["test-utils"]}
-reth-stages = {path = "../../crates/stages"}
-reth-interfaces = {path = "../../crates/interfaces", features = ["test-utils"] }
-reth-transaction-pool = {path = "../../crates/transaction-pool"}
-reth-consensus = {path = "../../crates/consensus"}
-reth-executor = { path = "../../crates/executor"}
+reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
+reth-stages = { path = "../../crates/stages"}
+reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
+reth-transaction-pool = { path = "../../crates/transaction-pool" }
+reth-consensus = { path = "../../crates/consensus", features = ["serde"] }
+reth-executor = { path = "../../crates/executor" }
 reth-rpc = {path = "../../crates/net/rpc"}
 reth-rlp = { path = "../../crates/common/rlp" }
-reth-network = {path = "../../crates/net/network"}
-reth-downloaders = {path = "../../crates/net/downloaders"}
+reth-network = {path = "../../crates/net/network" }
+reth-downloaders = {path = "../../crates/net/downloaders" }
 
 # tracing
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# misc
+# io
+walkdir = "2.3"
+serde = "1.0"
+serde_json = "1.0"
 shellexpand = "2.1"
+dirs-next = "2.0.0"
+confy = "0.5"
 
+# rpc/metrics
+metrics-exporter-prometheus = { version = "0.11.0", features = ["http-listener"] }
+metrics-util = "0.14.0"
+
+# misc
 eyre = "0.6.8"
 clap = { version = "4.0", features = ["derive", "cargo"] }
 thiserror = "1.0"
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
-serde = "1.0"
-serde_json = "1.0"
-walkdir = "2.3"
 futures = "0.3.25"
-metrics-exporter-prometheus = { version = "0.11.0", features = ["http-listener"] }
-metrics-util = "0.14.0"

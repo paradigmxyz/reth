@@ -182,6 +182,12 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
+    /// Sets the chain ID.
+    pub fn chain_id<Id: Into<Chain>>(mut self, chain_id: Id) -> Self {
+        self.chain = chain_id.into();
+        self
+    }
+
     /// Sets the `HelloMessage` to send when connecting to peers.
     ///
     /// ```

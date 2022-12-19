@@ -62,8 +62,8 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..0x10000000),   // TODO: reevaluate
-                    growth_step: Some(0x100000), // TODO: reevaluate
+                    size: Some(0..(1024 * 1024 * 1024 * 1024 * 4)), // TODO: reevaluate (4 tb)
+                    growth_step: Some(1024 * 1024 * 256),           // TODO: reevaluate (256 mb)
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })

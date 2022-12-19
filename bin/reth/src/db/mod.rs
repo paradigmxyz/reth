@@ -1,6 +1,5 @@
 //! Database debugging tool
-
-use crate::util::parse_path;
+use crate::dirs::DbPath;
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -12,16 +11,20 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::path::PathBuf;
 use tracing::info;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the database folder.
-    // TODO: This should use dirs-next
-    #[arg(long, value_name = "PATH", default_value = "~/.reth/db", value_parser = parse_path)]
-    db: PathBuf,
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
+    /// - macOS: `$HOME/Library/Application Support/reth/db`
+    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
+    db: DbPath,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -64,7 +67,7 @@ impl Command {
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            &self.db,
+            self.db.as_ref(),
             reth_db::mdbx::EnvKind::RW,
         )?;
 
