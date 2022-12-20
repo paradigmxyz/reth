@@ -91,8 +91,10 @@ const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 /// rlp overhead) / size(rlp(Node_IPv6))`
 const SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = (MAX_PACKET_SIZE - 109) / 91;
 
-/// The timeout used to identify expired nodes
-const NODE_LAST_SEEN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+/// The timeout used to identify expired nodes, 24h
+///
+/// Mirrors geth's `bondExpiration` of 24h
+const ENDPOINT_PROOF_EXPIRATION: Duration = Duration::from_secs(24 * 60 * 60);
 
 type EgressSender = mpsc::Sender<(Bytes, SocketAddr)>;
 type EgressReceiver = mpsc::Receiver<(Bytes, SocketAddr)>;
@@ -593,7 +595,7 @@ impl Discv4Service {
         trace!(target : "discv4", ?node, lookup=?ctx.target(),  "Sending FindNode");
         ctx.mark_queried(node.id);
         let id = ctx.target();
-        let msg = Message::FindNode(FindNode { id, expire: self.find_node_timeout() });
+        let msg = Message::FindNode(FindNode { id, expire: self.find_node_expiration() });
         self.send_packet(msg, node.udp_addr());
         self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
     }
@@ -858,7 +860,7 @@ impl Discv4Service {
         let ping = Ping {
             from: self.local_node_record.into(),
             to: node.into(),
-            expire: self.ping_timeout(),
+            expire: self.ping_expiration(),
             enr_sq: self.enr_seq(),
         };
         trace!(target : "discv4",  ?ping, "sending ping");
@@ -877,7 +879,7 @@ impl Discv4Service {
             return
         }
         let remote_addr = node.udp_addr();
-        let enr_request = EnrRequest { expire: self.enr_request_timeout() };
+        let enr_request = EnrRequest { expire: self.enr_request_expiration() };
 
         trace!(target : "discv4",  ?enr_request, "sending enr request");
         let echo_hash = self.send_packet(Message::EnrRequest(enr_request), remote_addr);
@@ -1093,7 +1095,7 @@ impl Discv4Service {
     /// Sends a Neighbours packet for `target` to the given addr
     fn respond_closest(&mut self, target: PeerId, to: SocketAddr) {
         let key = kad_key(target);
-        let expire = self.send_neighbours_timeout();
+        let expire = self.send_neighbours_expiration();
         let all_nodes = self.kbuckets.closest_values(&key).collect::<Vec<_>>();
 
         for nodes in all_nodes.chunks(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS) {
@@ -1106,12 +1108,12 @@ impl Discv4Service {
 
     fn evict_expired_requests(&mut self, now: Instant) {
         self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.ping_timeout
+            now.duration_since(enr_request.sent_at) < self.config.ping_expiration
         });
 
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
-            if now.duration_since(ping_request.sent_at) > self.config.ping_timeout {
+            if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
                 failed_pings.push(*node_id);
                 return false
             }
@@ -1161,8 +1163,11 @@ impl Discv4Service {
         }
     }
 
-    /// Send some pings
-    fn reping_oldest(&mut self) {
+    /// Re-pings all nodes which endpoint proofs are considered expired: [``NodeEntry::is_expired]
+    ///
+    /// This will send a `Ping` to the nodes, if a node fails to respond with a `Pong` to renew the
+    /// endpoint proof it will be removed from the table.
+    fn re_ping_oldest(&mut self) {
         let mut nodes = self
             .kbuckets
             .iter_ref()
@@ -1201,21 +1206,23 @@ impl Discv4Service {
         }
     }
 
-    fn ping_timeout(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.ping_timeout).as_secs()
+    fn ping_expiration(&self) -> u64 {
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.ping_expiration)
+            .as_secs()
     }
 
-    fn find_node_timeout(&self) -> u64 {
+    fn find_node_expiration(&self) -> u64 {
         (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.request_timeout)
             .as_secs()
     }
 
-    fn enr_request_timeout(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_timeout).as_secs()
+    fn enr_request_expiration(&self) -> u64 {
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_expiration)
+            .as_secs()
     }
 
-    fn send_neighbours_timeout(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.neighbours_timeout)
+    fn send_neighbours_expiration(&self) -> u64 {
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.neighbours_expiration)
             .as_secs()
     }
 
@@ -1238,7 +1245,7 @@ impl Discv4Service {
 
         // re-ping some peers
         if self.ping_interval.poll_tick(cx).is_ready() {
-            self.reping_oldest();
+            self.re_ping_oldest();
         }
 
         // process all incoming commands
@@ -1694,9 +1701,9 @@ impl NodeEntry {
 // === impl NodeEntry ===
 
 impl NodeEntry {
-    /// Returns true if the node is considered expired.
+    /// Returns true if the node should be re-pinged.
     fn is_expired(&self) -> bool {
-        self.last_seen.elapsed() > NODE_LAST_SEEN_TIMEOUT
+        self.last_seen.elapsed() > ENDPOINT_PROOF_EXPIRATION
     }
 }
 
