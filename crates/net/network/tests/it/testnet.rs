@@ -3,6 +3,7 @@
 use futures::{FutureExt, StreamExt};
 use parking_lot::Mutex;
 use pin_project::pin_project;
+use reth_eth_wire::DisconnectReason;
 use reth_network::{
     error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
     NetworkHandle, NetworkManager,
@@ -70,6 +71,16 @@ where
 
     pub fn peers_iter(&self) -> impl Iterator<Item = &Peer<C>> + '_ {
         self.peers.iter()
+    }
+
+    pub async fn extend_peer_with_config(
+        &mut self,
+        configs: impl IntoIterator<Item = PeerConfig<C>>,
+    ) -> Result<(), NetworkError> {
+        for config in configs {
+            self.add_peer_with_config(config).await?;
+        }
+        Ok(())
     }
 
     pub async fn add_peer_with_config(
@@ -261,6 +272,10 @@ where
 {
     pub fn new(client: Arc<C>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
+        Self::with_secret_key(client, secret_key)
+    }
+
+    pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
         let config = NetworkConfig::builder(Arc::clone(&client), secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
@@ -289,10 +304,10 @@ impl NetworkEventStream {
         Self { inner }
     }
 
-    pub async fn next_session_closed(&mut self) -> Option<PeerId> {
+    pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { peer_id } => return Some(peer_id),
+                NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
                 NetworkEvent::SessionEstablished { .. } => continue,
             }
         }

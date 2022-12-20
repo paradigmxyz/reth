@@ -452,8 +452,10 @@ impl Future for ActiveSession {
             }
 
             if !progress {
-                // check for timed out requests
-                this.evict_timed_out_requests(Instant::now());
+                if this.timeout_interval.poll_tick(cx).is_ready() {
+                    // check for timed out requests
+                    this.evict_timed_out_requests(Instant::now());
+                }
 
                 return Poll::Pending
             }

@@ -11,8 +11,12 @@ use crate::{
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
-    reth_tracing::build_subscriber(if opt.silent { TracingMode::Silent } else { TracingMode::All })
-        .init();
+    reth_tracing::build_subscriber(if opt.silent {
+        TracingMode::Silent
+    } else {
+        TracingMode::from(opt.verbose)
+    })
+    .init();
 
     match opt.command {
         Commands::Node(command) => command.execute().await,

@@ -1,6 +1,6 @@
 //! Connection tests
 
-use crate::NetworkEventStream;
+use crate::{NetworkEventStream, PeerConfig};
 
 use super::testnet::Testnet;
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
@@ -8,6 +8,7 @@ use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config, NodeRecord};
+use reth_eth_wire::DisconnectReason;
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::PeerId;
@@ -77,6 +78,50 @@ async fn test_establish_connections() {
         assert_eq!(net.peers()[1].num_peers(), 1);
         assert_eq!(net.peers()[2].num_peers(), 1);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_already_connected() {
+    reth_tracing::init_tracing();
+    let mut net = Testnet::default();
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let client = Arc::new(TestApi::default());
+    let p1 = PeerConfig::default();
+
+    // initialize two peers with the same identifier
+    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+
+    net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+    let handle2 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+    let mut listener2 = NetworkEventStream::new(handle2.event_listener());
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+
+    let peer = listener0.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+
+    handle2.add_peer(*handle0.peer_id(), handle0.local_addr());
+    let peer = listener2.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle0.peer_id());
+
+    let (peer, reason) = listener2.next_session_closed().await.unwrap();
+    assert_eq!(peer, *handle0.peer_id());
+    let reason = reason.unwrap();
+    assert_eq!(reason, DisconnectReason::AlreadyConnected);
+
+    assert_eq!(handle0.num_connected_peers(), 1);
+    assert_eq!(handle1.num_connected_peers(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -181,7 +226,7 @@ async fn test_incoming_node_id_blacklist() {
         assert_eq!(incoming_peer_id, geth_peer_id);
 
         // check to see that the session was closed
-        let incoming_peer_id = event_stream.next_session_closed().await.unwrap();
+        let incoming_peer_id = event_stream.next_session_closed().await.unwrap().0;
         assert_eq!(incoming_peer_id, geth_peer_id);
     })
     .await
@@ -327,7 +372,7 @@ async fn test_geth_disconnect() {
         handle.disconnect_peer(geth_peer_id);
 
         // wait for a disconnect from geth
-        if let Some(NetworkEvent::SessionClosed { peer_id }) = events.next().await {
+        if let Some(NetworkEvent::SessionClosed { peer_id, .. }) = events.next().await {
             assert_eq!(peer_id, geth_peer_id);
         } else {
             panic!("Expected a session closed event");

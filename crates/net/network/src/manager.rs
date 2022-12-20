@@ -470,7 +470,11 @@ where
                 let _ = tx.send(self.fetch_client());
             }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
-                self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
+                if let Some(transition) =
+                    self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty)
+                {
+                    self.swarm.state_mut().update_fork_id(transition.current);
+                }
             }
         }
     }
@@ -568,6 +572,7 @@ where
                         "Session disconnected"
                     );
 
+                    let mut reason = None;
                     if let Some(ref err) = error {
                         // If the connection was closed due to an error, we report the peer
                         this.swarm.state_mut().peers_mut().on_connection_dropped(
@@ -575,12 +580,13 @@ where
                             &peer_id,
                             err,
                         );
+                        reason = err.as_disconnected();
                     } else {
                         // Gracefully disconnected
                         this.swarm.state_mut().peers_mut().on_disconnected(peer_id);
                     }
 
-                    this.event_listeners.send(NetworkEvent::SessionClosed { peer_id });
+                    this.event_listeners.send(NetworkEvent::SessionClosed { peer_id, reason });
                 }
                 SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                     warn!(
@@ -647,6 +653,8 @@ pub enum NetworkEvent {
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
         peer_id: PeerId,
+        /// Why the disconnect was triggered
+        reason: Option<DisconnectReason>,
     },
     /// Established a new session with the given peer.
     SessionEstablished {
