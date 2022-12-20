@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
-    models::{StoredBlockBody, StoredBlockOmmers},
+    models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -16,7 +16,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{error, warn};
+use tracing::*;
 
 const BODIES: StageId = StageId("Bodies");
 
@@ -80,7 +80,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     ) -> Result<ExecOutput, StageError> {
         let previous_stage_progress = input.previous_stage_progress();
         if previous_stage_progress == 0 {
-            warn!("The body stage seems to be running first, no work can be completed.");
+            error!(target: "sync::stages::bodies", "The body stage is running first, no work can be done");
             return Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody {
                 number: 0,
             }))
@@ -93,6 +93,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.commit_threshold);
         if target <= stage_progress {
+            info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
             return Ok(ExecOutput { stage_progress, done: true })
         }
 
@@ -107,20 +108,17 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut block_transition_cursor = tx.cursor_mut::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
 
-        // Get id for the first transaction in the block
+        // Get id for the first transaction and first transition in the block
         let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(starting_block)?;
 
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = stage_progress;
+        trace!(target: "sync::stages::bodies", stage_progress, target, start_tx_id = current_tx_id, transition_id, "Commencing sync");
         while let Some(result) = bodies_stream.next().await {
             let Ok(response) = result else {
-                error!(
-                    "Encountered an error downloading block {}: {:?}",
-                    highest_block + 1,
-                    result.unwrap_err()
-                );
+                error!(target: "sync::stages::bodies", block = highest_block + 1, error = ?result.unwrap_err(), "Error downloading block");
                 return Ok(ExecOutput {
                     stage_progress: highest_block,
                     done: false,
@@ -129,20 +127,21 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             // Write block
             let block_header = response.header();
-            let block_number = block_header.number;
-            let block_key = block_header.num_hash().into();
+            let numhash: BlockNumHash = block_header.num_hash().into();
 
             match response {
                 BlockResponse::Full(block) => {
+                    trace!(target: "sync::stages::bodies", ommers = block.ommers.len(), txs = block.body.len(), ?numhash, "Writing full block");
+
                     body_cursor.append(
-                        block_key,
+                        numhash,
                         StoredBlockBody {
                             start_tx_id: current_tx_id,
                             tx_count: block.body.len() as u64,
                         },
                     )?;
                     ommers_cursor.append(
-                        block_key,
+                        numhash,
                         StoredBlockOmmers {
                             ommers: block
                                 .ommers
@@ -164,8 +163,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     }
                 }
                 BlockResponse::Empty(_) => {
+                    trace!(target: "sync::stages::bodies", ?numhash, "Writing empty block");
                     body_cursor.append(
-                        block_key,
+                        numhash,
                         StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
                     )?;
                 }
@@ -175,12 +175,14 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // Increment the transition if the block contains an addition block reward.
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
-            if self.consensus.has_block_reward(block_number) {
+            let has_reward = self.consensus.has_block_reward(numhash.number());
+            trace!(target: "sync::stages::bodies", has_reward, ?numhash, "Block reward");
+            if has_reward {
                 transition_id += 1;
             }
-            block_transition_cursor.append(block_key, transition_id)?;
+            block_transition_cursor.append(numhash, transition_id)?;
 
-            highest_block = block_number;
+            highest_block = numhash.number();
         }
 
         // The stage is "done" if:
@@ -188,6 +190,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // - We reached our target and the target was not limited by the batch size of the stage
         let capped = target < previous_stage_progress;
         let done = highest_block < target || !capped;
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target, done, "Sync iteration finished");
 
         Ok(ExecOutput { stage_progress: highest_block, done })
     }

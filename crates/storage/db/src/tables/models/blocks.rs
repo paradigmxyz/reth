@@ -65,8 +65,14 @@ pub type HeaderHash = H256;
 /// element as BlockNumber, helps out with querying/sorting.
 ///
 /// Since it's used as a key, the `BlockNumber` is not compressed when encoding it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct BlockNumHash(pub (BlockNumber, BlockHash));
+
+impl std::fmt::Debug for BlockNumHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("").field(&self.0 .0).field(&self.0 .1).finish()
+    }
+}
 
 impl BlockNumHash {
     /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]
