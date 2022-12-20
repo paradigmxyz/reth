@@ -10,7 +10,6 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod dirs;
-pub mod metrics_describer;
 pub mod node;
 pub mod prometheus_exporter;
 pub mod test_eth_chain;

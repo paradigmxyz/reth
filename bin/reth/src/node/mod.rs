@@ -4,7 +4,7 @@
 use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
-    metrics_describer, prometheus_exporter,
+    prometheus_exporter,
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
@@ -95,7 +95,7 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!("Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
-            metrics_describer::describe();
+            stages_metrics_describer::describe();
         }
 
         let chain_id = self.chain.consensus.chain_id;
