@@ -102,7 +102,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                         return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        error!( target: "sync::stages::headers", ?error, ?hash, "Validation error");
+                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
@@ -114,7 +114,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         }
 
         // Write total difficulty values after all headers have been inserted
-        info!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
+        debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
         self.write_td::<DB>(tx, &head)?;
 
         let stage_progress = current_progress.max(

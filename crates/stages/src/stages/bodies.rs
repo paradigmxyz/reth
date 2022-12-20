@@ -115,7 +115,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = stage_progress;
-        trace!(target: "sync::stages::bodies", highest_block, tx_id = current_tx_id, transition_id, "Commencing sync");
+        trace!(target: "sync::stages::bodies", stage_progress, target, start_tx_id = current_tx_id, transition_id, "Commencing sync");
         while let Some(result) = bodies_stream.next().await {
             let Ok(response) = result else {
                 error!(target: "sync::stages::bodies", block = highest_block + 1, error = ?result.unwrap_err(), "Error downloading block");
@@ -176,7 +176,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
             let has_reward = self.consensus.has_block_reward(numhash.number());
-            debug!(target: "sync::stages::bodies", has_reward, ?numhash, "Block reward");
+            trace!(target: "sync::stages::bodies", has_reward, ?numhash, "Block reward");
             if has_reward {
                 transition_id += 1;
             }
@@ -190,7 +190,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // - We reached our target and the target was not limited by the batch size of the stage
         let capped = target < previous_stage_progress;
         let done = highest_block < target || !capped;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, done, "Sync iteration finished");
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target, done, "Sync iteration finished");
 
         Ok(ExecOutput { stage_progress: highest_block, done })
     }

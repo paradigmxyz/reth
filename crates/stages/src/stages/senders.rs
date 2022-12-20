@@ -91,7 +91,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
             .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
 
         // Iterate over transactions in chunks
-        info!(target: "sync::stages::senders", start_tx_index, end_tx_index, batch_size = self.batch_size, "Recovering senders");
+        info!(target: "sync::stages::senders", start_tx_index, end_tx_index, "Recovering senders");
         for chunk in &entries.chunks(self.batch_size) {
             let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
             // Recover signers for the chunk in parallel
