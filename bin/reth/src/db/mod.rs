@@ -131,7 +131,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
         info!("Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..len, Default::default());
+        let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
             chain.iter().try_for_each(|block| {

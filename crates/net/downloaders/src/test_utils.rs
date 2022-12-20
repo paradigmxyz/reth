@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 pub(crate) fn generate_bodies(
     rng: std::ops::Range<u64>,
 ) -> (Vec<SealedHeader>, HashMap<H256, BlockBody>) {
-    let blocks = random_block_range(rng, H256::zero());
+    let blocks = random_block_range(rng, H256::zero(), 0..2);
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
     let bodies = blocks

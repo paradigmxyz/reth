@@ -1,4 +1,4 @@
-use rand::{thread_rng, Rng};
+use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
     proofs, Address, BlockLocked, Bytes, Header, SealedHeader, Signature, Transaction,
     TransactionKind, TransactionSigned, TxLegacy, H256, U256,
@@ -141,13 +141,19 @@ pub fn random_block(number: u64, parent: Option<H256>, tx_count: Option<u8>) -> 
 /// in the result will be equal to `head`.
 ///
 /// See [random_block] for considerations when validating the generated blocks.
-pub fn random_block_range(rng: std::ops::Range<u64>, head: H256) -> Vec<BlockLocked> {
-    let mut blocks = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
-    for idx in rng {
+pub fn random_block_range(
+    block_numbers: std::ops::Range<u64>,
+    head: H256,
+    tx_count: std::ops::Range<u8>,
+) -> Vec<BlockLocked> {
+    let mut rng = rand::thread_rng();
+    let mut blocks =
+        Vec::with_capacity(block_numbers.end.saturating_sub(block_numbers.start) as usize);
+    for idx in block_numbers {
         blocks.push(random_block(
             idx,
             Some(blocks.last().map(|block: &BlockLocked| block.header.hash()).unwrap_or(head)),
-            None,
+            Some(tx_count.clone().sample_single(&mut rng)),
         ));
     }
     blocks

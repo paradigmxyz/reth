@@ -244,11 +244,15 @@ mod tests {
                         .into_iter()
                         .map(| header | {
                             let body = bodies .remove(&header.hash()).unwrap();
-                            BlockResponse::Full(BlockLocked {
-                                header,
-                                body: body.transactions,
-                                ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
-                            })
+                            if header.is_empty() {
+                                BlockResponse::Empty(header)
+                            } else {
+                                BlockResponse::Full(BlockLocked {
+                                    header,
+                                    body: body.transactions,
+                                    ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
+                                })
+                            }
                         })
                         .collect::<Vec<BlockResponse>>()
                 );
