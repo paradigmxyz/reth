@@ -75,7 +75,7 @@ jobs:
           command: install
           args: cargo-test-fuzz afl
 
-      - name: check for cargo afl
+      - name: Force install cargo-afl
         run: |
           cargo install --force afl
           cargo afl --version
