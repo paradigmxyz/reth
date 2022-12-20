@@ -12,7 +12,7 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::Capabilities,
-    error::{EthStreamError, HandshakeError},
+    error::{EthStreamError, HandshakeError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
@@ -290,8 +290,12 @@ impl ActiveSession {
     }
 
     /// Starts the disconnect process
-    fn start_disconnect(&mut self, reason: DisconnectReason) {
-        self.conn.inner_mut().start_disconnect(reason);
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
+        self.conn
+            .inner_mut()
+            .start_disconnect(reason)
+            .map_err(P2PStreamError::from)
+            .map_err(Into::into)
     }
 
     /// Flushes the disconnect message and emits the corresponding message
@@ -348,8 +352,18 @@ impl Future for ActiveSession {
                             SessionCommand::Disconnect { reason } => {
                                 let reason =
                                     reason.unwrap_or(DisconnectReason::DisconnectRequested);
-                                this.start_disconnect(reason);
-                                return this.poll_disconnect(cx)
+                                // try to disconnect
+                                match this.start_disconnect(reason) {
+                                    Ok(()) => {
+                                        // we're done
+                                        return this.poll_disconnect(cx)
+                                    }
+                                    Err(err) => {
+                                        error!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "could not send disconnect");
+                                        this.close_on_error(err);
+                                        return Poll::Ready(())
+                                    }
+                                }
                             }
                             SessionCommand::Message(msg) => {
                                 this.on_peer_message(msg);
@@ -660,7 +674,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let mut session = builder.connect_incoming(incoming).await;
 
-            session.start_disconnect(expected_disconnect);
+            session.start_disconnect(expected_disconnect).unwrap();
             session.await
         });
 

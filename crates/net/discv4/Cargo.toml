@@ -17,7 +17,7 @@ reth-rlp-derive = { path = "../../common/rlp-derive" }
 reth-net-common = { path = "../common" }
 
 # ethereum
-discv5 = { git = "https://github.com/mattsse/discv5", branch = "matt/add-mut-value" }
+discv5 = { git = "https://github.com/sigp/discv5" }
 secp256k1 = { version = "0.24", features = [
     "global-context",
     "rand-std",

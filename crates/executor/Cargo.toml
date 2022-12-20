@@ -15,7 +15,7 @@ reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 reth-consensus = { path = "../consensus" }
 
-revm = { git = "https://github.com/bluealloy/revm", branch = "custom_inspector", features=["inspectors"] }
+revm = { git = "https://github.com/bluealloy/revm", branch = "main"}
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 

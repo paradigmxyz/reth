@@ -30,10 +30,11 @@ smol_str = { version = "0.1", features = ["serde"] }
 metrics = "0.20.1"
 
 [dev-dependencies]
-test-fuzz = "3.0.4"
 reth-ecies = { path = "../ecies" }
+reth-tracing = { path = "../../tracing" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 
+test-fuzz = "3.0.4"
 tokio-util = { version = "0.7.4", features = ["io", "codec"] }
 hex-literal = "0.3"
 rand = "0.8"
