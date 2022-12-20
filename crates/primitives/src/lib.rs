@@ -35,7 +35,7 @@ pub use block::{Block, BlockHashOrNumber, BlockLocked};
 pub use chain::Chain;
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;
-pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
+pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
