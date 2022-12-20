@@ -114,7 +114,7 @@ pub struct ExecutionResult {
     pub block_reward: Option<BTreeMap<Address, AccountInfoChangeSet>>,
 }
 
-/// Commit chgange to database and return change diff that is used to update state and create
+/// Commit change to database and return change diff that is used to update state and create
 /// history index
 ///
 /// ChangeDiff consists of:
@@ -331,6 +331,7 @@ pub fn execute<DB: StateProvider>(
 
         // Execute transaction.
         let out = evm.transact();
+        
         //let out = evm.inspect(revm::inspectors::CustomPrintTracer::new());
         //tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
         // \nENV:{:?}",transaction.hash(),transaction,evm.env);

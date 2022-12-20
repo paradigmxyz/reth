@@ -191,6 +191,9 @@ pub enum ForkSpec {
     /// After Merge Init Code test
     #[serde(alias = "Merge+3860")]
     MergeMeterInitCode,
+    /// After Merge plus new PUSH0 opcode
+    #[serde(alias = "Merge+3855")]
+    MergePush0,
 }
 
 impl From<ForkSpec> for reth_executor::SpecUpgrades {
@@ -214,6 +217,7 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
             ForkSpec::Merge => Self::new_paris_activated(),
             ForkSpec::MergeEOF => Self::new_paris_activated(),
             ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
+            ForkSpec::MergePush0 => Self::new_paris_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overriden with PETERSBURG")
             }

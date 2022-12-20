@@ -2,7 +2,7 @@ use super::models::Test;
 use crate::test_eth_chain::models::{ForkSpec, RootOrState};
 use eyre::eyre;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     mdbx::{test_utils::create_test_rw_db, WriteMap},
     tables,
@@ -12,7 +12,7 @@ use reth_db::{
 use reth_executor::SpecUpgrades;
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, BlockLocked, JsonU256, SealedHeader, StorageEntry,
-    H256, U256,
+     H256, U256,
 };
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, Transaction};
@@ -87,6 +87,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 | ForkSpec::Constantinople
                 | ForkSpec::MergeEOF
                 | ForkSpec::MergeMeterInitCode
+                | ForkSpec::MergePush0,
         ) {
             continue;
         }
@@ -158,20 +159,24 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         tracing::trace!("Pre state :{:?}", storage);
 
         // Initialize the execution stage
-        // Hardcode the chain_id to Ethereums 1.
+        // Hardcode the chain_id to Ethereum 1.
         let mut stage =
             ExecutionStage::new(reth_executor::Config { chain_id: 1.into(), spec_upgrades });
 
         // Call execution stage
         let input = ExecInput::default();
-        let mut transaction = Transaction::new(db.as_ref())?;
+        {
+            let mut transaction = Transaction::new(db.as_ref())?;
 
-        // ignore error
-        let _ = stage.execute(&mut transaction, input).await;
-        transaction.commit()?;
+            // ignore error
+            let _ = stage.execute(&mut transaction, input).await;
+            transaction.commit()?;
+        }
 
-        /* TODO remove print test
-        let acc = H160(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87"));
+        // TODO remove print test
+        let acc = reth_primitives::H160(reth_primitives::hex_literal::hex!(
+            "095e7baea6a6c7c4c2dfeb977efac326af552d87"
+        ));
         let prob_val = db
             .tx()
             .unwrap()
@@ -179,7 +184,6 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             .unwrap()
             .seek_by_key_subkey(acc, H256::zero());
         debug!("Value wih seek_by_key_subkey {prob_val:?}");
-        */
 
         // Validate post state
         match suite.post_state {

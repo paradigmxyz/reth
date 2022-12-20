@@ -418,6 +418,45 @@ mod tests {
     }
 
     #[test]
+    fn dup_value_with_same_subkey() {
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT key1 (0,1)
+        let value01 = StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value01.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key1 (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // Iterate with walk
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk(first.0).unwrap();
+
+            // NOTE: Both values are present
+            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value01.clone()))), walker.next());
+            assert_eq!(None, walker.next());
+        }
+
+        // seek_by_key_subkey
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+
+            // NOTE: There are two values with same SubKey but only first one is shown
+            assert_eq!(Ok(Some((value00.clone()))), cursor.seek_by_key_subkey(key1, value00.key));
+        }
+    }
+
+    #[test]
     fn db_sharded_key() {
         let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
         let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
