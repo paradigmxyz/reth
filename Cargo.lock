@@ -3292,6 +3292,7 @@ dependencies = [
  "dirs-next",
  "eyre",
  "futures",
+ "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
  "reth-consensus",
