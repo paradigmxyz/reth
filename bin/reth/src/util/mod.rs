@@ -31,17 +31,41 @@ pub mod reth_tracing {
 
     /// Tracing modes
     pub enum TracingMode {
-        /// Enable all info traces.
+        /// Enable all traces.
         All,
-        /// Disable tracing
+        /// Enable debug traces.
+        Debug,
+        /// Enable info traces.
+        Info,
+        /// Enable warn traces.
+        Warn,
+        /// Enable error traces.
+        Error,
+        /// Disable tracing.
         Silent,
     }
 
     impl TracingMode {
         fn into_env_filter(self) -> EnvFilter {
             match self {
-                Self::All => EnvFilter::new("reth=info"),
+                Self::All => EnvFilter::new("reth=trace"),
+                Self::Debug => EnvFilter::new("reth=debug"),
+                Self::Info => EnvFilter::new("reth=info"),
+                Self::Warn => EnvFilter::new("reth=warn"),
+                Self::Error => EnvFilter::new("reth=error"),
                 Self::Silent => EnvFilter::new(""),
+            }
+        }
+    }
+
+    impl From<u8> for TracingMode {
+        fn from(value: u8) -> Self {
+            match value {
+                0 => Self::Error,
+                1 => Self::Warn,
+                2 => Self::Info,
+                3 => Self::Debug,
+                _ => Self::All,
             }
         }
     }
