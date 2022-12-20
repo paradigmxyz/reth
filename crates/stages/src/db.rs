@@ -162,7 +162,7 @@ where
         block: BlockNumber,
     ) -> Result<(TxNumber, TransitionId), StageError> {
         if block == 0 {
-            return Ok((0, 0));
+            return Ok((0, 0))
         }
 
         let prev_key = self.get_block_numhash(block - 1)?;
@@ -211,7 +211,7 @@ where
         let mut entry = cursor.last()?;
         while let Some((key, _)) = entry {
             if selector(key) <= block {
-                break;
+                break
             }
             cursor.delete_current()?;
             entry = cursor.prev()?;

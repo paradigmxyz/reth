@@ -110,7 +110,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
             info!(target: "sync::stages::execution", stage_progress = last_block, "Target block already reached");
-            return Ok(ExecOutput { stage_progress: last_block, done: true });
+            return Ok(ExecOutput { stage_progress: last_block, done: true })
         }
 
         // Get block headers and bodies from canonical hashes
@@ -144,9 +144,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(
-                        DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into()
-                    );
+                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
             }
@@ -160,10 +158,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Signer gap");
-                    return Err(DatabaseIntegrityError::TransactionsSignerGap {
-                        missing: tx_index,
-                    }
-                    .into());
+                    return Err(
+                        DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
+                    )
                 }
                 signers.push(tx);
             }
@@ -309,7 +306,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to });
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
@@ -357,7 +354,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = account_changeset.last()?;
         while let Some((transition_id, _)) = entry {
             if transition_id < to_transition {
-                break;
+                break
             }
             account_changeset.delete_current()?;
             entry = account_changeset.prev()?;
@@ -366,7 +363,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = storage_changeset.last()?;
         while let Some((key, _)) = entry {
             if key.transition_id() < to_transition {
-                break;
+                break
             }
             storage_changeset.delete_current()?;
             entry = storage_changeset.prev()?;

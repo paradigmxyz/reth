@@ -331,7 +331,7 @@ pub fn execute<DB: StateProvider>(
 
         // Execute transaction.
         let out = evm.transact();
-        
+
         //let out = evm.inspect(revm::inspectors::CustomPrintTracer::new());
         //tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
         // \nENV:{:?}",transaction.hash(),transaction,evm.env);
