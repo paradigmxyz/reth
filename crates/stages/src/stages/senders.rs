@@ -251,7 +251,7 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
-            let blocks = random_block_range(stage_progress..end, H256::zero());
+            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
 
             let mut current_tx_id = 0;
             blocks.iter().try_for_each(|b| -> Result<(), TestRunnerError> {
