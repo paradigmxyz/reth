@@ -3487,6 +3487,7 @@ dependencies = [
  "reth-ecies",
  "reth-primitives",
  "reth-rlp",
+ "reth-tracing",
  "secp256k1",
  "serde",
  "smol_str",

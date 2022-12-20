@@ -1,7 +1,7 @@
 //! Disconnect
 
 use bytes::Buf;
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
@@ -102,64 +102,50 @@ impl TryFrom<u8> for DisconnectReason {
 }
 
 /// The [`Encodable`](reth_rlp::Encodable) implementation for [`DisconnectReason`] encodes the
-/// disconnect reason as RLP, and prepends a snappy header to the RLP bytes.
+/// disconnect reason in a single-element RLP list.
 impl Encodable for DisconnectReason {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        // disconnect reasons are snappy encoded as follows:
-        // [0x02, 0x04, 0xc1, rlp(reason as u8)]
-        // this is 4 bytes
-        out.put_u8(0x02);
-        out.put_u8(0x04);
         vec![*self as u8].encode(out);
     }
     fn length(&self) -> usize {
-        // disconnect reasons are snappy encoded as follows:
-        // [0x02, 0x04, 0xc1, rlp(reason as u8)]
-        // this is 4 bytes
-        4
+        vec![*self as u8].length()
     }
 }
 
-/// The [`Decodable`](reth_rlp::Decodable) implementation for [`DisconnectReason`] assumes that the
-/// input is snappy compressed.
+/// The [`Decodable`](reth_rlp::Decodable) implementation for [`DisconnectReason`] supports either
+/// a disconnect reason encoded a single byte or a RLP list containing the disconnect reason.
 impl Decodable for DisconnectReason {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         if buf.is_empty() {
             return Err(DecodeError::InputTooShort)
+        } else if buf.len() > 2 {
+            return Err(DecodeError::Overflow)
         }
 
-        // encoded as a single byte
-        let reason_byte = if buf.len() == 1 {
-            u8::decode(buf)?
-        } else if buf.len() <= 4 {
-            // in any disconnect encoding, headers precede and do not wrap the reason, so we should
-            // advance to the end of the buffer
-            buf.advance(buf.len() - 1);
-
-            // geth rlp encodes [`DisconnectReason::DisconnectRequested`] as 0x00 and not as empty
-            // string 0x80
-            if buf[0] == 0x00 {
-                DisconnectReason::DisconnectRequested as u8
-            } else {
-                // the reason is encoded at the end of the snappy encoded bytes
-                u8::decode(buf)?
+        if buf.len() > 1 {
+            // this should be a list, so decode the list header. this should advance the buffer so
+            // buf[0] is the first (and only) element of the list.
+            let header = Header::decode(buf)?;
+            if !header.list {
+                return Err(DecodeError::UnexpectedString)
             }
-        } else {
-            return Err(DecodeError::Custom("invalid disconnect reason length"))
-        };
+        }
 
-        let reason = DisconnectReason::try_from(reason_byte)
-            .map_err(|_| DecodeError::Custom("unknown disconnect reason"))?;
-        Ok(reason)
+        // geth rlp encodes [`DisconnectReason::DisconnectRequested`] as 0x00 and not as empty
+        // string 0x80
+        if buf[0] == 0x00 {
+            buf.advance(1);
+            Ok(DisconnectReason::DisconnectRequested)
+        } else {
+            DisconnectReason::try_from(u8::decode(buf)?)
+                .map_err(|_| DecodeError::Custom("unknown disconnect reason"))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        p2pstream::{P2PMessage, P2PMessageID},
-        DisconnectReason,
-    };
+    use crate::{p2pstream::P2PMessage, DisconnectReason};
     use reth_rlp::{Decodable, Encodable};
 
     fn all_reasons() -> Vec<DisconnectReason> {
@@ -198,7 +184,12 @@ mod tests {
 
     #[test]
     fn test_reason_too_short() {
-        assert!(DisconnectReason::decode(&mut &[0u8][..]).is_err())
+        assert!(DisconnectReason::decode(&mut &[0u8; 0][..]).is_err())
+    }
+
+    #[test]
+    fn test_reason_too_long() {
+        assert!(DisconnectReason::decode(&mut &[0u8; 3][..]).is_err())
     }
 
     #[test]
@@ -216,122 +207,17 @@ mod tests {
     }
 
     #[test]
-    fn disconnect_snappy_encoding_parity() {
-        // encode disconnect using our `Encodable` implementation
-        let disconnect = P2PMessage::Disconnect(DisconnectReason::DisconnectRequested);
-        let mut disconnect_encoded = Vec::new();
-        disconnect.encode(&mut disconnect_encoded);
-
-        let mut disconnect_raw = Vec::new();
-        // encode [DisconnectRequested]
-        // DisconnectRequested will be converted to 0x80 (encoding of 0) in Encodable::encode
-        Encodable::encode(&vec![0x00u8], &mut disconnect_raw);
-
-        let mut snappy_encoder = snap::raw::Encoder::new();
-        let disconnect_compressed = snappy_encoder.compress_vec(&disconnect_raw).unwrap();
-        let mut disconnect_expected = vec![P2PMessageID::Disconnect as u8];
-        disconnect_expected.extend(&disconnect_compressed);
-
-        // ensure that the two encodings are equal
-        assert_eq!(
-            disconnect_expected, disconnect_encoded,
-            "left: {disconnect_expected:#x?}, right: {disconnect_encoded:#x?}"
-        );
-
-        // also ensure that the length is correct
-        assert_eq!(
-            disconnect_expected.len(),
-            P2PMessage::Disconnect(DisconnectReason::DisconnectRequested).length()
-        );
-    }
-
-    #[test]
-    fn disconnect_snappy_decoding_parity() {
-        // encode disconnect using our `Encodable` implementation
-        let disconnect = P2PMessage::Disconnect(DisconnectReason::DisconnectRequested);
-        let mut disconnect_encoded = Vec::new();
-        disconnect.encode(&mut disconnect_encoded);
-
-        // try to decode using Decodable
-        let p2p_message = P2PMessage::decode(&mut &disconnect_encoded[..]).unwrap();
-        assert_eq!(p2p_message, P2PMessage::Disconnect(DisconnectReason::DisconnectRequested));
-
-        // finally decode the encoded message with snappy
-        let mut snappy_decoder = snap::raw::Decoder::new();
-
-        // the message id is not compressed, only compress the latest bits
-        let decompressed = snappy_decoder.decompress_vec(&disconnect_encoded[1..]).unwrap();
-
-        let mut disconnect_raw = Vec::new();
-        // encode [DisconnectRequested]
-        // DisconnectRequested will be converted to 0x80 (encoding of 0) in Encodable::encode
-        Encodable::encode(&vec![0x00u8], &mut disconnect_raw);
-
-        assert_eq!(decompressed, disconnect_raw);
-    }
-
-    #[test]
     fn test_decode_known_reasons() {
         let all_reasons = vec![
-            // non-snappy, encoding the disconnect reason as a single byte
-            "0180",
-            "0101",
-            "0102",
-            "0103",
-            "0104",
-            "0105",
-            "0106",
-            "0107",
-            "0108",
-            "0109",
-            "010a",
-            "010b",
-            "0110",
-            // non-snappy, encoding the disconnect reason in a list
-            "01c180",
-            "01c101",
-            "01c102",
-            "01c103",
-            "01c104",
-            "01c105",
-            "01c106",
-            "01c107",
-            "01c108",
-            "01c109",
-            "01c10a",
-            "01c10b",
-            "01c110",
-            // snappy, compressing a single byte
-            "010080",
-            "010001",
-            "010002",
-            "010003",
-            "010004",
-            "010005",
-            "010006",
-            "010007",
-            "010008",
-            "010009",
-            "01000a",
-            "01000b",
-            "010010",
-            // TODO: just saw this format once, not really sure what this format even is
-            "01010003",
-            "01010000",
-            // snappy, encoded the disconnect reason as a list
-            "010204c180",
-            "010204c101",
-            "010204c102",
-            "010204c103",
-            "010204c104",
-            "010204c105",
-            "010204c106",
-            "010204c107",
-            "010204c108",
-            "010204c109",
-            "010204c10a",
-            "010204c10b",
-            "010204c110",
+            // encoding the disconnect reason as a single byte
+            "0100", // 0x00 case
+            "0180", // second 0x00 case
+            "0101", "0102", "0103", "0104", "0105", "0106", "0107", "0108", "0109", "010a", "010b",
+            "0110",   // encoding the disconnect reason in a list
+            "01c100", // 0x00 case
+            "01c180", // second 0x00 case
+            "01c101", "01c102", "01c103", "01c104", "01c105", "01c106", "01c107", "01c108",
+            "01c109", "01c10a", "01c10b", "01c110",
         ];
 
         for reason in all_reasons {
@@ -345,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_decode_disconnect_requested() {
-        let reason = "01010000";
+        let reason = "0100";
         let reason = hex::decode(reason).unwrap();
         match P2PMessage::decode(&mut &reason[..]).unwrap() {
             P2PMessage::Disconnect(DisconnectReason::DisconnectRequested) => {}
