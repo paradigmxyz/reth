@@ -1,6 +1,5 @@
 //! CLI definition and entrypoint to executable
 
-use crate::{metrics_describer, prometheus_exporter};
 use clap::{ArgAction, Parser, Subcommand};
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -18,11 +17,6 @@ pub async fn run() -> eyre::Result<()> {
         TracingMode::from(opt.verbose)
     })
     .init();
-
-    if opt.metrics {
-        prometheus_exporter::initialize_prometheus_exporter();
-        metrics_describer::describe_metrics();
-    }
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -59,7 +53,4 @@ struct Cli {
     /// Silence all output
     #[clap(long, global = true)]
     silent: bool,
-
-    #[clap(long, global = true)]
-    metrics: bool,
 }
