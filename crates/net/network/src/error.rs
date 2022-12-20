@@ -50,6 +50,9 @@ pub(crate) fn is_fatal_protocol_error(err: &EthStreamError) -> bool {
                     P2PStreamError::EmptyProtocolMessage |
                     P2PStreamError::ParseVersionError(_) |
                     P2PStreamError::Disconnected(DisconnectReason::UselessPeer) |
+                    P2PStreamError::Disconnected(
+                        DisconnectReason::IncompatibleP2PProtocolVersion
+                    ) |
                     P2PStreamError::MismatchedProtocolVersion { .. }
             )
         }
