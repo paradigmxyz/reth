@@ -18,6 +18,7 @@ use std::{
     time::Duration,
 };
 
+use crate::peers::reputation::BACKOFF_REPUTATION_CHANGE;
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -25,7 +26,6 @@ use tokio::{
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
-use crate::peers::reputation::BACKOFF_REPUTATION_CHANGE;
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -92,7 +92,8 @@ pub(crate) struct PeersManager {
     unban_interval: Interval,
     /// How long to ban bad peers.
     ban_duration: Duration,
-    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as [`DisconnectReason::TooManyPeers`].
+    /// How long peers to which we could not connect for non-fatal reasons, e.g.
+    /// [`DisconnectReason::TooManyPeers`], are put in time out.
     backoff_duration: Duration,
 }
 
@@ -105,7 +106,7 @@ impl PeersManager {
             reputation_weights,
             ban_list,
             ban_duration,
-            backoff_duration
+            backoff_duration,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -123,11 +124,11 @@ impl PeersManager {
                 now + refill_slots_interval,
                 refill_slots_interval,
             ),
-            unban_interval: tokio::time::interval_at(now + unban_interval, unban_interval ),
+            unban_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info,
             ban_list,
             ban_duration,
-            backoff_duration
+            backoff_duration,
         }
     }
 
@@ -302,13 +303,15 @@ impl PeersManager {
                 })
             }
         } else {
-
-            let reputation_change = if let Some(DisconnectReason::TooManyPeers) = err.as_disconnected() {
-                // The peer has signaled that it is currently unable to process any more connections, so we will hold off on attempting any new connections for a while
+            let reputation_change = if let Some(DisconnectReason::TooManyPeers) =
+                err.as_disconnected()
+            {
+                // The peer has signaled that it is currently unable to process any more
+                // connections, so we will hold off on attempting any new connections for a while
                 self.backoff_peer(*peer_id);
                 BACKOFF_REPUTATION_CHANGE.into()
             } else {
-                 self.reputation_weights.change(ReputationChangeKind::Dropped)
+                self.reputation_weights.change(ReputationChangeKind::Dropped)
             };
 
             if let Some(mut peer) = self.peers.get_mut(peer_id) {
@@ -724,7 +727,8 @@ pub struct PeersConfig {
     pub ban_list: BanList,
     /// How long to ban bad peers.
     pub ban_duration: Duration,
-    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as [`DisconnectReason::TooManyPeers`].
+    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
+    /// [`DisconnectReason::TooManyPeers`].
     pub backoff_duration: Duration,
 }
 
@@ -738,7 +742,7 @@ impl Default for PeersConfig {
             // Ban peers for 12h
             ban_duration: Duration::from_secs(60 * 60 * 12),
             // backoff peers for 1h
-            backoff_duration:  Duration::from_secs(60 * 60),
+            backoff_duration: Duration::from_secs(60 * 60),
         }
     }
 }
@@ -813,8 +817,8 @@ mod test {
         net::{IpAddr, Ipv4Addr, SocketAddr},
         pin::Pin,
         task::{Context, Poll},
+        time::Duration,
     };
-    use std::time::Duration;
 
     struct PeerActionFuture<'a> {
         peers: &'a mut PeersManager,
@@ -878,10 +882,7 @@ mod test {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
         let backoff_duration = Duration::from_secs(3);
-        let config = PeersConfig {
-            backoff_duration,
-            ..Default::default()
-        };
+        let config = PeersConfig { backoff_duration, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_discovered_node(peer, socket_addr);
 
@@ -896,7 +897,7 @@ mod test {
             assert!(peers.poll(cx).is_pending());
             Poll::Ready(())
         })
-            .await;
+        .await;
 
         peers.on_connection_dropped(
             &socket_addr,
@@ -910,7 +911,7 @@ mod test {
             assert!(peers.poll(cx).is_pending());
             Poll::Ready(())
         })
-            .await;
+        .await;
 
         assert!(peers.ban_list.is_banned_peer(&peer));
         assert!(peers.peers.get(&peer).is_some());
