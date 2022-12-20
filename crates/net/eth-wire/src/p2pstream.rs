@@ -303,12 +303,6 @@ where
                 None => return Poll::Ready(None),
             };
 
-            tracing::trace!(
-                fromlen=%bytes.len(),
-                msg=%hex::encode(&bytes),
-                "Determining decompressed message length",
-            );
-
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
