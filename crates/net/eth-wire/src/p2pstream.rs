@@ -273,8 +273,25 @@ where
                 None => return Poll::Ready(None),
             };
 
-            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+            // first check that the compressed message length does not exceed the max
+            // payload size
+            let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
+            if decompressed_len > MAX_PAYLOAD_SIZE {
+                return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
+                    message_size: decompressed_len,
+                    max_size: MAX_PAYLOAD_SIZE,
+                })))
+            }
 
+            // create a buffer to hold the decompressed message, adding a byte to the length for
+            // the message ID byte, which is the first byte in this buffer
+            let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
+
+            // each message following a successful handshake is compressed with snappy, so we need
+            // to decompress the message before we can decode it.
+            this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
+
+            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
                     // we have received a ping, so we will send a pong
@@ -315,25 +332,30 @@ where
                     return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
                 }
                 _ => {
-                    // first check that the compressed message length does not exceed the max
-                    // message size
-                    let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
-                    if decompressed_len > MAX_PAYLOAD_SIZE {
-                        return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
-                            message_size: decompressed_len,
-                            max_size: MAX_PAYLOAD_SIZE,
-                        })))
-                    }
+                    // we have received a message that is outside the `p2p` reserved message space,
+                    // so it is a subprotocol message.
 
-                    // then decompress the message
-                    let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
-
-                    // we have a subprotocol message that needs to be sent in the stream.
-                    // first, switch the message id based on offset so the next layer can decode it
-                    // without being aware of the p2p stream's state (shared capabilities / the
-                    // message id offset)
+                    // Peers must be able to identify messages meant for different subprotocols
+                    // using a single message ID byte, and those messages must be distinct from the
+                    // lower-level `p2p` messages.
+                    //
+                    // To ensure that messages for subprotocols are distinct from messages meant
+                    // for the `p2p` capability, message IDs 0x00 - 0x0f are reserved for `p2p`
+                    // messages, so subprotocol messages must have an ID of 0x10 or higher.
+                    //
+                    // To ensure that messages for two different capabilities are distinct from
+                    // each other, all shared capabilities are first ordered lexicographically.
+                    // Message IDs are then reserved in this order, starting at 0x10, reserving a
+                    // message ID for each message the capability supports.
+                    //
+                    // For example, if the shared capabilities are `eth/67` (containing 10
+                    // messages), and "qrs/65" (containing 8 messages):
+                    //
+                    //  * The special case of `p2p`: `p2p` is reserved message IDs 0x00 - 0x0f.
+                    //  * `eth/67` is reserved message IDs 0x10 - 0x19.
+                    //  * `qrs/65` is reserved message IDs 0x1a - 0x21.
+                    //
                     decompress_buf[0] = bytes[0] - this.shared_capability.offset();
-                    this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
 
                     return Poll::Ready(Some(Ok(decompress_buf)))
                 }
