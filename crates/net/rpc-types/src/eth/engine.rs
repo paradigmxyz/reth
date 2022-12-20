@@ -113,3 +113,19 @@ pub struct ForkchoiceUpdated {
     pub payload_status: PayloadStatus,
     pub payload_id: Option<H64>,
 }
+
+impl ForkchoiceUpdated {
+    pub fn new(status: PayloadStatusEnum) -> Self {
+        Self { payload_status: PayloadStatus { status, latest_valid_hash: None }, payload_id: None }
+    }
+
+    pub fn with_latest_valid_hash(mut self, hash: H256) -> Self {
+        self.payload_status.latest_valid_hash = Some(hash);
+        self
+    }
+
+    pub fn with_payload_id(mut self, id: H64) -> Self {
+        self.payload_id = Some(id);
+        self
+    }
+}

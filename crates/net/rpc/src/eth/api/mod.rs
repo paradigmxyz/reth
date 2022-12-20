@@ -1,8 +1,8 @@
 //! Provides everything related to `eth_` namespace
 
 use reth_interfaces::Result;
-use reth_primitives::{U256, U64};
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_primitives::{rpc::BlockId, Block, BlockHash, U64};
+use reth_provider::{BlockProvider, ChainInfo, StateProviderFactory};
 use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -16,11 +16,14 @@ pub trait EthApiSpec: Send + Sync {
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> U64;
 
-    /// Returns the best block number
-    fn block_number(&self) -> Result<U256>;
-
     /// Returns the chain id
     fn chain_id(&self) -> U64;
+
+    /// Returns client chain info
+    fn chain_info(&self) -> Result<ChainInfo>;
+
+    /// Get block by hash
+    fn block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>>;
 }
 
 /// `Eth` API implementation.
@@ -66,14 +69,19 @@ where
         1u64.into()
     }
 
-    /// Returns the best block number
-    fn block_number(&self) -> Result<U256> {
-        Ok(self.client().chain_info()?.best_number.into())
-    }
-
     /// Returns the chain id
     fn chain_id(&self) -> U64 {
         todo!()
+    }
+
+    /// Returns the current info for the chain
+    fn chain_info(&self) -> Result<ChainInfo> {
+        self.client().chain_info()
+    }
+
+    /// Get block by hash
+    fn block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>> {
+        self.client().block(BlockId::Hash(hash))
     }
 }
 

@@ -3720,6 +3720,7 @@ dependencies = [
  "async-trait",
  "hex",
  "jsonrpsee",
+ "reth-consensus",
  "reth-interfaces",
  "reth-network",
  "reth-primitives",
