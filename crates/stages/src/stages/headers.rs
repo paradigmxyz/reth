@@ -76,12 +76,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
         // Lookup the head and tip of the sync range
         let (head, tip) = self.get_head_and_tip(tx, stage_progress).await?;
-        debug!(
-            target: "sync::stages::headers",
-            "Syncing from tip {:?} to head {:?}",
-            tip,
-            head.hash()
-        );
+        debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
         let mut current_progress = stage_progress;
         let mut stream =
@@ -93,11 +88,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         while let Some(headers) = stream.next().await {
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
-                    info!(
-                        target: "sync::stages::headers",
-                        len = res.len(),
-                        "Received headers"
-                    );
+                    info!(target: "sync::stages::headers", len = res.len(), "Received headers");
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
@@ -107,25 +98,15 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 }
                 Err(e) => match e {
                     DownloadError::Timeout => {
-                        warn!(
-                            target: "sync::stages::headers",
-                            "No response for header request"
-                        );
+                        warn!(target: "sync::stages::headers", "No response for header request");
                         return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        error!(
-                            target: "sync::stages::headers",
-                            "Validation error for header {hash}: {error}"
-                        );
+                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
                         return Err(StageError::Validation { block: stage_progress, error })
                     }
                     error => {
-                        error!(
-                            target: "sync::stages::headers",
-                            ?error,
-                            "An unexpected error occurred"
-                        );
+                        error!(target: "sync::stages::headers", ?error, "Unexpected error");
                         return Err(StageError::Recoverable(error.into()))
                     }
                 },
@@ -133,6 +114,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         }
 
         // Write total difficulty values after all headers have been inserted
+        debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
         self.write_td::<DB>(tx, &head)?;
 
         let stage_progress = current_progress.max(

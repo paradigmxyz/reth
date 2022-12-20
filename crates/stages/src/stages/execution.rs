@@ -18,6 +18,7 @@ use reth_executor::{
 use reth_primitives::{Address, Header, StorageEntry, TransactionSignedEcRecovered, H256, U256};
 use reth_provider::StateProviderImplRefLatest;
 use std::fmt::Debug;
+use tracing::*;
 
 const EXECUTION: StageId = StageId("Execution");
 
@@ -108,6 +109,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // no more canonical blocks, we are done with execution.
         if canonical_batch.is_empty() {
+            info!(target: "sync::stages::execution", stage_progress = last_block, "Target block already reached");
             return Ok(ExecOutput { stage_progress: last_block, done: true })
         }
 
@@ -131,8 +133,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
         for (header, body) in block_batch.iter() {
-            let num = header.number;
-            tracing::trace!(target: "stages::execution", ?num, "Execute block num.");
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -141,6 +141,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
+                    error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Transaction gap");
                     return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
@@ -154,6 +155,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .next()
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
+                    error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Signer gap");
                     return Err(
                         DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
                     )
@@ -172,6 +174,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             // for now use default eth config
             let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
 
+            trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
             let change_set = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
@@ -195,6 +198,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // Get last tx count so that we can know amount of transaction in the block.
         let mut current_transition_id = tx.get_block_transition_by_num(last_block)? + 1;
+        info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
         // apply changes to plain database.
         for results in block_change_patches.into_iter() {
@@ -205,6 +209,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
+                    trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
                     account.apply_to_db(&**tx, address, current_transition_id)?;
 
                     // wipe storage
@@ -217,6 +222,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     for (key, (old_value, new_value)) in storage {
                         let mut hkey = H256::zero();
                         key.to_big_endian(&mut hkey.0);
+
+                        trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
 
                         // insert into StorageChangeSet
                         tx.put::<tables::StorageChangeSet>(
@@ -242,7 +249,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
                     // make different types of bytecode. Checked and maybe even analyzed (needs to
                     // be packed). Currently save only raw bytes.
-                    tx.put::<tables::Bytecodes>(hash, bytecode.bytes()[..bytecode.len()].to_vec())?;
+                    let bytecode = bytecode.bytes();
+                    trace!(target: "sync::stages::execution", ?hash, ?bytecode, len = bytecode.len(), "Inserting bytecode");
+                    tx.put::<tables::Bytecodes>(hash, bytecode[..bytecode.len()].to_vec())?;
 
                     // NOTE: bytecode bytes are not inserted in change set and it stand in saparate
                     // table
@@ -254,15 +263,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             if let Some(block_reward_changeset) = results.block_reward {
                 // we are sure that block reward index is present.
                 for (address, changeset) in block_reward_changeset.into_iter() {
+                    trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
                     changeset.apply_to_db(&**tx, address, current_transition_id)?;
                 }
                 current_transition_id += 1;
             }
         }
 
-        let last_block = last_block + canonical_batch.len() as u64;
-        let is_done = canonical_batch.len() < BATCH_SIZE as usize;
-        Ok(ExecOutput { done: is_done, stage_progress: last_block })
+        let stage_progress = last_block + canonical_batch.len() as u64;
+        let done = canonical_batch.len() < BATCH_SIZE as usize;
+        info!(target: "sync::stages::execution", done, stage_progress, "Sync iteration finished");
+        Ok(ExecOutput { done, stage_progress })
     }
 
     /// Unwind the stage.
