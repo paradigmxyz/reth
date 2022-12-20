@@ -2,11 +2,9 @@
 //! Previously version of apache licenced: https://crates.io/crates/ethereum-forkid
 
 #![deny(missing_docs)]
-#![allow(clippy::redundant_else, clippy::too_many_lines)]
 
 use crate::{BlockNumber, H256};
 use crc::crc32;
-use maplit::btreemap;
 use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -125,10 +123,11 @@ impl ForkFilter {
         let genesis_fork_hash = ForkHash::from(genesis);
         let mut forks = forks.into_iter().map(Into::into).collect::<BTreeSet<_>>();
         forks.remove(&0);
+
         let forks = forks
             .into_iter()
             .fold(
-                (btreemap! { 0 => genesis_fork_hash }, genesis_fork_hash),
+                (BTreeMap::from([(0, genesis_fork_hash)]), genesis_fork_hash),
                 |(mut acc, base_hash), block| {
                     let fork_hash = base_hash + block;
                     acc.insert(block, fork_hash);
@@ -143,7 +142,6 @@ impl ForkFilter {
     }
 
     fn set_head_priv(&mut self, head: BlockNumber) -> bool {
-        #[allow(clippy::option_if_let_else)]
         let recompute_cache = {
             if head < self.cache.epoch_start {
                 true
@@ -428,21 +426,15 @@ mod tests {
     #[test]
     fn forkid_serialization() {
         assert_eq!(
-            &*reth_rlp::encode_fixed_size(&ForkId { hash: ForkHash(hex!("00000000")), next: 0 }),
+            &*encode_fixed_size(&ForkId { hash: ForkHash(hex!("00000000")), next: 0 }),
             hex!("c6840000000080")
         );
         assert_eq!(
-            &*reth_rlp::encode_fixed_size(&ForkId {
-                hash: ForkHash(hex!("deadbeef")),
-                next: 0xBADD_CAFE
-            }),
+            &*encode_fixed_size(&ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADD_CAFE }),
             hex!("ca84deadbeef84baddcafe")
         );
         assert_eq!(
-            &*reth_rlp::encode_fixed_size(&ForkId {
-                hash: ForkHash(hex!("ffffffff")),
-                next: u64::MAX
-            }),
+            &*encode_fixed_size(&ForkId { hash: ForkHash(hex!("ffffffff")), next: u64::MAX }),
             hex!("ce84ffffffff88ffffffffffffffff")
         );
 
