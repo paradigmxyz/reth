@@ -53,6 +53,13 @@ jobs:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        target:
+          - reth-primitives
+          - reth-db
+          - reth-eth-wire
+          - reth-codecs
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -75,10 +82,9 @@ jobs:
 
       - name: Run fuzz tests
         run: |
-          ./.github/scripts/fuzz.sh reth-primitives
-          ./.github/scripts/fuzz.sh reth-db
-          ./.github/scripts/fuzz.sh reth-eth-wire
-          ./.github/scripts/fuzz.sh reth-codecs
+          ./.github/scripts/fuzz.sh ${{ matrix.target }}
+        env:
+          AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
 
   lint:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete

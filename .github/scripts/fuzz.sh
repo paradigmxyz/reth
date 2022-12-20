@@ -4,8 +4,6 @@
 PACKAGE=$1
 TEST_TIME=${2:-5}
 
-echo "::group::$PACKAGE"
-
 echo Building corpus.
 cargo test -p $PACKAGE --no-run --all-features
 
@@ -19,5 +17,3 @@ do
     cargo test-fuzz --no-ui  -p "$PACKAGE" $test  -- -V $TEST_TIME
     set +x
 done;
-
-echo "::endgroup::"
