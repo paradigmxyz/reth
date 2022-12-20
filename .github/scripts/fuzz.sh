@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 # Runs fuzz tests using `cargo test-fuzz`.
 
 PACKAGE=$1
