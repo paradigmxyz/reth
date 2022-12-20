@@ -13,6 +13,7 @@ use reth_db::{
 use reth_primitives::TxNumber;
 use std::fmt::Debug;
 use thiserror::Error;
+use tracing::*;
 
 const SENDERS: StageId = StageId("Senders");
 
@@ -63,6 +64,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
 
         if max_block_num <= stage_progress {
+            info!(target: "sync::stages::senders", target = max_block_num, stage_progress, "Target block already reached");
             return Ok(ExecOutput { stage_progress, done: true })
         }
 
@@ -74,6 +76,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
+            info!(target: "sync::stages::senders", start_tx_index, end_tx_index, "Target transaction already reached");
             return Ok(ExecOutput { stage_progress: max_block_num, done: true })
         }
 
@@ -88,17 +91,19 @@ impl<DB: Database> Stage<DB> for SendersStage {
             .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
 
         // Iterate over transactions in chunks
+        info!(target: "sync::stages::senders", start_tx_index, end_tx_index, "Recovering senders");
         for chunk in &entries.chunks(self.batch_size) {
             let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
             // Recover signers for the chunk in parallel
             let recovered = transactions
                 .into_par_iter()
-                .map(|(id, transaction)| {
+                .map(|(tx_id, transaction)| {
+                    trace!(target: "sync::stages::senders", tx_id, hash = ?transaction.hash(), "Recovering sender");
                     let signer =
                         transaction.recover_signer().ok_or_else::<StageError, _>(|| {
-                            SendersStageError::SenderRecovery { tx: id }.into()
+                            SendersStageError::SenderRecovery { tx: tx_id }.into()
                         })?;
-                    Ok((id, signer))
+                    Ok((tx_id, signer))
                 })
                 .collect::<Result<Vec<_>, StageError>>()?;
             // Append the signers to the table
@@ -106,6 +111,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         }
 
         let done = max_block_num >= previous_stage_progress;
+        info!(target: "sync::stages::senders", stage_progress = max_block_num, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: max_block_num, done })
     }
 
