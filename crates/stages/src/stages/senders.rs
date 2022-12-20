@@ -64,7 +64,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
 
         if max_block_num <= stage_progress {
-            info!(target: "sync::stages::senders", max_block_num, stage_progress, "Target block already reached");
+            info!(target: "sync::stages::senders", target = max_block_num, stage_progress, "Target block already reached");
             return Ok(ExecOutput { stage_progress, done: true })
         }
 

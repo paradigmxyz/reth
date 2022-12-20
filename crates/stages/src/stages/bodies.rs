@@ -355,7 +355,7 @@ mod tests {
     }
 
     /// Same as [full_body_download] except we have made progress before
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn sync_from_previous_progress() {
         let (stage_progress, previous_stage) = (1, 21);
 
