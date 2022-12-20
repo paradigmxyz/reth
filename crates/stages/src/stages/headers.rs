@@ -3,7 +3,6 @@ use crate::{
     UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
-use metrics::{counter, histogram, increment_counter};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -81,7 +80,6 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
         let mut current_progress = stage_progress;
         // Start timer for request_time metric
-        let mut start = tokio::time::Instant::now();
         let mut stream =
             self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold as usize);
         // The stage relies on the downloader to return the headers
@@ -100,26 +98,24 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                         self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
                     current_progress = current_progress.max(write_progress);
                 }
-                Err(e) => match e {
-                    DownloadError::Timeout => {
-                        increment_counter!("stages.headers.timeout_errors");
-                        warn!(target: "sync::stages::headers", "No response for header request");
-                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                Err(e) => {
+                    update_header_error_metrics(e);
+                    match e {
+                        DownloadError::Timeout => {
+                            warn!(target: "sync::stages::headers", "No response for header request");
+                            return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                        }
+                        DownloadError::HeaderValidation { hash, error } => {
+                            error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
+                            return Err(StageError::Validation { block: stage_progress, error })
+                        }
+                        error => {
+                            error!(target: "sync::stages::headers", ?error, "Unexpected error");
+                            return Err(StageError::Recoverable(error.into()))
+                        }
                     }
-                    DownloadError::HeaderValidation { hash, error } => {
-                        increment_counter!("stages.headers.validation_errors");
-                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
-                        return Err(StageError::Validation { block: stage_progress, error })
-                    }
-                    error => {
-                        increment_counter!("stages.headers.unexpected_errors");
-                        error!(target: "sync::stages::headers", ?error, "Unexpected error");
-                        return Err(StageError::Recoverable(error.into()))
-                    }
-                },
+                }
             }
-            // Restart timer for next request
-            start = tokio::time::Instant::now();
         }
 
         // Write total difficulty values after all headers have been inserted
