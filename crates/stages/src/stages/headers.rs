@@ -79,7 +79,6 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
         let mut current_progress = stage_progress;
-        // Start timer for request_time metric
         let mut stream =
             self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold as usize);
         // The stage relies on the downloader to return the headers
