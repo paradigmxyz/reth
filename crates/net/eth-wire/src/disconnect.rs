@@ -212,12 +212,33 @@ mod tests {
             // encoding the disconnect reason as a single byte
             "0100", // 0x00 case
             "0180", // second 0x00 case
-            "0101", "0102", "0103", "0104", "0105", "0106", "0107", "0108", "0109", "010a", "010b",
-            "0110",   // encoding the disconnect reason in a list
+            "0101",
+            "0102",
+            "0103",
+            "0104",
+            "0105",
+            "0106",
+            "0107",
+            "0108",
+            "0109",
+            "010a",
+            "010b",
+            "0110",
+            // encoding the disconnect reason in a list
             "01c100", // 0x00 case
             "01c180", // second 0x00 case
-            "01c101", "01c102", "01c103", "01c104", "01c105", "01c106", "01c107", "01c108",
-            "01c109", "01c10a", "01c10b", "01c110",
+            "01c101",
+            "01c102",
+            "01c103",
+            "01c104",
+            "01c105",
+            "01c106",
+            "01c107",
+            "01c108",
+            "01c109",
+            "01c10a",
+            "01c10b",
+            "01c110",
         ];
 
         for reason in all_reasons {
