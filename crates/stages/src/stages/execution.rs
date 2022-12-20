@@ -177,7 +177,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
 
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
-            let change_set = std::thread::scope(|scope| {
+            let changeset = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
                     .spawn_scoped(scope, || {

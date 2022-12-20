@@ -86,8 +86,7 @@ where
     /// Panics if an inner transaction does not exist. This should never be the case unless
     /// [Transaction::close] was called without following up with a call to [Transaction::open].
     pub fn commit(&mut self) -> Result<bool, Error> {
-        let success =
-            self.tx.take().expect("Tried committing a non-existent transaction").commit()?;
+        let success = if let Some(tx) = self.tx.take() { tx.commit()? } else { false };
         self.tx = Some(self.db.tx_mut()?);
         Ok(success)
     }
@@ -163,7 +162,7 @@ where
         block: BlockNumber,
     ) -> Result<(TxNumber, TransitionId), StageError> {
         if block == 0 {
-            return Ok((0, 0))
+            return Ok((0, 0));
         }
 
         let prev_key = self.get_block_numhash(block - 1)?;
@@ -212,7 +211,7 @@ where
         let mut entry = cursor.last()?;
         while let Some((key, _)) = entry {
             if selector(key) <= block {
-                break
+                break;
             }
             cursor.delete_current()?;
             entry = cursor.prev()?;
