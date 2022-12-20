@@ -278,7 +278,10 @@ impl PeersManager {
                 self.connection_info.decr_state(peer.state);
             }
 
-            // If the error is caused by a peer that should be banned
+            // ban the peer
+            self.ban_peer(*peer_id);
+
+            // If the error is caused by a peer that should be banned from discovery
             if error_merits_discovery_ban(err) {
                 self.queued_actions.push_back(PeerAction::DiscoveryBan {
                     peer_id: *peer_id,
@@ -771,6 +774,10 @@ mod test {
         },
         PeersConfig,
     };
+    use reth_eth_wire::{
+        error::{EthStreamError, P2PStreamError},
+        DisconnectReason,
+    };
     use reth_net_common::ban_list::BanList;
     use reth_primitives::{PeerId, H512};
     use std::{
@@ -835,6 +842,50 @@ mod test {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_ban_on_drop() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        peers.on_connection_dropped(
+            &socket_addr,
+            &peer,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::UselessPeer,
+            )),
+        );
+
+        match event!(peers) {
+            PeerAction::BanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(peers.peers.get(&peer).is_none());
     }
 
     #[tokio::test]
