@@ -470,7 +470,11 @@ where
                 let _ = tx.send(self.fetch_client());
             }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
-                self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty);
+                if let Some(transition) =
+                    self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty)
+                {
+                    self.swarm.state_mut().update_fork_id(transition.current);
+                }
             }
         }
     }
