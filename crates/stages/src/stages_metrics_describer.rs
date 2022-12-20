@@ -1,6 +1,6 @@
 use metrics::{describe_counter, describe_histogram};
 
-// Describe stagedsync headers metrics
+/// Describe stagedsync headers metrics
 fn describe_header_metrics() {
     describe_counter!("stages.headers.counter", "Number of headers successfully retrived");
     describe_counter!(
