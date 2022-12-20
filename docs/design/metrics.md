@@ -16,6 +16,9 @@ The main difference between metrics and traces is therefore that metrics are sys
 ### How to add a metric
 
 To add metrics use the [`metrics`][metrics] crate. 
+1. Add the code emitting the metric.
+2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages_metrics_describer.rs).
+3. Document the metric in this file.
 
 #### Metric anatomy
 
