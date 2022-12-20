@@ -5,6 +5,10 @@ set -e
 PACKAGE=$1
 TEST_TIME=${2:-5}
 
+echo Configuring coverage.
+source <(cargo llvm-cov show-env --export-prefix)
+cargo llvm-cov clean --workspace
+
 echo Building corpus.
 cargo test -p $PACKAGE
 
