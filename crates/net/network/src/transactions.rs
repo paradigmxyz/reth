@@ -288,7 +288,7 @@ where
     /// Handles a received event related to common network events.
     fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
-            NetworkEvent::SessionClosed { peer_id } => {
+            NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
