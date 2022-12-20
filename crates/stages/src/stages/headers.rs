@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, stages_metrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -89,8 +89,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
                     info!(target: "sync::stages::headers", len = res.len(), "Received headers");
-                    histogram!("stages.headers.request_time", start.elapsed());
-                    counter!("stages.headers.counter", res.len() as u64);
+                    stages_metrics::update_headers_metrics(res.len() as u64);
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
@@ -99,7 +98,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                     current_progress = current_progress.max(write_progress);
                 }
                 Err(e) => {
-                    update_header_error_metrics(e);
+                    stages_metrics::update_headers_error_metrics(&e);
                     match e {
                         DownloadError::Timeout => {
                             warn!(target: "sync::stages::headers", "No response for header request");
