@@ -141,7 +141,7 @@ impl ForkFilter {
         Self { forks, head, cache }
     }
 
-    fn set_head_priv(&mut self, head: BlockNumber) -> bool {
+    fn set_head_priv(&mut self, head: BlockNumber) -> Option<ForkTransition> {
         let recompute_cache = {
             if head < self.cache.epoch_start {
                 true
@@ -152,17 +152,27 @@ impl ForkFilter {
             }
         };
 
+        let mut transition = None;
+
+        // recompute the cache
         if recompute_cache {
+            let past = self.current();
+
             self.cache = Cache::compute_cache(&self.forks, head);
+
+            transition = Some(ForkTransition { current: self.current(), past })
         }
+
         self.head = head;
 
-        recompute_cache
+        transition
     }
 
-    /// Set the current head
-    pub fn set_head(&mut self, head: BlockNumber) {
-        self.set_head_priv(head);
+    /// Set the current head.
+    ///
+    /// If the update updates the current [`ForkId`] it returns a [`ForkTransition`]
+    pub fn set_head(&mut self, head: BlockNumber) -> Option<ForkTransition> {
+        self.set_head_priv(head)
     }
 
     /// Return current fork id
@@ -230,6 +240,17 @@ impl ForkFilter {
         // 4) Reject in all other cases.
         Err(ValidationError::LocalIncompatibleOrStale { local: self.current(), remote: fork_id })
     }
+}
+
+/// Represents a transition from one fork to another
+///
+/// See also [`ForkFilter::set_head`]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ForkTransition {
+    /// The new, active ForkId
+    pub current: ForkId,
+    /// The previously active ForkId before the transition
+    pub past: ForkId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -463,28 +484,34 @@ mod tests {
 
         let mut fork_filter = ForkFilter::new(0, GENESIS_HASH, vec![b1, b2]);
 
-        assert!(!fork_filter.set_head_priv(0));
+        assert!(fork_filter.set_head_priv(0).is_none());
         assert_eq!(fork_filter.current(), h0);
 
-        assert!(!fork_filter.set_head_priv(1));
+        assert!(fork_filter.set_head_priv(1).is_none());
         assert_eq!(fork_filter.current(), h0);
 
-        assert!(fork_filter.set_head_priv(b1 + 1));
+        assert_eq!(
+            fork_filter.set_head_priv(b1 + 1).unwrap(),
+            ForkTransition { current: h1, past: h0 }
+        );
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(!fork_filter.set_head_priv(b1));
+        assert!(fork_filter.set_head_priv(b1).is_none());
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(fork_filter.set_head_priv(b1 - 1));
+        assert_eq!(
+            fork_filter.set_head_priv(b1 - 1).unwrap(),
+            ForkTransition { current: h0, past: h1 }
+        );
         assert_eq!(fork_filter.current(), h0);
 
-        assert!(fork_filter.set_head_priv(b1));
+        assert!(fork_filter.set_head_priv(b1).is_some());
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(!fork_filter.set_head_priv(b2 - 1));
+        assert!(fork_filter.set_head_priv(b2 - 1).is_none());
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(fork_filter.set_head_priv(b2));
+        assert!(fork_filter.set_head_priv(b2).is_some());
         assert_eq!(fork_filter.current(), h2);
     }
 }

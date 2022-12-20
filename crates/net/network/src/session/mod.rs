@@ -19,7 +19,7 @@ use reth_eth_wire::{
     error::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{ForkFilter, PeerId, H256, U256};
+use reth_primitives::{ForkFilter, ForkTransition, PeerId, H256, U256};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -146,11 +146,19 @@ impl SessionManager {
         }
     }
 
-    /// Invoked on a received status update
-    pub(crate) fn on_status_update(&mut self, height: u64, hash: H256, total_difficulty: U256) {
+    /// Invoked on a received status update.
+    ///
+    /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
+    /// active [`ForkId`](reth_primitives::ForkId). See also [`ForkFilter::set_head`].
+    pub(crate) fn on_status_update(
+        &mut self,
+        height: u64,
+        hash: H256,
+        total_difficulty: U256,
+    ) -> Option<ForkTransition> {
         self.status.blockhash = hash;
         self.status.total_difficulty = total_difficulty;
-        self.fork_filter.set_head(height);
+        self.fork_filter.set_head(height)
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this

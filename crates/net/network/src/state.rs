@@ -216,10 +216,9 @@ where
         self.state_fetcher.update_peer_block(peer_id, hash, number);
     }
 
-    /// Invoked on a [`ForkId`] update
-    #[allow(unused)]
-    pub(crate) fn update_fork_id(&mut self, _fork_id: ForkId) {
-        todo!()
+    /// Invoked when a new [`ForkId`] is activated.
+    pub(crate) fn update_fork_id(&mut self, fork_id: ForkId) {
+        self.discovery.update_fork_id(fork_id)
     }
 
     /// Invoked after a `NewBlock` message was received by the peer.
