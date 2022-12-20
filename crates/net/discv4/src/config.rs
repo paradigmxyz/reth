@@ -23,19 +23,19 @@ pub struct Discv4Config {
     pub udp_ingress_message_buffer: usize,
     /// The number of allowed failures for `FindNode` requests. Default: 1.
     pub max_find_node_failures: u8,
-    /// The time between pings to ensure connectivity amongst connected nodes. Default: 300
-    /// seconds.
+    /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
+    /// 300sec, 5min.
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
-    pub ping_timeout: Duration,
+    pub ping_expiration: Duration,
     /// The rate at which lookups should be triggered.
     pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
     pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
-    pub enr_timeout: Duration,
+    pub enr_expiration: Duration,
     /// The duration we set for neighbours responses
-    pub neighbours_timeout: Duration,
+    pub neighbours_expiration: Duration,
     /// Provides a way to ban peers and ips.
     pub ban_list: BanList,
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
@@ -99,10 +99,12 @@ impl Default for Discv4Config {
             udp_ingress_message_buffer: 1024,
             max_find_node_failures: 2,
             ping_interval: Duration::from_secs(300),
-            ping_timeout: Duration::from_secs(5),
+            /// unified expiration and timeout durations, mirrors geth's `expiration` duration
+            ping_expiration: Duration::from_secs(20),
+            enr_expiration: Duration::from_secs(20),
+            neighbours_expiration: Duration::from_secs(20),
             request_timeout: Duration::from_secs(20),
-            enr_timeout: Duration::from_secs(5),
-            neighbours_timeout: Duration::from_secs(5),
+
             lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
@@ -152,15 +154,21 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Sets the timeout for pings
-    pub fn ping_timeout(&mut self, duration: Duration) -> &mut Self {
-        self.config.ping_timeout = duration;
+    /// Sets the timeout after which requests are considered timed out
+    pub fn request_timeout(&mut self, duration: Duration) -> &mut Self {
+        self.config.request_timeout = duration;
         self
     }
 
-    /// Sets the timeout for enr requests
-    pub fn enr_request_timeout(&mut self, duration: Duration) -> &mut Self {
-        self.config.enr_timeout = duration;
+    /// Sets the expiration duration for pings
+    pub fn ping_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.ping_expiration = duration;
+        self
+    }
+
+    /// Sets the expiration duration for enr requests
+    pub fn enr_request_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.enr_expiration = duration;
         self
     }
 
