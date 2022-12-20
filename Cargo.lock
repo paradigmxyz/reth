@@ -1003,7 +1003,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.1.0"
-source = "git+https://github.com/mattsse/discv5?branch=matt/add-mut-value#0a70cf9190aad45adebf6fb68a9d6573ce8a3be7"
+source = "git+https://github.com/sigp/discv5#97a806ccf7817a420b5f43efa23e6127b475d839"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
