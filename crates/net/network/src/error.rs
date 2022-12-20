@@ -17,7 +17,7 @@ pub enum NetworkError {
 }
 
 /// Returns true if the error indicates that the corresponding peer should be removed from peer
-/// discover
+/// discovery, for example if it's using a different genesis hash.
 pub(crate) fn error_merits_discovery_ban(err: &EthStreamError) -> bool {
     match err {
         EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
@@ -25,9 +25,6 @@ pub(crate) fn error_merits_discovery_ban(err: &EthStreamError) -> bool {
         )) |
         EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
             P2PHandshakeError::NonHelloMessageInHandshake,
-        )) |
-        EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
-            DisconnectReason::UselessPeer,
         )) => true,
         EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
         _ => false,
@@ -36,12 +33,19 @@ pub(crate) fn error_merits_discovery_ban(err: &EthStreamError) -> bool {
 
 /// Returns true if the error indicates that we'll never be able to establish a connection to that
 /// peer. For example, not matching capabilities or a mismatch in protocols.
+///
+/// Note: This does not necessarily mean that either of the peers are in violation of the protocol
+/// but rather that they'll never be able to connect with each other. This check is a superset of
+/// [`error_merits_discovery_ban`] which checks if the peer should not be part of the gossip
+/// network.
 pub(crate) fn is_fatal_protocol_error(err: &EthStreamError) -> bool {
     match err {
         EthStreamError::P2PStreamError(err) => {
             matches!(
                 err,
                 P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities) |
+                    P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake) |
+                    P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake) |
                     P2PStreamError::UnknownReservedMessageId(_) |
                     P2PStreamError::EmptyProtocolMessage |
                     P2PStreamError::ParseVersionError(_) |
