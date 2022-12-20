@@ -9,12 +9,27 @@ use std::fmt::Debug;
 /// The test will create a random instance of the type, encode it, and then decode it.
 fn roundtrip_encoding<T>(thing: T)
 where
-    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq,
+    T: Encodable + Decodable + Debug + PartialEq + Eq,
 {
     let mut encoded = Vec::new();
     thing.encode(&mut encoded);
     let decoded = T::decode(&mut &encoded[..]).unwrap();
     assert_eq!(thing, decoded, "expected: {thing:?}, got: {decoded:?}");
+}
+
+/// This method delegates to roundtrip_encoding, but is used to enforce that each type input to the
+/// macro has a proper Default, Clone, and Serialize impl. These trait implementations are
+/// necessary for test-fuzz to autogenerate a corpus.
+///
+/// If it makes sense to remove a Default impl from a type that we fuzz, this should prevent the
+/// fuzz test from compiling, rather than failing at runtime.
+/// In this case, we should implement a wrapper for the type that should no longer implement
+/// Default, Clone, or Serialize, and fuzz the wrapper type instead.
+fn roundtrip_fuzz<T>(thing: T)
+where
+    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq + Default,
+{
+    roundtrip_encoding::<T>(thing)
 }
 
 /// Creates a fuzz test for a rlp encodable and decodable type.
@@ -24,7 +39,7 @@ macro_rules! fuzz_type_and_name {
         #[test_fuzz]
         #[allow(non_snake_case)]
         fn $fuzzname(thing: $x) {
-            roundtrip_encoding::<$x>(thing)
+            crate::roundtrip_fuzz::<$x>(thing)
         }
     };
 }
@@ -46,7 +61,34 @@ pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
 
     // p2p subprotocol messages
-    fuzz_type_and_name!(HelloMessage, fuzz_HelloMessage);
+
+    // see message below for why wrapper types are necessary for fuzzing types that do not have a
+    // Default impl
+    #[derive(
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Serialize,
+        Deserialize,
+        RlpEncodableWrapper,
+        RlpDecodableWrapper,
+    )]
+    struct HelloMessageWrapper(HelloMessage);
+
+    impl Default for HelloMessageWrapper {
+        fn default() -> Self {
+            HelloMessageWrapper(HelloMessage {
+                client_version: Default::default(),
+                capabilities: Default::default(),
+                protocol_version: Default::default(),
+                id: Default::default(),
+                port: Default::default(),
+            })
+        }
+    }
+
+    fuzz_type_and_name!(HelloMessageWrapper, fuzz_HelloMessage);
     fuzz_type_and_name!(DisconnectReason, fuzz_DisconnectReason);
 
     // eth subprotocol messages
