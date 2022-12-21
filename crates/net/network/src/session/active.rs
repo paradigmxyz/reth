@@ -438,9 +438,7 @@ impl Future for ActiveSession {
                         match res {
                             Ok(msg) => {
                                 trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
-                                // trace!(target: "net::session", id=?msg.message_id(), "received
-                                // eth message"); decode and handle
-                                // message
+                                // decode and handle message
                                 if let Some((err, bad_protocol_msg)) = this.on_incoming(msg) {
                                     error!(target: "net::session", ?err, msg=?bad_protocol_msg,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                     this.close_on_error(err);
