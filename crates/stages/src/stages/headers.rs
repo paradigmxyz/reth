@@ -297,11 +297,9 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{
-            stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
-            PREV_STAGE_ID,
-        },
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::{p2p::error::RequestError, test_utils::generators::random_header};

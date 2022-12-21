@@ -14,12 +14,6 @@ pub struct HeaderMetrics {
     pub headers_unexpected_errors: Counter,
 }
 
-impl fmt::Debug for HeaderMetrics {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HeaderMetrics").finish()
-    }
-}
-
 impl HeaderMetrics {
     /// Initialize header metrics struct and register then
     pub fn new() -> Self {
@@ -40,5 +34,17 @@ impl HeaderMetrics {
             }
             _error => self.headers_unexpected_errors.increment(1),
         }
+    }
+}
+
+impl Default for HeaderMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for HeaderMetrics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeaderMetrics").finish()
     }
 }
