@@ -1,5 +1,5 @@
 use jsonrpsee::core::Error as RpcError;
-use reth_primitives::{BlockNumber, H256, U256};
+use reth_primitives::{H256, U256};
 use thiserror::Error;
 
 use crate::result::rpc_err;
@@ -8,15 +8,13 @@ use crate::result::rpc_err;
 #[derive(Error, Debug)]
 pub enum EngineApiError {
     #[error(
-        "Invalid transition terminal total difficulty. Expected: {expected}. Received: {received}"
+        "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
     )]
-    TerminalTD { expected: U256, received: U256 },
-    #[error("Invalid transition terminal block hash. Expected: {expected}. Received: {received}")]
-    TerminalBlockHash { expected: H256, received: H256 },
+    TerminalTD { execution: U256, consensus: U256 },
     #[error(
-        "Invalid transition terminal block number. Expected: {expected}. Received: {received}"
+        "Invalid transition terminal block hash. Execution: {execution:?}. Consensus: {consensus}"
     )]
-    TerminalBlockNumber { expected: BlockNumber, received: BlockNumber },
+    TerminalBlockHash { execution: Option<H256>, consensus: H256 },
     #[error("Unknown payload")]
     UnknownPayload,
     /// API encountered an internal error.

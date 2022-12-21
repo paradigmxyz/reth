@@ -1,7 +1,7 @@
 //! Provides everything related to `eth_` namespace
 
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockHash, U64};
+use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, U256, U64};
 use reth_provider::{BlockProvider, ChainInfo, StateProviderFactory};
 use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
@@ -24,6 +24,9 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Get block by hash
     fn block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>>;
+
+    /// Get block hash by number
+    fn block_hash(&self, number: BlockNumber) -> Result<Option<BlockHash>>;
 }
 
 /// `Eth` API implementation.
@@ -82,6 +85,11 @@ where
     /// Get block by hash
     fn block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>> {
         self.client().block(BlockId::Hash(hash))
+    }
+
+    /// Get block hash by number
+    fn block_hash(&self, number: BlockNumber) -> Result<Option<BlockHash>> {
+        self.client().block_hash(number.into())
     }
 }
 

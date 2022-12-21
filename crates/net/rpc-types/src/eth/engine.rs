@@ -96,7 +96,7 @@ pub enum PayloadStatusEnum {
 }
 
 /// This structure contains configurable settings of the transition process.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransitionConfiguration {
     /// Maps on the TERMINAL_TOTAL_DIFFICULTY parameter of EIP-3675
