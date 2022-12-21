@@ -245,8 +245,7 @@ impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEng
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            }
-            .into())
+            })
         }
 
         // Short circuit if communicated block hash is zero
@@ -270,8 +269,7 @@ impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEng
             _ => Err(EngineApiError::TerminalBlockHash {
                 execution: local_hash,
                 consensus: terminal_block_hash,
-            }
-            .into()),
+            }),
         }
     }
 }
