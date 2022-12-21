@@ -349,6 +349,10 @@ impl HeaderProvider for MockEthProvider {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number == num).cloned())
     }
+
+    fn header_td(&self, hash: &BlockHash) -> reth_interfaces::Result<Option<U256>> {
+        todo!()
+    }
 }
 
 impl BlockProvider for MockEthProvider {

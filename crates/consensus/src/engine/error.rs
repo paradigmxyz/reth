@@ -1,14 +1,13 @@
-use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{Bytes, H256, U256};
 use thiserror::Error;
-
-use crate::result::rpc_err;
 
 /// Error returned by [`EngineApi`][crate::engine::EngineApi]
 #[derive(Error, Debug)]
 pub enum EngineApiError {
+    /// Invalid payload extra data.
     #[error("Invalid payload extra data: {0}")]
     PayloadExtraData(Bytes),
+    /// Invalid payload base fee.
     #[error("Invalid payload base fee: {0}")]
     PayloadBaseFee(U256),
     /// Invalid payload block hash.
@@ -19,6 +18,17 @@ pub enum EngineApiError {
         /// The block hash provided with the payload.
         consensus: H256,
     },
+    /// Invalid payload block hash.
+    #[error("Invalid payload timestamp: {invalid}. Latest: {latest}")]
+    PayloadTimestamp {
+        /// The payload timestamp.
+        invalid: u64,
+        /// Latest available timestamp.
+        latest: u64,
+    },
+    /// Received pre-merge payload.
+    #[error("Received pre-merge payload.")]
+    PayloadPreMerge,
     /// Unknown payload requested.
     #[error("Unknown payload")]
     PayloadUnknown,
@@ -42,26 +52,13 @@ pub enum EngineApiError {
         /// Consensus terminal block hash.
         consensus: H256,
     },
+    /// Forkchoice zero hash head received.
+    #[error("Received zero hash as forkchoice head")]
+    ForkchoiceEmptyHead,
     /// Encountered decoding error.
     #[error(transparent)]
     Decode(#[from] reth_rlp::DecodeError),
     /// API encountered an internal error.
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
-}
-
-impl EngineApiError {
-    fn code(&self) -> i32 {
-        match self {
-            Self::PayloadUnknown => -38001,
-            // Any other server error
-            _ => jsonrpsee::types::error::INTERNAL_ERROR_CODE,
-        }
-    }
-}
-
-impl From<EngineApiError> for RpcError {
-    fn from(value: EngineApiError) -> Self {
-        rpc_err(value.code(), value.to_string(), None)
-    }
 }

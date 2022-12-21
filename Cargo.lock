@@ -3336,13 +3336,16 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "eyre",
+ "futures",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3725,13 +3728,13 @@ dependencies = [
  "reth-network",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-types",
  "reth-transaction-pool",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

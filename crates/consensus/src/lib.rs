@@ -11,6 +11,7 @@
 //! - `serde`: Enable serde support for configuration types.
 pub mod config;
 pub mod consensus;
+pub mod engine;
 pub mod verification;
 
 pub use config::Config;

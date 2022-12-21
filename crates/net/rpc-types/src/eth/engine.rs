@@ -66,7 +66,7 @@ pub struct PayloadAttributes {
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawal: Option<Withdrawal>,
+    pub withdrawal: Option<Withdrawal>, // TODO: should be a vec
 }
 
 /// This structure contains the result of processing a payload
