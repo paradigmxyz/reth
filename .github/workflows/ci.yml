@@ -57,6 +57,10 @@ jobs:
           flags: unit-tests
 
   fuzz:
+    # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
+    # always recompile the codebase for each test and that takes way too long.
+    if: false
+
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
