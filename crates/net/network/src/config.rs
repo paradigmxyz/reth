@@ -259,7 +259,7 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Sets the discv4 config to use.
+    /// Sets the boot nodes.
     pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         self.boot_nodes = nodes.into_iter().collect();
         self
