@@ -44,6 +44,8 @@ pub struct Discv4Config {
     pub ban_duration: Option<Duration>,
     /// Nodes to boot from.
     pub bootstrap_nodes: HashSet<NodeRecord>,
+    /// Nodes to always connect to.
+    pub preferred_nodes: HashSet<NodeRecord>,
     /// Whether to randomly discover new peers.
     ///
     /// If true, the node will automatically randomly walk the DHT in order to find new peers.
@@ -109,6 +111,7 @@ impl Default for Discv4Config {
             ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
+            preferred_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
             enable_eip868: true,
