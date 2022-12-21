@@ -27,7 +27,9 @@ use reth_network::{
 };
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
-use reth_stages::stages::{bodies::BodyStage, headers::HeaderStage, senders::SendersStage};
+use reth_stages::stages::{
+    bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage,
+};
 use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
 
@@ -137,9 +139,9 @@ impl Command {
                 consensus: consensus.clone(),
                 commit_threshold: config.stages.bodies.commit_threshold,
             })
-            .push(SendersStage {
-                batch_size: config.stages.senders.batch_size,
-                commit_threshold: config.stages.senders.commit_threshold,
+            .push(SenderRecoveryStage {
+                batch_size: config.stages.sender_recovery.batch_size,
+                commit_threshold: config.stages.sender_recovery.commit_threshold,
             });
 
         if let Some(tip) = self.tip {

@@ -15,13 +15,13 @@ use std::fmt::Debug;
 use thiserror::Error;
 use tracing::*;
 
-const SENDERS: StageId = StageId("Senders");
+const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
-/// The senders stage iterates over existing transactions,
+/// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
 /// in [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
 #[derive(Debug)]
-pub struct SendersStage {
+pub struct SenderRecoveryStage {
     /// The size of the chunk for parallel sender recovery
     pub batch_size: usize,
     /// The size of inserted items after which the control
@@ -31,22 +31,22 @@ pub struct SendersStage {
 
 // TODO(onbjerg): Should unwind
 #[derive(Error, Debug)]
-enum SendersStageError {
+enum SenderRecoveryStageError {
     #[error("Sender recovery failed for transaction {tx}.")]
     SenderRecovery { tx: TxNumber },
 }
 
-impl From<SendersStageError> for StageError {
-    fn from(error: SendersStageError) -> Self {
+impl From<SenderRecoveryStageError> for StageError {
+    fn from(error: SenderRecoveryStageError) -> Self {
         StageError::Fatal(Box::new(error))
     }
 }
 
 #[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for SendersStage {
+impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        SENDERS
+        SENDER_RECOVERY
     }
 
     /// Retrieve the range of transactions to iterate over by querying
@@ -64,7 +64,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
 
         if max_block_num <= stage_progress {
-            info!(target: "sync::stages::senders", target = max_block_num, stage_progress, "Target block already reached");
+            info!(target: "sync::stages::sender_recovery", target = max_block_num, stage_progress, "Target block already reached");
             return Ok(ExecOutput { stage_progress, done: true })
         }
 
@@ -76,7 +76,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
-            info!(target: "sync::stages::senders", start_tx_index, end_tx_index, "Target transaction already reached");
+            info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
             return Ok(ExecOutput { stage_progress: max_block_num, done: true })
         }
 
@@ -91,17 +91,17 @@ impl<DB: Database> Stage<DB> for SendersStage {
             .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
 
         // Iterate over transactions in chunks
-        info!(target: "sync::stages::senders", start_tx_index, end_tx_index, "Recovering senders");
+        info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
         for chunk in &entries.chunks(self.batch_size) {
             let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
             // Recover signers for the chunk in parallel
             let recovered = transactions
                 .into_par_iter()
                 .map(|(tx_id, transaction)| {
-                    trace!(target: "sync::stages::senders", tx_id, hash = ?transaction.hash(), "Recovering sender");
+                    trace!(target: "sync::stages::sender_recovery", tx_id, hash = ?transaction.hash(), "Recovering sender");
                     let signer =
                         transaction.recover_signer().ok_or_else::<StageError, _>(|| {
-                            SendersStageError::SenderRecovery { tx: tx_id }.into()
+                            SenderRecoveryStageError::SenderRecovery { tx: tx_id }.into()
                         })?;
                     Ok((tx_id, signer))
                 })
@@ -111,7 +111,7 @@ impl<DB: Database> Stage<DB> for SendersStage {
         }
 
         let done = max_block_num >= previous_stage_progress;
-        info!(target: "sync::stages::senders", stage_progress = max_block_num, done, "Sync iteration finished");
+        info!(target: "sync::stages::sender_recovery", stage_progress = max_block_num, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: max_block_num, done })
     }
 
@@ -141,7 +141,7 @@ mod tests {
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
-    stage_test_suite_ext!(SendersTestRunner);
+    stage_test_suite_ext!(SenderRecoveryTestRunner);
 
     /// Execute a block range with a single transaction
     #[tokio::test]
@@ -149,7 +149,7 @@ mod tests {
         let (previous_stage, stage_progress) = (500, 100);
 
         // Set up the runner
-        let runner = SendersTestRunner::default();
+        let runner = SenderRecoveryTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -186,7 +186,7 @@ mod tests {
     #[tokio::test]
     async fn execute_intermediate_commit() {
         let threshold = 50;
-        let mut runner = SendersTestRunner::default();
+        let mut runner = SenderRecoveryTestRunner::default();
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
         let first_input = ExecInput {
@@ -221,36 +221,36 @@ mod tests {
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }
 
-    struct SendersTestRunner {
+    struct SenderRecoveryTestRunner {
         tx: TestTransaction,
         threshold: u64,
     }
 
-    impl Default for SendersTestRunner {
+    impl Default for SenderRecoveryTestRunner {
         fn default() -> Self {
             Self { threshold: 1000, tx: TestTransaction::default() }
         }
     }
 
-    impl SendersTestRunner {
+    impl SenderRecoveryTestRunner {
         fn set_threshold(&mut self, threshold: u64) {
             self.threshold = threshold;
         }
     }
 
-    impl StageTestRunner for SendersTestRunner {
-        type S = SendersStage;
+    impl StageTestRunner for SenderRecoveryTestRunner {
+        type S = SenderRecoveryStage;
 
         fn tx(&self) -> &TestTransaction {
             &self.tx
         }
 
         fn stage(&self) -> Self::S {
-            SendersStage { batch_size: 100, commit_threshold: self.threshold }
+            SenderRecoveryStage { batch_size: 100, commit_threshold: self.threshold }
         }
     }
 
-    impl ExecuteStageTestRunner for SendersTestRunner {
+    impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
         type Seed = Vec<BlockLocked>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -306,13 +306,13 @@ mod tests {
         }
     }
 
-    impl UnwindStageTestRunner for SendersTestRunner {
+    impl UnwindStageTestRunner for SenderRecoveryTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.check_no_senders_by_block(input.unwind_to)
         }
     }
 
-    impl SendersTestRunner {
+    impl SenderRecoveryTestRunner {
         fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.tx.inner().get_block_body_by_num(block);
             match body_result {
