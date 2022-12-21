@@ -84,8 +84,8 @@ impl Default for SenderRecoveryConfig {
 /// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct DiscoveryConfig {
-    /// Preferred nodes to connect to.
+    /// Trusted nodes to connect to.
     pub trusted_nodes: Vec<String>,
-    /// Connect to preferred nodes only?
+    /// Connect to trusted nodes only?
     pub trusted_only: bool,
 }

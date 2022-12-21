@@ -253,16 +253,13 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Adds multiple preferred nodes
-    pub fn add_preferred_nodes(
-        &mut self,
-        nodes: impl IntoIterator<Item = NodeRecord>,
-    ) -> &mut Self {
+    /// Adds multiple trusted nodes
+    pub fn add_trusted_nodes(&mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> &mut Self {
         self.config.trusted_nodes.extend(nodes);
         self
     }
 
-    /// Sets flag for using only preferred nodes
+    /// Sets flag for using only trusted nodes
     pub fn set_trusted_only(&mut self, trusted_only: bool) -> &mut Self {
         self.config.trusted_only = trusted_only;
         self
