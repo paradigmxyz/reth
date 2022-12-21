@@ -8,7 +8,7 @@ pub struct Config {
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for the discovery service.
-    pub peers: DiscoveryConfig,
+    pub peers: PeersConfig,
 }
 
 /// Configuration for each stage in the pipeline.
@@ -83,7 +83,7 @@ impl Default for SenderRecoveryConfig {
 
 /// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct DiscoveryConfig {
+pub struct PeersConfig {
     /// Trusted nodes to connect to.
     pub trusted_nodes: Vec<String>,
     /// Connect to trusted nodes only?
