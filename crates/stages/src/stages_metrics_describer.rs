@@ -9,7 +9,7 @@ fn describe_header_metrics() {
     );
     describe_counter!(
         "stages.headers.validation_errors",
-        "Number of validation errores while requesting headers"
+        "Number of validation errors while requesting headers"
     );
     describe_counter!(
         "stages.headers.unexpected_errors",

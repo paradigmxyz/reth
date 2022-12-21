@@ -60,7 +60,7 @@ How the metrics are exposed to the end-user is determined by the CLI.
 #### StagedSync Headers
 - `stages.headers.counter`: Number of headers successfully retrieved
 - `stages.headers.timeout_error`: Number of timeout errors while requesting headers
-- `stages.headers.validation_errors`: Number of validation errores while requesting headers
+- `stages.headers.validation_errors`: Number of validation errors while requesting headers
 - `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
 - `stages.headers.request_time`: Elapsed time of successful header requests
 

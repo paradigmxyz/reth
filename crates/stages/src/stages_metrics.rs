@@ -8,7 +8,7 @@ pub struct HeaderMetrics {
     pub headers_counter: Counter,
     /// Number of timeout errors while requesting headers
     pub headers_timeout_errors: Counter,
-    /// Number of validation errores while requesting headers
+    /// Number of validation errors while requesting headers
     pub headers_validation_errors: Counter,
     /// Elapsed time of successful header requests
     pub headers_unexpected_errors: Counter,
