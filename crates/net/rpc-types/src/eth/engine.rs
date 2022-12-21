@@ -79,6 +79,16 @@ pub struct PayloadStatus {
     pub latest_valid_hash: Option<H256>,
 }
 
+impl PayloadStatus {
+    pub fn new(status: PayloadStatusEnum, latest_valid_hash: H256) -> Self {
+        Self { status, latest_valid_hash: Some(latest_valid_hash) }
+    }
+
+    pub fn from_status(status: PayloadStatusEnum) -> Self {
+        Self { status, latest_valid_hash: None }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PayloadStatusEnum {
@@ -115,8 +125,12 @@ pub struct ForkchoiceUpdated {
 }
 
 impl ForkchoiceUpdated {
-    pub fn new(status: PayloadStatusEnum) -> Self {
-        Self { payload_status: PayloadStatus { status, latest_valid_hash: None }, payload_id: None }
+    pub fn new(payload_status: PayloadStatus) -> Self {
+        Self { payload_status, payload_id: None }
+    }
+
+    pub fn from_status(status: PayloadStatusEnum) -> Self {
+        Self { payload_status: PayloadStatus::from_status(status), payload_id: None }
     }
 
     pub fn with_latest_valid_hash(mut self, hash: H256) -> Self {

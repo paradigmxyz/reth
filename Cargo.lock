@@ -3725,6 +3725,7 @@ dependencies = [
  "reth-network",
  "reth-primitives",
  "reth-provider",
+ "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-types",
  "reth-transaction-pool",
