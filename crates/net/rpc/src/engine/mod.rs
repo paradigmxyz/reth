@@ -1,6 +1,6 @@
 use crate::result::rpc_err;
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult as Result;
+use jsonrpsee::core::{Error, RpcResult as Result};
 use reth_consensus::engine::{EngineApiError, EngineApiResult, EngineMessage};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::H64;
@@ -32,7 +32,7 @@ impl EngineApi {
         rx: Receiver<EngineApiResult<T>>,
     ) -> Result<T> {
         let _ = self.engine_tx.send(msg);
-        rx.await.expect("channel is open").map_err(|err| {
+        rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| {
             let code = match err {
                 EngineApiError::PayloadUnknown => -38001,
                 // Any other server error
