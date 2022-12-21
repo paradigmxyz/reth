@@ -108,7 +108,7 @@ pub struct NetworkConfigBuilder<C> {
     /// All boot nodes to start network discovery with.
     boot_nodes: Vec<NodeRecord>,
     /// Nodes we always want to connect to.
-    preferred_nodes: Vec<NodeRecord>,
+    trusted_nodes: Vec<NodeRecord>,
     /// If we should connect to preferred nodes only.
     trusted_only: bool,
     /// Address to use for discovery
@@ -149,7 +149,7 @@ impl<C> NetworkConfigBuilder<C> {
             secret_key,
             discovery_v4_builder: Default::default(),
             boot_nodes: vec![],
-            preferred_nodes: vec![],
+            trusted_nodes: vec![],
             trusted_only: false,
             discovery_addr: None,
             listener_addr: None,
@@ -266,8 +266,8 @@ impl<C> NetworkConfigBuilder<C> {
     }
 
     /// Sets the preferred nodes.
-    pub fn preferred_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
-        self.preferred_nodes = nodes.into_iter().collect();
+    pub fn trusted_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
+        self.trusted_nodes = nodes.into_iter().collect();
         self
     }
 
@@ -285,7 +285,7 @@ impl<C> NetworkConfigBuilder<C> {
             secret_key,
             mut discovery_v4_builder,
             boot_nodes,
-            preferred_nodes,
+            trusted_nodes,
             trusted_only,
             discovery_addr,
             listener_addr,
@@ -317,7 +317,7 @@ impl<C> NetworkConfigBuilder<C> {
             ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
         });
 
-        discovery_v4_builder.add_preferred_nodes(preferred_nodes).set_trusted_only(trusted_only);
+        discovery_v4_builder.add_preferred_nodes(trusted_nodes).set_trusted_only(trusted_only);
 
         NetworkConfig {
             client,

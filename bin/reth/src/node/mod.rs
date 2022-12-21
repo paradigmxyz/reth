@@ -220,7 +220,7 @@ fn network_config<DB: Database>(
 ) -> NetworkConfig<ProviderImpl<DB>> {
     NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
         .boot_nodes(mainnet_nodes())
-        .preferred_nodes(parse_nodes(config.discovery.preferred_nodes.clone()))
+        .trusted_nodes(parse_nodes(config.discovery.trusted_nodes.clone()))
         .set_trusted_only(false)
         .genesis_hash(genesis_hash)
         .chain_id(chain_id)

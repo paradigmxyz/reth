@@ -45,8 +45,8 @@ pub struct Discv4Config {
     /// Nodes to boot from.
     pub bootstrap_nodes: HashSet<NodeRecord>,
     /// Nodes to always connect to.
-    pub preferred_nodes: HashSet<NodeRecord>,
-    /// If true, the node won't connect to peers not in preferred_nodes.
+    pub trusted_nodes: HashSet<NodeRecord>,
+    /// If true, the node will connect only to trusted peers.
     pub trusted_only: bool,
     /// Whether to randomly discover new peers.
     ///
@@ -113,7 +113,7 @@ impl Default for Discv4Config {
             ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
             bootstrap_nodes: Default::default(),
-            preferred_nodes: Default::default(),
+            trusted_nodes: Default::default(),
             trusted_only: false,
             enable_dht_random_walk: true,
             enable_lookup: true,
@@ -258,7 +258,7 @@ impl Discv4ConfigBuilder {
         &mut self,
         nodes: impl IntoIterator<Item = NodeRecord>,
     ) -> &mut Self {
-        self.config.preferred_nodes.extend(nodes);
+        self.config.trusted_nodes.extend(nodes);
         self
     }
 

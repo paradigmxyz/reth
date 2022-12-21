@@ -85,7 +85,7 @@ impl Default for SenderRecoveryConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct DiscoveryConfig {
     /// Preferred nodes to connect to.
-    pub preferred_nodes: Vec<String>,
+    pub trusted_nodes: Vec<String>,
     /// Connect to preferred nodes only?
     pub trusted_only: bool,
 }
