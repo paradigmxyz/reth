@@ -87,5 +87,5 @@ pub struct PeersConfig {
     /// Trusted nodes to connect to.
     pub trusted_nodes: Vec<String>,
     /// Connect to trusted nodes only?
-    pub trusted_only: bool,
+    pub connect_trusted_nodes_only: bool,
 }
