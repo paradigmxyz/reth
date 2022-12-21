@@ -198,7 +198,7 @@ impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEng
 
         // TODO: execute block
 
-        return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block.hash()))
+        Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block.hash()))
     }
 
     fn fork_choice_updated(
