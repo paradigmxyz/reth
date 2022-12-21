@@ -51,6 +51,8 @@ The field of note here is `to_manager_tx`, which is a handle that can be used to
 
 Now we're getting to the meat of the `network` crate! The `NetworkManager` struct represents the "Network Management" task described above. It is implemented as an endless [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html) that can be thought of as a "hub" process which listens for messages from the `NetworkHandle` or the node's peers and dispatches messages to the other tasks, while keeping track of the state of the network.
 
+While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`](https://docs.rs/tokio/0.2.4/tokio/task/index.html), the `NetworkHandle` can be passed around and shared, enabling access to the `NetworkManager` from anywhere by sending requests & commands through the appropriate channels.
+
 #### Instantiating the `NetworkHandle`
 
 Back in the `execute` method of the `"node"` CLI command, we saw the `NetworkHandle` get returned from a call to `start_network`. Sounds important, doesn't it?
@@ -61,7 +63,9 @@ At a high level, this function is responsible for starting the tasks listed at t
 
 It gets the handles for the network management, transactions, and ETH requests tasks downstream of the `NetworkManager::builder` method call, and spawns them.
 
-TODO: Go into more depth regarding `NetworkBuilder`, `NetworkConfig`, etc?
+The `NetworkManager::builder` constructor requires a `NetworkConfig` struct to be passed in as a parameter, which can be used as the main entrypoint for setting up the entire network layer:
+
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/config.rs anchor=struct-NetworkConfig}}
 
 The discovery task progresses as the network management task is polled, handling events regarding peer management through the `Swarm` struct which is stored as a field on the `NetworkManager`:
 
