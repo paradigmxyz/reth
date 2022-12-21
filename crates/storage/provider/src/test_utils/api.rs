@@ -40,7 +40,7 @@ impl HeaderProvider for TestApi {
         Ok(None)
     }
 
-    fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
+    fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
         Ok(None)
     }
 }

@@ -77,9 +77,9 @@ pub struct EthConsensusEngine<Client> {
     /// Consensus configuration
     config: Config,
     client: Client,
-    /// Placeholder for storing future built blocks
+    /// Placeholder for storing future blocks
     local_store: HashMap<H64, ExecutionPayload>, // TODO: bound
-    remote_store: HashMap<H64, ExecutionPayload>,
+    // remote_store: HashMap<H64, ExecutionPayload>,
     rx: UnboundedReceiverStream<EngineMessage>,
 }
 
