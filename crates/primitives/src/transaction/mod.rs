@@ -714,7 +714,7 @@ impl TransactionSigned {
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     pub fn recalculate_hash(&self) -> H256 {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
         self.encode_inner(&mut buf, false);
         keccak256(&buf)
     }
