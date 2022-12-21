@@ -1,20 +1,22 @@
 //! Consensus for ethereum network
-
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, H256};
 use tokio::sync::{watch, watch::error::SendError};
 
-/// Ethereum consensus
-pub struct EthConsensus {
+/// Ethereum beacon consensus
+///
+/// This consensus engine does basic checks as outlined in the execution specs,
+/// but otherwise defers consensus on what the current chain is to a consensus client.
+pub struct BeaconConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Configuration
     config: Config,
 }
 
-impl EthConsensus {
-    /// Create a new instance of [EthConsensus]
+impl BeaconConsensus {
+    /// Create a new instance of [BeaconConsensus]
     pub fn new(config: Config) -> Self {
         Self {
             channel: watch::channel(ForkchoiceState {
@@ -35,7 +37,7 @@ impl EthConsensus {
     }
 }
 
-impl Consensus for EthConsensus {
+impl Consensus for BeaconConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }

@@ -10,7 +10,7 @@ use clap::{crate_version, Parser};
 use eyre::WrapErr;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_consensus::EthConsensus;
+use reth_consensus::BeaconConsensus;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -105,7 +105,7 @@ impl Command {
         }
 
         let chain_id = self.chain.consensus.chain_id;
-        let consensus = Arc::new(EthConsensus::new(self.chain.consensus.clone()));
+        let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         info!("Connecting to p2p");
