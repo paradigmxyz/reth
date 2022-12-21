@@ -15,7 +15,7 @@ pub struct HeaderMetrics {
 }
 
 impl HeaderMetrics {
-    /// Initialize header metrics struct and register then
+    /// Initialize header metrics struct and register them
     pub fn new() -> Self {
         Self {
             headers_counter: register_counter!("stages.headers.counter"),
