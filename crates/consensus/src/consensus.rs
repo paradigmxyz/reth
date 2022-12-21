@@ -57,6 +57,6 @@ impl Consensus for EthConsensus {
     }
 
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        block_num <= self.config.paris_block
+        block_num < self.config.paris_block
     }
 }
