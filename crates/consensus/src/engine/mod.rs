@@ -22,7 +22,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 mod error;
 pub use error::EngineApiError;
-
 use crate::Config;
 
 /// The Engine API result type
@@ -73,10 +72,11 @@ pub enum EngineMessage {
 }
 
 /// The consensus engine API implementation
+#[must_use = "EthConsensusEngine does nothing unless polled."]
 pub struct EthConsensusEngine<Client> {
     /// Consensus configuration
     config: Config,
-    client: Client,
+    client: Arc<Client>,
     /// Placeholder for storing future blocks
     local_store: HashMap<H64, ExecutionPayload>, // TODO: bound
     // remote_store: HashMap<H64, ExecutionPayload>,

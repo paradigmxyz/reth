@@ -24,7 +24,7 @@ jsonrpsee = { version = "0.16" }
 
 # async
 async-trait = "0.1"
-tokio = { version = "1.21.2", features = ["sync"] }
+tokio = { version = "1", features = ["sync"] }
 
 # misc
 serde = { version = "1.0", features = ["derive"] }
