@@ -218,6 +218,8 @@ fn network_config<DB: Database>(
 ) -> NetworkConfig<ProviderImpl<DB>> {
     NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
         .boot_nodes(mainnet_nodes())
+        .preferred_nodes(vec![])
+        .set_trusted_only(false)
         .genesis_hash(genesis_hash)
         .chain_id(chain_id)
         .build()

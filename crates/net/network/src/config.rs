@@ -107,6 +107,10 @@ pub struct NetworkConfigBuilder<C> {
     discovery_v4_builder: Discv4ConfigBuilder,
     /// All boot nodes to start network discovery with.
     boot_nodes: Vec<NodeRecord>,
+    /// Nodes we always want to connect to.
+    preferred_nodes: Vec<NodeRecord>,
+    /// If we should connect to preferred nodes only.
+    trusted_only: bool,
     /// Address to use for discovery
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
@@ -145,6 +149,8 @@ impl<C> NetworkConfigBuilder<C> {
             secret_key,
             discovery_v4_builder: Default::default(),
             boot_nodes: vec![],
+            preferred_nodes: vec![],
+            trusted_only: false,
             discovery_addr: None,
             listener_addr: None,
             peers_config: None,
@@ -259,14 +265,28 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
+    /// Sets the preferred nodes.
+    pub fn preferred_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
+        self.preferred_nodes = nodes.into_iter().collect();
+        self
+    }
+
+    /// Sets the preferred nodes.
+    pub fn set_trusted_only(mut self, trusted_only: bool) -> Self {
+        self.trusted_only = trusted_only;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     pub fn build(self) -> NetworkConfig<C> {
         let peer_id = self.get_peer_id();
         let Self {
             client,
             secret_key,
-            discovery_v4_builder,
+            mut discovery_v4_builder,
             boot_nodes,
+            preferred_nodes,
+            trusted_only,
             discovery_addr,
             listener_addr,
             peers_config,
@@ -296,6 +316,8 @@ impl<C> NetworkConfigBuilder<C> {
             // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
             ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
         });
+
+        discovery_v4_builder.add_preferred_nodes(preferred_nodes).set_trusted_only(trusted_only);
 
         NetworkConfig {
             client,
