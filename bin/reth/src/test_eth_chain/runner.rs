@@ -216,7 +216,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                     }
                     if test_account.nonce.0.as_u64() != our_account.nonce {
                         return Err(eyre!(
-                            "Account {address} nonce diff, expected {} got{}",
+                            "Account {address} nonce diff, expected {} got {}",
                             test_account.nonce.0,
                             our_account.nonce
                         ));
