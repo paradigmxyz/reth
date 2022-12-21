@@ -23,10 +23,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 mod error;
 use crate::Config;
-pub use error::EngineApiError;
-
-/// The Engine API result type
-pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
+pub use error::{EngineApiError, EngineApiResult};
 
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;

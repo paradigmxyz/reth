@@ -1,6 +1,9 @@
 use reth_primitives::{Bytes, H256, U256};
 use thiserror::Error;
 
+/// The Engine API result type
+pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
+
 /// Error returned by [`EngineApi`][crate::engine::EngineApi]
 #[derive(Error, Debug)]
 pub enum EngineApiError {
