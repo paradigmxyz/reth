@@ -260,11 +260,16 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, config, db)?;
 
-    let _receipts_iter =
+    let receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
 
-    // TODO check https://eips.ethereum.org/EIPS/eip-658 introduced in Byzantium
-    //verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
+    if header.number >= config.spec_upgrades.byzantium {
+        verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
+    }
+    // TODO Before Byzantium receipts contained state root that would mean that expensive operation
+    // as hashing that is needed for state root got calculated in every transaction
+    // This was replaced with is_success flag.
+    // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
 
     Ok(transaction_change_set)
 }
@@ -332,8 +337,8 @@ pub fn execute<DB: StateProvider>(
         // Execute transaction.
         let out = evm.transact();
 
-        //let out = evm.inspect(revm::inspectors::CustomPrintTracer::new());
-        //tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
+        // let out = evm.inspect(revm::inspectors::CustomPrintTracer::default());
+        // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
         // \nENV:{:?}",transaction.hash(),transaction,evm.env);
 
         let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
