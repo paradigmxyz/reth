@@ -96,5 +96,11 @@ pub use __reexport::*;
 /// Returns the keccak256 hash for the given data.
 #[inline]
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    H256(ethers_core::utils::keccak256(data))
+    use tiny_keccak::{Hasher, Keccak};
+
+    let mut buf = [0u8; 32];
+    let mut hasher = Keccak::v256();
+    hasher.update(data.as_ref());
+    hasher.finalize(&mut buf);
+    buf.into()
 }
