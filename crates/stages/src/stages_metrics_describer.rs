@@ -2,7 +2,7 @@ use metrics::{describe_counter, describe_histogram};
 
 /// Describe stagedsync headers metrics
 fn describe_header_metrics() {
-    describe_counter!("stages.headers.counter", "Number of headers successfully retrived");
+    describe_counter!("stages.headers.counter", "Number of headers successfully retrieved");
     describe_counter!(
         "stages.headers.timeout_errors",
         "Number of timeout errors while requesting headers"
