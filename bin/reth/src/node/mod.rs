@@ -21,7 +21,7 @@ use reth_db::{
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{
-    config::{mainnet_nodes, rng_secret_key},
+    config::{mainnet_nodes, parse_nodes, rng_secret_key},
     error::NetworkError,
     NetworkConfig, NetworkHandle, NetworkManager,
 };
@@ -109,7 +109,8 @@ impl Command {
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         info!("Connecting to p2p");
-        let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
+        let network =
+            start_network(network_config(db.clone(), chain_id, genesis_hash, &config)).await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own
@@ -215,10 +216,11 @@ fn network_config<DB: Database>(
     db: Arc<DB>,
     chain_id: u64,
     genesis_hash: H256,
+    config: &Config,
 ) -> NetworkConfig<ProviderImpl<DB>> {
     NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
         .boot_nodes(mainnet_nodes())
-        .preferred_nodes(vec![])
+        .preferred_nodes(parse_nodes(config.discovery.preferred_nodes.clone()))
         .set_trusted_only(false)
         .genesis_hash(genesis_hash)
         .chain_id(chain_id)

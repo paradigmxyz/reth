@@ -7,6 +7,8 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
+    /// Configuration for the discovery service.
+    pub discovery: DiscoveryConfig,
 }
 
 /// Configuration for each stage in the pipeline.
@@ -77,4 +79,13 @@ impl Default for SenderRecoveryConfig {
     fn default() -> Self {
         Self { commit_threshold: 5_000, batch_size: 1000 }
     }
+}
+
+/// Configuration for each stage in the pipeline.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DiscoveryConfig {
+    /// Preferred nodes to connect to.
+    pub preferred_nodes: Vec<String>,
+    /// Connect to preferred nodes only?
+    pub trusted_only: bool,
 }
