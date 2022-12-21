@@ -33,7 +33,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the [`SessionsManager`].
@@ -247,10 +247,10 @@ impl ActiveSession {
     fn emit_message(&self, message: PeerMessage) {
         let _ = self.try_emit_message(message).map_err(|err| {
             warn!(
-                    target : "net",
-            %err,
-                    "dropping incoming message",
-                );
+                target : "net",
+                %err,
+                "dropping incoming message",
+            );
         });
     }
 
@@ -272,6 +272,7 @@ impl ActiveSession {
 
     /// Report back that this session has been closed.
     fn emit_disconnect(&self) {
+        trace!(target: "net::session", remote_peer_id=?self.remote_peer_id, "emitting disconnect");
         // NOTE: we clone here so there's enough capacity to deliver this message
         let _ = self.to_session.clone().try_send(ActiveSessionMessage::Disconnected {
             peer_id: self.remote_peer_id,
@@ -316,8 +317,9 @@ impl ActiveSession {
                 timedout.push(*id)
             }
         }
+
         for id in timedout {
-            warn!(target: "net::session", remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
+            warn!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
             let req = self.inflight_requests.remove(&id).expect("exists; qed");
             req.request.send_err_response(RequestError::Timeout);
         }
@@ -350,18 +352,19 @@ impl Future for ActiveSession {
                         progress = true;
                         match cmd {
                             SessionCommand::Disconnect { reason } => {
+                                info!(target: "net::session", ?reason, remote_peer_id=?this.remote_peer_id, "session received disconnect command");
                                 let reason =
                                     reason.unwrap_or(DisconnectReason::DisconnectRequested);
                                 // try to disconnect
-                                match this.start_disconnect(reason) {
+                                return match this.start_disconnect(reason) {
                                     Ok(()) => {
                                         // we're done
-                                        return this.poll_disconnect(cx)
+                                        this.poll_disconnect(cx)
                                     }
                                     Err(err) => {
                                         error!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "could not send disconnect");
                                         this.close_on_error(err);
-                                        return Poll::Ready(())
+                                        Poll::Ready(())
                                     }
                                 }
                             }
@@ -434,6 +437,7 @@ impl Future for ActiveSession {
                         progress = true;
                         match res {
                             Ok(msg) => {
+                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
                                 // decode and handle message
                                 if let Some((err, bad_protocol_msg)) = this.on_incoming(msg) {
                                     error!(target: "net::session", ?err, msg=?bad_protocol_msg,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
