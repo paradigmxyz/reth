@@ -21,6 +21,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
+use stages_metrics::HeaderMetrics;
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -53,6 +54,8 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
     pub network_handle: S,
     /// The number of block headers to commit at once
     pub commit_threshold: u64,
+    /// Header metrics
+    pub metrics: HeaderMetrics,
 }
 
 #[async_trait::async_trait]
@@ -88,7 +91,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
                     info!(target: "sync::stages::headers", len = res.len(), "Received headers");
-                    stages_metrics::update_headers_metrics(res.len() as u64);
+                    self.metrics.headers_counter.increment(res.len() as u64);
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
@@ -97,7 +100,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                     current_progress = current_progress.max(write_progress);
                 }
                 Err(e) => {
-                    stages_metrics::update_headers_error_metrics(&e);
+                    self.metrics.update_headers_error_metrics(&e);
                     match e {
                         DownloadError::Timeout => {
                             warn!(target: "sync::stages::headers", "No response for header request");
@@ -294,9 +297,11 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
-        PREV_STAGE_ID,
+    use crate::{
+        test_utils::{
+            stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+            PREV_STAGE_ID,
+        },
     };
     use assert_matches::assert_matches;
     use reth_interfaces::{p2p::error::RequestError, test_utils::generators::random_header};
@@ -451,6 +456,7 @@ mod tests {
     mod test_runner {
         use crate::{
             stages::headers::HeaderStage,
+            stages_metrics::HeaderMetrics,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
                 UnwindStageTestRunner,
@@ -505,6 +511,7 @@ mod tests {
                     downloader: self.downloader.clone(),
                     network_handle: self.network_handle.clone(),
                     commit_threshold: 100,
+                    metrics: HeaderMetrics::new(),
                 }
             }
         }

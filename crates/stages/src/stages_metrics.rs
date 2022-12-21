@@ -1,14 +1,27 @@
-use metrics::{counter, increment_counter, Counter};
+use metrics::{register_counter, Counter};
 use reth_interfaces::p2p::error::DownloadError;
+use std::fmt;
 
-struct HeaderMetrics {
-    headers_counter: Counter,
-    headers_timeout_errors: Counter,
-    headers_validation_errors: Counter,
-    headers_unexpected_errors: Counter,
+/// Stagedsync header metrics
+pub struct HeaderMetrics {
+    /// Number of headers successfully retrieved
+    pub headers_counter: Counter,
+    /// Number of timeout errors while requesting headers
+    pub headers_timeout_errors: Counter,
+    /// Number of validation errores while requesting headers
+    pub headers_validation_errors: Counter,
+    /// Elapsed time of successful header requests
+    pub headers_unexpected_errors: Counter,
+}
+
+impl fmt::Debug for HeaderMetrics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeaderMetrics").finish()
+    }
 }
 
 impl HeaderMetrics {
+    /// Initialize header metrics struct and register then
     pub fn new() -> Self {
         Self {
             headers_counter: register_counter!("stages.headers.counter"),
@@ -18,7 +31,8 @@ impl HeaderMetrics {
         }
     }
 
-    pub fn update_headers_errors(&self, error: &DownloadError) {
+    /// Update header errors metrics
+    pub fn update_headers_error_metrics(&self, error: &DownloadError) {
         match error {
             DownloadError::Timeout => self.headers_timeout_errors.increment(1),
             DownloadError::HeaderValidation { hash: _, error: _ } => {
@@ -27,8 +41,4 @@ impl HeaderMetrics {
             _error => self.headers_unexpected_errors.increment(1),
         }
     }
-}
-
-pub(crate) fn update_headers_metrics(n_headers: u64) {
-    counter!("stages.headers.counter", n_headers);
 }
