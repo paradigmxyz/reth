@@ -17,7 +17,7 @@ pub struct StageConfig {
     /// Body stage configuration.
     pub bodies: BodiesConfig,
     /// Sender recovery stage configuration.
-    pub senders: SendersConfig,
+    pub sender_recovery: SenderRecoveryConfig,
 }
 
 /// Header stage configuration.
@@ -66,14 +66,14 @@ impl Default for BodiesConfig {
 
 /// Sender recovery stage configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SendersConfig {
+pub struct SenderRecoveryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
     /// The maximum number of transactions to recover senders for concurrently.
     pub batch_size: usize,
 }
 
-impl Default for SendersConfig {
+impl Default for SenderRecoveryConfig {
     fn default() -> Self {
         Self { commit_threshold: 5_000, batch_size: 1000 }
     }
