@@ -339,6 +339,10 @@ where
             let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
+                    if this.outgoing_messages.len() > MAX_P2P_CAPACITY {
+                        return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
+                    }
+
                     tracing::trace!("Received Ping, Sending Pong");
                     this.send_pong();
                 }
