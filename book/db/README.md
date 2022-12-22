@@ -2,7 +2,7 @@
 
 The database is a central component to Reth, enabling persistent storage for data like block headers, block bodies, transactions and more. The Reth database is comprised of key-value storage written to the disk and organized in tables. This chapter might feel a little dense at first, but shortly, you will feel very comfortable understanding and navigating the `db` crate. This chapter will go through the structure of the database, its tables and the mechanics of the `Database` trait.
 
-### Tables
+## Tables
 
 Within Reth, a table is a struct that implements the `Table` trait.
 
@@ -50,7 +50,7 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 - SyncStage
 
 
-### Database
+## Database
 
 Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/mod.rs#L33), which takes advantage of [generic associated types]() to implement the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
@@ -94,7 +94,7 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 ```
 
 <!-- TODO: give some examples of what a transaction could actually be -->
-In the code snippet contains the `Database` trait. Any type that implements the `Database` trait can create a database transaction, view an existing transaction or update an existing transaction. We already saw that `StageDB` from the `stages` chapter of the book implements the `Database` trait, allowing it to store new headers, bodies and senders in the database during the Reth pipeline loop. As an example, in the code snippet below, you can see the `open()` method defined on the `StageDB` struct, which uses the `Database::tx_mut()` function to create a mutable transaction. 
+The code snippet above contains the `Database` trait. Any type that implements the `Database` trait can create a database transaction, view an existing transaction or update an existing transaction. We already saw that `StageDB` from the `stages` chapter of the book implements the `Database` trait, allowing it to store new headers, bodies and senders in the database during the Reth pipeline loop. As an example, in the code snippet below, you can see the `open()` method defined on the `StageDB` struct, which uses the `Database::tx_mut()` function to create a mutable transaction. 
 
 [File: ]()
 ```rust ignore
