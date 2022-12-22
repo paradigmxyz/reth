@@ -253,6 +253,12 @@ impl Discv4ConfigBuilder {
         self
     }
 
+    /// Adds a trusted node
+    pub fn add_trusted_node(&mut self, node: NodeRecord) -> &mut Self {
+        self.config.trusted_nodes.insert(node);
+        self
+    }
+
     /// Adds multiple trusted nodes
     pub fn add_trusted_nodes(&mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> &mut Self {
         self.config.trusted_nodes.extend(nodes);
