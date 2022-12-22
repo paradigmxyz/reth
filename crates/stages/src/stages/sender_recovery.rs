@@ -133,7 +133,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::models::StoredBlockBody;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{BlockLocked, BlockNumber, H256};
+    use reth_primitives::{BlockNumber, SealedBlock, H256};
 
     use super::*;
     use crate::test_utils::{
@@ -159,7 +159,7 @@ mod tests {
         let stage_progress = input.stage_progress.unwrap_or_default();
         // Insert blocks with a single transaction at block `stage_progress + 10`
         (stage_progress..input.previous_stage_progress() + 1)
-            .map(|number| -> Result<BlockLocked, TestRunnerError> {
+            .map(|number| -> Result<SealedBlock, TestRunnerError> {
                 let tx_count = Some((number == stage_progress + 10) as u8);
                 let block = random_block(number, None, tx_count);
                 current_tx_id = runner.insert_block(current_tx_id, &block, false)?;
@@ -251,7 +251,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
-        type Seed = Vec<BlockLocked>;
+        type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.stage_progress.unwrap_or_default();
@@ -332,7 +332,7 @@ mod tests {
         fn insert_block(
             &self,
             tx_offset: u64,
-            block: &BlockLocked,
+            block: &SealedBlock,
             insert_senders: bool,
         ) -> Result<u64, TestRunnerError> {
             let mut current_tx_id = tx_offset;

@@ -31,7 +31,7 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
-pub use block::{Block, BlockHashOrNumber, BlockLocked};
+pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use chain::Chain;
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;

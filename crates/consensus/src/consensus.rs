@@ -1,7 +1,7 @@
 //! Consensus for ethereum network
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, H256};
 use tokio::sync::{watch, watch::error::SendError};
 
 /// Ethereum beacon consensus
@@ -54,7 +54,7 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
-    fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error> {
+    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error> {
         verification::validate_block_standalone(block)
     }
 

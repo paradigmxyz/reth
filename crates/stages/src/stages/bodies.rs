@@ -557,14 +557,14 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, TxNumber, H256};
+        use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{collections::HashMap, sync::Arc};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
 
         /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &BlockLocked) -> (H256, DownloadResult<BlockBody>) {
+        pub(crate) fn body_by_hash(block: &SealedBlock) -> (H256, DownloadResult<BlockBody>) {
             (
                 block.hash(),
                 Ok(BlockBody {
@@ -624,7 +624,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl ExecuteStageTestRunner for BodyTestRunner {
-            type Seed = Vec<BlockLocked>;
+            type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
@@ -841,7 +841,7 @@ mod tests {
                         .get(&header.hash())
                         .expect("Stage tried downloading a block we do not have.")
                         .clone()?;
-                    Ok(BlockResponse::Full(BlockLocked {
+                    Ok(BlockResponse::Full(SealedBlock {
                         header: header.clone(),
                         body: result.transactions,
                         ommers: result.ommers.into_iter().map(|header| header.seal()).collect(),

@@ -7,7 +7,7 @@ use reth_db::{
 use reth_interfaces::{provider::Error as ProviderError, Result};
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, BlockHashOrNumber, BlockLocked, Header, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, Header, SealedBlock, H256, U256,
 };
 
 /// Client trait for fetching `Header` related data.
@@ -115,7 +115,7 @@ pub struct ChainInfo {
 /// [tables::CumulativeTxCount] and [tables::BlockBodies]
 pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
-    block: &BlockLocked,
+    block: &SealedBlock,
     has_block_reward: bool,
 ) -> Result<()> {
     let block_num_hash = BlockNumHash((block.number, block.hash()));
