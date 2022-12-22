@@ -165,6 +165,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Remove all transaction that were included in the block
         for tx_hash in &event.mined_transactions {
             self.remove_transaction_by_hash(tx_hash);
+            // Update removed transactions metric
             self.metrics.removed_transactions.increment(1);
         }
 
@@ -220,6 +221,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
+                // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
@@ -238,6 +240,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Ok(res)
             }
             Err(e) => {
+                // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
                 match e {
                     InsertErr::Underpriced { existing, .. } => {
