@@ -15,16 +15,6 @@ pub struct HeaderMetrics {
 }
 
 impl HeaderMetrics {
-    /// Initialize header metrics struct and register them
-    pub fn new() -> Self {
-        Self {
-            headers_counter: register_counter!("stages.headers.counter"),
-            headers_timeout_errors: register_counter!("stages.headers.timeout_errors"),
-            headers_validation_errors: register_counter!("stages.headers.validation_errors"),
-            headers_unexpected_errors: register_counter!("stages.headers.unexpected_errors"),
-        }
-    }
-
     /// Update header errors metrics
     pub fn update_headers_error_metrics(&self, error: &DownloadError) {
         match error {
@@ -38,8 +28,14 @@ impl HeaderMetrics {
 }
 
 impl Default for HeaderMetrics {
+    /// Initialize header metrics struct and register them
     fn default() -> Self {
-        Self::new()
+        Self {
+            headers_counter: register_counter!("stages.headers.counter"),
+            headers_timeout_errors: register_counter!("stages.headers.timeout_errors"),
+            headers_validation_errors: register_counter!("stages.headers.validation_errors"),
+            headers_unexpected_errors: register_counter!("stages.headers.unexpected_errors"),
+        }
     }
 }
 
