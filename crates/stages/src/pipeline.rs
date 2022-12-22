@@ -37,7 +37,7 @@ use state::*;
 ///   Done[Done]
 ///   Error[Error]
 ///   subgraph Unwind
-///     StartUnwind(Unwind by unwind priority)
+///     StartUnwind(Unwind in reverse order of execution)
 ///     UnwindStage(Unwind stage)
 ///     NextStageToUnwind(Next stage)
 ///   end
@@ -68,7 +68,7 @@ use state::*;
 /// # Unwinding
 ///
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
-/// pipeline will unwind the stages in reverse order of insertion. It is also possible to
+/// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
 // ANCHOR: struct-Pipeline
 pub struct Pipeline<DB: Database> {
@@ -101,10 +101,6 @@ impl<DB: Database> Pipeline<DB> {
     }
 
     /// Add a stage to the pipeline.
-    ///
-    /// # Unwinding
-    ///
-    /// The unwind priority is set to 0.
     pub fn push<S>(mut self, stage: S) -> Self
     where
         S: Stage<DB> + 'static,
@@ -203,17 +199,12 @@ impl<DB: Database> Pipeline<DB> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Sort stages by unwind priority
-        let mut unwind_pipeline = {
-            let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
-            stages.reverse();
-            stages
-        };
+        // Unwind stages in reverse order of execution
+        let unwind_pipeline = self.stages.iter_mut().rev();
 
-        // Unwind stages in reverse order of priority (i.e. higher priority = first)
         let mut tx = Transaction::new(db)?;
 
-        for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
+        for QueuedStage { stage, .. } in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
