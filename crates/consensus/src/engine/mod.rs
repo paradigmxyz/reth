@@ -3,7 +3,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     rpc::BlockId,
-    BlockLocked, Header, TransactionSigned, H64,
+    Header, SealedBlock, TransactionSigned, H64,
 };
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_rlp::Decodable;
@@ -108,7 +108,7 @@ impl<Client: HeaderProvider + BlockProvider> EthConsensusEngine<Client> {
     /// NOTE: Ommers hash is validated upon computing block hash and comparing the value with
     /// `payload.block_hash`.
     /// Ref: https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145
-    fn try_construct_block(&self, payload: ExecutionPayload) -> EngineApiResult<BlockLocked> {
+    fn try_construct_block(&self, payload: ExecutionPayload) -> EngineApiResult<SealedBlock> {
         if payload.extra_data.len() > 32 {
             return Err(EngineApiError::PayloadExtraData(payload.extra_data))
         }
@@ -151,7 +151,7 @@ impl<Client: HeaderProvider + BlockProvider> EthConsensusEngine<Client> {
             })
         }
 
-        Ok(BlockLocked { header, body: transactions, ommers: Default::default() })
+        Ok(SealedBlock { header, body: transactions, ommers: Default::default() })
     }
 }
 
