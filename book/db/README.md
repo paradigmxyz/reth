@@ -253,7 +253,7 @@ This last example uses the `DbTx::cursor()` method to get a `Cursor`. The [`Curs
 ```
 
 
-We are almost at the last stop in this tour of the `db` crate. In addition to the methods provided by the `DbTx` and `DbTxMut` traits, `DbTx` also inherits the `DbTxGAT` trait, while `DbTxMut` inherits `DbTxMutGAT`. This next level of inherited traits provides various associated types related to cursors as well as methods to utilize the cursor types.
+We are almost at the last stop in the tour of the `db` crate. In addition to the methods provided by the `DbTx` and `DbTxMut` traits, `DbTx` also inherits the `DbTxGAT` trait, while `DbTxMut` inherits `DbTxMutGAT`. This next level of inherited traits provides various associated types related to cursors as well as methods to utilize the cursor types.
 
 [File: ]()
 ```rust ignore
