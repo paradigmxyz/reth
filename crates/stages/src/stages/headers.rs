@@ -509,7 +509,7 @@ mod tests {
                     downloader: self.downloader.clone(),
                     network_handle: self.network_handle.clone(),
                     commit_threshold: 100,
-                    metrics: HeaderMetrics::new(),
+                    metrics: HeaderMetrics::default(),
                 }
             }
         }
