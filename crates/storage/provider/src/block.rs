@@ -31,6 +31,9 @@ pub trait HeaderProvider: Send + Sync {
             BlockHashOrNumber::Number(num) => self.header_by_number(num),
         }
     }
+
+    /// Get total difficulty by block hash.
+    fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
 }
 
 /// Api trait for fetching `Block` related data.

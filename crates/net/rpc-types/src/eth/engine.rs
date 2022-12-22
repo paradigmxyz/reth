@@ -66,7 +66,7 @@ pub struct PayloadAttributes {
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawal: Option<Withdrawal>,
+    pub withdrawal: Option<Withdrawal>, // TODO: should be a vec
 }
 
 /// This structure contains the result of processing a payload
@@ -77,6 +77,16 @@ pub struct PayloadStatus {
     pub status: PayloadStatusEnum,
     /// Hash of the most recent valid block in the branch defined by payload and its ancestors
     pub latest_valid_hash: Option<H256>,
+}
+
+impl PayloadStatus {
+    pub fn new(status: PayloadStatusEnum, latest_valid_hash: H256) -> Self {
+        Self { status, latest_valid_hash: Some(latest_valid_hash) }
+    }
+
+    pub fn from_status(status: PayloadStatusEnum) -> Self {
+        Self { status, latest_valid_hash: None }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,7 +106,7 @@ pub enum PayloadStatusEnum {
 }
 
 /// This structure contains configurable settings of the transition process.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransitionConfiguration {
     /// Maps on the TERMINAL_TOTAL_DIFFICULTY parameter of EIP-3675
@@ -112,4 +122,24 @@ pub struct TransitionConfiguration {
 pub struct ForkchoiceUpdated {
     pub payload_status: PayloadStatus,
     pub payload_id: Option<H64>,
+}
+
+impl ForkchoiceUpdated {
+    pub fn new(payload_status: PayloadStatus) -> Self {
+        Self { payload_status, payload_id: None }
+    }
+
+    pub fn from_status(status: PayloadStatusEnum) -> Self {
+        Self { payload_status: PayloadStatus::from_status(status), payload_id: None }
+    }
+
+    pub fn with_latest_valid_hash(mut self, hash: H256) -> Self {
+        self.payload_status.latest_valid_hash = Some(hash);
+        self
+    }
+
+    pub fn with_payload_id(mut self, id: H64) -> Self {
+        self.payload_id = Some(id);
+        self
+    }
 }
