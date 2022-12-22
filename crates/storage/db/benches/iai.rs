@@ -3,21 +3,6 @@
 use iai::main;
 use reth_db::table::*;
 
-/// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
-fn load_vectors<T>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
-where
-    T: Table + Default,
-    T::Key: Default + Clone,
-    T::Value: Default + Clone,
-{
-    let encoded: bytes::Bytes = bytes::Bytes::copy_from_slice(T::Key::default().encode().as_ref());
-    let compressed: bytes::Bytes =
-        bytes::Bytes::copy_from_slice(T::Value::default().compress().as_ref());
-
-    let row = (T::Key::default(), encoded, T::Value::default(), compressed);
-    vec![row.clone(), row.clone(), row]
-}
-
 macro_rules! impl_iai {
     ($($name:tt),+) => {
         $(
@@ -76,3 +61,18 @@ impl_iai!(
     Config,
     SyncStage
 );
+
+/// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
+fn load_vectors<T>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
+where
+    T: Table + Default,
+    T::Key: Default + Clone,
+    T::Value: Default + Clone,
+{
+    let encoded: bytes::Bytes = bytes::Bytes::copy_from_slice(T::Key::default().encode().as_ref());
+    let compressed: bytes::Bytes =
+        bytes::Bytes::copy_from_slice(T::Value::default().compress().as_ref());
+
+    let row = (T::Key::default(), encoded, T::Value::default(), compressed);
+    vec![row.clone(), row.clone(), row]
+}
