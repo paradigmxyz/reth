@@ -433,6 +433,11 @@ mod tests {
                         .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
                         .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
                 )
+                .push(
+                    TestStage::new(StageId("C"))
+                        .add_exec(Ok(ExecOutput { stage_progress: 20, done: true }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                )
                 .set_max_block(Some(10));
 
             // Sync first
@@ -446,6 +451,14 @@ mod tests {
         assert_eq!(
             ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
             vec![
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("C"),
+                    input: UnwindInput { stage_progress: 20, unwind_to: 1, bad_block: None }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("C"),
+                    result: UnwindOutput { stage_progress: 1 },
+                },
                 PipelineEvent::Unwinding {
                     stage_id: StageId("B"),
                     input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
@@ -536,83 +549,6 @@ mod tests {
                 PipelineEvent::Ran {
                     stage_id: StageId("B"),
                     result: ExecOutput { stage_progress: 10, done: true },
-                },
-            ]
-        );
-    }
-
-    /// Unwinds a pipeline with unwind priorities specified.
-    ///
-    /// The stages are inserted in the order A, B, C.
-    ///
-    /// By default, the pipeline is unwound in reverse insert order, i.e. C, B, A.
-    /// In this test we reorder it to be B, C, A by setting these unwind priorities:
-    ///
-    /// - Stage A: 1
-    /// - Stage B: 10 (higher is more priority)
-    /// - Stage C: 5
-    #[tokio::test]
-    async fn unwind_priority() {
-        let (tx, rx) = channel(2);
-        let db = test_utils::create_test_db(EnvKind::RW);
-
-        // Run pipeline
-        tokio::spawn(async move {
-            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>>::new()
-                .push_with_unwind_priority(
-                    TestStage::new(StageId("A"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                    1,
-                )
-                .push_with_unwind_priority(
-                    TestStage::new(StageId("B"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                    10,
-                )
-                .push_with_unwind_priority(
-                    TestStage::new(StageId("C"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                    5,
-                )
-                .set_max_block(Some(10));
-
-            // Sync first
-            pipeline.run(db.clone()).await.expect("Could not run pipeline");
-
-            // Unwind
-            pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
-        });
-
-        // Check that the stages were unwound in reverse order
-        assert_eq!(
-            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
-            vec![
-                PipelineEvent::Unwinding {
-                    stage_id: StageId("B"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
-                },
-                PipelineEvent::Unwound {
-                    stage_id: StageId("B"),
-                    result: UnwindOutput { stage_progress: 1 },
-                },
-                PipelineEvent::Unwinding {
-                    stage_id: StageId("C"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
-                },
-                PipelineEvent::Unwound {
-                    stage_id: StageId("C"),
-                    result: UnwindOutput { stage_progress: 1 },
-                },
-                PipelineEvent::Unwinding {
-                    stage_id: StageId("A"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
-                },
-                PipelineEvent::Unwound {
-                    stage_id: StageId("A"),
-                    result: UnwindOutput { stage_progress: 1 },
                 },
             ]
         );
