@@ -7,7 +7,7 @@ use reth_db::{
 use reth_interfaces::{provider::Error as ProviderError, Result};
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, BlockHashOrNumber, SealedBlock, Header, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, Header, SealedBlock, H256, U256,
 };
 
 /// Client trait for fetching `Header` related data.

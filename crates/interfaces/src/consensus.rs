@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use reth_primitives::{BlockHash, SealedBlock, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedHeader, H256};
 use tokio::sync::watch::Receiver;
 
 /// Re-export forkchoice state

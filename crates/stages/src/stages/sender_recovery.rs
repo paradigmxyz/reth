@@ -133,7 +133,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::models::StoredBlockBody;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{SealedBlock, BlockNumber, H256};
+    use reth_primitives::{BlockNumber, SealedBlock, H256};
 
     use super::*;
     use crate::test_utils::{

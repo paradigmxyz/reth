@@ -557,7 +557,7 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{SealedBlock, BlockNumber, SealedHeader, TxNumber, H256};
+        use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{collections::HashMap, sync::Arc};
 
         /// The block hash of the genesis block.

@@ -1,6 +1,6 @@
 use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Address, SealedBlock, Bytes, Header, SealedHeader, Signature, Transaction,
+    proofs, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
     TransactionKind, TransactionSigned, TxLegacy, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};

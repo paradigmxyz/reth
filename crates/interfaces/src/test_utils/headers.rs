@@ -13,7 +13,7 @@ use crate::{
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    SealedBlock, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
+    BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{

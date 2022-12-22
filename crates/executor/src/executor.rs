@@ -418,7 +418,7 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, SealedBlock, Bytes, StorageKey, H160, H256,
+        hex_literal::hex, keccak256, Account, Address, Bytes, SealedBlock, StorageKey, H160, H256,
         U256,
     };
     use reth_provider::{AccountProvider, StateProvider};

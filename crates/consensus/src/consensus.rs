@@ -2,7 +2,7 @@
 
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{SealedBlock, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, H256};
 use tokio::sync::{watch, watch::error::SendError};
 
 /// Ethereum consensus
