@@ -309,6 +309,7 @@ impl NetworkEventStream {
             match ev {
                 NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
                 NetworkEvent::SessionEstablished { .. } => continue,
+                _ => todo!(),
             }
         }
         None
@@ -319,6 +320,7 @@ impl NetworkEventStream {
             match ev {
                 NetworkEvent::SessionClosed { .. } => continue,
                 NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                _ => todo!(),
             }
         }
         None

@@ -65,6 +65,12 @@ async fn test_establish_connections() {
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
                     assert!(expected_connections.remove(&peer_id))
                 }
+                NetworkEvent::PeerAdded(peer_id) => {
+                    assert!(!expected_connections.contains(&peer_id))
+                }
+                NetworkEvent::PeerRemoved(_) => {
+                    panic!("unexpected event")
+                }
             }
         }
         assert!(expected_connections.is_empty());
