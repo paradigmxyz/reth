@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, stages_metrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -21,6 +21,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
+use stages_metrics::HeaderMetrics;
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -53,6 +54,8 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
     pub network_handle: S,
     /// The number of block headers to commit at once
     pub commit_threshold: u64,
+    /// Header metrics
+    pub metrics: HeaderMetrics,
 }
 
 #[async_trait::async_trait]
@@ -81,7 +84,6 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         let mut current_progress = stage_progress;
         let mut stream =
             self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold as usize);
-
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
@@ -89,6 +91,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
             match headers.into_iter().collect::<Result<Vec<_>, _>>() {
                 Ok(res) => {
                     info!(target: "sync::stages::headers", len = res.len(), "Received headers");
+                    self.metrics.headers_counter.increment(res.len() as u64);
 
                     // Perform basic response validation
                     self.validate_header_response(&res)?;
@@ -96,20 +99,23 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                         self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
                     current_progress = current_progress.max(write_progress);
                 }
-                Err(e) => match e {
-                    DownloadError::Timeout => {
-                        warn!(target: "sync::stages::headers", "No response for header request");
-                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                Err(e) => {
+                    self.metrics.update_headers_error_metrics(&e);
+                    match e {
+                        DownloadError::Timeout => {
+                            warn!(target: "sync::stages::headers", "No response for header request");
+                            return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                        }
+                        DownloadError::HeaderValidation { hash, error } => {
+                            error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
+                            return Err(StageError::Validation { block: stage_progress, error })
+                        }
+                        error => {
+                            error!(target: "sync::stages::headers", ?error, "Unexpected error");
+                            return Err(StageError::Recoverable(error.into()))
+                        }
                     }
-                    DownloadError::HeaderValidation { hash, error } => {
-                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
-                        return Err(StageError::Validation { block: stage_progress, error })
-                    }
-                    error => {
-                        error!(target: "sync::stages::headers", ?error, "Unexpected error");
-                        return Err(StageError::Recoverable(error.into()))
-                    }
-                },
+                }
             }
         }
 
@@ -448,6 +454,7 @@ mod tests {
     mod test_runner {
         use crate::{
             stages::headers::HeaderStage,
+            stages_metrics::HeaderMetrics,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
                 UnwindStageTestRunner,
@@ -502,6 +509,7 @@ mod tests {
                     downloader: self.downloader.clone(),
                     network_handle: self.network_handle.clone(),
                     commit_threshold: 100,
+                    metrics: HeaderMetrics::default(),
                 }
             }
         }

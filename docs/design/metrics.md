@@ -16,6 +16,9 @@ The main difference between metrics and traces is therefore that metrics are sys
 ### How to add a metric
 
 To add metrics use the [`metrics`][metrics] crate. 
+1. Add the code emitting the metric.
+2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages_metrics_describer.rs).
+3. Document the metric in this file.
 
 #### Metric anatomy
 
@@ -52,6 +55,14 @@ How the metrics are exposed to the end-user is determined by the CLI.
   - Use the Prometheus [base units][prom_base_units]
 
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
+
+### Current metrics
+#### StagedSync Headers
+- `stages.headers.counter`: Number of headers successfully retrieved
+- `stages.headers.timeout_error`: Number of timeout errors while requesting headers
+- `stages.headers.validation_errors`: Number of validation errors while requesting headers
+- `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
+- `stages.headers.request_time`: Elapsed time of successful header requests
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html
