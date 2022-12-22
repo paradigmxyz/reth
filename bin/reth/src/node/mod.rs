@@ -4,12 +4,10 @@
 use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
+    prometheus_exporter,
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
-use eyre::WrapErr;
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::{PrefixLayer, Stack};
 use reth_consensus::BeaconConsensus;
 use reth_db::{
     cursor::DbCursorRO,
@@ -27,8 +25,10 @@ use reth_network::{
 };
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
-use reth_stages::stages::{
-    bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage,
+use reth_stages::{
+    stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
+    stages_metrics::HeaderMetrics,
+    stages_metrics_describer,
 };
 use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
@@ -93,15 +93,8 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!("Starting metrics endpoint at {}", listen_addr);
-            let (recorder, exporter) = PrometheusBuilder::new()
-                .with_http_listener(listen_addr)
-                .build()
-                .wrap_err("Could not build Prometheus endpoint.")?;
-            tokio::task::spawn(exporter);
-            Stack::new(recorder)
-                .push(PrefixLayer::new("reth"))
-                .install()
-                .wrap_err("Couldn't set metrics recorder.")?;
+            prometheus_exporter::initialize(listen_addr)?;
+            stages_metrics_describer::describe();
         }
 
         let chain_id = self.chain.consensus.chain_id;
@@ -125,6 +118,7 @@ impl Command {
                 client: fetch_client.clone(),
                 network_handle: network.clone(),
                 commit_threshold: config.stages.headers.commit_threshold,
+                metrics: HeaderMetrics::default(),
             })
             .push(BodyStage {
                 downloader: Arc::new(
