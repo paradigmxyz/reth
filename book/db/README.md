@@ -2,6 +2,8 @@
 
 The database is a central component to Reth, enabling persistent storage for data like block headers, block bodies, transactions and more. The Reth database is comprised of key-value storage written to the disk and organized in tables. This chapter might feel a little dense at first, but shortly, you will feel very comfortable understanding and navigating the `db` crate. This chapter will go through the structure of the database, its tables and the mechanics of the `Database` trait.
 
+<br>
+
 ## Tables
 
 Within Reth, a table is a struct that implements the `Table` trait.
@@ -49,6 +51,7 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 - Config
 - SyncStage
 
+<br>
 
 ## Database
 
