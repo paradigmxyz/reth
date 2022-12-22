@@ -11,7 +11,7 @@ use reth_interfaces::{
         error::{DownloadError, DownloadResult, RequestError},
     },
 };
-use reth_primitives::{BlockLocked, SealedHeader};
+use reth_primitives::{SealedBlock, SealedHeader};
 use std::{borrow::Borrow, sync::Arc};
 
 /// Downloads bodies in batches.
@@ -158,7 +158,7 @@ where
                     }
                 };
 
-                let block = BlockLocked {
+                let block = SealedBlock {
                     header: header.clone(),
                     body: body.transactions,
                     ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
@@ -247,7 +247,7 @@ mod tests {
                             if header.is_empty() {
                                 BlockResponse::Empty(header)
                             } else {
-                                BlockResponse::Full(BlockLocked {
+                                BlockResponse::Full(SealedBlock {
                                     header,
                                     body: body.transactions,
                                     ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
