@@ -1,4 +1,4 @@
-//! Engine API types: <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md> and <https://eips.ethereum.org/EIPS/eip-3675> following the execution spec <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md>
+//! Engine API types: <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md> and <https://eips.ethereum.org/EIPS/eip-3675> following the execution specs <https://github.com/ethereum/execution-apis/tree/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine>
 
 #![allow(missing_docs)]
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 ///
-/// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#executionpayloadv1>
+/// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#executionpayloadv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionPayload {
@@ -26,14 +26,14 @@ pub struct ExecutionPayload {
     pub block_hash: H256,
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
-    /// See <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#executionpayloadv2>
+    /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
 }
 
 /// This structure maps onto the validator withdrawal object from the beacon chain spec.
 ///
-/// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#withdrawalv1>
+/// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#withdrawalv1>
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Withdrawal {
@@ -64,7 +64,7 @@ pub struct PayloadAttributes {
     pub prev_randao: H256,
     pub suggested_fee_recipient: Address,
     /// Array of [`Withdrawal`] enabled with V2
-    /// See <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#executionpayloadv2>
+    /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
 }
