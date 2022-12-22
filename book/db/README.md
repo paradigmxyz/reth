@@ -1,6 +1,28 @@
 # db
 
-The database is a central component to Reth, enabling persistent storage for data like block headers, block bodies, transactions and more. The Reth database is a key-value store organized via the following tables. For an in-depth look at how any of the tables work under the hood, feel free to check out the [tables section of the docs]().
+The database is a central component to Reth, enabling persistent storage for data like block headers, block bodies, transactions and more. The Reth database is comprised of key-value storage written to the disk and organized in tables. Within Reth, a table is a struct that implements the `Table` trait.
+
+```rust ignore
+pub trait Table: Send + Sync + Debug + 'static {
+    /// Return table name as it is present inside the MDBX.
+    const NAME: &'static str;
+    /// Key element of `Table`.
+    ///
+    /// Sorting should be taken into account when encoding this.
+    type Key: Key;
+    /// Value element of `Table`.
+    type Value: Value;
+}
+
+//--snip--
+pub trait Key: Encode + Decode {}
+
+//--snip--
+pub trait Value: Compress + Decompress {}
+
+```
+
+The `Table` trait has two generic values, `Key` and `Value`, which need to implement the `Key` and `Value` traits, respectively. There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link]() if you would like to see the table definitions for any of the tables below.
 
 - CanonicalHeaders
 - HeaderTD
@@ -22,6 +44,7 @@ The database is a central component to Reth, enabling persistent storage for dat
 - TxSenders
 - Config
 - SyncStage
+
 
 Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/mod.rs#L33), which takes advantage of [generic associated types]() to implement the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works. This section might feel a little dense at first, but shortly, you will feel very comfortable with Reth's use of GATs and the `Database` trait in its implementation. 
 
@@ -65,7 +88,7 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 ```
 
 <!-- TODO: give some examples of what a transaction could actually be -->
-Here is the `Database` trait in the code snippet above. Any type that implements the `Database` trait can create a read only transaction, create a read/write transaction, view an existing transaction or update an existing transaction. We already saw one type that implements the `Database` trait, which is the `StageDB` from the `stages` chapter of the book which uses the database trait to store new headers, bodies and senders in the database during the loop in the Reth pipeline.
+In the code snippet above is the `Database` trait. Any type that implements the `Database` trait can create a read only transaction, create a read/write transaction, view an existing transaction or update an existing transaction. We already saw one type that implements the `Database` trait, which is the `StageDB` from the `stages` chapter of the book. `StageDB` uses the `Database` trait to store new headers, bodies and senders in the database during the loop in the Reth  pipeline. In the code snippet below, you can see the `StageDB` struct as well as its `open()` function which uses the `Database::tx_mut()` function to create a mutable transaction. 
 
 [File: ]()
 ```rust ignore
@@ -74,12 +97,8 @@ pub struct StageDB<'this, DB: Database> {
     pub(crate) db: &'this DB,
     tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
 }
-```
 
-Further, we can also see where the `StageDB` uses the `Database::tx_mut()` function to create a mutable transaction. However, looking further through the `StageDB` impl, we will start to find methods that are used, but are not defined within the `Database` trait. For example, the `get_block_hash()` method, uses `self.get()` which is not defined within the `Database` trait.
-
-[File: ]()
-```rust ignore
+//--snip--
 impl<'this, DB> StageDB<'this, DB>
 where
     DB: Database,
@@ -91,7 +110,17 @@ where
         self.tx = Some(self.db.tx_mut()?);
         Ok(())
     }
+}
+```
 
+If you keep looking through the `StageDB` impl, we will start to find a few methods that are used on `self`, but are not defined within the `Database` trait. For example, the `get_block_hash()` method, uses `self.get()` which is not defined within the `Database` trait.
+
+[File: ]()
+```rust ignore
+impl<'this, DB> StageDB<'this, DB>
+where
+    DB: Database,
+{\
     //--snip--
 
     /// Query [tables::CanonicalHeaders] table for block hash by block number
@@ -101,9 +130,7 @@ where
             .ok_or(DatabaseIntegrityError::CanonicalHash { number })?;
         Ok(hash)
     }
-
     //--snip--
-
 }
 ```
 
@@ -160,7 +187,58 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
 }
 ```
 
-//TODO: Walk through TX and TXMut, give some examples of where their methods are used within the stages crate.
+Lets take a look at the `DbTx` and `DbTxMut` traits in action. Below is the the implementation block for the `StageId` struct used throughout the `stages` crate. This struct is defined as `pub struct StageId(pub &'static str);` and simply holds an Id for a given stage in the Reth pipeline. Within the `StageId` implementation block, you can see a few variables that the implement the `DbTx` or `DbTxMut`.
+
+[File: ]()
+```rust ignore
+
+impl StageId {
+    /// Get the last committed progress of this stage.
+    pub fn get_progress<'db>(&self, tx: &impl DbTx<'db>) -> Result<Option<BlockNumber>, DbError> {
+        tx.get::<SyncStage>(self.0.as_bytes().to_vec())
+    }
+
+    /// Save the progress of this stage.
+    pub fn save_progress<'db>(
+        &self,
+        tx: &impl DbTxMut<'db>,
+        block: BlockNumber,
+    ) -> Result<(), DbError> {
+        counter!("stage.progress", block, "stage" => self.0);
+        tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
+    }
+}
+```
+
+Within the `get_process` function, the `tx` variable uses the `get()` method, which is defined in the `DbTx` trait.
+
+```rust ignore
+pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
+    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
+//--snip--
+}
+```
+
+This method defines a generic type `T` that implements the `Table` trait, and takes a `key` variable that is the 
+
+Within the `StageId::get_progress()` function, the `get` method uses the [turbofish operator]() to define which type to use that implements the `Table` trait, using the following syntax: `tx.get::<SyncStage>(self.0.as_bytes().to_vec())`. 
+
+
+Similarly, within the `save_progress` method, the tx variable uses the `put()` method, which is defined in th `DbTxMut` trait. The `put` method within `StageId::save_progress()` also uses the turbofish operator to define which table to use, placing values into the table.
+
+```rust ignore 
+    pub fn save_progress<'db>(
+        &self,
+        tx: &impl DbTxMut<'db>,
+        block: BlockNumber,
+    ) -> Result<(), DbError> {
+        
+        //--snip--
+        tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
+    }
+```
+
+
 
 //TODO: Explore DbTxGAT, Cursor and DupCursor
 
@@ -194,4 +272,3 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
 Ok, lets do a quick review.
 <!-- Insert a diagram of the traits maybe?-->
 TODO: Very digestible overview of how the db trait works as a whole in a few sentences.
-
