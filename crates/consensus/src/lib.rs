@@ -14,5 +14,5 @@ pub mod consensus;
 pub mod verification;
 
 pub use config::Config;
-pub use consensus::EthConsensus;
+pub use consensus::BeaconConsensus;
 pub use reth_interfaces::consensus::Error;
