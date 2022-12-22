@@ -68,11 +68,8 @@ use state::*;
 /// # Unwinding
 ///
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
-/// pipeline will unwind the stages according to their unwind priority. It is also possible to
+/// pipeline will unwind the stages in reverse order of insertion. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
-///
-/// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
-/// priorities are unwound first.
 // ANCHOR: struct-Pipeline
 pub struct Pipeline<DB: Database> {
     stages: Vec<QueuedStage<DB>>,
@@ -108,19 +105,11 @@ impl<DB: Database> Pipeline<DB> {
     /// # Unwinding
     ///
     /// The unwind priority is set to 0.
-    pub fn push<S>(self, stage: S) -> Self
+    pub fn push<S>(mut self, stage: S) -> Self
     where
         S: Stage<DB> + 'static,
     {
-        self.push_with_unwind_priority(stage, 0)
-    }
-
-    /// Add a stage to the pipeline, specifying the unwind priority.
-    pub fn push_with_unwind_priority<S>(mut self, stage: S, unwind_priority: usize) -> Self
-    where
-        S: Stage<DB> + 'static,
-    {
-        self.stages.push(QueuedStage { stage: Box::new(stage), unwind_priority });
+        self.stages.push(QueuedStage { stage: Box::new(stage) });
         self
     }
 
@@ -217,7 +206,6 @@ impl<DB: Database> Pipeline<DB> {
         // Sort stages by unwind priority
         let mut unwind_pipeline = {
             let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
-            stages.sort_by(|a, b| a.1.unwind_priority.cmp(&b.1.unwind_priority));
             stages.reverse();
             stages
         };
@@ -269,8 +257,6 @@ impl<DB: Database> Pipeline<DB> {
 struct QueuedStage<DB: Database> {
     /// The actual stage to execute.
     stage: Box<dyn Stage<DB>>,
-    /// The unwind priority of the stage.
-    unwind_priority: usize,
 }
 
 impl<DB: Database> QueuedStage<DB> {
