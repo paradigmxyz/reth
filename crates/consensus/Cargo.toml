@@ -11,14 +11,19 @@ readme = "README.md"
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
-reth-rlp = {path = "../common/rlp"}
+reth-rlp = { path = "../common/rlp" }
+reth-rpc-types = { path = "../net/rpc-types" }
+
+# async
+futures = "0.3"
+async-trait = "0.1.57"
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
 
 # common
-async-trait = "0.1.57"
 thiserror = "1.0.37"
 eyre = "0.6.8"
 auto_impl = "1.0"
-tokio = { version = "1.21.2", features = ["sync"] }
 
 # io
 serde = { version = "1.0", optional = true }

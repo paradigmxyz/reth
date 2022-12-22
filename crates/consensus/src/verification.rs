@@ -431,6 +431,10 @@ mod tests {
         fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
             Ok(self.parent.clone())
         }
+
+        fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
+            Ok(None)
+        }
     }
 
     fn mock_tx(nonce: u64) -> TransactionSignedEcRecovered {
