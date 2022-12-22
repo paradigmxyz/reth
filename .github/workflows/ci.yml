@@ -8,7 +8,6 @@ env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   GETH_BUILD: 1.10.26-e5eb32ac
-  AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -25,6 +24,8 @@ jobs:
         uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -42,22 +43,37 @@ jobs:
 
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Test with latest nextest release
-        uses: actions-rs/cargo@v1
+      - name: Run tests
+        run: cargo llvm-cov nextest --lcov --output-path lcov.info --locked --workspace --all-features
+
+      - name: Upload coverage data to codecov
+        uses: codecov/codecov-action@v3
         with:
-          command: nextest
-          args: run --locked --workspace --all-features
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          flags: unit-tests
 
   fuzz:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        target:
+          - reth-primitives
+          - reth-db
+          - reth-eth-wire
+          - reth-codecs
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -67,18 +83,24 @@ jobs:
         with:
           command: install
           args: cargo-test-fuzz afl
-
-      - name: check for cargo afl
+      - name: Force install cargo-afl
         run: |
           cargo install --force afl
           cargo afl --version
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run fuzz tests
         run: |
-          ./.github/scripts/fuzz.sh reth-primitives
-          ./.github/scripts/fuzz.sh reth-db
-          ./.github/scripts/fuzz.sh reth-eth-wire
-          ./.github/scripts/fuzz.sh reth-codecs
+          ./.github/scripts/fuzz.sh ${{ matrix.target }}
+        env:
+          AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
+      - name: Upload coverage data to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          flags: fuzz-tests
 
   lint:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
@@ -106,39 +128,3 @@ jobs:
         with:
           args: --all --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  coverage:
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
-    runs-on: ubuntu-20.04
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install latest nextest release
-        uses: taiki-e/install-action@nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Install geth
-        run: |
-            mkdir -p "$HOME/bin"
-            wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
-            tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
-            mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
-            chmod u+x "$HOME/bin/geth"
-            export PATH=$HOME/bin:$PATH
-            echo $HOME/bin >> $GITHUB_PATH
-            geth version
-
-      - name: Collect coverage data
-        run: cargo llvm-cov nextest --lcov --output-path lcov.info --locked --workspace --all-features
-      - name: Upload coverage data to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
