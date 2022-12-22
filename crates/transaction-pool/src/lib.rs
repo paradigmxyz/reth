@@ -101,6 +101,7 @@ use tokio::sync::mpsc::Receiver;
 mod config;
 pub mod error;
 mod identifier;
+pub mod metrics;
 mod ordering;
 pub mod pool;
 mod traits;
