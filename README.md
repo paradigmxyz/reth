@@ -41,6 +41,8 @@ The project is not ready for use. We hope to have full sync implemented sometime
 
 Rust minimum required version to build this project is 1.65.0 published 02.11.2022
 
+To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/install-and-build/installing-geth)
+
 ```sh
 git clone https://github.com/paradigmxyz/reth
 cd reth
