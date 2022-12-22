@@ -3,13 +3,16 @@
 use metrics::{describe_counter, register_counter, Counter};
 
 pub(crate) struct TxPoolMetrics {
+    /// Number of transactions inserted in the pool
     pub(crate) inserted_transactions: Counter,
+    /// Number of invalid transactions
     pub(crate) invalid_transactions: Counter,
+    /// Number of removed transactions from the pool 
     pub(crate) removed_transactions: Counter,
 }
 
 impl Default for TxPoolMetrics {
-    /// Initialize TxPoolMetrics struct and register them
+    /// Initialize txpool metrics struct and register them
     fn default() -> Self {
         Self {
             inserted_transactions: register_counter!("transaction_pool.inserted_transactions"),
