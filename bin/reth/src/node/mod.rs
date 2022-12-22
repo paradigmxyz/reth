@@ -8,9 +8,6 @@ use crate::{
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
-use eyre::WrapErr;
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::{PrefixLayer, Stack};
 use reth_consensus::BeaconConsensus;
 use reth_db::{
     cursor::DbCursorRO,
@@ -121,7 +118,7 @@ impl Command {
                 client: fetch_client.clone(),
                 network_handle: network.clone(),
                 commit_threshold: config.stages.headers.commit_threshold,
-                metrics: HeaderMetrics::new(),
+                metrics: HeaderMetrics::default(),
             })
             .push(BodyStage {
                 downloader: Arc::new(
