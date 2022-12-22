@@ -1,6 +1,6 @@
 use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Address, BlockLocked, Bytes, Header, SealedHeader, Signature, Transaction,
+    proofs, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
     TransactionKind, TransactionSigned, TxLegacy, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
@@ -100,7 +100,7 @@ pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1:
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block(number: u64, parent: Option<H256>, tx_count: Option<u8>) -> BlockLocked {
+pub fn random_block(number: u64, parent: Option<H256>, tx_count: Option<u8>) -> SealedBlock {
     let mut rng = thread_rng();
 
     // Generate transactions
@@ -119,7 +119,7 @@ pub fn random_block(number: u64, parent: Option<H256>, tx_count: Option<u8>) -> 
     let transactions_root = proofs::calculate_transaction_root(transactions.iter());
     let ommers_hash = proofs::calculate_ommers_root(ommers.iter());
 
-    BlockLocked {
+    SealedBlock {
         header: Header {
             parent_hash: parent.unwrap_or_default(),
             number,
@@ -145,14 +145,14 @@ pub fn random_block_range(
     block_numbers: std::ops::Range<u64>,
     head: H256,
     tx_count: std::ops::Range<u8>,
-) -> Vec<BlockLocked> {
+) -> Vec<SealedBlock> {
     let mut rng = rand::thread_rng();
     let mut blocks =
         Vec::with_capacity(block_numbers.end.saturating_sub(block_numbers.start) as usize);
     for idx in block_numbers {
         blocks.push(random_block(
             idx,
-            Some(blocks.last().map(|block: &BlockLocked| block.header.hash()).unwrap_or(head)),
+            Some(blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head)),
             Some(tx_count.clone().sample_single(&mut rng)),
         ));
     }
