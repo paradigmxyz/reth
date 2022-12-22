@@ -7,7 +7,7 @@ pub(crate) struct TxPoolMetrics {
     pub(crate) inserted_transactions: Counter,
     /// Number of invalid transactions
     pub(crate) invalid_transactions: Counter,
-    /// Number of removed transactions from the pool 
+    /// Number of removed transactions from the pool
     pub(crate) removed_transactions: Counter,
 }
 
