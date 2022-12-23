@@ -9,6 +9,12 @@ description = """
 Transaction pool implementation
 """
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine"
+]
+
 [dependencies]
 
 # eth

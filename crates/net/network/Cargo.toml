@@ -9,6 +9,12 @@ description = """
 Ethereum network support
 """
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine"
+]
+
 [dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces" }
