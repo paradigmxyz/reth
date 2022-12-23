@@ -312,12 +312,8 @@ where
                     msg,
                 })
             }
-            NetworkEvent::PeerAdded(_) => {
-                todo!()
-            }
-            NetworkEvent::PeerRemoved(_) => {
-                todo!()
-            }
+            // TODO Add remaining events
+            _ => {}
         }
     }
 
