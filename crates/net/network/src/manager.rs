@@ -18,7 +18,7 @@
 use crate::{
     config::NetworkConfig,
     discovery::Discovery,
-    error::NetworkError,
+    error::{NetworkError, SessionError},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
@@ -575,7 +575,7 @@ where
                     let mut reason = None;
                     if let Some(ref err) = error {
                         // If the connection was closed due to an error, we report the peer
-                        this.swarm.state_mut().peers_mut().on_connection_dropped(
+                        this.swarm.state_mut().peers_mut().on_active_session_dropped(
                             &remote_addr,
                             &peer_id,
                             err,
@@ -583,7 +583,10 @@ where
                         reason = err.as_disconnected();
                     } else {
                         // Gracefully disconnected
-                        this.swarm.state_mut().peers_mut().on_disconnected(peer_id);
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_active_session_gracefully_closed(peer_id);
                     }
 
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id, reason });
@@ -609,12 +612,18 @@ where
                         ?error,
                         "Outgoing pending session failed"
                     );
-                    let peers = this.swarm.state_mut().peers_mut();
-                    peers.on_closed_outgoing_pending_session(&peer_id);
-                    peers.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
 
-                    if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
-                        this.swarm.state_mut().ban_discovery(peer_id, remote_addr.ip());
+                    if let Some(ref err) = error {
+                        this.swarm.state_mut().peers_mut().on_pending_session_dropped(
+                            &remote_addr,
+                            &peer_id,
+                            err,
+                        );
+                    } else {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_pending_session_gracefully_closed(&peer_id);
                     }
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
