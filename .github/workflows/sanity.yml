@@ -63,7 +63,7 @@ jobs:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
-    name: dep version constraints
+    name: unused dependencies
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
