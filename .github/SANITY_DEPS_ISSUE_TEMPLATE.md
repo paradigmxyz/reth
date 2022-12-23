@@ -1,5 +1,5 @@
 ---
-title: bug: deps sanity check failed
+title: "bug: deps sanity check failed"
 labels: P-high, C-bug, A-dependencies
 ---
 
