@@ -1,5 +1,5 @@
 ---
-title: chore: some installed deps are not needed
+title: "chore: some installed deps are not needed"
 labels: C-debt, A-dependencies
 ---
 
