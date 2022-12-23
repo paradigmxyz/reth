@@ -10,6 +10,7 @@ use reth_primitives::{Chain, ForkFilter, Hardfork, PeerId, H256, MAINNET_GENESIS
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
+    collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
@@ -36,7 +37,7 @@ pub struct NetworkConfig<C> {
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
-    pub boot_nodes: Vec<NodeRecord>,
+    pub boot_nodes: HashSet<NodeRecord>,
     /// How to set up discovery.
     pub discovery_v4_config: Discv4Config,
     /// Address to use for discovery
@@ -106,9 +107,9 @@ pub struct NetworkConfigBuilder<C> {
     /// How to set up discovery.
     discovery_v4_builder: Discv4ConfigBuilder,
     /// All boot nodes to start network discovery with.
-    boot_nodes: Vec<NodeRecord>,
+    boot_nodes: HashSet<NodeRecord>,
     /// Nodes we always want to connect to.
-    trusted_nodes: Vec<NodeRecord>,
+    trusted_nodes: HashSet<NodeRecord>,
     /// If we should connect to trusted nodes only.
     connect_trusted_nodes_only: bool,
     /// Address to use for discovery
@@ -148,8 +149,8 @@ impl<C> NetworkConfigBuilder<C> {
             client,
             secret_key,
             discovery_v4_builder: Default::default(),
-            boot_nodes: vec![],
-            trusted_nodes: vec![],
+            boot_nodes: Default::default(),
+            trusted_nodes: Default::default(),
             connect_trusted_nodes_only: false,
             discovery_addr: None,
             listener_addr: None,
