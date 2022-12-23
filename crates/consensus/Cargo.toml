@@ -22,7 +22,6 @@ tokio-stream = "0.1"
 
 # common
 thiserror = "1.0.37"
-eyre = "0.6.8"
 auto_impl = "1.0"
 
 # io

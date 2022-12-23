@@ -21,8 +21,6 @@ reth-eth-wire = { path = "../net/eth-wire" }
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
-postcard = { version = "1.0.2", features = ["alloc"] }
-heapless = "0.7.16"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 futures = "0.3.25"
 tokio-stream = "0.1.11"

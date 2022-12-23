@@ -2352,12 +2352,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "maplit"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
-
-[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3304,7 +3298,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
- "reth-rpc",
  "reth-stages",
  "reth-transaction-pool",
  "serde",
@@ -3336,7 +3329,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "auto_impl",
- "eyre",
  "futures",
  "reth-interfaces",
  "reth-primitives",
@@ -3361,7 +3353,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "criterion",
- "eyre",
  "futures",
  "heapless",
  "iai",
@@ -3491,11 +3482,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "auto_impl",
- "eyre",
  "hash-db",
  "hashbrown 0.13.1",
  "plain_hasher",
- "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
@@ -3519,11 +3508,9 @@ dependencies = [
  "auto_impl",
  "bytes",
  "futures",
- "heapless",
  "hex-literal",
  "modular-bitfield",
  "parity-scale-codec",
- "postcard",
  "rand 0.8.5",
  "reth-codecs",
  "reth-db",
@@ -3598,7 +3585,6 @@ dependencies = [
  "aquamarine",
  "async-trait",
  "bytes",
- "either",
  "enr 0.7.0",
  "ethers-core",
  "ethers-providers",
@@ -3643,7 +3629,6 @@ dependencies = [
  "hash-db",
  "hex",
  "hex-literal",
- "maplit",
  "modular-bitfield",
  "parity-scale-codec",
  "plain_hasher",
@@ -3705,14 +3690,12 @@ dependencies = [
  "rlp",
  "secp256k1",
  "smol_str",
- "tracing",
 ]
 
 [[package]]
 name = "reth-rlp-derive"
 version = "0.1.1"
 dependencies = [
- "bytes",
  "proc-macro2",
  "quote",
  "syn",
@@ -3776,7 +3759,6 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
- "reth-network",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3785,7 +3767,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-futures",
 ]
 
 [[package]]
@@ -3815,7 +3796,6 @@ dependencies = [
  "bitflags",
  "fnv",
  "futures-util",
- "linked-hash-map",
  "parking_lot 0.12.1",
  "paste",
  "rand 0.8.5",
