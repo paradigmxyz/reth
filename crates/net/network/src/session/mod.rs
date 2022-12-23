@@ -311,7 +311,7 @@ impl SessionManager {
             Poll::Ready(None) => unreachable!("Manager holds both channel halves."),
             Poll::Ready(Some(event)) => event,
         };
-        return match event {
+        match event {
             PendingSessionEvent::Established {
                 session_id,
                 remote_addr,
