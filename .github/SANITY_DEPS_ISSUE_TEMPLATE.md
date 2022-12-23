@@ -1,6 +1,6 @@
 ---
-title: chore: deps sanity check failed
-labels: P-high, C-bug, dependencies
+title: bug: deps sanity check failed
+labels: P-high, C-bug, A-dependencies
 ---
 
 Something broke our version constraints in a `Cargo.toml`.
