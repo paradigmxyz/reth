@@ -3585,6 +3585,7 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "async-trait",
+ "auto_impl",
  "bytes",
  "enr 0.7.0",
  "ethers-core",

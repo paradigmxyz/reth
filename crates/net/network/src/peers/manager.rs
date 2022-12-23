@@ -1,10 +1,10 @@
 use crate::{
-    error::{error_merits_discovery_ban, is_fatal_protocol_error},
+    error::SessionError,
     peers::{
-        reputation::{is_banned_reputation, DEFAULT_REPUTATION},
+        reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
         ReputationChangeKind, ReputationChangeWeights,
     },
-    session::Direction,
+    session::{Direction, PendingSessionHandshakeError},
 };
 use futures::StreamExt;
 use reth_eth_wire::{error::EthStreamError, DisconnectReason};
@@ -17,8 +17,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-
-use crate::peers::reputation::BACKOFF_REPUTATION_CHANGE;
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -162,14 +160,6 @@ impl PeersManager {
         self.connection_info.decr_in()
     }
 
-    /// Invoked when a pending outgoing session was closed.
-    pub(crate) fn on_closed_outgoing_pending_session(&mut self, peer_id: &PeerId) {
-        if let Some(mut peer) = self.peers.get_mut(peer_id) {
-            peer.state = PeerConnectionState::Idle;
-        }
-        self.connection_info.decr_out()
-    }
-
     /// Called when a new _incoming_ active session was established to the given peer.
     ///
     /// This will update the state of the peer if not yet tracked.
@@ -241,8 +231,28 @@ impl PeersManager {
         }
     }
 
-    /// Gracefully disconnected
-    pub(crate) fn on_disconnected(&mut self, peer_id: PeerId) {
+    /// Gracefully disconnected a pending session
+    pub(crate) fn on_pending_session_gracefully_closed(&mut self, peer_id: &PeerId) {
+        if let Some(mut peer) = self.peers.get_mut(peer_id) {
+            peer.state = PeerConnectionState::Idle;
+        } else {
+            return
+        }
+        self.connection_info.decr_out()
+    }
+
+    /// Invoked when a pending outgoing session was closed during authentication or the handshake.
+    pub(crate) fn on_pending_session_dropped(
+        &mut self,
+        remote_addr: &SocketAddr,
+        peer_id: &PeerId,
+        err: &PendingSessionHandshakeError,
+    ) {
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
+    }
+
+    /// Gracefully disconnected an active session
+    pub(crate) fn on_active_session_gracefully_closed(&mut self, peer_id: PeerId) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 self.connection_info.decr_state(entry.get().state);
@@ -261,6 +271,63 @@ impl PeersManager {
         self.fill_outbound_slots();
     }
 
+    /// Called when an _active_ session to a peer was forcefully dropped due to an error.
+    ///
+    /// Depending on whether the error is fatal, the peer will be removed from the peer set
+    /// otherwise its reputation is slashed.
+    pub(crate) fn on_active_session_dropped(
+        &mut self,
+        remote_addr: &SocketAddr,
+        peer_id: &PeerId,
+        err: &EthStreamError,
+    ) {
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::Dropped)
+    }
+
+    fn on_connection_failure(
+        &mut self,
+        remote_addr: &SocketAddr,
+        peer_id: &PeerId,
+        err: impl SessionError,
+        reputation_change: ReputationChangeKind,
+    ) {
+        if err.is_fatal_protocol_error() {
+            // remove the peer to which we can't establish a connection due to protocol related
+            // issues.
+            if let Some(peer) = self.peers.remove(peer_id) {
+                self.connection_info.decr_state(peer.state);
+            }
+
+            // ban the peer
+            self.ban_peer(*peer_id);
+
+            // If the error is caused by a peer that should be banned from discovery
+            if err.merits_discovery_ban() {
+                self.queued_actions.push_back(PeerAction::DiscoveryBan {
+                    peer_id: *peer_id,
+                    ip_addr: remote_addr.ip(),
+                })
+            }
+        } else {
+            let reputation_change = if err.should_backoff() {
+                // The peer has signaled that it is currently unable to process any more
+                // connections, so we will hold off on attempting any new connections for a while
+                self.backoff_peer(*peer_id);
+                BACKOFF_REPUTATION_CHANGE.into()
+            } else {
+                self.reputation_weights.change(reputation_change)
+            };
+
+            if let Some(mut peer) = self.peers.get_mut(peer_id) {
+                self.connection_info.decr_state(peer.state);
+                peer.state = PeerConnectionState::Idle;
+                peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
+            }
+        }
+
+        self.fill_outbound_slots();
+    }
+
     /// Invoked if a session was disconnected because there's already a connection to the peer.
     ///
     /// If the session was an outgoing connection, this means that the peer initiated a connection
@@ -273,55 +340,6 @@ impl PeersManager {
                 self.connection_info.decr_out();
             }
         }
-    }
-
-    /// Called when a session to a peer was forcefully disconnected.
-    ///
-    /// Depending on whether the error is fatal, the peer will be removed from the peer set
-    /// otherwise its reputation is slashed.
-    pub(crate) fn on_connection_dropped(
-        &mut self,
-        remote_addr: &SocketAddr,
-        peer_id: &PeerId,
-        err: &EthStreamError,
-    ) {
-        if is_fatal_protocol_error(err) {
-            // remove the peer to which we can't establish a connection due to protocol related
-            // issues.
-            if let Some(peer) = self.peers.remove(peer_id) {
-                self.connection_info.decr_state(peer.state);
-            }
-
-            // ban the peer
-            self.ban_peer(*peer_id);
-
-            // If the error is caused by a peer that should be banned from discovery
-            if error_merits_discovery_ban(err) {
-                self.queued_actions.push_back(PeerAction::DiscoveryBan {
-                    peer_id: *peer_id,
-                    ip_addr: remote_addr.ip(),
-                })
-            }
-        } else {
-            let reputation_change = if let Some(DisconnectReason::TooManyPeers) =
-                err.as_disconnected()
-            {
-                // The peer has signaled that it is currently unable to process any more
-                // connections, so we will hold off on attempting any new connections for a while
-                self.backoff_peer(*peer_id);
-                BACKOFF_REPUTATION_CHANGE.into()
-            } else {
-                self.reputation_weights.change(ReputationChangeKind::Dropped)
-            };
-
-            if let Some(mut peer) = self.peers.get_mut(peer_id) {
-                self.connection_info.decr_state(peer.state);
-                peer.state = PeerConnectionState::Idle;
-                peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
-            }
-        }
-
-        self.fill_outbound_slots();
     }
 
     /// Called as follow-up for a discovered peer.
@@ -803,6 +821,7 @@ mod test {
             manager::{ConnectionInfo, PeerConnectionState},
             PeerAction, ReputationChangeKind,
         },
+        session::PendingSessionHandshakeError,
         PeersConfig,
     };
     use reth_eth_wire::{
@@ -899,7 +918,7 @@ mod test {
         })
         .await;
 
-        peers.on_connection_dropped(
+        peers.on_active_session_dropped(
             &socket_addr,
             &peer,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
@@ -934,7 +953,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_ban_on_drop() {
+    async fn test_ban_on_active_drop() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
@@ -953,11 +972,55 @@ mod test {
         })
         .await;
 
-        peers.on_connection_dropped(
+        peers.on_active_session_dropped(
             &socket_addr,
             &peer,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
                 DisconnectReason::UselessPeer,
+            )),
+        );
+
+        match event!(peers) {
+            PeerAction::BanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(peers.peers.get(&peer).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_ban_on_pending_drop() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        peers.on_pending_session_dropped(
+            &socket_addr,
+            &peer,
+            &PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+                P2PStreamError::Disconnected(DisconnectReason::UselessPeer),
             )),
         );
 
@@ -1038,7 +1101,7 @@ mod test {
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
         assert!(p.is_banned());
 
-        peers.on_disconnected(peer);
+        peers.on_active_session_gracefully_closed(peer);
 
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::Idle);
@@ -1086,7 +1149,7 @@ mod test {
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
 
-        peers.on_disconnected(peer);
+        peers.on_active_session_gracefully_closed(peer);
         assert!(peers.peers.get(&peer).is_none());
     }
 
