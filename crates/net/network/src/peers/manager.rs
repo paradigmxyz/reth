@@ -197,6 +197,7 @@ impl PeersManager {
 
     /// Temporarily puts the peer in timeout
     fn backoff_peer(&mut self, peer_id: PeerId) {
+        trace!(target: "net::peers", ?peer_id, "backing off");
         self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + self.backoff_duration);
     }
 
@@ -291,7 +292,10 @@ impl PeersManager {
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
     ) {
+        trace!(target: "net::peers", ?remote_addr, ?peer_id, ?err, "handling failed connection");
+
         if err.is_fatal_protocol_error() {
+            trace!(target: "net::peers", ?remote_addr, ?peer_id, ?err, "fatal connection error");
             // remove the peer to which we can't establish a connection due to protocol related
             // issues.
             if let Some(peer) = self.peers.remove(peer_id) {
