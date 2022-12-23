@@ -452,7 +452,7 @@ mod tests {
             let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
 
             // NOTE: There are two values with same SubKey but only first one is shown
-            assert_eq!(Ok(Some((value00.clone()))), cursor.seek_by_key_subkey(key1, value00.key));
+            assert_eq!(Ok(Some(value00.clone())), cursor.seek_by_key_subkey(key1, value00.key));
         }
     }
 

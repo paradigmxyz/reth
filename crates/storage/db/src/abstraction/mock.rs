@@ -154,7 +154,7 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
     fn seek_by_key_subkey(
         &mut self,
         _key: <T as Table>::Key,
-        _value: <T as DupSort>::SubKey,
+        _subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
         todo!()
     }
