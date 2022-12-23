@@ -173,18 +173,6 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             transaction.commit()?;
         }
 
-        // TODO remove print test
-        let acc = reth_primitives::H160(reth_primitives::hex_literal::hex!(
-            "095e7baea6a6c7c4c2dfeb977efac326af552d87"
-        ));
-        let prob_val = db
-            .tx()
-            .unwrap()
-            .cursor_dup::<tables::PlainStorageState>()
-            .unwrap()
-            .seek_by_key_subkey(acc, H256::zero());
-        debug!("Value wih seek_by_key_subkey {prob_val:?}");
-
         // Validate post state
         match suite.post_state {
             Some(RootOrState::Root(root)) => {
@@ -212,14 +200,14 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                             "Account {address} balance diff, expected {} got{}",
                             test_account.balance.0,
                             our_account.balance
-                        ));
+                        ))
                     }
                     if test_account.nonce.0.as_u64() != our_account.nonce {
                         return Err(eyre!(
                             "Account {address} nonce diff, expected {} got {}",
                             test_account.nonce.0,
                             our_account.nonce
-                        ));
+                        ))
                     }
                     if let Some(our_bytecode) = our_account.bytecode_hash {
                         let test_bytecode = keccak256(test_account.code.as_ref());
@@ -228,45 +216,42 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                                 "Account {address} bytecode diff, expected: {} got: {:?}",
                                 test_account.code,
                                 our_account.bytecode_hash
-                            ));
+                            ))
                         }
                     } else if !test_account.code.is_empty() {
                         return Err(eyre!(
                             "Account {address} bytecode diff, expected {} got empty bytecode",
                             test_account.code,
-                        ));
+                        ))
                     }
 
                     // get walker if present
                     if let Some(storage) = storage.as_ref() {
                         // iterate over storages
                         for (JsonU256(key), JsonU256(value)) in test_account.storage.iter() {
-                            if let Some(storage) = storage.get(address) {
-                                if let Some(our_value) = storage.get(key) {
-                                    if value != our_value {
-                                        return Err(eyre!(
-                                            "Storage diff we got {address}: {storage:?} but expect: {:?}",
-                                            test_account.storage
-                                        ));
-                                    }
-                                } else {
-                                    return Err(eyre!(
-                                        "Slot is missing from table {storage:?} got:{:?}",
-                                        test_account.storage
-                                    ));
-                                }
-                            } else {
-                                return Err(eyre!(
+                            let our_value = storage
+                                .get(address)
+                                .ok_or(eyre!(
                                     "Missing storage from test {storage:?} got {:?}",
                                     test_account.storage
-                                ));
+                                ))?
+                                .get(key)
+                                .ok_or(eyre!(
+                                    "Slot is missing from table {storage:?} got:{:?}",
+                                    test_account.storage
+                                ))?;
+                            if value != our_value {
+                                return Err(eyre!(
+                                    "Storage diff we got {address}: {storage:?} but expect: {:?}",
+                                    test_account.storage
+                                ))
                             }
                         }
                     } else if !test_account.storage.is_empty() {
                         return Err(eyre!(
                             "Walker is not present, but storage is not empty.{:?}",
                             test_account.storage
-                        ));
+                        ))
                     }
                 }
                 Ok(())

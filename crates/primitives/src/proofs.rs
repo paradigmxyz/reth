@@ -2,7 +2,6 @@ use crate::{keccak256, Header, Log, Receipt, TransactionSigned, H256};
 use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;
-use reth_rlp::Encodable;
 use triehash::ordered_trie_root;
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").

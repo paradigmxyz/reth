@@ -134,7 +134,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
         for (header, body) in block_batch.iter() {
             let num = header.number;
-            tracing::trace!(target: "stages::execution", ?num, "Execute block.");
+            tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -233,6 +233,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             StorageEntry { key: hkey, value: old_value },
                         )?;
                         tracing::debug!(
+                            target = "sync::stages::execution",
                             "{address} setting storage:{key} ({old_value} -> {new_value})"
                         );
 
