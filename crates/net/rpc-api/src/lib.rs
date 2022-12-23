@@ -9,6 +9,7 @@
 //!
 //! Provides all RPC interfaces.
 
+mod admin;
 mod debug;
 mod engine;
 mod eth;

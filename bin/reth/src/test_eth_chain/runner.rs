@@ -2,7 +2,7 @@ use super::models::Test;
 use crate::test_eth_chain::models::{ForkSpec, RootOrState};
 use eyre::eyre;
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::DbCursorRO,
     database::Database,
     mdbx::{test_utils::create_test_rw_db, WriteMap},
     tables,
@@ -11,7 +11,7 @@ use reth_db::{
 };
 use reth_executor::SpecUpgrades;
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, BlockLocked, JsonU256, SealedHeader, StorageEntry,
+    keccak256, Account as RethAccount, Address, JsonU256, SealedBlock, SealedHeader, StorageEntry,
     H256, U256,
 };
 use reth_rlp::Decodable;
@@ -108,11 +108,11 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
-        let genesis_block = BlockLocked { header, body: vec![], ommers: vec![] };
+        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![] };
         reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
 
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
-            let decoded = BlockLocked::decode(&mut block.rlp.as_ref())?;
+            let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
             reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
             Ok(())
         })?;

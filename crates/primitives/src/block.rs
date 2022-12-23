@@ -22,9 +22,9 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-// ANCHOR: struct-BlockLocked
+// ANCHOR: struct-SealedBlock
 #[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-pub struct BlockLocked {
+pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
     /// Transactions with signatures.
@@ -32,16 +32,16 @@ pub struct BlockLocked {
     /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
 }
-// ANCHOR_END: struct-BlockLocked
+// ANCHOR_END: struct-SealedBlock
 
-impl BlockLocked {
+impl SealedBlock {
     /// Header hash.
     pub fn hash(&self) -> H256 {
         self.header.hash()
     }
 }
 
-impl Deref for BlockLocked {
+impl Deref for SealedBlock {
     type Target = Header;
     fn deref(&self) -> &Self::Target {
         self.header.as_ref()
