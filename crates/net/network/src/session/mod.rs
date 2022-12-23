@@ -19,7 +19,7 @@ use reth_eth_wire::{
     error::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{ForkFilter, ForkTransition, PeerId, H256, U256};
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -125,6 +125,12 @@ impl SessionManager {
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
         }
+    }
+
+    /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
+    /// `EIP-2124`.
+    pub(crate) fn is_valid_fork_id(&self, fork_id: ForkId) -> bool {
+        self.fork_filter.validate(fork_id).is_ok()
     }
 
     /// Returns the next unique [`SessionId`].

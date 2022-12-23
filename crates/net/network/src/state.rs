@@ -262,8 +262,9 @@ where
             DiscoveryEvent::Discovered(peer, addr) => {
                 self.peers_manager.add_discovered_node(peer, addr);
             }
-            DiscoveryEvent::EnrForkId(peer, fork_id) => {
-                self.peers_manager.set_discovered_fork_id(peer, fork_id);
+            DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
+                self.queued_messages
+                    .push_back(StateAction::DiscoveredEnrForkId { peer_id, fork_id });
             }
         }
     }
@@ -454,5 +455,11 @@ pub(crate) enum StateAction {
         peer_id: PeerId,
         /// Why the disconnect was initiated
         reason: Option<DisconnectReason>,
+    },
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    DiscoveredEnrForkId {
+        peer_id: PeerId,
+        /// The reported [`ForkId`] by this peer.
+        fork_id: ForkId,
     },
 }
