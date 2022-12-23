@@ -1,0 +1,62 @@
+# Runs a series of sanity checks for crate consumers.
+#
+# Currently the only check is that the version constraints in each `Cargo.toml` do not lead to a breaking dependency.
+on:
+  workflow_dispatch: {}
+  # Once per day at 00:00 UTC
+  schedule:
+    - cron: '0 0 * * *'
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+  GETH_BUILD: 1.10.26-e5eb32ac
+
+name: sanity
+jobs:
+  dep-version-constraints:
+    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
+    # See also <https://github.com/foundry-rs/foundry/issues/3827>
+    runs-on: ubuntu-20.04
+    name: dep version constraints
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install geth
+        run: |
+            mkdir -p "$HOME/bin"
+            wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
+            tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+            mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
+            chmod u+x "$HOME/bin/geth"
+            export PATH=$HOME/bin:$PATH
+            echo $HOME/bin >> $GITHUB_PATH
+            geth version
+
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Update packages
+        run: cargo update
+
+      - name: Run tests
+        run: cargo --locked --workspace --all-features
+
+      - uses: JasonEtco/create-an-issue@v2
+        if: ${{ failure() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          update_existing: true
+          filename: .github/SANITY_DEPS_ISSUE_TEMPLATE.md
