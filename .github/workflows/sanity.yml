@@ -14,10 +14,11 @@ env:
 
 name: sanity
 jobs:
-  dep-test:
+  dep-version-constraints:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
+    name: dep version constraints
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
