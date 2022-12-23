@@ -2,7 +2,6 @@ use crate::{keccak256, Header, Log, Receipt, TransactionSigned, H256};
 use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;
-use reth_rlp::Encodable;
 use triehash::ordered_trie_root;
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
@@ -46,12 +45,12 @@ pub fn calculate_transaction_root<'a>(
 pub fn calculate_receipt_root<'a>(receipts: impl Iterator<Item = &'a Receipt>) -> H256 {
     ordered_trie_root::<KeccakHasher, _>(receipts.into_iter().map(|receipt| {
         let mut receipt_rlp = Vec::new();
-        receipt.encode(&mut receipt_rlp);
+        receipt.encode_inner(&mut receipt_rlp, false);
         receipt_rlp
     }))
 }
 
-/// Calculates the log root for a header.
+/// Calculates the log root for headers.
 pub fn calculate_log_root<'a>(logs: impl Iterator<Item = &'a Log> + Clone) -> H256 {
     //https://github.com/ethereum/go-ethereum/blob/356bbe343a30789e77bb38f25983c8f2f2bfbb47/cmd/evm/internal/t8ntool/execution.go#L255
     let mut logs_rlp = Vec::new();
@@ -69,7 +68,13 @@ pub fn calculate_ommers_root<'a>(ommers: impl Iterator<Item = &'a Header> + Clon
 
 #[cfg(test)]
 mod tests {
-    use crate::{hex_literal::hex, proofs::calculate_transaction_root, Block};
+
+    use crate::{
+        hex_literal::hex,
+        proofs::{calculate_receipt_root, calculate_transaction_root},
+        Block, Bloom, Log, Receipt, TxType, H160, H256,
+    };
+    use bytes::Bytes;
     use reth_rlp::Decodable;
 
     #[test]
@@ -80,5 +85,24 @@ mod tests {
 
         let tx_root = calculate_transaction_root(block.body.iter());
         assert_eq!(block.transactions_root, tx_root, "Should be same");
+    }
+
+    #[test]
+    fn check_receipt_root() {
+        let logs = vec![Log { address: H160::zero(), topics: vec![], data: Bytes::default() }];
+        let bloom =  Bloom(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"));
+        let receipt = Receipt {
+            tx_type: TxType::EIP2930,
+            success: true,
+            cumulative_gas_used: 102068,
+            bloom,
+            logs,
+        };
+        let receipt = vec![receipt];
+        let root = calculate_receipt_root(receipt.iter());
+        assert_eq!(
+            root,
+            H256(hex!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"))
+        );
     }
 }

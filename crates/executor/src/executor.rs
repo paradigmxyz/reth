@@ -8,12 +8,12 @@ use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as Db
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Bloom, Header, Log, Receipt, TransactionSignedEcRecovered,
-    H256, U256,
+    H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
-    Return, EVM,
+    Return, B160, EVM, U256 as evmU256,
 };
 use std::collections::BTreeMap;
 
@@ -108,13 +108,13 @@ pub struct AccountChangeSet {
 #[derive(Debug)]
 pub struct ExecutionResult {
     /// Transaction changeest contraining [Receipt], changed [Accounts][Account] and Storages.
-    pub changeset: Vec<TransactionChangeSet>,
+    pub changesets: Vec<TransactionChangeSet>,
     /// Block reward if present. It represent changeset for block reward slot in
     /// [tables::AccountChangeSet] .
     pub block_reward: Option<BTreeMap<Address, AccountInfoChangeSet>>,
 }
 
-/// Commit chgange to database and return change diff that is used to update state and create
+/// Commit change to database and return change diff that is used to update state and create
 /// history index
 ///
 /// ChangeDiff consists of:
@@ -124,7 +124,7 @@ pub struct ExecutionResult {
 /// BTreeMap is used to have sorted values
 pub fn commit_changes<DB: StateProvider>(
     db: &mut SubState<DB>,
-    changes: hashbrown::HashMap<Address, RevmAccount>,
+    changes: hashbrown::HashMap<B160, RevmAccount>,
 ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
     let mut change = BTreeMap::new();
     let mut new_bytecodes = BTreeMap::new();
@@ -132,7 +132,7 @@ pub fn commit_changes<DB: StateProvider>(
     for (address, account) in changes {
         if account.is_destroyed {
             // get old account that we are destroying.
-            let db_account = match db.accounts.entry(address) {
+            let db_account = match db.accounts.entry(B160(address.0)) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(_entry) => {
                     panic!("Left panic to critically jumpout if happens, as every account shound be hot loaded.");
@@ -141,7 +141,7 @@ pub fn commit_changes<DB: StateProvider>(
             // Insert into `change` a old account and None for new account
             // and mark storage to be mapped
             change.insert(
-                address,
+                H160(address.0),
                 AccountChangeSet {
                     account: AccountInfoChangeSet::Destroyed { old: to_reth_acc(&db_account.info) },
                     storage: BTreeMap::new(),
@@ -163,7 +163,7 @@ pub fn commit_changes<DB: StateProvider>(
                     match db.contracts.entry(account.info.code_hash) {
                         Entry::Vacant(entry) => {
                             entry.insert(code.clone());
-                            new_bytecodes.insert(account.info.code_hash, code.clone());
+                            new_bytecodes.insert(H256(account.info.code_hash.0), code.clone());
                         }
                         Entry::Occupied(mut entry) => {
                             entry.insert(code.clone());
@@ -175,7 +175,7 @@ pub fn commit_changes<DB: StateProvider>(
             // get old account that is going to be overwritten or none if it does not exist
             // and get new account that was just inserted. new account mut ref is used for
             // inserting storage
-            let (account_info_changeset, new_account) = match db.accounts.entry(address) {
+            let (account_info_changeset, new_account) = match db.accounts.entry(B160(address.0)) {
                 Entry::Vacant(entry) => {
                     let entry = entry.insert(Default::default());
                     entry.info = account.info.clone();
@@ -217,13 +217,19 @@ pub fn commit_changes<DB: StateProvider>(
 
             // insert storage into new db account.
             new_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                storage.insert(key, (value.original_value(), value.present_value()));
+                storage.insert(
+                    U256(*key.as_limbs()),
+                    (
+                        U256(*value.original_value().as_limbs()),
+                        U256(*value.present_value().as_limbs()),
+                    ),
+                );
                 (key, value.present_value())
             }));
 
             // Insert into change.
             change.insert(
-                address,
+                H160(address.0),
                 AccountChangeSet { account: account_info_changeset, storage, wipe_storage },
             );
         }
@@ -240,7 +246,7 @@ pub struct TransactionChangeSet {
     /// Transaction receipt
     pub receipt: Receipt,
     /// State change that this transaction made on state.
-    pub state_diff: BTreeMap<Address, AccountChangeSet>,
+    pub changeset: BTreeMap<Address, AccountChangeSet>,
     /// new bytecode created as result of transaction execution.
     pub new_bytecodes: BTreeMap<H256, Bytecode>,
 }
@@ -254,8 +260,16 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, config, db)?;
 
-    let receipts_iter = transaction_change_set.changeset.iter().map(|changeset| &changeset.receipt);
-    verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
+    let receipts_iter =
+        transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
+
+    if header.number >= config.spec_upgrades.byzantium {
+        verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
+    }
+    // TODO Before Byzantium receipts contained state root that would mean that expensive operation
+    // as hashing that is needed for state root got calculated in every transaction
+    // This was replaced with is_success flag.
+    // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
 
     Ok(transaction_change_set)
 }
@@ -296,15 +310,15 @@ pub fn execute<DB: StateProvider>(
     let mut evm = EVM::new();
     evm.database(db);
 
-    evm.env.cfg.chain_id = config.chain_id;
+    evm.env.cfg.chain_id = evmU256::from_limbs(config.chain_id.0);
     evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(header.number);
-    evm.env.cfg.perf_all_precompiles_have_balance = true;
+    evm.env.cfg.perf_all_precompiles_have_balance = false;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
     revm_wrap::fill_block_env(&mut evm.env.block, header);
     let mut cumulative_gas_used = 0;
     // output of verification
-    let mut changeset = Vec::with_capacity(transactions.len());
+    let mut changesets = Vec::with_capacity(transactions.len());
 
     for transaction in transactions.iter() {
         // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
@@ -321,10 +335,14 @@ pub fn execute<DB: StateProvider>(
         revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
 
         // Execute transaction.
-        let (revm::ExecutionResult { exit_reason, gas_used, logs, gas_refunded, .. }, state) =
-            evm.transact();
+        let out = evm.transact();
 
-        tracing::trace!(target:"evm","Executing transaction {:?}, gas:{gas_used} refund:{gas_refunded}",transaction.hash());
+        // Useful for debugging
+        // let out = evm.inspect(revm::inspectors::CustomPrintTracer::default());
+        // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
+        // \nENV:{:?}",transaction.hash(),transaction,evm.env);
+
+        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
 
         // Fatal internal error.
         if exit_reason == revm::Return::FatalExternalError {
@@ -332,10 +350,13 @@ pub fn execute<DB: StateProvider>(
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
+        // TODO for verification (exit_reason): some error should return EVM error as the block with
+        // that transaction can have consensus error that would make block invalid.
         let is_success = match exit_reason {
             revm::return_ok!() => true,
             revm::return_revert!() => false,
-            e => return Err(Error::EVMError { error_code: e as u32 }),
+            _ => false,
+            //e => return Err(Error::EVMError { error_code: e as u32 }),
         };
 
         // Add spend gas.
@@ -344,14 +365,18 @@ pub fn execute<DB: StateProvider>(
         // Transform logs to reth format.
         let logs: Vec<Log> = logs
             .into_iter()
-            .map(|l| Log { address: l.address, topics: l.topics, data: l.data })
+            .map(|l| Log {
+                address: H160(l.address.0),
+                topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
+                data: l.data,
+            })
             .collect();
 
         // commit state
-        let (state_diff, new_bytecodes) = commit_changes(evm.db().unwrap(), state);
+        let (changeset, new_bytecodes) = commit_changes(evm.db().unwrap(), state);
 
         // Push transaction changeset and calculte header bloom filter for receipt.
-        changeset.push(TransactionChangeSet {
+        changesets.push(TransactionChangeSet {
             receipt: Receipt {
                 tx_type: transaction.tx_type(),
                 success: is_success,
@@ -359,7 +384,7 @@ pub fn execute<DB: StateProvider>(
                 bloom: logs_bloom(logs.iter()),
                 logs,
             },
-            state_diff,
+            changeset,
             new_bytecodes,
         })
     }
@@ -373,7 +398,7 @@ pub fn execute<DB: StateProvider>(
     let beneficiary = evm
         .db
         .expect("It is set at the start of the function")
-        .basic(header.beneficiary)
+        .basic(B160(header.beneficiary.0))
         .map_err(|_| Error::ProviderError)?;
 
     // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
@@ -403,7 +428,7 @@ pub fn execute<DB: StateProvider>(
         }
     });
 
-    Ok(ExecutionResult { changeset, block_reward })
+    Ok(ExecutionResult { changesets, block_reward })
 }
 
 #[cfg(test)]
@@ -517,10 +542,10 @@ mod tests {
         // execute chain and verify receipts
         let out = execute_and_verify_receipt(&block.header, &transactions, &config, db).unwrap();
 
-        assert_eq!(out.changeset.len(), 1, "Should executed one transaction");
+        assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
-        let changeset = out.changeset[0].clone();
-        assert_eq!(changeset.new_bytecodes.len(), 0, "Should have zero new bytecodes");
+        let changesets = out.changesets[0].clone();
+        assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let _account1_info = Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None };
@@ -536,17 +561,17 @@ mod tests {
             Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
 
         assert_eq!(
-            changeset.state_diff.get(&account1).unwrap().account,
+            changesets.changeset.get(&account1).unwrap().account,
             AccountInfoChangeSet::NoChange,
             "No change to account"
         );
         assert_eq!(
-            changeset.state_diff.get(&account2).unwrap().account,
+            changesets.changeset.get(&account2).unwrap().account,
             AccountInfoChangeSet::Created { new: account2_info },
             "New acccount"
         );
         assert_eq!(
-            changeset.state_diff.get(&account3).unwrap().account,
+            changesets.changeset.get(&account3).unwrap().account,
             AccountInfoChangeSet::Changed { old: account3_old_info, new: account3_info },
             "Change to account state"
         );
@@ -563,10 +588,10 @@ mod tests {
             )]))
         );
 
-        assert_eq!(changeset.new_bytecodes.len(), 0, "No new bytecodes");
+        assert_eq!(changesets.new_bytecodes.len(), 0, "No new bytecodes");
 
         // check torage
-        let storage = &changeset.state_diff.get(&account1).unwrap().storage;
+        let storage = &changesets.changeset.get(&account1).unwrap().storage;
         assert_eq!(storage.len(), 1, "Only one storage change");
         assert_eq!(
             storage.get(&1.into()),
