@@ -1166,7 +1166,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "sha3",
  "zeroize",
@@ -3367,7 +3367,7 @@ dependencies = [
  "reth-interfaces",
  "reth-libmdbx",
  "reth-primitives",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "tempfile",
  "test-fuzz",
@@ -3392,7 +3392,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "reth-tracing",
- "secp256k1",
+ "secp256k1 0.24.2",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3438,7 +3438,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-primitives",
  "reth-rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "sha2 0.10.6",
  "sha3",
  "thiserror",
@@ -3465,7 +3465,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "smol_str",
  "snap",
@@ -3518,7 +3518,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-primitives",
  "reth-rpc-types",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "thiserror",
  "tokio",
@@ -3608,7 +3608,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serial_test",
  "tempfile",
  "thiserror",
@@ -3635,7 +3635,7 @@ dependencies = [
  "plain_hasher",
  "reth-codecs",
  "reth-rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "serde_json",
  "sucds",
@@ -3665,7 +3665,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-rpc-types",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "test-fuzz",
  "thiserror",
@@ -3689,7 +3689,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "smol_str",
 ]
 
@@ -3810,33 +3810,35 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "2.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73d84c8f9836efb0f5f5f8de4700a953c4e1f3119e5cfcb0aad8e5be73daf991"
+source = "git+https://github.com/bluealloy/revm?branch=main#488ef8ab62f433b1b434d2d81bc744a2db8f735f"
 dependencies = [
  "arrayref",
  "auto_impl",
  "bytes",
+ "derive_more",
+ "fixed-hash",
  "hashbrown 0.13.1",
+ "hex",
+ "hex-literal",
  "num_enum",
- "primitive-types",
  "revm_precompiles",
  "rlp",
+ "ruint",
  "sha3",
 ]
 
 [[package]]
 name = "revm_precompiles"
 version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0353d456ef3e989dc9190f42c6020f09bc2025930c37895826029304413204b5"
+source = "git+https://github.com/bluealloy/revm?branch=main#488ef8ab62f433b1b434d2d81bc744a2db8f735f"
 dependencies = [
  "bytes",
  "hashbrown 0.13.1",
  "num",
  "once_cell",
- "primitive-types",
  "ripemd",
- "secp256k1",
+ "ruint",
+ "secp256k1 0.25.0",
  "sha2 0.10.6",
  "sha3",
  "substrate-bn",
@@ -3897,6 +3899,26 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "ruint"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ad3a104dc8c3867f653b0fec89c65e00b0ceb752718ad282177a7e0f33257ac"
+dependencies = [
+ "derive_more",
+ "primitive-types",
+ "rlp",
+ "ruint-macro",
+ "rustc_version",
+ "thiserror",
+]
+
+[[package]]
+name = "ruint-macro"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62cc5760263ea229d367e7dff3c0cbf09e4797a125bd87059a6c095804f3b2d1"
 
 [[package]]
 name = "rustc-hash"
@@ -4058,7 +4080,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "rand 0.8.5",
- "secp256k1-sys",
+ "secp256k1-sys 0.6.1",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "550fc3b723a478be77bf74718947cdcdd75144d508aaa70f0a320036905df2a8"
+dependencies = [
+ "secp256k1-sys 0.7.0",
 ]
 
 [[package]]
@@ -4066,6 +4097,15 @@ name = "secp256k1-sys"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83080e2c2fc1006e625be82e5d1eb6a43b7fd9578b617fcc55814daf286bba4b"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8058e28ae464daf5ac14c5c0f78110b58616e796c4e4e28cfcca38fdb13d8f22"
 dependencies = [
  "cc",
 ]

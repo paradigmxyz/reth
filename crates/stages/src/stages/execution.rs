@@ -133,6 +133,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
         for (header, body) in block_batch.iter() {
+            let num = header.number;
+            tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -175,7 +177,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
 
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
-            let change_set = std::thread::scope(|scope| {
+            let changeset = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
                     .spawn_scoped(scope, || {
@@ -193,7 +195,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push(change_set);
+            block_change_patches.push(changeset);
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
@@ -203,9 +205,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // apply changes to plain database.
         for results in block_change_patches.into_iter() {
             // insert state change set
-            for result in results.changeset.into_iter() {
+            for result in results.changesets.into_iter() {
                 // TODO insert to transitionId to tx_index
-                for (address, account_change_set) in result.state_diff.into_iter() {
+                for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
@@ -230,13 +232,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             storage_id.clone(),
                             StorageEntry { key: hkey, value: old_value },
                         )?;
+                        tracing::debug!(
+                            target = "sync::stages::execution",
+                            "{address} setting storage:{key} ({old_value} -> {new_value})"
+                        );
 
-                        if new_value.is_zero() {
-                            tx.delete::<tables::PlainStorageState>(
-                                address,
-                                Some(StorageEntry { key: hkey, value: old_value }),
-                            )?;
-                        } else {
+                        // Always delete old value as duplicate table put will not override it
+                        tx.delete::<tables::PlainStorageState>(
+                            address,
+                            Some(StorageEntry { key: hkey, value: old_value }),
+                        )?;
+                        if !new_value.is_zero() {
                             tx.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
@@ -259,7 +265,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
 
             // If there is block reward we will add account changeset to db
-            // TODO add apply_block_reward_changeset to db tx fn which maybe takes an option.
             if let Some(block_reward_changeset) = results.block_reward {
                 // we are sure that block reward index is present.
                 for (address, changeset) in block_reward_changeset.into_iter() {
