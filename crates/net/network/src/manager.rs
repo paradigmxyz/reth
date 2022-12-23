@@ -643,6 +643,7 @@ where
 ///
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
+// ANCHOR: enum-NetworkEvent
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     /// Closed the peer session.
@@ -662,6 +663,7 @@ pub enum NetworkEvent {
         status: Status,
     },
 }
+// ANCHOR_END: enum-NetworkEvent
 
 /// Bundles all listeners for [`NetworkEvent`]s.
 #[derive(Default)]

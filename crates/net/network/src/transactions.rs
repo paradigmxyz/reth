@@ -38,10 +38,12 @@ const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
+// ANCHOR: struct-TransactionsHandle
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
 }
+// ANCHOR_END: struct-TransactionsHandle
 
 // === impl TransactionsHandle ===
 
@@ -394,7 +396,7 @@ where
             this.on_network_event(event);
         }
 
-        // drain network/peer related events
+        // drain commands
         while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
             this.on_command(cmd);
         }
@@ -453,29 +455,36 @@ where
 
 /// An inflight request for `PooledTransactions` from a peer
 #[allow(missing_docs)]
+// ANCHOR: struct-GetPooledTxRequest
 struct GetPooledTxRequest {
     peer_id: PeerId,
     response: oneshot::Receiver<RequestResult<PooledTransactions>>,
 }
+// ANCHOR_END: struct-GetPooledTxRequest
 
 /// Tracks a single peer
+// ANCHOR: struct-Peer
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
     transactions: LruCache<H256>,
     /// A communication channel directly to the session task.
     request_tx: PeerRequestSender,
 }
+// ANCHOR_END: struct-Peer
 
 /// Commands to send to the [`TransactionManager`]
+// ANCHOR: enum-TransactionsCommand
 enum TransactionsCommand {
     PropagateHash(H256),
 }
+// ANCHOR_END: enum-TransactionsCommand
 
 /// All events related to transactions emitted by the network.
 #[derive(Debug)]
 #[allow(missing_docs)]
+// ANCHOR: enum-NetworkTransactionEvent
 pub enum NetworkTransactionEvent {
-    /// Received list of transactions to the given peer.
+    /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
     IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
@@ -486,3 +495,4 @@ pub enum NetworkTransactionEvent {
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
 }
+// ANCHOR_END: enum-NetworkTransactionEvent

@@ -348,7 +348,7 @@ where
         removed
     }
 
-    /// Removes all transactions that are missing in the pool.
+    /// Removes all transactions that are present in the pool.
     pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
         let pool = self.pool.read();
         hashes.retain(|tx| !pool.contains(tx))
