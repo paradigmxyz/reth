@@ -50,7 +50,7 @@ jobs:
         run: cargo update
 
       - name: Run tests
-        run: cargo --locked --workspace --all-features
+        run: cargo nextest run --locked --workspace --all-features
 
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}
