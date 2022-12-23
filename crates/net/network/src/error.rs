@@ -5,6 +5,7 @@ use reth_eth_wire::{
     error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
+use std::fmt;
 
 /// All error variants for the network
 #[derive(Debug, thiserror::Error)]
@@ -19,7 +20,7 @@ pub enum NetworkError {
 
 /// Abstraction over errors that can lead to a failed session
 #[auto_impl::auto_impl(&)]
-pub(crate) trait SessionError {
+pub(crate) trait SessionError: fmt::Debug {
     /// Returns true if the error indicates that the corresponding peer should be removed from peer
     /// discovery, for example if it's using a different genesis hash.
     fn merits_discovery_ban(&self) -> bool;
@@ -78,7 +79,14 @@ impl SessionError for EthStreamError {
     }
 
     fn should_backoff(&self) -> bool {
-        Some(DisconnectReason::TooManyPeers) == self.as_disconnected()
+        self.as_disconnected()
+            .map(|reason| {
+                matches!(
+                    reason,
+                    DisconnectReason::TooManyPeers | DisconnectReason::AlreadyConnected
+                )
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -102,5 +110,20 @@ impl SessionError for PendingSessionHandshakeError {
             PendingSessionHandshakeError::Eth(eth) => eth.should_backoff(),
             PendingSessionHandshakeError::Ecies(_) => true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_backoff() {
+        let err = EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+            P2PHandshakeError::Disconnected(DisconnectReason::TooManyPeers),
+        ));
+
+        assert_eq!(err.as_disconnected(), Some(DisconnectReason::TooManyPeers));
+        assert!(err.should_backoff());
     }
 }
