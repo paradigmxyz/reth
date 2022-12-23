@@ -266,9 +266,15 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Sets the trusted nodes.
-    pub fn trusted_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
-        self.trusted_nodes = nodes.into_iter().collect();
+    /// Add a trusted node.
+    pub fn add_trusted_node(mut self, node: NodeRecord) -> Self {
+        self.trusted_nodes.insert(node);
+        self
+    }
+
+    /// Adds multiple trusted nodes.
+    pub fn add_trusted_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
+        self.trusted_nodes.extend(nodes);
         self
     }
 
