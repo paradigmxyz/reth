@@ -9,6 +9,12 @@ description = """
 Transaction pool implementation
 """
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine"
+]
+
 [dependencies]
 
 # eth
@@ -25,7 +31,6 @@ aquamarine = "0.1" # docs
 thiserror = "1.0"
 tracing = "0.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
-linked-hash-map = "0.5"
 fnv = "1.0.7"
 bitflags = "1.3"
 
