@@ -13,7 +13,6 @@ reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../common/rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
-reth-consensus = { path = "../consensus" }
 
 revm = "2.3"
 # remove from reth and reexport from revm
@@ -22,7 +21,6 @@ hashbrown = "0.13"
 # common
 async-trait = "0.1.57"
 thiserror = "1.0.37"
-eyre = "0.6.8"
 auto_impl = "1.0"
 tracing = "0.1.37"
 tokio = { version = "1.21.2", features = ["sync"] }

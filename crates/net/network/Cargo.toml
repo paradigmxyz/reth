@@ -9,6 +9,12 @@ description = """
 Ethereum network support
 """
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine"
+]
+
 [dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces" }
@@ -37,7 +43,6 @@ thiserror = "1.0"
 parking_lot = "0.12"
 async-trait = "0.1"
 bytes = "1.2"
-either = "1.8"
 linked_hash_set = "0.1"
 rand = "0.8"
 secp256k1 = { version = "0.24", features = [

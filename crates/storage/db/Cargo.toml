@@ -31,8 +31,6 @@ bytes = "1.2.1"
 page_size = "0.4.2"
 thiserror = "1.0.37"
 tempfile = { version = "3.3.0", optional = true }
-eyre = "0.6.8"
-
 
 [dev-dependencies]
 tempfile = "3.3.0"
