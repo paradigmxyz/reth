@@ -3585,6 +3585,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-metrics"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
@@ -3776,6 +3787,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
+ "reth-metrics",
  "reth-network",
  "reth-primitives",
  "reth-provider",
