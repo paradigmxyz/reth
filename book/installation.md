@@ -1,7 +1,6 @@
 ## Installation
 
-(still WIP, please contribute!):
-
+To use Reth, you must first install Geth. You can find instructions for installing Geth at the following link: https://geth.ethereum.org/docs/install-and-build/installing-geth.
 
 ### Ubuntu
 Building the source
@@ -12,8 +11,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 * install Requirements
-- libclang-dev
-- pkg-config
+ - libclang-dev
+ - pkg-config
 
 ```bash
 apt install libclang-dev pkg-config
@@ -60,9 +59,3 @@ cargo build --all
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && brew install llvm pkg-config && git clone https://github.com/paradigmxyz/reth && cd reth && cargo build --all && ./target/debug/reth
 ```
-
-
-
-### Docker
--
-- 

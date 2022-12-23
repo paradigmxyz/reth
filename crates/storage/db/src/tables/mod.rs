@@ -232,12 +232,12 @@ table!(
     /// }
     /// ```
     ///
-    ( AccountHistory ) ShardedKey<Address> | TxNumberList
+    ( AccountHistory ) ShardedKey<Address> | TransitionList
 );
 
 table!(
     /// Stores pointers to transactions that changed each storage key.
-    ( StorageHistory ) AddressStorageKey | TxNumberList
+    ( StorageHistory ) AddressStorageKey | TransitionList
 );
 
 dupsort!(
@@ -275,7 +275,7 @@ table!(
 /// Alias Types
 
 /// List with transaction numbers.
-pub type TxNumberList = IntegerList;
+pub type TransitionList = IntegerList;
 /// Encoded stage id.
 pub type StageId = Vec<u8>;
 

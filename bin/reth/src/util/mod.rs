@@ -1,11 +1,14 @@
 //! Utility functions.
-
-use std::path::{Path, PathBuf};
+use std::{
+    env::VarError,
+    path::{Path, PathBuf},
+};
 use walkdir::{DirEntry, WalkDir};
 
 /// Utilities for parsing chainspecs
 pub mod chainspec;
 
+/// Finds all files in a directory with a given postfix.
 pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<PathBuf> {
     WalkDir::new(path)
         .into_iter()
@@ -15,6 +18,12 @@ pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<Pat
         .collect::<Vec<PathBuf>>()
 }
 
+/// Parses a user-specified path with support for environment variables and common shorthands (e.g.
+/// ~ for the user's home directory).
+pub(crate) fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
+    shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
+}
+
 /// Tracing utility
 pub mod reth_tracing {
     use tracing::Subscriber;
@@ -22,17 +31,41 @@ pub mod reth_tracing {
 
     /// Tracing modes
     pub enum TracingMode {
-        /// Enable all info traces.
+        /// Enable all traces.
         All,
-        /// Disable tracing
+        /// Enable debug traces.
+        Debug,
+        /// Enable info traces.
+        Info,
+        /// Enable warn traces.
+        Warn,
+        /// Enable error traces.
+        Error,
+        /// Disable tracing.
         Silent,
     }
 
     impl TracingMode {
         fn into_env_filter(self) -> EnvFilter {
             match self {
-                Self::All => EnvFilter::new("reth=info"),
+                Self::All => EnvFilter::new("reth=trace"),
+                Self::Debug => EnvFilter::new("reth=debug"),
+                Self::Info => EnvFilter::new("reth=info"),
+                Self::Warn => EnvFilter::new("reth=warn"),
+                Self::Error => EnvFilter::new("reth=error"),
                 Self::Silent => EnvFilter::new(""),
+            }
+        }
+    }
+
+    impl From<u8> for TracingMode {
+        fn from(value: u8) -> Self {
+            match value {
+                0 => Self::Error,
+                1 => Self::Warn,
+                2 => Self::Info,
+                3 => Self::Debug,
+                _ => Self::All,
             }
         }
     }

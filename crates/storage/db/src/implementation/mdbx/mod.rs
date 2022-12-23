@@ -62,8 +62,8 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..0x10000000),   // TODO: reevaluate
-                    growth_step: Some(0x100000), // TODO: reevaluate
+                    size: Some(0..(1024 * 1024 * 1024 * 1024 * 4)), // TODO: reevaluate (4 tb)
+                    growth_step: Some(1024 * 1024 * 256),           // TODO: reevaluate (256 mb)
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })
@@ -364,6 +364,95 @@ mod tests {
                     .expect("element should exist.")
                     .expect("should be able to retrieve it.")
             );
+        }
+    }
+
+    #[test]
+    fn db_iterate_over_all_dup_values() {
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
+            .expect(ERROR_ETH_ADDRESS);
+        let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT key1 (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key1 (1,1)
+        let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value11.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key2 (2,2)
+        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        env.update(|tx| tx.put::<PlainStorageState>(key2, value22.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // Iterate with walk_dup
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk_dup(first.0, first.1.key).unwrap();
+
+            // Notice that value11 and value22 have been ordered in the DB.
+            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value11.clone()))), walker.next());
+            // NOTE: Dup cursor does NOT iterates on all values but only on duplicated values of the
+            // same key. assert_eq!(Ok(Some(value22.clone())), walker.next());
+            assert_eq!(None, walker.next());
+        }
+
+        // Iterate by using `walk`
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk(first.0).unwrap();
+            assert_eq!(Some(Ok((key1, value00))), walker.next());
+            assert_eq!(Some(Ok((key1, value11))), walker.next());
+            assert_eq!(Some(Ok((key2, value22))), walker.next());
+        }
+    }
+
+    #[test]
+    fn dup_value_with_same_subkey() {
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT key1 (0,1)
+        let value01 = StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value01.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key1 (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // Iterate with walk
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk(first.0).unwrap();
+
+            // NOTE: Both values are present
+            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value01.clone()))), walker.next());
+            assert_eq!(None, walker.next());
+        }
+
+        // seek_by_key_subkey
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+
+            // NOTE: There are two values with same SubKey but only first one is shown
+            assert_eq!(Ok(Some(value00.clone())), cursor.seek_by_key_subkey(key1, value00.key));
         }
     }
 

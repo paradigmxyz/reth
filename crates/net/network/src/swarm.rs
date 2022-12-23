@@ -139,6 +139,11 @@ where
                     direction,
                 })
             }
+            SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
+                trace!( target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
+                self.state.peers_mut().on_already_connected(direction);
+                None
+            }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
             }
@@ -223,6 +228,13 @@ where
             StateAction::NewBlockHashes { peer_id, hashes } => {
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
+            }
+            StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
+                if self.sessions.is_valid_fork_id(fork_id) {
+                    self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
+                } else {
+                    self.state_mut().peers_mut().remove_discovered_node(peer_id);
+                }
             }
         }
         None

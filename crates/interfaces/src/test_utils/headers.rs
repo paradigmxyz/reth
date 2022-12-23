@@ -13,13 +13,13 @@ use crate::{
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockLocked, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
+    BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     task::{ready, Context, Poll},
@@ -147,9 +147,15 @@ impl Stream for TestDownload {
 pub struct TestHeadersClient {
     responses: Arc<Mutex<Vec<Header>>>,
     error: Arc<Mutex<Option<RequestError>>>,
+    request_attempts: AtomicU64,
 }
 
 impl TestHeadersClient {
+    /// Return the number of times client was polled
+    pub fn request_attempts(&self) -> u64 {
+        self.request_attempts.load(Ordering::SeqCst)
+    }
+
     /// Adds headers to the set.
     pub async fn extend(&self, headers: impl IntoIterator<Item = Header>) {
         let mut lock = self.responses.lock().await;
@@ -172,6 +178,7 @@ impl DownloadClient for TestHeadersClient {
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
     async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
+        self.request_attempts.fetch_add(1, Ordering::SeqCst);
         if let Some(err) = &mut *self.error.lock().await {
             return Err(err.clone())
         }
@@ -253,7 +260,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), consensus::Error> {
+    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::Error> {
         if self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {

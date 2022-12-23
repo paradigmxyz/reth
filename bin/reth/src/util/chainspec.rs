@@ -3,7 +3,18 @@ use reth_primitives::{
     Address, Bytes, Header, H256, U256,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
+
+/// Defines a chain, including it's genesis block, chain ID and fork block numbers.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChainSpecification {
+    /// Consensus configuration.
+    #[serde(rename = "config")]
+    pub consensus: reth_consensus::Config,
+    /// The genesis block of the chain.
+    #[serde(flatten)]
+    pub genesis: Genesis,
+}
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -57,4 +68,18 @@ pub struct GenesisAccount {
     pub nonce: Option<u64>,
     /// The balance of the account at genesis.
     pub balance: U256,
+}
+
+/// Clap value parser for [ChainSpecification]s that takes either a built-in chainspec or the path
+/// to a custom one.
+pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpecification, eyre::Error> {
+    Ok(match s {
+        "mainnet" => serde_json::from_str(include_str!("../../res/chainspec/mainnet.json"))?,
+        "goerli" => serde_json::from_str(include_str!("../../res/chainspec/goerli.json"))?,
+        "sepolia" => serde_json::from_str(include_str!("../../res/chainspec/mainnet.json"))?,
+        _ => {
+            let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
+            serde_json::from_str(&raw)?
+        }
+    })
 }

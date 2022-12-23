@@ -108,46 +108,8 @@ mod tests {
     use secp256k1::{SecretKey, SECP256K1};
 
     use crate::{
-        capability::Capability,
-        p2pstream::{P2PMessage, P2PMessageID},
-        EthVersion, HelloMessage, ProtocolVersion,
+        capability::Capability, p2pstream::P2PMessage, EthVersion, HelloMessage, ProtocolVersion,
     };
-
-    #[test]
-    fn test_pong_snappy_encoding_parity() {
-        // encode pong using our `Encodable` implementation
-        let pong = P2PMessage::Pong;
-        let mut pong_encoded = Vec::new();
-        pong.encode(&mut pong_encoded);
-
-        // the definition of pong is 0x80 (an empty rlp string)
-        let pong_raw = vec![EMPTY_STRING_CODE];
-        let mut snappy_encoder = snap::raw::Encoder::new();
-        let pong_compressed = snappy_encoder.compress_vec(&pong_raw).unwrap();
-        let mut pong_expected = vec![P2PMessageID::Pong as u8];
-        pong_expected.extend(&pong_compressed);
-
-        // ensure that the two encodings are equal
-        assert_eq!(
-            pong_expected, pong_encoded,
-            "left: {pong_expected:#x?}, right: {pong_encoded:#x?}"
-        );
-
-        // also ensure that the length is correct
-        assert_eq!(pong_expected.len(), P2PMessage::Pong.length());
-
-        // try to decode using Decodable
-        let p2p_message = P2PMessage::decode(&mut &pong_expected[..]).unwrap();
-        assert_eq!(p2p_message, P2PMessage::Pong);
-
-        // finally decode the encoded message with snappy
-        let mut snappy_decoder = snap::raw::Decoder::new();
-
-        // the message id is not compressed, only compress the latest bits
-        let decompressed = snappy_decoder.decompress_vec(&pong_encoded[1..]).unwrap();
-
-        assert_eq!(decompressed, pong_raw);
-    }
 
     #[test]
     fn test_hello_encoding_round_trip() {

@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
-    models::{StoredBlockBody, StoredBlockOmmers},
+    models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -16,7 +16,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{error, warn};
+use tracing::*;
 
 const BODIES: StageId = StageId("Bodies");
 
@@ -75,12 +75,12 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let previous_stage_progress = input.previous_stage_progress();
         if previous_stage_progress == 0 {
-            warn!("The body stage seems to be running first, no work can be completed.");
+            error!(target: "sync::stages::bodies", "The body stage is running first, no work can be done");
             return Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody {
                 number: 0,
             }))
@@ -93,57 +93,55 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Short circuit in case we already reached the target block
         let target = previous_stage_progress.min(starting_block + self.commit_threshold);
         if target <= stage_progress {
-            return Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
+            info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
+            return Ok(ExecOutput { stage_progress, done: true })
         }
 
-        let bodies_to_download = self.bodies_to_download::<DB>(db, starting_block, target)?;
+        let bodies_to_download = self.bodies_to_download::<DB>(tx, starting_block, target)?;
 
         // Cursors used to write bodies, ommers and transactions
-        let mut body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
-        let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
-        let mut tx_cursor = db.cursor_mut::<tables::Transactions>()?;
+        let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
+        let mut ommers_cursor = tx.cursor_mut::<tables::BlockOmmers>()?;
+        let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
 
         // Cursors used to write state transition mapping
-        let mut block_transition_cursor = db.cursor_mut::<tables::BlockTransitionIndex>()?;
-        let mut tx_transition_cursor = db.cursor_mut::<tables::TxTransitionIndex>()?;
+        let mut block_transition_cursor = tx.cursor_mut::<tables::BlockTransitionIndex>()?;
+        let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
 
-        // Get id for the first transaction in the block
-        let (mut current_tx_id, mut transition_id) = db.get_next_block_ids(starting_block)?;
+        // Get id for the first transaction and first transition in the block
+        let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(starting_block)?;
 
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = stage_progress;
+        trace!(target: "sync::stages::bodies", stage_progress, target, start_tx_id = current_tx_id, transition_id, "Commencing sync");
         while let Some(result) = bodies_stream.next().await {
             let Ok(response) = result else {
-                error!(
-                    "Encountered an error downloading block {}: {:?}",
-                    highest_block + 1,
-                    result.unwrap_err()
-                );
+                error!(target: "sync::stages::bodies", block = highest_block + 1, error = ?result.unwrap_err(), "Error downloading block");
                 return Ok(ExecOutput {
                     stage_progress: highest_block,
                     done: false,
-                    reached_tip: false,
                 })
             };
 
             // Write block
             let block_header = response.header();
-            let block_number = block_header.number;
-            let block_key = block_header.num_hash().into();
+            let numhash: BlockNumHash = block_header.num_hash().into();
 
             match response {
                 BlockResponse::Full(block) => {
+                    trace!(target: "sync::stages::bodies", ommers = block.ommers.len(), txs = block.body.len(), ?numhash, "Writing full block");
+
                     body_cursor.append(
-                        block_key,
+                        numhash,
                         StoredBlockBody {
                             start_tx_id: current_tx_id,
                             tx_count: block.body.len() as u64,
                         },
                     )?;
                     ommers_cursor.append(
-                        block_key,
+                        numhash,
                         StoredBlockOmmers {
                             ommers: block
                                 .ommers
@@ -156,7 +154,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     // Write transactions
                     for transaction in block.body {
                         // Insert the transaction hash to number mapping
-                        db.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
+                        tx.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
                         // Append the transaction
                         tx_cursor.append(current_tx_id, transaction)?;
                         tx_transition_cursor.append(current_tx_id, transition_id)?;
@@ -165,8 +163,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     }
                 }
                 BlockResponse::Empty(_) => {
+                    trace!(target: "sync::stages::bodies", ?numhash, "Writing empty block");
                     body_cursor.append(
-                        block_key,
+                        numhash,
                         StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
                     )?;
                 }
@@ -176,12 +175,14 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // Increment the transition if the block contains an addition block reward.
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
-            if self.consensus.has_block_reward(block_number) {
+            let has_reward = self.consensus.has_block_reward(numhash.number());
+            trace!(target: "sync::stages::bodies", has_reward, ?numhash, "Block reward");
+            if has_reward {
                 transition_id += 1;
             }
-            block_transition_cursor.append(block_key, transition_id)?;
+            block_transition_cursor.append(numhash, transition_id)?;
 
-            highest_block = block_number;
+            highest_block = numhash.number();
         }
 
         // The stage is "done" if:
@@ -189,24 +190,25 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // - We reached our target and the target was not limited by the batch size of the stage
         let capped = target < previous_stage_progress;
         let done = highest_block < target || !capped;
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target, done, "Sync iteration finished");
 
-        Ok(ExecOutput { stage_progress: highest_block, reached_tip: true, done })
+        Ok(ExecOutput { stage_progress: highest_block, done })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         // Cursors to unwind bodies, ommers, transactions and tx hash to number
-        let mut body_cursor = db.cursor_mut::<tables::BlockBodies>()?;
-        let mut ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
-        let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
-        let mut tx_hash_number_cursor = db.cursor_mut::<tables::TxHashNumber>()?;
+        let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
+        let mut ommers_cursor = tx.cursor_mut::<tables::BlockOmmers>()?;
+        let mut transaction_cursor = tx.cursor_mut::<tables::Transactions>()?;
+        let mut tx_hash_number_cursor = tx.cursor_mut::<tables::TxHashNumber>()?;
         // Cursors to unwind transitions
-        let mut block_transition_cursor = db.cursor_mut::<tables::BlockTransitionIndex>()?;
-        let mut tx_transition_cursor = db.cursor_mut::<tables::TxTransitionIndex>()?;
+        let mut block_transition_cursor = tx.cursor_mut::<tables::BlockTransitionIndex>()?;
+        let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
 
         // let mut entry = tx_count_cursor.last()?;
         let mut entry = body_cursor.last()?;
@@ -321,7 +323,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress < 200
+            Ok(ExecOutput { stage_progress, done: false }) if stage_progress < 200
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -348,10 +350,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        assert_matches!(
-            output,
-            Ok(ExecOutput { stage_progress: 20, reached_tip: true, done: true })
-        );
+        assert_matches!(output, Ok(ExecOutput { stage_progress: 20, done: true }));
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
@@ -377,7 +376,7 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: false }) if stage_progress >= 10
+            Ok(ExecOutput { stage_progress, done: false }) if stage_progress >= 10
         );
         let first_run_progress = first_run.unwrap().stage_progress;
 
@@ -392,7 +391,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress > first_run_progress
+            Ok(ExecOutput { stage_progress, done: true }) if stage_progress > first_run_progress
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -432,7 +431,7 @@ mod tests {
         // Check that the error bubbles up
         assert_matches!(
             rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: out_stage_progress, done: false, reached_tip: false })
+            Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
                 if out_stage_progress == stage_progress
         );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
@@ -462,7 +461,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, reached_tip: true, done: true }) if stage_progress == previous_stage
+            Ok(ExecOutput { stage_progress, done: true }) if stage_progress == previous_stage
         );
         let stage_progress = output.unwrap().stage_progress;
         runner
@@ -471,7 +470,7 @@ mod tests {
 
         // Delete a transaction
         runner
-            .db()
+            .tx()
             .commit(|tx| {
                 let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
                 let (_, transaction) = tx_cursor.last()?.expect("Could not read last transaction");
@@ -521,7 +520,7 @@ mod tests {
         // Check that the error bubbles up
         assert_matches!(
             rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: out_stage_progress, done: false, reached_tip: false })
+            Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
                 if out_stage_progress == stage_progress
         );
         assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
@@ -558,14 +557,14 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, TxNumber, H256};
+        use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{collections::HashMap, sync::Arc};
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
 
         /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &BlockLocked) -> (H256, DownloadResult<BlockBody>) {
+        pub(crate) fn body_by_hash(block: &SealedBlock) -> (H256, DownloadResult<BlockBody>) {
             (
                 block.hash(),
                 Ok(BlockBody {
@@ -579,7 +578,7 @@ mod tests {
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
             responses: HashMap<H256, DownloadResult<BlockBody>>,
-            db: TestTransaction,
+            tx: TestTransaction,
             batch_size: u64,
         }
 
@@ -588,7 +587,7 @@ mod tests {
                 Self {
                     consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
-                    db: TestTransaction::default(),
+                    tx: TestTransaction::default(),
                     batch_size: 1000,
                 }
             }
@@ -610,8 +609,8 @@ mod tests {
         impl StageTestRunner for BodyTestRunner {
             type S = BodyStage<TestBodyDownloader, TestConsensus>;
 
-            fn db(&self) -> &TestTransaction {
-                &self.db
+            fn tx(&self) -> &TestTransaction {
+                &self.tx
             }
 
             fn stage(&self) -> Self::S {
@@ -625,16 +624,16 @@ mod tests {
 
         #[async_trait::async_trait]
         impl ExecuteStageTestRunner for BodyTestRunner {
-            type Seed = Vec<BlockLocked>;
+            type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage_progress() + 1;
-                let blocks = random_block_range(start..end, GENESIS_HASH);
-                self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
+                let blocks = random_block_range(start..end, GENESIS_HASH, 0..2);
+                self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
-                    self.db.commit(|tx| {
+                    self.tx.commit(|tx| {
                         let key = (progress.number, progress.hash()).into();
                         let body = StoredBlockBody {
                             start_tx_id: 0,
@@ -678,24 +677,24 @@ mod tests {
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.db.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
+                self.tx.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
                     key.number()
                 })?;
-                self.db.check_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
+                self.tx.check_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
                     key.number()
                 })?;
-                self.db.check_no_entry_above::<tables::BlockTransitionIndex, _>(
+                self.tx.check_no_entry_above::<tables::BlockTransitionIndex, _>(
                     input.unwind_to,
                     |key| key.number(),
                 )?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
-                    self.db
+                    self.tx
                         .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
-                    self.db.check_no_entry_above::<tables::TxTransitionIndex, _>(
+                    self.tx.check_no_entry_above::<tables::TxTransitionIndex, _>(
                         last_tx_id,
                         |key| key,
                     )?;
-                    self.db.check_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                    self.tx.check_no_entry_above_by_value::<tables::TxHashNumber, _>(
                         last_tx_id,
                         |value| value,
                     )?;
@@ -707,7 +706,7 @@ mod tests {
         impl BodyTestRunner {
             /// Get the last available tx id if any
             pub(crate) fn get_last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
-                let last_body = self.db.query(|tx| {
+                let last_body = self.tx.query(|tx| {
                     let v = tx.cursor::<tables::BlockBodies>()?.last()?;
                     Ok(v)
                 })?;
@@ -725,7 +724,7 @@ mod tests {
                 prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
-                self.db.query(|tx| {
+                self.tx.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut bodies_cursor = tx.cursor::<tables::BlockBodies>()?;
                     let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
@@ -842,7 +841,7 @@ mod tests {
                         .get(&header.hash())
                         .expect("Stage tried downloading a block we do not have.")
                         .clone()?;
-                    Ok(BlockResponse::Full(BlockLocked {
+                    Ok(BlockResponse::Full(SealedBlock {
                         header: header.clone(),
                         body: result.transactions,
                         ommers: result.ommers.into_iter().map(|header| header.seal()).collect(),

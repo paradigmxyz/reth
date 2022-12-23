@@ -37,8 +37,6 @@ pub struct ExecOutput {
     pub stage_progress: BlockNumber,
     /// Whether or not the stage is done.
     pub done: bool,
-    /// Whether or not the stage reached the tip of the chain.
-    pub reached_tip: bool,
 }
 
 /// The output of a stage unwinding.
@@ -71,14 +69,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }

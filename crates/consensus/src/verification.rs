@@ -2,7 +2,7 @@
 use crate::{config, Config};
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
-    BlockLocked, BlockNumber, Header, SealedHeader, Transaction, TransactionSignedEcRecovered,
+    BlockNumber, Header, SealedBlock, SealedHeader, Transaction, TransactionSignedEcRecovered,
     TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
@@ -38,13 +38,13 @@ pub fn validate_header_standalone(
     }
 
     // Check if base fee is set.
-    if header.number >= config.london_hard_fork_block && header.base_fee_per_gas.is_none() {
+    if header.number >= config.london_block && header.base_fee_per_gas.is_none() {
         return Err(Error::BaseFeeMissing)
     }
 
     // EIP-3675: Upgrade consensus to Proof-of-Stake:
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if header.number >= config.paris_hard_fork_block {
+    if header.number >= config.paris_block {
         if header.difficulty != U256::zero() {
             return Err(Error::TheMergeDifficultyIsNotZero)
         }
@@ -77,14 +77,14 @@ pub fn validate_transaction_regarding_header(
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if config.spurious_dragon_hard_fork_block <= at_block_number && chain_id.is_some() {
+            if config.eip_155_block <= at_block_number && chain_id.is_some() {
                 return Err(Error::TransactionOldLegacyChainId)
             }
             *chain_id
         }
         Transaction::Eip2930(TxEip2930 { chain_id, .. }) => {
             // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
-            if config.berlin_hard_fork_block > at_block_number {
+            if config.berlin_block > at_block_number {
                 return Err(Error::TransactionEip2930Disabled)
             }
             Some(*chain_id)
@@ -96,7 +96,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
-            if config.berlin_hard_fork_block > at_block_number {
+            if config.berlin_block > at_block_number {
                 return Err(Error::TransactionEip1559Disabled)
             }
 
@@ -182,7 +182,7 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(block: &BlockLocked) -> Result<(), Error> {
+pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let ommers_hash =
@@ -256,7 +256,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if config.paris_hard_fork_block > child.number {
+    if config.paris_block > child.number {
         // TODO how this needs to be checked? As ice age did increment it by some formula
     }
 
@@ -264,7 +264,7 @@ pub fn validate_header_regarding_parent(
 
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
-    if config.london_hard_fork_block == child.number {
+    if config.london_block == child.number {
         parent_gas_limit = parent.gas_limit * config::EIP1559_ELASTICITY_MULTIPLIER;
     }
 
@@ -284,10 +284,10 @@ pub fn validate_header_regarding_parent(
     }
 
     // EIP-1559 check base fee
-    if child.number >= config.london_hard_fork_block {
+    if child.number >= config.london_block {
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
 
-        let expected_base_fee = if config.london_hard_fork_block == child.number {
+        let expected_base_fee = if config.london_block == child.number {
             config::EIP1559_INITIAL_BASE_FEE
         } else {
             // This BaseFeeMissing will not happen as previous blocks are checked to have them.
@@ -313,7 +313,7 @@ pub fn validate_header_regarding_parent(
 ///
 /// Returns parent block header  
 pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
-    block: &BlockLocked,
+    block: &SealedBlock,
     provider: &PROV,
 ) -> RethResult<SealedHeader> {
     let hash = block.header.hash();
@@ -334,7 +334,7 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
 
 /// Full validation of block before execution.
 pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
-    block: &BlockLocked,
+    block: &SealedBlock,
     provider: Provider,
     config: &Config,
 ) -> RethResult<()> {
@@ -431,6 +431,10 @@ mod tests {
         fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
             Ok(self.parent.clone())
         }
+
+        fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
+            Ok(None)
+        }
     }
 
     fn mock_tx(nonce: u64) -> TransactionSignedEcRecovered {
@@ -452,7 +456,7 @@ mod tests {
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
     }
     /// got test block
-    fn mock_block() -> (BlockLocked, Header) {
+    fn mock_block() -> (SealedBlock, Header) {
         // https://etherscan.io/block/15867168 where transaction root and receipts root are cleared
         // empty merkle tree: 0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
 
@@ -485,7 +489,7 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (BlockLocked { header: header.seal(), body, ommers }, parent)
+        (SealedBlock { header: header.seal(), body, ommers }, parent)
     }
 
     #[test]

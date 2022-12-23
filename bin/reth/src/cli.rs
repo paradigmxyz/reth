@@ -11,10 +11,12 @@ use crate::{
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
-
-    let tracing = if opt.silent { TracingMode::Silent } else { TracingMode::All };
-
-    reth_tracing::build_subscriber(tracing).init();
+    reth_tracing::build_subscriber(if opt.silent {
+        TracingMode::Silent
+    } else {
+        TracingMode::from(opt.verbose)
+    })
+    .init();
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -26,7 +28,7 @@ pub async fn run() -> eyre::Result<()> {
 /// Commands to be executed
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Main node command
+    /// Start the node
     #[command(name = "node")]
     Node(node::Command),
     /// Runs Ethereum blockchain tests

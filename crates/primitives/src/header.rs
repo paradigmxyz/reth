@@ -1,9 +1,10 @@
 use crate::{
+    keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockHash, BlockNumber, Bloom, H160, H256, U256,
 };
 use bytes::{BufMut, BytesMut};
-use ethers_core::{types::H64, utils::keccak256};
+use ethers_core::types::H64;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -97,7 +98,7 @@ impl Header {
     pub fn hash_slow(&self) -> H256 {
         let mut out = BytesMut::new();
         self.encode(&mut out);
-        H256::from_slice(keccak256(&out).as_slice())
+        keccak256(&out)
     }
 
     /// Checks if the header is empty - has no transactions and no ommers

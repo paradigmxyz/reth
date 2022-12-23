@@ -17,21 +17,25 @@ use std::{
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
-    /// The number of retries for each UDP request. Default: 1.
-    pub request_retries: u8,
-    /// The time between pings to ensure connectivity amongst connected nodes. Default: 300
-    /// seconds.
+    /// Size of the channel buffer for outgoing messages.
+    pub udp_egress_message_buffer: usize,
+    /// Size of the channel buffer for incoming messages.
+    pub udp_ingress_message_buffer: usize,
+    /// The number of allowed failures for `FindNode` requests. Default: 1.
+    pub max_find_node_failures: u8,
+    /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
+    /// 300sec, 5min.
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
-    pub ping_timeout: Duration,
+    pub ping_expiration: Duration,
     /// The rate at which lookups should be triggered.
     pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
     pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
-    pub enr_timeout: Duration,
+    pub enr_expiration: Duration,
     /// The duration we set for neighbours responses
-    pub neighbours_timeout: Duration,
+    pub neighbours_expiration: Duration,
     /// Provides a way to ban peers and ips.
     pub ban_list: BanList,
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
@@ -87,12 +91,20 @@ impl Default for Discv4Config {
     fn default() -> Self {
         Self {
             enable_packet_filter: false,
-            request_retries: 1,
+            /// This should be high enough to cover an entire recursive FindNode lookup which is
+            /// includes sending FindNode to nodes it discovered in the rounds using the
+            /// concurrency factor ALPHA
+            udp_egress_message_buffer: 1024,
+            /// Every outgoing request will eventually lead to an incoming response
+            udp_ingress_message_buffer: 1024,
+            max_find_node_failures: 2,
             ping_interval: Duration::from_secs(300),
-            ping_timeout: Duration::from_secs(5),
+            /// unified expiration and timeout durations, mirrors geth's `expiration` duration
+            ping_expiration: Duration::from_secs(20),
+            enr_expiration: Duration::from_secs(20),
+            neighbours_expiration: Duration::from_secs(20),
             request_timeout: Duration::from_secs(20),
-            enr_timeout: Duration::from_secs(5),
-            neighbours_timeout: Duration::from_secs(5),
+
             lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
             ban_duration: Some(Duration::from_secs(3600)), // 1 hour
@@ -118,9 +130,21 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// The number of retries for each UDP request.
-    pub fn request_retries(&mut self, retries: u8) -> &mut Self {
-        self.config.request_retries = retries;
+    /// Sets the channel size for incoming messages
+    pub fn udp_ingress_message_buffer(&mut self, udp_ingress_message_buffer: usize) -> &mut Self {
+        self.config.udp_ingress_message_buffer = udp_ingress_message_buffer;
+        self
+    }
+
+    /// Sets the channel size for outgoing messages
+    pub fn udp_egress_message_buffer(&mut self, udp_egress_message_buffer: usize) -> &mut Self {
+        self.config.udp_egress_message_buffer = udp_egress_message_buffer;
+        self
+    }
+
+    /// The number of allowed request failures for `findNode` requests.
+    pub fn max_find_node_failures(&mut self, max_find_node_failures: u8) -> &mut Self {
+        self.config.max_find_node_failures = max_find_node_failures;
         self
     }
 
@@ -130,15 +154,21 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Sets the timeout for pings
-    pub fn ping_timeout(&mut self, duration: Duration) -> &mut Self {
-        self.config.ping_timeout = duration;
+    /// Sets the timeout after which requests are considered timed out
+    pub fn request_timeout(&mut self, duration: Duration) -> &mut Self {
+        self.config.request_timeout = duration;
         self
     }
 
-    /// Sets the timeout for enr requests
-    pub fn enr_request_timeout(&mut self, duration: Duration) -> &mut Self {
-        self.config.enr_timeout = duration;
+    /// Sets the expiration duration for pings
+    pub fn ping_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.ping_expiration = duration;
+        self
+    }
+
+    /// Sets the expiration duration for enr requests
+    pub fn enr_request_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.enr_expiration = duration;
         self
     }
 

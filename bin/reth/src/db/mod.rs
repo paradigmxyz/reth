@@ -1,5 +1,5 @@
 //! Database debugging tool
-
+use crate::dirs::DbPath;
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -11,15 +11,20 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::path::Path;
 use tracing::info;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Path to database folder
-    #[arg(long, default_value = "~/.reth/db")]
-    db: String,
+    /// The path to the database folder.
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
+    /// - macOS: `$HOME/Library/Application Support/reth/db`
+    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
+    db: DbPath,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -58,13 +63,11 @@ pub struct ListArgs {
 impl Command {
     /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        let path = shellexpand::full(&self.db)?.into_owned();
-        let expanded_db_path = Path::new(&path);
-        std::fs::create_dir_all(expanded_db_path)?;
+        std::fs::create_dir_all(&self.db)?;
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            expanded_db_path,
+            self.db.as_ref(),
             reth_db::mdbx::EnvKind::RW,
         )?;
 
@@ -128,7 +131,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
         info!("Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..len, Default::default());
+        let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
             chain.iter().try_for_each(|block| {
