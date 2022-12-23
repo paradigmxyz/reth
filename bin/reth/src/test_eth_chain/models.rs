@@ -112,6 +112,18 @@ pub struct Block {
     pub transactions: Option<Vec<Transaction>>,
     /// Uncle/ommer headers
     pub uncle_headers: Option<Vec<Header>>,
+    /// Transaction Sequence
+    pub transaction_sequence: Option<Vec<TransactionSequence>>,
+}
+
+/// Transaction Sequence in block
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionSequence {
+    exception: String,
+    raw_bytes: Bytes,
+    valid: String,
 }
 
 /// Ethereum blockchain test data State.
