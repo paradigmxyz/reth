@@ -476,6 +476,10 @@ where
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }
+			NetworkHandleMessage::GetPeerInfo => {
+				let peer_info = self.swarm.sessions_mut().get_peer_info();
+				println!("{:#?}", peer_info);
+			}
         }
     }
 }

@@ -7,7 +7,7 @@ use crate::{
         config::SessionCounter,
         handle::{
             ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
-            SessionCommand,
+            SessionCommand, PeerInfo,
         },
     },
 };
@@ -470,6 +470,22 @@ impl SessionManager {
             }
         }
     }
+
+	pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo>{
+		let mut peers: Vec<PeerInfo> = Vec::new();
+
+		for (peer_id, session) in self.active_sessions.iter() {
+			let peer_info = PeerInfo {
+				remote_id: session.remote_id,
+				direction: session.direction,
+				remote_addr: session.remote_addr,
+				capabilities: session.capabilities.clone(),
+				client_version: session.client_version.clone(),
+			};
+			peers.push(peer_info);
+		}
+		peers
+	}
 }
 
 /// Events produced by the [`SessionManager`]

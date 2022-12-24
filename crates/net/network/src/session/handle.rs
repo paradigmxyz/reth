@@ -47,6 +47,10 @@ pub(crate) struct ActiveSessionHandle {
     pub(crate) capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
     pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
+	/// The client's name and version
+	pub(crate) client_version: String,
+	/// The address we're connected to
+	pub(crate) remote_addr: SocketAddr,
 }
 
 // === impl ActiveSessionHandle ===
@@ -70,6 +74,8 @@ pub(crate) struct PeerInfo {
 	pub(crate) client_version: String,
 	/// The address we're connected to
 	pub(crate) remote_addr: SocketAddr,
+	/// The direction of the session
+    pub(crate) direction: Direction,
 }
 
 /// Events a pending session can produce.
