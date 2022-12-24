@@ -280,11 +280,13 @@ where
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
             PeerAction::DisconnectBannedIncoming { peer_id } => {
-                // TODO: can IP ban
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
-            PeerAction::DiscoveryBan { peer_id, ip_addr } => self.ban_discovery(peer_id, ip_addr),
+            PeerAction::DiscoveryBanPeerId { peer_id, ip_addr } => {
+                self.ban_discovery(peer_id, ip_addr)
+            }
+            PeerAction::DiscoveryBanIp { ip_addr } => self.ban_ip_discovery(ip_addr),
             PeerAction::BanPeer { .. } => {}
             PeerAction::UnBanPeer { .. } => {}
         }
