@@ -179,8 +179,9 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
+                // ensure we can handle an incoming connection from this address
                 if let Err(err) =
-                    self.state_mut().peers_mut().on_inbound_pending_session(remote_addr.ip())
+                    self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
                 {
                     match err {
                         InboundConnectionError::IpBanned => {
@@ -202,6 +203,9 @@ where
                     }
                     Err(err) => {
                         warn!(target: "net", ?err, "Incoming connection rejected");
+                        self.state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_rejected_internally();
                     }
                 }
             }

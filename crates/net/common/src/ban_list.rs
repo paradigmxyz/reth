@@ -47,21 +47,28 @@ impl BanList {
         evicted
     }
 
-    /// Removes all entries that should no longer be banned.
-    pub fn evict(&mut self, now: Instant) {
-        self.banned_ips.retain(|_, until| {
+    /// Removes all ip addresses that are no longer banned.
+    pub fn evict_ips(&mut self, now: Instant) -> Vec<IpAddr> {
+        let mut evicted = Vec::new();
+        self.banned_ips.retain(|peer, until| {
             if let Some(until) = until {
-                return *until > now
+                if now > *until {
+                    evicted.push(*peer);
+                    return false
+                }
             }
             true
         });
+        evicted
+    }
 
-        self.banned_peers.retain(|_, until| {
-            if let Some(until) = until {
-                return *until > now
-            }
-            true
-        });
+    /// Removes all entries that should no longer be banned.
+    ///
+    /// Returns the evicted entries.
+    pub fn evict(&mut self, now: Instant) -> (Vec<IpAddr>, Vec<PeerId>) {
+        let ips = self.evict_ips(now);
+        let peers = self.evict_peers(now);
+        (ips, peers)
     }
 
     /// Returns true if either the given peer id _or_ ip address is banned.

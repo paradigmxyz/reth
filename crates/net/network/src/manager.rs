@@ -18,7 +18,7 @@
 use crate::{
     config::NetworkConfig,
     discovery::Discovery,
-    error::{NetworkError, SessionError},
+    error::NetworkError,
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
@@ -597,10 +597,17 @@ where
                         ?error,
                         "Incoming pending session failed"
                     );
-                    this.swarm.state_mut().peers_mut().on_closed_incoming_pending_session();
 
-                    if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
-                        this.swarm.state_mut().ban_ip_discovery(remote_addr.ip());
+                    if let Some(ref err) = error {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_dropped(remote_addr, err);
+                    } else {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_gracefully_closed();
                     }
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
