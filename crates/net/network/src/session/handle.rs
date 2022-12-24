@@ -59,6 +59,19 @@ impl ActiveSessionHandle {
     }
 }
 
+#[derive(Debug)]
+#[allow(unused)]
+pub(crate) struct PeerInfo {
+	/// Announced capabilities of the peer
+	pub(crate) capabilities: Arc<Capabilities>,
+	/// The identifier of the remote peer
+	pub(crate) remote_id: PeerId,
+	/// The client's name and version
+	pub(crate) client_version: String,
+	/// The address we're connected to
+	pub(crate) remote_addr: SocketAddr,
+}
+
 /// Events a pending session can produce.
 ///
 /// This represents the state changes a session can undergo until it is ready to send capability messages <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md>.
