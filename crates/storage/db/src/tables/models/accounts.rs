@@ -19,6 +19,10 @@ pub struct AccountBeforeTx {
     pub info: Option<Account>,
 }
 
+
+// NOTE: Removing main_codec and manually encode subkey
+// and compress second part of the value. If we have compression
+// over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for AccountBeforeTx {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         // for now put full bytes and later compress it.

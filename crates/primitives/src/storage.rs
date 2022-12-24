@@ -10,6 +10,10 @@ pub struct StorageEntry {
     pub value: U256,
 }
 
+
+// NOTE: Removing main_codec and manually encode subkey
+// and compress second part of the value. If we have compression
+// over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for StorageEntry {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         // for now put full bytes and later compress it.
