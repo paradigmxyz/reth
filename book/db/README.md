@@ -44,7 +44,6 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 - PlainStorageState
 - Bytecodes
 - AccountHistory
-- AccountHistory
 - StorageHistory
 - AccountChangeSet
 - StorageChangeSet
