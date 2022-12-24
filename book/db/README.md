@@ -271,7 +271,7 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 }
 ```
 
-Lets look at an examples of how cursors are used. The code snippet below is the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline. 
+Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline. 
 
 [File: crates/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/bodies.rs#L205-L238)
 ```rust ignore
