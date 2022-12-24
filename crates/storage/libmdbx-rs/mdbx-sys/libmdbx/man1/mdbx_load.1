@@ -1,0 +1,105 @@
+.\" Copyright 2015-2022 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2014-2015 Howard Chu, Symas Corp. All Rights Reserved.
+.\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
+.\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
+.TH MDBX_LOAD 1 "2022-11-11" "MDBX 0.12.2"
+.SH NAME
+mdbx_load \- MDBX environment import tool
+.SH SYNOPSIS
+.B mdbx_load
+[\c
+.BR \-V ]
+[\c
+.BR \-q ]
+[\c
+.BR \-a ]
+[\c
+.BI \-f \ file\fR]
+[\c
+.BI \-s \ subdb\fR]
+[\c
+.BR \-N ]
+[\c
+.BR \-T ]
+[\c
+.BR \-r ]
+[\c
+.BR \-n ]
+.BR \ dbpath
+.SH DESCRIPTION
+The
+.B mdbx_load
+utility reads from the standard input and loads it into the
+MDBX environment
+.BR dbpath .
+
+The input to
+.B mdbx_load
+must be in the output format specified by the
+.BR mdbx_dump (1)
+utility or as specified by the
+.B -T
+option below.
+
+A simple escape mechanism, where newline and backslash (\\) characters are special, is
+applied to the text input. Newline characters are interpreted as record separators.
+Backslash characters in the text will be interpreted in one of two ways: If the backslash
+character precedes another backslash character, the pair will be interpreted as a literal
+backslash. If the backslash character precedes any other character, the two characters
+following the backslash will be interpreted as a hexadecimal specification of a single
+character; for example, \\0a is a newline character in the ASCII character set.
+
+For this reason, any backslash or newline characters that naturally occur in the text
+input must be escaped to avoid misinterpretation by
+.BR mdbx_load .
+
+.SH OPTIONS
+.TP
+.BR \-V
+Write the library version number to the standard output, and exit.
+.TP
+.BR \-q
+Be quiet.
+.TP
+.BR \-a
+Append all records in the order they appear in the input. The input is assumed to already be
+in correctly sorted order and no sorting or checking for redundant values will be performed.
+This option must be used to reload data that was produced by running
+.B mdbx_dump
+on a database that uses custom compare functions.
+.TP
+.BR \-f \ file
+Read from the specified file instead of from the standard input.
+.TP
+.BR \-s \ subdb
+Load a specific subdatabase. If no database is specified, data is loaded into the main database.
+.TP
+.BR \-N
+Don't overwrite existing records when loading into an already existing database; just skip them.
+.TP
+.BR \-T
+Load data from simple text files. The input must be paired lines of text, where the first
+line of the pair is the key item, and the second line of the pair is its corresponding
+data item.
+.TP
+.BR \-r
+Rescure mode. Ignore errors to load corrupted DB dump.
+.TP
+.BR \-n
+Load an MDBX database which does not use subdirectories.
+This is legacy option. For now MDBX handles this automatically.
+
+.SH DIAGNOSTICS
+Exit status is zero if no errors occur.
+Errors result in a non-zero exit status and
+a diagnostic message being written to standard error.
+
+.SH "SEE ALSO"
+.BR mdbx_dump (1),
+.BR mdbx_chk (1),
+.BR mdbx_stat (1),
+.BR mdbx_copy (1)
+.BR mdbx_drop (1)
+.SH AUTHOR
+Howard Chu of Symas Corporation <http://www.symas.com>,
+Leonid Yuriev <https://gitflic.ru/user/erthink>

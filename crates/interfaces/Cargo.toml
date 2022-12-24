@@ -7,7 +7,7 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]
-reth-codecs = { path = "../codecs" }
+reth-codecs = { path = "../storage/codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
 async-trait = "0.1.57"
@@ -21,24 +21,21 @@ reth-eth-wire = { path = "../net/eth-wire" }
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
-postcard = { version = "1.0.2", features = ["alloc"] }
-heapless = "0.7.16"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 futures = "0.3.25"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
+secp256k1 = { version = "0.24.2", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
 modular-bitfield = "0.11.2"
 
 [dev-dependencies]
-reth-db = { path = "../db", features = ["test-utils"] }
-test-fuzz = "3.0.4"
+reth-db = { path = "../storage/db", features = ["test-utils"] }
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 arbitrary = { version = "1.1.7", features = ["derive"]}
 hex-literal = "0.3"
-secp256k1 = { version = "0.24.0", default-features = false, features = ["alloc", "recovery", "rand"] }
+secp256k1 = { version = "0.24.2", default-features = false, features = ["alloc", "recovery", "rand"] }
 
 [features]
 bench = []

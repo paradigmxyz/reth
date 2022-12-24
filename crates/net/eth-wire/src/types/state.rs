@@ -7,7 +7,15 @@ use serde::{Deserialize, Serialize};
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct GetNodeData(pub Vec<H256>);
 
@@ -17,7 +25,15 @@ pub struct GetNodeData(pub Vec<H256>);
 /// Not all nodes are guaranteed to be returned by the peer.
 /// This message was removed in `eth/67`.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct NodeData(pub Vec<bytes::Bytes>);
 

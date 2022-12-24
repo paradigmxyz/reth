@@ -1,65 +1,67 @@
 use reth_db::{
-    kv::{test_utils::create_test_db, tx::Tx, Env, EnvKind},
-    mdbx::{WriteMap, RW},
-};
-use reth_interfaces::db::{
-    self, models::BlockNumHash, tables, DbCursorRO, DbCursorRW, DbTx, DbTxMut, Table,
+    cursor::{DbCursorRO, DbCursorRW},
+    mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind, WriteMap, RW},
+    models::BlockNumHash,
+    table::Table,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedHeader, U256};
 use std::{borrow::Borrow, sync::Arc};
 
-use crate::db::StageDB;
+use crate::db::Transaction;
 
-/// The [StageTestDB] is used as an internal
+/// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
 ///
 /// ```rust
-/// let db = StageTestDB::default();
-/// stage.execute(&mut db.container(), input);
+/// let tx = TestTransaction::default();
+/// stage.execute(&mut tx.container(), input);
 /// ```
-pub(crate) struct TestStageDB {
-    db: Arc<Env<WriteMap>>,
+pub(crate) struct TestTransaction {
+    tx: Arc<Env<WriteMap>>,
 }
 
-impl Default for TestStageDB {
-    /// Create a new instance of [StageTestDB]
+impl Default for TestTransaction {
+    /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { db: create_test_db::<WriteMap>(EnvKind::RW) }
+        Self { tx: create_test_db::<WriteMap>(EnvKind::RW) }
     }
 }
 
-impl TestStageDB {
-    /// Return a database wrapped in [StageDB].
-    pub(crate) fn inner(&self) -> StageDB<'_, Env<WriteMap>> {
-        StageDB::new(self.db.borrow()).expect("failed to create db container")
+impl TestTransaction {
+    /// Return a database wrapped in [Transaction].
+    pub(crate) fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
+        Transaction::new(self.tx.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
     pub(crate) fn inner_raw(&self) -> Arc<Env<WriteMap>> {
-        self.db.clone()
+        self.tx.clone()
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub(crate) fn commit<F>(&self, f: F) -> Result<(), db::Error>
+    pub(crate) fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), db::Error>,
+        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
-        let mut db = self.inner();
-        f(&mut db)?;
-        db.commit()?;
+        let mut tx = self.inner();
+        f(&mut tx)?;
+        tx.commit()?;
         Ok(())
     }
 
     /// Invoke a callback with a read transaction
-    pub(crate) fn query<F, R>(&self, f: F) -> Result<R, db::Error>
+    pub(crate) fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, db::Error>,
+        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
     {
         f(&self.inner())
     }
 
     /// Check if the table is empty
-    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, db::Error> {
+    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
         self.query(|tx| {
             let last = tx.cursor::<T>()?.last()?;
             Ok(last.is_none())
@@ -70,11 +72,11 @@ impl TestStageDB {
     /// This function commits the transaction before exiting.
     ///
     /// ```rust
-    /// let db = StageTestDB::default();
-    /// db.map_put::<Table, _, _>(&items, |item| item)?;
+    /// let tx = TestTransaction::default();
+    /// tx.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), db::Error>
+    pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
     where
         T: Table,
         S: Clone,
@@ -94,15 +96,15 @@ impl TestStageDB {
     /// This function commits the transaction before exiting.
     ///
     /// ```rust
-    /// let db = StageTestDB::default();
-    /// db.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
+    /// let tx = TestTransaction::default();
+    /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
     #[allow(dead_code)]
     pub(crate) fn transform_append<T, S, F>(
         &self,
         values: &[S],
         mut transform: F,
-    ) -> Result<(), db::Error>
+    ) -> Result<(), DbError>
     where
         T: Table,
         <T as Table>::Value: Clone,
@@ -126,7 +128,7 @@ impl TestStageDB {
         &self,
         num: u64,
         mut selector: F,
-    ) -> Result<(), db::Error>
+    ) -> Result<(), DbError>
     where
         T: Table,
         F: FnMut(T::Key) -> BlockNumber,
@@ -146,15 +148,17 @@ impl TestStageDB {
         &self,
         num: u64,
         mut selector: F,
-    ) -> Result<(), db::Error>
+    ) -> Result<(), DbError>
     where
         T: Table,
         F: FnMut(T::Value) -> BlockNumber,
     {
         self.query(|tx| {
             let mut cursor = tx.cursor::<T>()?;
-            if let Some((_, value)) = cursor.last()? {
+            let mut entry = cursor.last()?;
+            while let Some((_, value)) = entry {
                 assert!(selector(value) <= num);
+                entry = cursor.prev()?;
             }
             Ok(())
         })
@@ -162,7 +166,7 @@ impl TestStageDB {
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
-    pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), db::Error>
+    pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {

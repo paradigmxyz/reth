@@ -1,7 +1,7 @@
 //! High level network management.
 //!
-//! The [`Network`] contains the state of the network as a whole. It controls how connections are
-//! handled and keeps track of connections to peers.
+//! The [`NetworkManager`] contains the state of the network as a whole. It controls how connections
+//! are handled and keeps track of connections to peers.
 //!
 //! ## Capabilities
 //!
@@ -29,16 +29,16 @@ use crate::{
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
-    FetchClient,
+    FetchClient, NetworkBuilder,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    DisconnectReason,
+    DisconnectReason, Status,
 };
-use reth_interfaces::provider::BlockProvider;
 use reth_primitives::{PeerId, H256};
+use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -50,8 +50,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, trace, warn};
-
+use tracing::{error, info, trace, warn};
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -62,19 +61,23 @@ use tracing::{error, trace, warn};
 ///  graph TB
 ///    handle(NetworkHandle)
 ///    events(NetworkEvents)
-///    transactions[(Transactions Task)]
+///    transactions(Transactions Task)
+///    ethrequest(ETH Request Task)
+///    discovery(Discovery Task)
 ///    subgraph NetworkManager
 ///      direction LR
 ///      subgraph Swarm
 ///          direction TB
-///          B1[(Peer Sessions)]
+///          B1[(Session Manager)]
 ///          B2[(Connection Lister)]
-///          B3[(State)]
+///          B3[(Network State)]
 ///      end
-///    end
-///   handle <--> |request/response channel| NetworkManager
+///   end
+///   handle <--> |request response channel| NetworkManager
 ///   NetworkManager --> |Network events| events
-///   transactions --> |propagate transactions| NetworkManager
+///   transactions <--> |transactions| NetworkManager
+///   ethrequest <--> |ETH request handing| NetworkManager
+///   discovery --> |Discovered peers| NetworkManager
 /// ```
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
@@ -86,11 +89,13 @@ pub struct NetworkManager<C> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
-    /// All listeners for [`Network`] events.
+    /// All listeners for high level network events.
     event_listeners: NetworkEventListeners,
-    /// Sender half to send events to the [`TransactionsManager`] task, if configured.
+    /// Sender half to send events to the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
     to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
-    /// Sender half to send events to the [`EthRequestHandler`] task, if configured.
+    /// Sender half to send events to the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
@@ -100,6 +105,26 @@ pub struct NetworkManager<C> {
 }
 
 // === impl NetworkManager ===
+impl<C> NetworkManager<C> {
+    /// Sets the dedicated channel for events indented for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
+        self.to_transactions_manager = Some(tx);
+    }
+
+    /// Sets the dedicated channel for events indented for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
+        self.to_eth_request_handler = Some(tx);
+    }
+
+    /// Returns the [`NetworkHandle`] that can be cloned and shared.
+    ///
+    /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
+    pub fn handle(&self) -> &NetworkHandle {
+        &self.handle
+    }
+}
 
 impl<C> NetworkManager<C>
 where
@@ -122,6 +147,10 @@ where
             block_import,
             network_mode,
             boot_nodes,
+            executor,
+            hello_message,
+            status,
+            fork_filter,
             ..
         } = config;
 
@@ -133,11 +162,20 @@ where
 
         // merge configured boot nodes
         discovery_v4_config.bootstrap_nodes.extend(boot_nodes.clone());
+        discovery_v4_config.add_eip868_pair("eth", status.forkid);
+
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let sessions = SessionManager::new(secret_key, sessions_config);
+        let sessions = SessionManager::new(
+            secret_key,
+            sessions_config,
+            executor,
+            status,
+            hello_message,
+            fork_filter,
+        );
         let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
@@ -166,14 +204,45 @@ where
         })
     }
 
-    /// Sets the dedicated channel for events indented for the [`TransactionsManager`]
-    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
-        self.to_transactions_manager = Some(tx);
+    /// Create a new [`NetworkManager`] instance and start a [`NetworkBuilder`] to configure all
+    /// components of the network
+    ///
+    /// ```
+    /// use reth_provider::test_utils::TestApi;
+    /// use reth_transaction_pool::TransactionPool;
+    /// use std::sync::Arc;
+    /// use reth_discv4::bootnodes::mainnet_nodes;
+    /// use reth_network::config::rng_secret_key;
+    /// use reth_network::{NetworkConfig, NetworkManager};
+    /// async fn launch<Pool: TransactionPool>(pool: Pool) {
+    ///     // This block provider implementation is used for testing purposes.
+    ///     let client = Arc::new(TestApi::default());
+    ///
+    ///     // The key that's used for encrypting sessions and to identify our node.
+    ///     let local_key = rng_secret_key();
+    ///
+    ///     let config =
+    ///         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+    ///
+    ///     // create the network instance
+    ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
+    ///         .await
+    ///         .unwrap()
+    ///         .transactions(pool)
+    ///         .request_handler(client)
+    ///         .split_with_handle();
+    /// }
+    /// ```
+    pub async fn builder(
+        config: NetworkConfig<C>,
+    ) -> Result<NetworkBuilder<C, (), ()>, NetworkError> {
+        let network = Self::new(config).await?;
+        Ok(network.into_builder())
     }
 
-    /// Sets the dedicated channel for events indented for the [`EthRequestHandler`]
-    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
-        self.to_eth_request_handler = Some(tx);
+    /// Create a [`NetworkBuilder`] to configure all components of the network
+    pub fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+        NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
@@ -188,19 +257,12 @@ where
 
     /// How many peers we're currently connected to.
     pub fn num_connected_peers(&self) -> usize {
-        self.swarm.state().num_connected_peers()
+        self.swarm.state().num_active_peers()
     }
 
     /// Returns the [`PeerId`] used in the network.
     pub fn peer_id(&self) -> &PeerId {
         self.handle.peer_id()
-    }
-
-    /// Returns the [`NetworkHandle`] that can be cloned and shared.
-    ///
-    /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-    pub fn handle(&self) -> &NetworkHandle {
-        &self.handle
     }
 
     /// Returns a new [`PeersHandle`] that can be cloned and shared.
@@ -231,14 +293,16 @@ where
             .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
     }
 
-    /// Sends an event to the [`TransactionsManager`] if configured
+    /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
+    /// configured.
     fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
         if let Some(ref tx) = self.to_transactions_manager {
             let _ = tx.send(event);
         }
     }
 
-    /// Sends an event to the [`EthRequestManager`] if configured
+    /// Sends an event to the [`EthRequestManager`](crate::eth_requests::EthRequestHandler) if
+    /// configured.
     fn delegate_eth_request(&self, event: IncomingEthRequest) {
         if let Some(ref reqs) = self.to_eth_request_handler {
             let _ = reqs.send(event);
@@ -395,14 +459,21 @@ where
             NetworkHandleMessage::AddPeerAddress(peer, addr) => {
                 self.swarm.state_mut().add_peer_address(peer, addr);
             }
-            NetworkHandleMessage::DisconnectPeer(peer_id) => {
-                self.swarm.sessions_mut().disconnect(peer_id, None);
+            NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
+                self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
             }
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
+            }
+            NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
+                if let Some(transition) =
+                    self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty)
+                {
+                    self.swarm.state_mut().update_fork_id(transition.current);
+                }
             }
         }
     }
@@ -463,10 +534,11 @@ where
                     remote_addr,
                     capabilities,
                     messages,
+                    status,
                     direction,
                 } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
-                    trace!(
+                    info!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -484,6 +556,7 @@ where
                     this.event_listeners.send(NetworkEvent::SessionEstablished {
                         peer_id,
                         capabilities,
+                        status,
                         messages,
                     });
                 }
@@ -498,15 +571,24 @@ where
                         "Session disconnected"
                     );
 
-                    if error.is_some() {
+                    let mut reason = None;
+                    if let Some(ref err) = error {
                         // If the connection was closed due to an error, we report the peer
-                        this.swarm.state_mut().peers_mut().on_connection_dropped(&peer_id);
+                        this.swarm.state_mut().peers_mut().on_active_session_dropped(
+                            &remote_addr,
+                            &peer_id,
+                            err,
+                        );
+                        reason = err.as_disconnected();
                     } else {
                         // Gracefully disconnected
-                        this.swarm.state_mut().peers_mut().on_disconnected(&peer_id);
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_active_session_gracefully_closed(peer_id);
                     }
 
-                    this.event_listeners.send(NetworkEvent::SessionClosed { peer_id });
+                    this.event_listeners.send(NetworkEvent::SessionClosed { peer_id, reason });
                 }
                 SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                     warn!(
@@ -515,7 +597,18 @@ where
                         ?error,
                         "Incoming pending session failed"
                     );
-                    this.swarm.state_mut().peers_mut().on_closed_incoming_pending_session()
+
+                    if let Some(ref err) = error {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_dropped(remote_addr, err);
+                    } else {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_gracefully_closed();
+                    }
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                     warn!(
@@ -525,10 +618,19 @@ where
                         ?error,
                         "Outgoing pending session failed"
                     );
-                    this.swarm
-                        .state_mut()
-                        .peers_mut()
-                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+
+                    if let Some(ref err) = error {
+                        this.swarm.state_mut().peers_mut().on_pending_session_dropped(
+                            &remote_addr,
+                            &peer_id,
+                            err,
+                        );
+                    } else {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_pending_session_gracefully_closed(&peer_id);
+                    }
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                     warn!(
@@ -549,9 +651,6 @@ where
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
                 }
-                SwarmEvent::StatusUpdate(status) => {
-                    this.swarm.sessions_mut().on_status_update(status.clone())
-                }
             }
         }
 
@@ -569,6 +668,8 @@ pub enum NetworkEvent {
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
         peer_id: PeerId,
+        /// Why the disconnect was triggered
+        reason: Option<DisconnectReason>,
     },
     /// Established a new session with the given peer.
     SessionEstablished {
@@ -578,7 +679,13 @@ pub enum NetworkEvent {
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
         messages: PeerRequestSender,
+        /// The status of the peer to which a session was established.
+        status: Status,
     },
+    /// Event emitted when a new peer is added
+    PeerAdded(PeerId),
+    /// Event emitted when a new peer is removed
+    PeerRemoved(PeerId),
 }
 
 /// Bundles all listeners for [`NetworkEvent`]s.

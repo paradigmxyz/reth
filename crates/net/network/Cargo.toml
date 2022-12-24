@@ -9,16 +9,25 @@ description = """
 Ethereum network support
 """
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine"
+]
+
 [dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
+reth-net-common = { path = "../common" }
 reth-discv4 = { path = "../discv4" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
 reth-rlp = { path = "../../common/rlp" }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
+reth-provider = { path = "../../storage/provider"}
 
 # async/futures
 futures = "0.3"
@@ -27,6 +36,7 @@ tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-threa
 tokio-stream = "0.1"
 
 # misc
+auto_impl = "1"
 aquamarine = "0.1" # docs
 tracing = "0.1"
 fnv = "1.0"
@@ -34,9 +44,8 @@ thiserror = "1.0"
 parking_lot = "0.12"
 async-trait = "0.1"
 bytes = "1.2"
-either = "1.8"
 linked_hash_set = "0.1"
-
+rand = "0.8"
 secp256k1 = { version = "0.24", features = [
     "global-context",
     "rand-std",
@@ -46,7 +55,15 @@ secp256k1 = { version = "0.24", features = [
 [dev-dependencies]
 # reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 
-rand = "0.8"
+enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"] }
+
+# misc
+hex = "0.4"
+tempfile = "3.3"
+serial_test = "0.10"
 

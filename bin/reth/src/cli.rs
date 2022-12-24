@@ -4,33 +4,39 @@ use clap::{ArgAction, Parser, Subcommand};
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{
-    node, test_eth_chain,
+    db, node, test_eth_chain,
     util::reth_tracing::{self, TracingMode},
 };
 
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
-
-    let tracing = if opt.silent { TracingMode::Silent } else { TracingMode::All };
-
-    reth_tracing::build_subscriber(tracing).init();
+    reth_tracing::build_subscriber(if opt.silent {
+        TracingMode::Silent
+    } else {
+        TracingMode::from(opt.verbose)
+    })
+    .init();
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
         Commands::TestEthChain(command) => command.execute().await,
+        Commands::Db(command) => command.execute().await,
     }
 }
 
 /// Commands to be executed
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Main node command
+    /// Start the node
     #[command(name = "node")]
     Node(node::Command),
     /// Runs Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
+    /// DB Debugging utilities
+    #[command(name = "db")]
+    Db(db::Command),
 }
 
 #[derive(Parser)]
@@ -45,6 +51,6 @@ struct Cli {
     verbose: u8,
 
     /// Silence all output
-    #[clap(short, long, global = true)]
+    #[clap(long, global = true)]
     silent: bool,
 }

@@ -1,0 +1,69 @@
+/* This is CMake-template for libmdbx's config.h
+ ******************************************************************************/
+
+/* *INDENT-OFF* */
+/* clang-format off */
+
+#cmakedefine LTO_ENABLED
+#cmakedefine MDBX_USE_VALGRIND
+#cmakedefine ENABLE_GPROF
+#cmakedefine ENABLE_GCOV
+#cmakedefine ENABLE_ASAN
+#cmakedefine ENABLE_UBSAN
+#cmakedefine01 MDBX_FORCE_ASSERTIONS
+
+/* Common */
+#cmakedefine01 MDBX_TXN_CHECKOWNER
+#cmakedefine MDBX_ENV_CHECKPID_AUTO
+#ifndef MDBX_ENV_CHECKPID_AUTO
+#cmakedefine01 MDBX_ENV_CHECKPID
+#endif
+#cmakedefine MDBX_LOCKING_AUTO
+#ifndef MDBX_LOCKING_AUTO
+#cmakedefine MDBX_LOCKING @MDBX_LOCKING@
+#endif
+#cmakedefine MDBX_TRUST_RTC_AUTO
+#ifndef MDBX_TRUST_RTC_AUTO
+#cmakedefine01 MDBX_TRUST_RTC
+#endif
+#cmakedefine01 MDBX_DISABLE_VALIDATION
+#cmakedefine01 MDBX_AVOID_MSYNC
+#cmakedefine01 MDBX_ENABLE_REFUND
+#cmakedefine01 MDBX_ENABLE_MADVISE
+#cmakedefine01 MDBX_ENABLE_BIGFOOT
+#cmakedefine01 MDBX_ENABLE_PGOP_STAT
+#cmakedefine01 MDBX_ENABLE_PROFGC
+
+/* Windows */
+#cmakedefine01 MDBX_WITHOUT_MSVC_CRT
+
+/* MacOS & iOS */
+#cmakedefine01 MDBX_OSX_SPEED_INSTEADOF_DURABILITY
+
+/* POSIX */
+#cmakedefine01 MDBX_DISABLE_GNU_SOURCE
+#cmakedefine MDBX_USE_OFDLOCKS_AUTO
+#ifndef MDBX_USE_OFDLOCKS_AUTO
+#cmakedefine01 MDBX_USE_OFDLOCKS
+#endif
+
+/* Build Info */
+#ifndef MDBX_BUILD_TIMESTAMP
+#cmakedefine MDBX_BUILD_TIMESTAMP "@MDBX_BUILD_TIMESTAMP@"
+#endif
+#ifndef MDBX_BUILD_TARGET
+#cmakedefine MDBX_BUILD_TARGET "@MDBX_BUILD_TARGET@"
+#endif
+#ifndef MDBX_BUILD_TYPE
+#cmakedefine MDBX_BUILD_TYPE "@MDBX_BUILD_TYPE@"
+#endif
+#ifndef MDBX_BUILD_COMPILER
+#cmakedefine MDBX_BUILD_COMPILER "@MDBX_BUILD_COMPILER@"
+#endif
+#ifndef MDBX_BUILD_FLAGS
+#cmakedefine MDBX_BUILD_FLAGS "@MDBX_BUILD_FLAGS@"
+#endif
+#cmakedefine MDBX_BUILD_SOURCERY @MDBX_BUILD_SOURCERY@
+
+/* *INDENT-ON* */
+/* clang-format on */

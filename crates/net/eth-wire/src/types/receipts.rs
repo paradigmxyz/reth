@@ -5,7 +5,15 @@ use serde::{Deserialize, Serialize};
 
 /// A request for transaction receipts from the given block hashes.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
@@ -15,7 +23,15 @@ pub struct GetReceipts(
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
 #[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Serialize, Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
+    Default,
 )]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.

@@ -22,6 +22,7 @@ mod hex_bytes;
 mod integer_list;
 mod jsonu256;
 mod log;
+mod peer;
 mod receipt;
 mod storage;
 mod transaction;
@@ -30,17 +31,18 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
-pub use block::{Block, BlockHashOrNumber, BlockLocked};
+pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use chain::Chain;
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;
-pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
+pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
+pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
 pub use transaction::{
@@ -68,12 +70,8 @@ pub type ChainId = u64;
 pub type StorageKey = H256;
 /// An account storage value.
 pub type StorageValue = U256;
-
-// TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to
-// prevent misuse
-/// This represents an uncompressed secp256k1 public key.
-/// This encodes the concatenation of the x and y components of the affine point in bytes.
-pub type PeerId = H512;
+/// The ID of block/transaction transition (represents state transition)
+pub type TransitionId = u64;
 
 pub use ethers_core::{
     types as rpc,
@@ -87,15 +85,22 @@ mod __reexport {
     pub use tiny_keccak;
 }
 
+/// Various utilities
+pub mod utils {
+    pub use ethers_core::types::serde_helpers;
+}
+
 // Useful reexports
 pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
+#[inline]
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     use tiny_keccak::{Hasher, Keccak};
-    let mut keccak = Keccak::v256();
-    let mut output = [0; 32];
-    keccak.update(data.as_ref());
-    keccak.finalize(&mut output);
-    output.into()
+
+    let mut buf = [0u8; 32];
+    let mut hasher = Keccak::v256();
+    hasher.update(data.as_ref());
+    hasher.finalize(&mut buf);
+    buf.into()
 }

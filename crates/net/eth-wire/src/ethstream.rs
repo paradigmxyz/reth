@@ -73,7 +73,10 @@ where
 
         let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
             Ok(m) => m,
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                tracing::warn!("rlp decode error in eth handshake: msg={their_msg:x}");
+                return Err(err.into())
+            }
         };
 
         // TODO: Add any missing checks
@@ -191,7 +194,10 @@ where
 
         let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
             Ok(m) => m,
-            Err(err) => return Poll::Ready(Some(Err(err.into()))),
+            Err(err) => {
+                tracing::warn!("rlp decode error: msg={bytes:x}");
+                return Poll::Ready(Some(Err(err.into())))
+            }
         };
 
         if matches!(msg.message, EthMessage::Status(_)) {
@@ -243,7 +249,8 @@ mod tests {
     use super::UnauthedEthStream;
     use crate::{
         capability::Capability,
-        p2pstream::{HelloMessage, ProtocolVersion, UnauthedP2PStream},
+        hello::HelloMessage,
+        p2pstream::{ProtocolVersion, UnauthedP2PStream},
         types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
         EthStream, PassthroughCodec,
     };
@@ -258,7 +265,7 @@ mod tests {
     #[tokio::test]
     async fn can_handshake() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
@@ -392,7 +399,7 @@ mod tests {
         );
 
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,

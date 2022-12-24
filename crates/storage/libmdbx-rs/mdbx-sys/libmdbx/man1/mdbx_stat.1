@@ -1,0 +1,86 @@
+.\" Copyright 2015-2022 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2012-2015 Howard Chu, Symas Corp. All Rights Reserved.
+.\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
+.\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
+.TH MDBX_STAT 1 "2022-11-11" "MDBX 0.12.2"
+.SH NAME
+mdbx_stat \- MDBX environment status tool
+.SH SYNOPSIS
+.B mdbx_stat
+[\c
+.BR \-V ]
+[\c
+.BR \-q ]
+[\c
+.BR \-p ]
+[\c
+.BR \-e ]
+[\c
+.BR \-f [ f [ f ]]]
+[\c
+.BR \-r [ r ]]
+[\c
+.BR \-a \ |
+.BI \-s \ subdb\fR]
+.BR \ dbpath
+[\c
+.BR \-n ]
+.SH DESCRIPTION
+The
+.B mdbx_stat
+utility displays the status of an MDBX environment.
+.SH OPTIONS
+.TP
+.BR \-V
+Write the library version number to the standard output, and exit.
+.TP
+.BR \-q
+Be quiet.
+.TP
+.BR \-p
+Display overall statistics of page operations of all (running, completed
+and aborted) transactions in the current multi-process session (since the
+first process opened the database after everyone had previously closed it).
+.TP
+.BR \-e
+Display information about the database environment.
+.TP
+.BR \-f
+Display information about the environment GC.
+If \fB\-ff\fP is given, summarize each GC/freelist entry.
+If \fB\-fff\fP is given, display the full list of page IDs in the GC/freelist.
+.TP
+.BR \-r
+Display information about the environment reader table.
+Shows the process ID, thread ID, and transaction ID for each active
+reader slot. The process ID and transaction ID are in decimal, the
+thread ID is in hexadecimal. The transaction ID is displayed as "-"
+if the reader does not currently have a read transaction open.
+If \fB\-rr\fP is given, check for stale entries in the reader
+table and clear them. The reader table will be printed again
+after the check is performed.
+.TP
+.BR \-a
+Display the status of all of the subdatabases in the environment.
+.TP
+.BR \-s \ subdb
+Display the status of a specific subdatabase.
+.TP
+.BR \-n
+Display the status of an MDBX database which does not use subdirectories.
+This is legacy option. For now MDBX handles this automatically
+for existing databases, but may be required while creating new.
+
+.SH DIAGNOSTICS
+Exit status is zero if no errors occur.
+Errors result in a non-zero exit status and
+a diagnostic message being written to standard error.
+.SH "SEE ALSO"
+.BR mdbx_chk (1),
+.BR mdbx_copy (1),
+.BR mdbx_dump (1),
+.BR mdbx_load (1)
+.BR mdbx_drop (1)
+.SH AUTHOR
+Howard Chu of Symas Corporation <http://www.symas.com>,
+Leonid Yuriev <https://gitflic.ru/user/erthink>

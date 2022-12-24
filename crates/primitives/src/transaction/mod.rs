@@ -1,8 +1,7 @@
-use crate::{Address, Bytes, ChainId, TxHash, H256};
+use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
-use ethers_core::utils::keccak256;
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
@@ -185,7 +184,7 @@ impl Transaction {
     pub fn signature_hash(&self) -> H256 {
         let mut buf = BytesMut::new();
         self.encode(&mut buf);
-        keccak256(&buf).into()
+        keccak256(&buf)
     }
 
     /// Sets the transaction's chain id to the provided value.
@@ -539,6 +538,12 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
+impl From<TransactionSignedEcRecovered> for TransactionSigned {
+    fn from(recovered: TransactionSignedEcRecovered) -> Self {
+        recovered.signed_transaction
+    }
+}
+
 impl Encodable for TransactionSigned {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, true);
@@ -608,7 +613,7 @@ impl Decodable for TransactionSigned {
             };
 
             let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
-            signed.hash = keccak256(&original_encoding[..first_header.payload_length]).into();
+            signed.hash = keccak256(&original_encoding[..first_header.payload_length]);
             Ok(signed)
         } else {
             let mut transaction = Transaction::Legacy(TxLegacy {
@@ -627,7 +632,7 @@ impl Decodable for TransactionSigned {
 
             let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
             let tx_length = first_header.payload_length + first_header.length();
-            signed.hash = keccak256(&original_encoding[..tx_length]).into();
+            signed.hash = keccak256(&original_encoding[..tx_length]);
             Ok(signed)
         }
     }
@@ -711,7 +716,7 @@ impl TransactionSigned {
     pub fn recalculate_hash(&self) -> H256 {
         let mut buf = Vec::new();
         self.encode_inner(&mut buf, false);
-        keccak256(&buf).into()
+        keccak256(&buf)
     }
 
     /// Create a new signed transaction from a transaction and its signature.
@@ -782,20 +787,13 @@ impl TransactionSignedEcRecovered {
         self.signer
     }
 
-    /// Create [TransactionSignedEcRecovered] from [TransactionSigned] and author of transaction
-    pub fn from_signed_transactions_and_signer(
-        signed_transaction: TransactionSigned,
-        signer: Address,
-    ) -> Self {
-        Self { signed_transaction, signer }
-    }
-
     /// Transform back to [`TransactionSigned`]
     pub fn into_signed(self) -> TransactionSigned {
         self.signed_transaction
     }
 
-    /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`].
+    /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
+    /// signer.
     pub fn from_signed_transaction(signed_transaction: TransactionSigned, signer: Address) -> Self {
         Self { signed_transaction, signer }
     }

@@ -8,11 +8,16 @@ description = "A book on all things Reth"
 
 [output.html]
 git-repository-url = "https://github.com/paradigmxyz/reth"
+<<<<<<< HEAD
 edit-url-template = ""
 default-theme = "ayu"
 cname = ""
 no-section-label = true
 additional-css = [""]
+=======
+default-theme = "ayu"
+no-section-label = true
+>>>>>>> main
 
 [output.html.fold]
 enable = true
@@ -23,3 +28,10 @@ build-dir = "target/book"
 
 [preprocessor.template]
 before = [ "links" ]
+<<<<<<< HEAD
+=======
+
+[preprocessor.index]
+
+[preprocessor.links]
+>>>>>>> main

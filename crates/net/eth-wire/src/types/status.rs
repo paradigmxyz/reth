@@ -7,8 +7,6 @@ use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
-/// The total difficulty and best block hash are used to identify whether or not the requesting
-/// client should be sent historical blocks for a full blockchain sync.
 ///
 /// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
 /// hash. This information should be treated as untrusted.
@@ -93,15 +91,16 @@ impl Debug for Status {
     }
 }
 
+// <https://etherscan.io/block/0>
 impl Default for Status {
     fn default() -> Self {
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
-            total_difficulty: U256::zero(),
+            total_difficulty: 17_179_869_184u64.into(),
             blockhash: MAINNET_GENESIS,
             genesis: MAINNET_GENESIS,
-            forkid: Hardfork::Homestead.fork_id(),
+            forkid: Hardfork::Frontier.fork_id(),
         }
     }
 }

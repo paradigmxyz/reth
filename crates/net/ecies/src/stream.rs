@@ -62,13 +62,23 @@ where
         transport.send(EgressECIESValue::Auth).await?;
 
         trace!("waiting for ecies ack ...");
+
         let msg = transport.try_next().await?;
 
+        // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
+        // unable to decode another message from the (partially filled) buffer. This usually happens
+        // if the remote drops the TcpStream.
+        let msg = msg.ok_or_else(|| ECIESErrorImpl::UnreadableStream)?;
+
         trace!("parsing ecies ack ...");
-        if matches!(msg, Some(IngressECIESValue::Ack)) {
+        if matches!(msg, IngressECIESValue::Ack) {
             Ok(Self { stream: transport, remote_id })
         } else {
-            Err(ECIESErrorImpl::InvalidHandshake { expected: IngressECIESValue::Ack, msg }.into())
+            Err(ECIESErrorImpl::InvalidHandshake {
+                expected: IngressECIESValue::Ack,
+                msg: Some(msg),
+            }
+            .into())
         }
     }
 
@@ -149,12 +159,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::util::pk2id;
     use secp256k1::{rand, SECP256K1};
     use tokio::net::TcpListener;
-
-    use crate::util::pk2id;
-
-    use super::*;
 
     #[tokio::test]
     async fn can_write_and_read() {

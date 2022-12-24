@@ -6,8 +6,9 @@ use crate::{
     FetchClient,
 };
 use parking_lot::Mutex;
-use reth_eth_wire::{NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_primitives::{PeerId, TransactionSigned, TxHash, H256};
+use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_interfaces::p2p::headers::client::StatusUpdater;
+use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -21,7 +22,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NetworkHandle {
     /// The Arc'ed delegate that contains the state.
     inner: Arc<NetworkInner>,
@@ -102,6 +103,11 @@ impl NetworkHandle {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
+    /// Update the status of the node.
+    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    }
+
     /// Announce a block over devp2p
     ///
     /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
@@ -109,15 +115,22 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Sends a message to the [`NetworkManager`] to add a peer to the known set
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
+    /// set
     pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
         let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::AddPeerAddress(peer, addr));
     }
 
-    /// Sends a message to the [`NetworkManager`] to disconnect an existing connection to the given
-    /// peer.
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer.
     pub fn disconnect_peer(&self, peer: PeerId) {
-        self.send_message(NetworkHandleMessage::DisconnectPeer(peer))
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, None))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer using the provided reason
+    pub fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason) {
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
     }
 
     /// Send a reputation change for the given peer.
@@ -147,6 +160,14 @@ impl NetworkHandle {
     }
 }
 
+impl StatusUpdater for NetworkHandle {
+    /// Update the status of the node.
+    fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    }
+}
+
+#[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
@@ -168,7 +189,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, SocketAddr),
     /// Disconnect a connection to a peer if it exists.
-    DisconnectPeer(PeerId),
+    DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
@@ -188,4 +209,6 @@ pub(crate) enum NetworkHandleMessage {
     ReputationChange(PeerId, ReputationChangeKind),
     /// Returns the client that can be used to interact with the network.
     FetchClient(oneshot::Sender<FetchClient>),
+    /// Apply a status update.
+    StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
 }

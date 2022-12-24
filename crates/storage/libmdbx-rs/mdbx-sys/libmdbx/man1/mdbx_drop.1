@@ -1,0 +1,48 @@
+.\" Copyright 2021-2022 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2014-2021 Howard Chu, Symas Corp. All Rights Reserved.
+.\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
+.TH MDBX_DROP 1 "2022-11-11" "MDBX 0.12.2"
+.SH NAME
+mdbx_drop \- MDBX database delete tool
+.SH SYNOPSIS
+.B mdbx_drop
+[\c
+.BR \-V ]
+[\c
+.BR \-d ]
+[\c
+.BI \-s \ subdb\fR]
+[\c
+.BR \-n ]
+.BR \ dbpath
+.SH DESCRIPTION
+The
+.B mdbx_drop
+utility empties or deletes a database in the specified
+environment.
+.SH OPTIONS
+.TP
+.BR \-V
+Write the library version number to the standard output, and exit.
+.TP
+.BR \-d
+Delete the specified database, don't just empty it.
+.TP
+.BR \-s \ subdb
+Operate on a specific subdatabase. If no database is specified, only the main database is dropped.
+.TP
+.BR \-n
+Dump an MDBX database which does not use subdirectories.
+This is legacy option. For now MDBX handles this automatically.
+
+.SH DIAGNOSTICS
+Exit status is zero if no errors occur.
+Errors result in a non-zero exit status and
+a diagnostic message being written to standard error.
+.SH "SEE ALSO"
+.BR mdbx_load (1),
+.BR mdbx_copy (1),
+.BR mdbx_chk (1),
+.BR mdbx_stat (1)
+.SH AUTHOR
+Howard Chu of Symas Corporation <http://www.symas.com>

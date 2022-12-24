@@ -1,0 +1,106 @@
+.\" Copyright 2015-2022 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
+.TH MDBX_CHK 1 "2022-11-11" "MDBX 0.12.2"
+.SH NAME
+mdbx_chk \- MDBX checking tool
+.SH SYNOPSIS
+.B mdbx_chk
+[\c
+.BR \-V ]
+[\c
+.BR \-v [ v [ v ]]]
+[\c
+.BR \-n ]
+[\c
+.BR \-q ]
+[\c
+.BR \-c ]
+[\c
+.BR \-w ]
+[\c
+.BR \-d ]
+[\c
+.BR \-i ]
+[\c
+.BI \-s \ subdb\fR]
+.BR \ dbpath
+.SH DESCRIPTION
+The
+.B mdbx_chk
+utility intended to check an MDBX database file.
+.SH OPTIONS
+.TP
+.BR \-V
+Write the library version number to the standard output, and exit.
+.TP
+.BR \-v
+Produce verbose output, including summarize space and page usage statistics.
+If \fB\-vv\fP is given, be more verbose, show summarized B-tree info
+and space allocation.
+If \fB\-vvv\fP is given, be more verbose, include summarized statistics
+of leaf B-tree pages.
+If \fB\-vvvv\fP is given, be even more verbose, show info of each page
+during B-tree traversal and basic info of each GC record.
+If \fB\-vvvvv\fP is given, turn maximal verbosity, display the full list
+of page IDs in the GC records and size of each key-value pair of database(s).
+.TP
+.BR \-q
+Be quiet; do not output anything even if an error was detected.
+.TP
+.BR \-c
+Force using cooperative mode while opening environment, i.e. don't try to open
+in exclusive/monopolistic mode. Only exclusive/monopolistic mode allow complete
+check, including full check of all meta-pages and actual size of database file.
+.TP
+.BR \-w
+Open environment in read-write mode and lock for writing while checking.
+This could be impossible if environment already used by another process(s)
+in an incompatible read-write mode. This allow rollback to last steady commit
+(in case environment was not closed properly) and then check transaction IDs
+of meta-pages. Otherwise, without \fB\-w\fP option environment will be
+opened in read-only mode.
+.TP
+.BR \-d
+Disable page-by-page traversal of B-tree. In this case, without B-tree
+traversal, it is unable to check for lost-unused pages nor for double-used
+pages.
+.TP
+.BR \-i
+Ignore wrong order errors, which will likely false-positive if custom
+comparator(s) was used.
+.TP
+.BR \-s \ subdb
+Verify and show info only for a specific subdatabase.
+.TP
+.BR \-0 | \-1 | \-2
+Using specific meta-page 0, or 2 for checking.
+.TP
+.BR \-t
+Turn to a specified meta-page on successful check.
+.TP
+.BR \-T
+Turn to a specified meta-page EVEN ON UNSUCCESSFUL CHECK!
+.TP
+.BR \-u
+Warms up the DB before checking via notifying OS kernel of subsequent access to the database pages.
+.TP
+.BR \-U
+Warms up the DB before checking, notifying the OS kernel of subsequent access to the database pages,
+then forcibly loads ones by sequential access and tries to lock database pages in memory.
+.TP
+.BR \-n
+Open MDBX environment(s) which do not use subdirectories.
+This is legacy option. For now MDBX handles this automatically.
+
+.SH DIAGNOSTICS
+Exit status is zero if no errors occur. Errors result in a non-zero exit status
+and a diagnostic message being written to standard error
+if no quiet mode was requested.
+.SH "SEE ALSO"
+.BR mdbx_stat (1),
+.BR mdbx_copy (1),
+.BR mdbx_dump (1),
+.BR mdbx_load (1)
+.BR mdbx_drop (1)
+.SH AUTHOR
+Leonid Yuriev <https://gitflic.ru/user/erthink>

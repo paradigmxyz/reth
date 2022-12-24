@@ -1,13 +1,13 @@
 //! Fetch data from the network.
 
-use crate::message::BlockRequest;
+use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
-    error::{RequestError, RequestResult},
+    error::{PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
 };
-use reth_primitives::{Header, PeerId, H256, U256};
+use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
@@ -23,38 +23,51 @@ pub use client::FetchClient;
 ///
 /// This type is hooked into the staged sync pipeline and delegates download request to available
 /// peers and sends the response once ready.
+///
+/// This type maintains a list of connected peers that are available for requests.
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests: HashMap<PeerId, Request<HeadersRequest, RequestResult<Vec<Header>>>>,
+    inflight_headers_requests:
+        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
     /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests: HashMap<PeerId, Request<Vec<H256>, RequestResult<Vec<BlockBody>>>>,
-    /// The list of available peers for requests.
+    inflight_bodies_requests:
+        HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
+    /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
+    /// The handle to the peers manager
+    peers_handle: PeersHandle,
     /// Requests queued for processing
     queued_requests: VecDeque<DownloadRequest>,
     /// Receiver for new incoming download requests
     download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest>,
-    /// Receiver for new incoming [`StatusUpdate`] requests.
-    status_rx: UnboundedReceiverStream<StatusUpdate>,
-    /// Sender for updating the status, used to detach a [`FetchClient`]
-    status_tx: UnboundedSender<StatusUpdate>,
 }
 
 // === impl StateSyncer ===
 
 impl StateFetcher {
+    pub(crate) fn new(peers_handle: PeersHandle) -> Self {
+        let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
+        Self {
+            inflight_headers_requests: Default::default(),
+            inflight_bodies_requests: Default::default(),
+            peers: Default::default(),
+            peers_handle,
+            queued_requests: Default::default(),
+            download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
+            download_requests_tx,
+        }
+    }
+
     /// Invoked when connected to a new peer.
-    pub(crate) fn new_connected_peer(
-        &mut self,
-        peer_id: PeerId,
-        best_hash: H256,
-        best_number: u64,
-    ) {
+    pub(crate) fn new_active_peer(&mut self, peer_id: PeerId, best_hash: H256, best_number: u64) {
         self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
     }
 
+    /// Removes the peer from the peer list, after which it is no longer available for future
+    /// requests.
+    ///
     /// Invoked when an active session was closed.
     ///
     /// This cancels als inflight request and sends an error to the receiver.
@@ -89,36 +102,39 @@ impl StateFetcher {
         }
     }
 
-    /// Returns the next idle peer that's ready to accept a request
+    /// Returns the _next_ idle peer that's ready to accept a request.
     fn next_peer(&mut self) -> Option<(&PeerId, &mut Peer)> {
         self.peers.iter_mut().find(|(_, peer)| peer.state.is_idle())
     }
 
     /// Returns the next action to return
-    fn poll_action(&mut self) -> Option<FetchAction> {
+    fn poll_action(&mut self) -> PollAction {
+        // we only check and not pop here since we don't know yet whether a peer is available.
         if self.queued_requests.is_empty() {
-            return None
+            return PollAction::NoRequests
         }
 
-        let peer_id = *self.next_peer()?.0;
+        let peer_id = if let Some(peer) = self.next_peer() {
+            *peer.0
+        } else {
+            return PollAction::NoPeersAvailable
+        };
 
         let request = self.queued_requests.pop_front().expect("not empty; qed");
         let request = self.prepare_block_request(peer_id, request);
 
-        Some(FetchAction::BlockRequest { peer_id, request })
+        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
     }
 
     /// Advance the state the syncer
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchAction> {
         // drain buffered actions first
         loop {
-            if let Some(action) = self.poll_action() {
-                return Poll::Ready(action)
-            }
-
-            if let Poll::Ready(Some(status)) = self.status_rx.poll_next_unpin(cx) {
-                return Poll::Ready(FetchAction::StatusUpdate(status))
-            }
+            let no_peers_available = match self.poll_action() {
+                PollAction::Ready(action) => return Poll::Ready(action),
+                PollAction::NoRequests => false,
+                PollAction::NoPeersAvailable => true,
+            };
 
             loop {
                 // poll incoming requests
@@ -133,7 +149,7 @@ impl StateFetcher {
                 }
             }
 
-            if self.queued_requests.is_empty() {
+            if self.queued_requests.is_empty() || no_peers_available {
                 return Poll::Pending
             }
         }
@@ -170,7 +186,7 @@ impl StateFetcher {
 
     /// Returns a new followup request for the peer.
     ///
-    /// Caution: this expects that the peer is _not_ closed
+    /// Caution: this expects that the peer is _not_ closed.
     fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
         let req = self.queued_requests.pop_front()?;
         let req = self.prepare_block_request(peer_id, req);
@@ -185,7 +201,7 @@ impl StateFetcher {
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         if let Some(resp) = self.inflight_headers_requests.remove(&peer_id) {
-            let _ = resp.response.send(res);
+            let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
         }
 
         if is_error {
@@ -213,7 +229,7 @@ impl StateFetcher {
         res: RequestResult<Vec<BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
         if let Some(resp) = self.inflight_bodies_requests.remove(&peer_id) {
-            let _ = resp.response.send(res);
+            let _ = resp.response.send(res.map(|b| (peer_id, b).into()));
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if peer.state.on_request_finished() {
@@ -227,26 +243,16 @@ impl StateFetcher {
     pub(crate) fn client(&self) -> FetchClient {
         FetchClient {
             request_tx: self.download_requests_tx.clone(),
-            status_tx: self.status_tx.clone(),
+            peers_handle: self.peers_handle.clone(),
         }
     }
 }
 
-impl Default for StateFetcher {
-    fn default() -> Self {
-        let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
-        let (status_tx, status_rx) = mpsc::unbounded_channel();
-        Self {
-            inflight_headers_requests: Default::default(),
-            inflight_bodies_requests: Default::default(),
-            peers: Default::default(),
-            queued_requests: Default::default(),
-            download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
-            download_requests_tx,
-            status_rx: UnboundedReceiverStream::new(status_rx),
-            status_tx,
-        }
-    }
+/// The outcome of [`StateFetcher::poll_action`]
+enum PollAction {
+    Ready(FetchAction),
+    NoRequests,
+    NoPeersAvailable,
 }
 
 /// Represents a connected peer
@@ -303,23 +309,18 @@ struct Request<Req, Resp> {
     response: oneshot::Sender<Resp>,
 }
 
-/// A message to update the status.
-#[derive(Debug, Clone)]
-pub(crate) struct StatusUpdate {
-    pub(crate) height: u64,
-    pub(crate) hash: H256,
-    pub(crate) total_difficulty: U256,
-}
-
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
-        response: oneshot::Sender<RequestResult<Vec<Header>>>,
+        response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
     },
     /// Download the requested headers and send response through channel
-    GetBlockBodies { request: Vec<H256>, response: oneshot::Sender<RequestResult<Vec<BlockBody>>> },
+    GetBlockBodies {
+        request: Vec<H256>,
+        response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
+    },
 }
 
 // === impl DownloadRequest ===
@@ -343,8 +344,6 @@ pub(crate) enum FetchAction {
         /// The request to send
         request: BlockRequest,
     },
-    /// Propagate a received status update for the node
-    StatusUpdate(StatusUpdate),
 }
 
 /// Outcome of a processed response.
@@ -356,4 +355,30 @@ pub(crate) enum BlockResponseOutcome {
     Request(PeerId, BlockRequest),
     /// How to handle a bad response and the reputation change to apply.
     BadResponse(PeerId, ReputationChangeKind),
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{peers::PeersManager, PeersConfig};
+
+    use super::*;
+    use std::future::poll_fn;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_poll_fetcher() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle());
+
+        poll_fn(move |cx| {
+            assert!(fetcher.poll(cx).is_pending());
+            let (tx, _rx) = oneshot::channel();
+            fetcher
+                .queued_requests
+                .push_back(DownloadRequest::GetBlockBodies { request: vec![], response: tx });
+            assert!(fetcher.poll(cx).is_pending());
+
+            Poll::Ready(())
+        })
+        .await;
+    }
 }

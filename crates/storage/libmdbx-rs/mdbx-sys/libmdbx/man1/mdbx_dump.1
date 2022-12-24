@@ -1,0 +1,101 @@
+.\" Copyright 2015-2022 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2014-2015 Howard Chu, Symas Corp. All Rights Reserved.
+.\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
+.\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
+.TH MDBX_DUMP 1 "2022-11-11" "MDBX 0.12.2"
+.SH NAME
+mdbx_dump \- MDBX environment export tool
+.SH SYNOPSIS
+.B mdbx_dump
+[\c
+.BR \-V ]
+[\c
+.BR \-q ]
+[\c
+.BI \-f \ file\fR]
+[\c
+.BR \-l ]
+[\c
+.BR \-p ]
+[\c
+.BR \-a \ |
+.BI \-s \ subdb\fR]
+[\c
+.BR \-r ]
+[\c
+.BR \-n ]
+.BR \ dbpath
+.SH DESCRIPTION
+The
+.B mdbx_dump
+utility reads a database and writes its contents to the
+standard output using a portable flat-text format
+understood by the
+.BR mdbx_load (1)
+utility.
+.SH OPTIONS
+.TP
+.BR \-V
+Write the library version number to the standard output, and exit.
+.TP
+.BR \-q
+Be quiet.
+.TP
+.BR \-f \ file
+Write to the specified file instead of to the standard output.
+.TP
+.BR \-l
+List the databases stored in the environment. Just the
+names will be listed, no data will be output.
+.TP
+.BR \-p
+If characters in either the key or data items are printing characters (as
+defined by isprint(3)), output them directly. This option permits users to
+use standard text editors and tools to modify the contents of databases.
+
+Note: different systems may have different notions about what characters
+are considered printing characters, and databases dumped in this manner may
+be less portable to external systems.
+.TP
+.BR \-a
+Dump all of the subdatabases in the environment.
+.TP
+.BR \-s \ subdb
+Dump a specific subdatabase. If no database is specified, only the main database is dumped.
+.TP
+.BR \-r
+Rescure mode. Ignore some errors to dump corrupted DB.
+.TP
+.BR \-u
+Warms up the DB before dumping via notifying OS kernel of subsequent access to the database pages.
+.TP
+.BR \-U
+Warms up the DB before dumping, notifying the OS kernel of subsequent access to the database pages,
+then forcibly loads ones by sequential access and tries to lock database pages in memory.
+.TP
+.BR \-n
+Dump an MDBX database which does not use subdirectories.
+This is legacy option. For now MDBX handles this automatically.
+
+.SH DIAGNOSTICS
+Exit status is zero if no errors occur.
+Errors result in a non-zero exit status and
+a diagnostic message being written to standard error.
+
+Dumping and reloading databases that use user-defined comparison functions
+will result in new databases that use the default comparison functions.
+\fBIn this case it is quite likely that the reloaded database will be
+damaged beyond repair permitting neither record storage nor retrieval.\fP
+
+The only available workaround is to modify the source for the
+.BR mdbx_load (1)
+utility to load the database using the correct comparison functions.
+.SH "SEE ALSO"
+.BR mdbx_load (1),
+.BR mdbx_copy (1),
+.BR mdbx_chk (1),
+.BR mdbx_stat (1)
+.BR mdbx_drop (1)
+.SH AUTHOR
+Howard Chu of Symas Corporation <http://www.symas.com>,
+Leonid Yuriev <https://gitflic.ru/user/erthink>

@@ -11,17 +11,19 @@ readme = "README.md"
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../common/rlp" }
-reth-consensus = { path = "../consensus" }
+reth-db = { path = "../storage/db" }
+reth-provider = { path = "../storage/provider" }
 
-revm = "2.3"
+revm = { git = "https://github.com/bluealloy/revm", branch = "main"}
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 
 # common
 async-trait = "0.1.57"
 thiserror = "1.0.37"
-eyre = "0.6.8"
 auto_impl = "1.0"
+tracing = "0.1.37"
+tokio = { version = "1.21.2", features = ["sync"] }
 
 triehash = "0.8"
 # See to replace hashers to simplify libraries
@@ -31,3 +33,7 @@ hash-db = "0.15"
 rlp = { version = "0.5", default-features = false }
 # replace with tiny-keccak (it is faster hasher)
 sha3 = { version = "0.10", default-features = false }
+
+
+[dev-dependencies]
+reth-db = { path = "../storage/db", features = ["test-utils"] }

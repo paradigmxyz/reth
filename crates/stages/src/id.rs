@@ -1,5 +1,9 @@
-use metrics::counter;
-use reth_interfaces::db::{tables::SyncStage, DbTx, DbTxMut, Error as DbError};
+use metrics::absolute_counter;
+use reth_db::{
+    tables::SyncStage,
+    transaction::{DbTx, DbTxMut},
+    Error as DbError,
+};
 use reth_primitives::BlockNumber;
 use std::fmt::Display;
 
@@ -27,7 +31,7 @@ impl StageId {
         tx: &impl DbTxMut<'db>,
         block: BlockNumber,
     ) -> Result<(), DbError> {
-        counter!("stage.progress", block, "stage" => self.0);
+        absolute_counter!("stage.progress", block, "stage" => self.0);
         tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
     }
 }

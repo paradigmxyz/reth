@@ -1,10 +1,10 @@
 //! Support for handling peer sessions.
 pub use crate::message::PeerRequestSender;
 use crate::{
-    fetch::StatusUpdate,
     message::PeerMessage,
     session::{
         active::ActiveSession,
+        config::SessionCounter,
         handle::{
             ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
             SessionCommand,
@@ -13,15 +13,15 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
-use reth_ecies::stream::ECIESStream;
+use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
-    DisconnectReason, HelloBuilder, HelloMessage, Status, StatusBuilder, UnauthedEthStream,
-    UnauthedP2PStream,
+    DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_primitives::{ForkFilter, Hardfork, PeerId};
-use secp256k1::{SecretKey, SECP256K1};
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
+use reth_tasks::TaskExecutor;
+use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
     future::Future,
@@ -33,7 +33,6 @@ use std::{
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
-    task::JoinSet,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{instrument, trace, warn};
@@ -41,9 +40,7 @@ use tracing::{instrument, trace, warn};
 mod active;
 mod config;
 mod handle;
-use crate::session::config::SessionCounter;
 pub use config::SessionsConfig;
-use reth_ecies::util::pk2id;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -62,16 +59,14 @@ pub(crate) struct SessionManager {
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
     status: Status,
-    /// THe `Hello` message to send to peers.
-    hello: HelloMessage,
+    /// THe `HelloMessage` message to send to peers.
+    hello_message: HelloMessage,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
     /// Size of the command buffer per session.
     session_command_buffer: usize,
-    /// All spawned session tasks.
-    ///
-    /// Note: If dropped, the session tasks are aborted.
-    spawned_tasks: JoinSet<()>,
+    /// The executor for spawned tasks.
+    executor: Option<TaskExecutor>,
     /// All pending session that are currently handshaking, exchanging `Hello`s.
     ///
     /// Events produced during the authentication phase are reported to this manager. Once the
@@ -99,18 +94,16 @@ pub(crate) struct SessionManager {
 
 impl SessionManager {
     /// Creates a new empty [`SessionManager`].
-    pub(crate) fn new(secret_key: SecretKey, config: SessionsConfig) -> Self {
+    pub(crate) fn new(
+        secret_key: SecretKey,
+        config: SessionsConfig,
+        executor: Option<TaskExecutor>,
+        status: Status,
+        hello_message: HelloMessage,
+        fork_filter: ForkFilter,
+    ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
-
-        let pk = secret_key.public_key(SECP256K1);
-        let peer_id = pk2id(&pk);
-
-        // TODO: make sure this is the right place to put these builders - maybe per-Network rather
-        // than per-Session?
-        let hello = HelloBuilder::new(peer_id).build();
-        let status = StatusBuilder::default().build();
-        let fork_filter = Hardfork::Frontier.fork_filter();
 
         Self {
             next_id: 0,
@@ -118,10 +111,10 @@ impl SessionManager {
             request_timeout: config.request_timeout,
             secret_key,
             status,
-            hello,
+            hello_message,
             fork_filter,
             session_command_buffer: config.session_command_buffer,
-            spawned_tasks: Default::default(),
+            executor,
             pending_sessions: Default::default(),
             active_sessions: Default::default(),
             pending_sessions_tx,
@@ -129,6 +122,12 @@ impl SessionManager {
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
         }
+    }
+
+    /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
+    /// `EIP-2124`.
+    pub(crate) fn is_valid_fork_id(&self, fork_id: ForkId) -> bool {
+        self.fork_filter.validate(fork_id).is_ok()
     }
 
     /// Returns the next unique [`SessionId`].
@@ -139,18 +138,30 @@ impl SessionManager {
     }
 
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
-    fn spawn<F>(&mut self, f: F)
+    fn spawn<F>(&self, f: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawned_tasks.spawn(async move { f.await });
+        if let Some(ref executor) = self.executor {
+            executor.spawn(async move { f.await })
+        } else {
+            tokio::task::spawn(async move { f.await });
+        }
     }
 
-    /// Invoked on a received status update
-    pub(crate) fn on_status_update(&mut self, status: StatusUpdate) {
-        self.status.blockhash = status.hash;
-        self.status.total_difficulty = status.total_difficulty;
-        self.fork_filter.set_head(status.height);
+    /// Invoked on a received status update.
+    ///
+    /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
+    /// active [`ForkId`](reth_primitives::ForkId). See also [`ForkFilter::set_head`].
+    pub(crate) fn on_status_update(
+        &mut self,
+        height: u64,
+        hash: H256,
+        total_difficulty: U256,
+    ) -> Option<ForkTransition> {
+        self.status.blockhash = hash;
+        self.status.total_difficulty = total_difficulty;
+        self.fork_filter.set_head(height)
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -165,6 +176,14 @@ impl SessionManager {
         self.counter.ensure_pending_inbound()?;
 
         let session_id = self.next_id();
+
+        trace!(
+            target : "net::session",
+            ?remote_addr,
+            ?session_id,
+            "new pending incoming session"
+        );
+
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         self.spawn(start_pending_incoming_session(
@@ -174,7 +193,7 @@ impl SessionManager {
             pending_events,
             remote_addr,
             self.secret_key,
-            self.hello.clone(),
+            self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
         ));
@@ -198,7 +217,7 @@ impl SessionManager {
             remote_addr,
             remote_peer_id,
             self.secret_key,
-            self.hello.clone(),
+            self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
         ));
@@ -295,7 +314,7 @@ impl SessionManager {
             Poll::Ready(None) => unreachable!("Manager holds both channel halves."),
             Poll::Ready(Some(event)) => event,
         };
-        return match event {
+        match event {
             PendingSessionEvent::Established {
                 session_id,
                 remote_addr,
@@ -307,6 +326,30 @@ impl SessionManager {
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
+
+                // If there's already a session to the peer then we disconnect right away
+                if self.active_sessions.contains_key(&peer_id) {
+                    trace!(
+                        target : "net::session",
+                        ?session_id,
+                        ?remote_addr,
+                        ?peer_id,
+                        ?direction,
+                        "already connected"
+                    );
+
+                    self.spawn(async move {
+                        // send a disconnect message
+                        let _ =
+                            conn.into_inner().disconnect(DisconnectReason::AlreadyConnected).await;
+                    });
+
+                    return Poll::Ready(SessionEvent::AlreadyConnected {
+                        peer_id,
+                        remote_addr,
+                        direction,
+                    })
+                }
 
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
 
@@ -367,14 +410,14 @@ impl SessionManager {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
-                            error,
+                            error: error.map(PendingSessionHandshakeError::Eth),
                         })
                     }
                     Direction::Outgoing(peer_id) => {
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
-                            error,
+                            error: error.map(PendingSessionHandshakeError::Eth),
                         })
                     }
                 }
@@ -410,14 +453,14 @@ impl SessionManager {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
-                            error: None,
+                            error: Some(PendingSessionHandshakeError::Ecies(error)),
                         })
                     }
                     Direction::Outgoing(peer_id) => {
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
-                            error: None,
+                            error: Some(PendingSessionHandshakeError::Ecies(error)),
                         })
                     }
                 }
@@ -427,6 +470,7 @@ impl SessionManager {
 }
 
 /// Events produced by the [`SessionManager`]
+#[derive(Debug)]
 pub(crate) enum SessionEvent {
     /// A new session was successfully authenticated.
     ///
@@ -437,6 +481,11 @@ pub(crate) enum SessionEvent {
         capabilities: Arc<Capabilities>,
         status: Status,
         messages: PeerRequestSender,
+        direction: Direction,
+    },
+    AlreadyConnected {
+        peer_id: PeerId,
+        remote_addr: SocketAddr,
         direction: Direction,
     },
     /// A session received a valid message via RLPx.
@@ -458,16 +507,23 @@ pub(crate) enum SessionEvent {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },
-    /// Closed an incoming pending session during authentication.
-    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
-    /// Closed an outgoing pending session during authentication.
+    /// Closed an incoming pending session during handshaking.
+    IncomingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        error: Option<PendingSessionHandshakeError>,
+    },
+    /// Closed an outgoing pending session during handshaking.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
         peer_id: PeerId,
-        error: Option<EthStreamError>,
+        error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream
-    OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
+    OutgoingConnectionError {
+        remote_addr: SocketAddr,
+        peer_id: PeerId,
+        error: io::Error,
+    },
     /// Session was closed due to an error
     SessionClosedOnConnectionError {
         /// The id of the remote peer.
@@ -478,7 +534,17 @@ pub(crate) enum SessionEvent {
         error: EthStreamError,
     },
     /// Active session was gracefully disconnected.
-    Disconnected { peer_id: PeerId, remote_addr: SocketAddr },
+    Disconnected {
+        peer_id: PeerId,
+        remote_addr: SocketAddr,
+    },
+}
+
+/// Errors that can occur during handshaking/authenticating the underlying streams.
+#[derive(Debug)]
+pub(crate) enum PendingSessionHandshakeError {
+    Eth(EthStreamError),
+    Ecies(ECIESError),
 }
 
 /// The direction of the connection.
@@ -622,8 +688,8 @@ async fn authenticate(
             }
         }
     };
-
     let unauthed = UnauthedP2PStream::new(stream);
+
     let auth = authenticate_stream(
         unauthed,
         session_id,
@@ -691,7 +757,6 @@ async fn authenticate_stream(
             }
         }
     };
-
     PendingSessionEvent::Established {
         session_id,
         remote_addr,

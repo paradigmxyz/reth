@@ -208,7 +208,8 @@ macro_rules! impl_ord_wrapper {
 /// This sorts transactions by their base fee.
 ///
 /// Caution: This assumes all transaction in the `BaseFee` sub-pool have a fee value.
-pub struct BasefeeOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
+#[derive(Debug)]
+pub(crate) struct BasefeeOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(BasefeeOrd);
 
@@ -232,7 +233,8 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
 ///
 /// The primary order function for is always compares via the timestamp when the transaction was
 /// created
-pub struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
+#[derive(Debug)]
+pub(crate) struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(QueuedOrd);
 

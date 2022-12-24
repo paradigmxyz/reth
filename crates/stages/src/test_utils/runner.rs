@@ -1,9 +1,9 @@
-use reth_db::{kv::Env, mdbx::WriteMap};
+use reth_db::mdbx::{Env, WriteMap};
 use std::borrow::Borrow;
 use tokio::sync::oneshot;
 
-use super::TestStageDB;
-use crate::{db::StageDB, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use super::TestTransaction;
+use crate::{db::Transaction, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
@@ -19,7 +19,7 @@ pub(crate) trait StageTestRunner {
     type S: Stage<Env<WriteMap>> + 'static;
 
     /// Return a reference to the database.
-    fn db(&self) -> &TestStageDB;
+    fn tx(&self) -> &TestTransaction;
 
     /// Return an instance of a Stage.
     fn stage(&self) -> Self::S;
@@ -42,9 +42,9 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     /// Run [Stage::execute] and return a receiver for the result.
     fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
         let (tx, rx) = oneshot::channel();
-        let (db, mut stage) = (self.db().inner_raw(), self.stage());
+        let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let mut db = StageDB::new(db.borrow()).expect("failed to create db container");
+            let mut db = Transaction::new(db.borrow()).expect("failed to create db container");
             let result = stage.execute(&mut db, input).await;
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
@@ -69,9 +69,9 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = oneshot::channel();
-        let (db, mut stage) = (self.db().inner_raw(), self.stage());
+        let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let mut db = StageDB::new(db.borrow()).expect("failed to create db container");
+            let mut db = Transaction::new(db.borrow()).expect("failed to create db container");
             let result = stage.unwind(&mut db, input).await;
             db.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");

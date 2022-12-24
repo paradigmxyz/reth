@@ -12,6 +12,8 @@ auto_impl = "1"
 bytes = { version = "1", default-features = false }
 ethnum = { version = "1", default-features = false, optional = true }
 smol_str = { version = "0.1", default-features = false, optional = true }
+enr = { version = "0.7", default-features = false, optional = true }
+rlp = { version = "0.5.2", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
 
@@ -21,15 +23,21 @@ reth-rlp = { path = ".", package = "reth-rlp", features = [
     "std",
     "ethnum",
     "ethereum-types",
+    "enr",
     "smol_str"
 ] }
 criterion = "0.4.0"
 hex-literal = "0.3"
+rand = "0.8"
+secp256k1 = { version = "0.24", features = [
+    "rand-std",
+] }
 
 [features]
 alloc = []
 derive = ["reth-rlp-derive"]
 std = ["alloc"]
+enr = ["dep:enr", "dep:rlp", "enr/rust-secp256k1", "derive"]
 
 [[bench]]
 name = "bench"

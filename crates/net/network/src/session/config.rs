@@ -1,4 +1,4 @@
-//! Configuration types for [`SessionsManager`]
+//! Configuration types for [SessionManager](crate::session::SessionManager).
 
 use crate::session::{Direction, ExceedsSessionLimit};
 use std::time::Duration;
@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Default request timeout.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(500u64);
 
-/// Configuration options when creating a [`SessionsManager`].
+/// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 pub struct SessionsConfig {
     /// Size of the session command buffer (per session task).
     pub session_command_buffer: usize,
@@ -25,7 +25,7 @@ impl Default for SessionsConfig {
         SessionsConfig {
             // This should be sufficient to slots for handling commands sent to the session task,
             // since the manager is the sender.
-            session_command_buffer: 10,
+            session_command_buffer: 32,
             // This should be greater since the manager is the receiver. The total size will be
             // `buffer + num sessions`. Each session can therefor fit at least 1 message in the
             // channel. The buffer size is additional capacity. The channel is always drained on

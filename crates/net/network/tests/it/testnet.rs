@@ -3,10 +3,7 @@
 use futures::{FutureExt, StreamExt};
 use parking_lot::Mutex;
 use pin_project::pin_project;
-use reth_interfaces::{
-    provider::{BlockProvider, ChainInfo, HeaderProvider},
-    test_utils::TestApi,
-};
+use reth_eth_wire::DisconnectReason;
 use reth_network::{
     error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
     NetworkHandle, NetworkManager,
@@ -15,6 +12,7 @@ use reth_primitives::{
     rpc::{BlockId, BlockNumber},
     Block, BlockHash, Header, PeerId, H256, U256,
 };
+use reth_provider::{test_utils::TestApi, BlockProvider, ChainInfo, HeaderProvider};
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -73,6 +71,16 @@ where
 
     pub fn peers_iter(&self) -> impl Iterator<Item = &Peer<C>> + '_ {
         self.peers.iter()
+    }
+
+    pub async fn extend_peer_with_config(
+        &mut self,
+        configs: impl IntoIterator<Item = PeerConfig<C>>,
+    ) -> Result<(), NetworkError> {
+        for config in configs {
+            self.add_peer_with_config(config).await?;
+        }
+        Ok(())
     }
 
     pub async fn add_peer_with_config(
@@ -264,6 +272,10 @@ where
 {
     pub fn new(client: Arc<C>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
+        Self::with_secret_key(client, secret_key)
+    }
+
+    pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
         let config = NetworkConfig::builder(Arc::clone(&client), secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
@@ -292,12 +304,21 @@ impl NetworkEventStream {
         Self { inner }
     }
 
+    pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
+        while let Some(ev) = self.inner.next().await {
+            match ev {
+                NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
+                _ => continue,
+            }
+        }
+        None
+    }
     /// Awaits the next event for an established session
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => continue,
                 NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                _ => continue,
             }
         }
         None
@@ -342,6 +363,10 @@ impl HeaderProvider for MockEthProvider {
     fn header_by_number(&self, num: u64) -> reth_interfaces::Result<Option<Header>> {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number == num).cloned())
+    }
+
+    fn header_td(&self, _hash: &BlockHash) -> reth_interfaces::Result<Option<U256>> {
+        todo!()
     }
 }
 

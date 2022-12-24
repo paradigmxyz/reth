@@ -1,17 +1,18 @@
 use crate::{
-    fetch::StatusUpdate,
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
-    session::{Direction, SessionEvent, SessionId, SessionManager},
+    peers::InboundConnectionError,
+    session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
 use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     error::EthStreamError,
+    Status,
 };
-use reth_interfaces::provider::BlockProvider;
 use reth_primitives::PeerId;
+use reth_provider::BlockProvider;
 use std::{
     io,
     net::SocketAddr,
@@ -132,8 +133,14 @@ where
                     remote_addr,
                     capabilities,
                     messages,
+                    status,
                     direction,
                 })
+            }
+            SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
+                trace!( target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
+                self.state.peers_mut().on_already_connected(direction);
+                None
             }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
@@ -172,10 +179,21 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
-                if let Err(limit) = self.state_mut().peers_mut().on_inbound_pending_session() {
-                    // We currently don't have additional capacity to establish a session from an
-                    // incoming connection, so we drop the connection.
-                    trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                // ensure we can handle an incoming connection from this address
+                if let Err(err) =
+                    self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
+                {
+                    match err {
+                        InboundConnectionError::IpBanned => {
+                            trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
+                        }
+                        InboundConnectionError::ExceedsLimit(limit) => {
+                            // We currently don't have additional capacity to establish a session
+                            // from an incoming connection, so we drop
+                            // the connection.
+                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                        }
+                    }
                     return None
                 }
 
@@ -185,6 +203,9 @@ where
                     }
                     Err(err) => {
                         warn!(target: "net", ?err, "Incoming connection rejected");
+                        self.state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_rejected_internally();
                     }
                 }
             }
@@ -210,7 +231,13 @@ where
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
             }
-            StateAction::StatusUpdate(status) => return Some(SwarmEvent::StatusUpdate(status)),
+            StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
+                if self.sessions.is_valid_fork_id(fork_id) {
+                    self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
+                } else {
+                    self.state_mut().peers_mut().remove_discovered_node(peer_id);
+                }
+            }
         }
         None
     }
@@ -268,8 +295,6 @@ where
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
 pub(crate) enum SwarmEvent {
-    /// Received a node status update.
-    StatusUpdate(StatusUpdate),
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
@@ -318,6 +343,7 @@ pub(crate) enum SwarmEvent {
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
         messages: PeerRequestSender,
+        status: Status,
         direction: Direction,
     },
     SessionClosed {
@@ -327,12 +353,15 @@ pub(crate) enum SwarmEvent {
         error: Option<EthStreamError>,
     },
     /// Closed an incoming pending session during authentication.
-    IncomingPendingSessionClosed { remote_addr: SocketAddr, error: Option<EthStreamError> },
+    IncomingPendingSessionClosed {
+        remote_addr: SocketAddr,
+        error: Option<PendingSessionHandshakeError>,
+    },
     /// Closed an outgoing pending session during authentication.
     OutgoingPendingSessionClosed {
         remote_addr: SocketAddr,
         peer_id: PeerId,
-        error: Option<EthStreamError>,
+        error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },

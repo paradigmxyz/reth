@@ -96,11 +96,13 @@ pub enum P2PStreamError {
 impl P2PStreamError {
     /// Returns the [`DisconnectReason`] if it is the `Disconnected` variant.
     pub fn as_disconnected(&self) -> Option<DisconnectReason> {
-        if let P2PStreamError::Disconnected(reason) = self {
-            Some(*reason)
-        } else {
-            None
-        }
+        let reason = match self {
+            P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)) => reason,
+            P2PStreamError::Disconnected(reason) => reason,
+            _ => return None,
+        };
+
+        Some(*reason)
     }
 }
 
@@ -120,6 +122,8 @@ pub enum P2PHandshakeError {
     Timeout,
     #[error("Disconnected by peer: {0}")]
     Disconnected(DisconnectReason),
+    #[error("error decoding a message during handshake: {0}")]
+    DecodeError(#[from] reth_rlp::DecodeError),
 }
 
 /// An error that can occur when interacting with a [`Pinger`].

@@ -40,9 +40,15 @@ pub enum ECIESErrorImpl {
     /// Error during IO
     #[error("IO error")]
     IO(std::io::Error),
-    /// Error when checking the HMAC tag against the tag on the data
-    #[error("tag check failure")]
-    TagCheckFailed,
+    /// Error when checking the HMAC tag against the tag on the message being decrypted
+    #[error("tag check failure in read_header")]
+    TagCheckDecryptFailed,
+    /// Error when checking the HMAC tag against the tag on the header
+    #[error("tag check failure in read_header")]
+    TagCheckHeaderFailed,
+    /// Error when checking the HMAC tag against the tag on the body
+    #[error("tag check failure in read_body")]
+    TagCheckBodyFailed,
     /// Error when parsing AUTH data
     #[error("invalid auth data")]
     InvalidAuthData,
@@ -77,6 +83,14 @@ pub enum ECIESErrorImpl {
         /// The actual value returned from the peer
         msg: Option<IngressECIESValue>,
     },
+    /// Error when the stream was closed by the peer for being unreadable.
+    ///
+    /// This exact error case happens when the wrapped stream in
+    /// [`Framed`](tokio_util::codec::Framed) is closed by the peer, See
+    /// [ConnectionReset](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to decode
+    /// a message from the (partially filled) buffer.
+    #[error("Stream closed due to not being readable.")]
+    UnreadableStream,
 }
 
 impl From<ECIESErrorImpl> for ECIESError {

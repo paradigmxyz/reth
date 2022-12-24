@@ -9,13 +9,16 @@ The book is continuously rendered [here](https://paradigmxyz.github.io/reth/)!
 
 > 📖 **Contributing**
 >
-> You can contribute to this book on [GitHub]().
+> You can contribute to this book on [GitHub][gh-book].
 
 ### Sections
 
 **[Getting Started]()**
 To get started with Reth, install, configure and sync your node.
+* To install and build reth, you can use the following [installation instruction](./installation.md).
 
 **[A Tour Of Reth]()**
 
 This section will take a deep dive into the inner workings of Reth. 
+
+[gh-book]: https://github.com/paradigmxyz/reth/tree/main/book
