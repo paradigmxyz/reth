@@ -229,16 +229,7 @@ fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
 
 This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.  
 
-Lets take a look at a few examples before moving on. In the snippet below, the `DbTx::get()` function is used to get the block header hash at the specified `block_num` from the `CanonicalHeaders` table.
-
-[File: crates/stages/src/stages/headers.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/headers.rs#L550-L552)
-```rust ignore
- let hash = tx
-    .get::<tables::CanonicalHeaders>(block_num)?
-    .expect("no header hash");
-```
-
-This next example uses the `DbTxMut::put()` method to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
+Lets take a look at a couple examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
 [File: crates/storage/provider/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/block.rs#L121-L125)
 ```rust ignore 
@@ -250,7 +241,7 @@ This next example uses the `DbTxMut::put()` method to insert values into the `Ca
 ```
 
 
-This last example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
+This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 
 
 [File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L93-L101)
