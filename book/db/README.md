@@ -8,7 +8,7 @@ The database is a central component to Reth, enabling persistent storage for dat
 
 Within Reth, the database is organized via "tables". A table is any struct that implements the `Table` trait.
 
-[File: crates/storage/db/src/abstraction/table.rs]()
+[File: crates/storage/db/src/abstraction/table.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/table.rs#L56-L65)
 ```rust ignore
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
@@ -58,6 +58,7 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 
 Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/mod.rs#L33), which takes advantage of [generic associated types](https://blog.rust-lang.org/2022/10/28/gats-stabilization.html) and [a few design tricks](https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats) to implement the database's functionality across many types.  Let's take a quick look at the `Database` trait and how it works.
 
+[File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L19)
 ```rust ignore
 /// Main Database trait that spawns transactions to be executed.
 pub trait Database: for<'a> DatabaseGAT<'a> {
@@ -96,20 +97,19 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
     }
 }
 ```
-Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. We already saw that the `StageDB` struct from the `stages` crate implements the `Database` trait, allowing it to store new headers, bodies and senders in the database during the Reth pipeline loop. In the code snippet below, you can see the `StageDB::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction. 
+Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. We already saw that the `Transaction` struct from the `stages` crate implements the `Database` trait, allowing it to store new headers, bodies and senders in the database during the Reth pipeline loop. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction. 
 
 
-//TODO: Looks like `StageDB` has been changed to `Transaction`
-[File: crates/stages/src/db.rs]()
+[File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L95-L98)
 ```rust ignore
-pub struct StageDB<'this, DB: Database> {
+pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
     pub(crate) db: &'this DB,
     tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
 }
 
 //--snip--
-impl<'this, DB> StageDB<'this, DB>
+impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
@@ -125,7 +125,7 @@ where
 
 The `Database` trait also implements the `DatabaseGAT` trait which defines two associated types `TX` and `TXMut`.
 
-[File: crates/storage/db/src/abstraction/database.rs]()
+[File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L11)
 ```rust ignore
 /// Implements the GAT method from:
 /// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
@@ -145,7 +145,7 @@ In the code snippet above, the `DatabaseGAT` trait has two associated types, `TX
 
 The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions. 
 
-[File: crates/storage/db/src/abstraction/transaction.rs]()
+[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L36)
 ```rust ignore
 /// Read only transaction
 pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
@@ -163,7 +163,7 @@ pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
 
 The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions.
 
-[File: crates/storage/db/src/abstraction/transaction.rs]()
+[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L49)
 ```rust ignore
 /// Read write transaction that allows writing to database
 pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
@@ -182,12 +182,12 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
 }
 ```
 
-Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `StageDB` struct as an example, the `StageDB::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash. Remember that the `StageDB` struct implements the `Database` trait, which implements the `DatabaseGAT` trait, which defines the `TX` type that implements the `DbTx` trait.
+Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `Transaction` struct as an example, the `Transaction::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash. Remember that the `Transaction` struct implements the `Database` trait, which implements the `DatabaseGAT` trait, which defines the `TX` type that implements the `DbTx` trait.
 
-[File: crates/stages/src/db.rs]()
+[File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L106)
 ```rust ignore
 
-impl<'this, DB> StageDB<'this, DB>
+impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
@@ -204,7 +204,7 @@ where
 }
 ```
 
-The `StageDB::get_block_hash()` method takes a `BlockNumber` and returns the block hash at that block number. To do this, the function uses `self.get::<tables::CanonicalHeaders>(number)?.ok_or(DatabaseIntegrityError::CanonicalHash { number })?;`.
+The `Transaction::get_block_hash()` method takes a `BlockNumber` and returns the block hash at that block number. To do this, the function uses `self.get::<tables::CanonicalHeaders>(number)?.ok_or(DatabaseIntegrityError::CanonicalHash { number })?;`.
 
 Notice that function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter. 
 
@@ -218,7 +218,7 @@ This design pattern is very powerful and allows Reth to use the methods availabl
 Lets take a look at a few examples before moving on. In the snippet below, the `DbTx::get()` function is used to get the transaction number from the `CumulativeTxCount` table.
 
 
-//TODO: This may have been moved as well
+//TODO: This may have been moved in a recent commit to main
 [File: ]()
 ```rust ignore
 let transaction_number = tx
@@ -228,7 +228,7 @@ let transaction_number = tx
 
 This next example uses the `DbTxMut::put()` method to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
-[File: crates/storage/provider/src/block.rs]()
+[File: crates/storage/provider/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/block.rs#L121-L125)
 ```rust ignore 
     let block_num_hash = BlockNumHash((block.number, block.hash()));
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
@@ -241,8 +241,7 @@ This next example uses the `DbTxMut::put()` method to insert values into the `Ca
 This last example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, ect) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 
 
-//TODO: was in `crates/stages/src/stages/execution.rs`
-[File: ]()
+[File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L93-L101)
 ```rust ignore 
 // Get next canonical block hashes to execute.
     let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
@@ -259,7 +258,7 @@ This last example uses the `DbTx::cursor()` method to get a `Cursor`. The `Curso
 
 We are almost at the last stop in the tour of the `db` crate. In addition to the methods provided by the `DbTx` and `DbTxMut` traits, `DbTx` also inherits the `DbTxGAT` trait, while `DbTxMut` inherits `DbTxMutGAT`. These next two traits provide various associated types related to cursors as well as methods to utilize the cursor types.
 
-[File: crates/storage/db/src/abstraction/transaction.rs]()
+[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L12-L17)
 ```rust ignore
 pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
@@ -271,12 +270,12 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 
 Lets look at an examples of how cursors are used. The code snippet below is the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline. 
 
-[File: crates/stages/src/stages/bodies.rs]()
+[File: crates/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/bodies.rs#L205-L238)
 ```rust ignore
  /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut StageDB<'_, DB>,
+        db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
