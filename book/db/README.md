@@ -185,7 +185,7 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
 }
 ```
 
-Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `Transaction` struct as an example, the `Transaction::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash. Remember that the `Transaction` struct implements the `Database` trait, which implements the `DatabaseGAT` trait, which defines the `TX` type that implements the `DbTx` trait.
+Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `Transaction` struct as an example, the `Transaction::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash. Remember that the `Transaction` struct's `db` field implements the `Database` trait, which implements the `DatabaseGAT` trait, which defines the `TX` type that implements the `DbTx` trait.
 
 [File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L106)
 ```rust ignore
