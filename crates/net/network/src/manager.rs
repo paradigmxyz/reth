@@ -560,6 +560,14 @@ where
                         messages,
                     });
                 }
+                SwarmEvent::PeerAdded(peer_id) => {
+                    info!(target: "net", ?peer_id, "Peer added");
+                    this.event_listeners.send(NetworkEvent::PeerAdded(peer_id));
+                }
+                SwarmEvent::PeerRemoved(peer_id) => {
+                    info!(target: "net", ?peer_id, "Peer dropped");
+                    this.event_listeners.send(NetworkEvent::PeerRemoved(peer_id));
+                }
                 SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                     trace!(
