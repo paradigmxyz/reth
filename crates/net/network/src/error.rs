@@ -63,6 +63,15 @@ impl SessionError for EthStreamError {
                         P2PStreamError::HandshakeError(
                             P2PHandshakeError::NonHelloMessageInHandshake
                         ) |
+                        P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                            DisconnectReason::UselessPeer
+                        )) |
+                        P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                            DisconnectReason::IncompatibleP2PProtocolVersion
+                        )) |
+                        P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                            DisconnectReason::ProtocolBreach
+                        )) |
                         P2PStreamError::UnknownReservedMessageId(_) |
                         P2PStreamError::EmptyProtocolMessage |
                         P2PStreamError::ParseVersionError(_) |
@@ -70,6 +79,7 @@ impl SessionError for EthStreamError {
                         P2PStreamError::Disconnected(
                             DisconnectReason::IncompatibleP2PProtocolVersion
                         ) |
+                        P2PStreamError::Disconnected(DisconnectReason::ProtocolBreach) |
                         P2PStreamError::MismatchedProtocolVersion { .. }
                 )
             }
@@ -116,6 +126,17 @@ impl SessionError for PendingSessionHandshakeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_fatal_disconnect() {
+        let err = PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+            P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                DisconnectReason::UselessPeer,
+            )),
+        ));
+
+        assert!(err.is_fatal_protocol_error());
+    }
 
     #[test]
     fn test_should_backoff() {
