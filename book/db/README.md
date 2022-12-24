@@ -208,7 +208,8 @@ The `Transaction::get_block_hash()` method takes a `BlockNumber` and returns the
 
 Notice that function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter. 
 
-[File: crates/storage/db/src/abstraction]()
+
+[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L38)
 ```rust ignore
 fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
 ```
