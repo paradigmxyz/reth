@@ -51,7 +51,6 @@ use std::{
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, info, trace, warn};
-
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -676,6 +675,10 @@ pub enum NetworkEvent {
         /// The status of the peer to which a session was established.
         status: Status,
     },
+    /// Event emitted when a new peer is added
+    PeerAdded(PeerId),
+    /// Event emitted when a new peer is removed
+    PeerRemoved(PeerId),
 }
 
 /// Bundles all listeners for [`NetworkEvent`]s.
