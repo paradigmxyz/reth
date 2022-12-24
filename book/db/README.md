@@ -35,14 +35,18 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 - HeaderTD
 - HeaderNumbers
 - Headers
-- CumulativeTxCount
+- BlockBodies
+- BlockOmmers
 - NonCanonicalTransactions
 - Transactions
+- TxHashNumber
 - Receipts
 - Logs
 - PlainAccountState
 - PlainStorageState
 - Bytecodes
+- BlockTransitionIndex
+- TxTransitionIndex
 - AccountHistory
 - StorageHistory
 - AccountChangeSet
@@ -215,15 +219,13 @@ fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
 
 This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.  
 
-Lets take a look at a few examples before moving on. In the snippet below, the `DbTx::get()` function is used to get the transaction number from the `CumulativeTxCount` table.
+Lets take a look at a few examples before moving on. In the snippet below, the `DbTx::get()` function is used to get the block header hash at the specified `block_num` from the `CanonicalHeaders` table.
 
-
-//TODO: This may have been moved in a recent commit to main
-[File: ]()
+[File: crates/stages/src/stages/headers.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/headers.rs#L550-L552)
 ```rust ignore
-let transaction_number = tx
-    .get::<tables::CumulativeTxCount>(block_num_hash.into())?
-    .ok_or(Error::BlockTxNumberNotExists { block_hash })?;
+ let hash = tx
+    .get::<tables::CanonicalHeaders>(block_num)?
+    .expect("no header hash");
 ```
 
 This next example uses the `DbTxMut::put()` method to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
