@@ -231,6 +231,8 @@ where
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
             }
+            StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
+            StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
                 if self.sessions.is_valid_fork_id(fork_id) {
                     self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
@@ -352,6 +354,10 @@ pub(crate) enum SwarmEvent {
         /// Whether the session was closed due to an error
         error: Option<EthStreamError>,
     },
+    /// Admin rpc: new peer added
+    PeerAdded(PeerId),
+    /// Admin rpc: peer removed
+    PeerRemoved(PeerId),
     /// Closed an incoming pending session during authentication.
     IncomingPendingSessionClosed {
         remote_addr: SocketAddr,
