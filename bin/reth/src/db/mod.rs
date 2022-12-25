@@ -160,7 +160,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             };
         }
 
-        list_tables!(args.table.to_lowercase().as_str(), args.start, args.len => [
+        list_tables!(args.table.as_str(), args.start, args.len => [
             CanonicalHeaders,
             HeaderTD,
             HeaderNumbers,
