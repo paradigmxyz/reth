@@ -22,7 +22,7 @@ reth-rlp = { path = "../common/rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 reth-network = { path = "../net/network" }
-reth-metrics = { path = "../metrics" }
+reth-metrics-derive = { path = "../metrics/metrics-derive" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
