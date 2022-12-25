@@ -54,9 +54,10 @@ async fn test_establish_connections() {
         handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
 
         let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
+        let mut expected_peers = expected_connections.clone();
 
         // wait for all initiator connections
-        let mut established = listener0.take(2);
+        let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
                 NetworkEvent::SessionClosed { .. } => {
@@ -66,7 +67,7 @@ async fn test_establish_connections() {
                     assert!(expected_connections.remove(&peer_id))
                 }
                 NetworkEvent::PeerAdded(peer_id) => {
-                    assert!(!expected_connections.contains(&peer_id))
+                    assert!(expected_peers.remove(&peer_id))
                 }
                 NetworkEvent::PeerRemoved(_) => {
                     panic!("unexpected event")
@@ -74,6 +75,7 @@ async fn test_establish_connections() {
             }
         }
         assert!(expected_connections.is_empty());
+        assert!(expected_peers.is_empty());
 
         // also await the established session on both target
         futures::future::join(listener1.next(), listener2.next()).await;
@@ -365,8 +367,13 @@ async fn test_geth_disconnect() {
         let geth_peer_id: PeerId =
             provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
-        // add geth as a peer then wait for a `SessionEstablished` event
+        // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);
+
+        match events.next().await {
+            Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
+            _ => panic!("Expected a peer added event"),
+        }
 
         if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
             assert_eq!(peer_id, geth_peer_id);

@@ -209,7 +209,7 @@ impl PeersManager {
             }
             Entry::Vacant(entry) => {
                 entry.insert(Peer::with_state(addr, PeerConnectionState::In));
-                self.queued_actions.push_back(PeerAction::NotifyPeerAdded(peer_id));
+                self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }
     }
@@ -291,7 +291,7 @@ impl PeersManager {
                 if entry.get().remove_after_disconnect {
                     // this peer should be removed from the set
                     entry.remove();
-                    self.queued_actions.push_back(PeerAction::NotifyPeerRemoved(peer_id));
+                    self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
                 } else {
                     entry.get_mut().state = PeerConnectionState::Idle;
                     return
@@ -331,7 +331,7 @@ impl PeersManager {
             // issues.
             if let Some(peer) = self.peers.remove(peer_id) {
                 self.connection_info.decr_state(peer.state);
-                self.queued_actions.push_back(PeerAction::NotifyPeerRemoved(*peer_id));
+                self.queued_actions.push_back(PeerAction::PeerRemoved(*peer_id));
             }
 
             // ban the peer
@@ -407,7 +407,7 @@ impl PeersManager {
             Entry::Vacant(entry) => {
                 trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
                 entry.insert(Peer::new(addr));
-                self.queued_actions.push_back(PeerAction::NotifyPeerAdded(peer_id));
+                self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }
 
@@ -418,7 +418,7 @@ impl PeersManager {
     pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
         if let Some(mut peer) = self.peers.remove(&peer_id) {
             trace!(target : "net::peers",  ?peer_id, "remove discovered node");
-            self.queued_actions.push_back(PeerAction::NotifyPeerRemoved(peer_id));
+            self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
             if peer.state.is_connected() {
                 debug!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
@@ -773,9 +773,9 @@ pub enum PeerAction {
     /// Unban the peer temporarily
     UnBanPeer { peer_id: PeerId },
     /// Emit peerAdded event
-    NotifyPeerAdded(PeerId),
+    PeerAdded(PeerId),
     /// Emit peerRemoved event
-    NotifyPeerRemoved(PeerId),
+    PeerRemoved(PeerId),
 }
 
 /// Config type for initiating a [`PeersManager`] instance
@@ -911,6 +911,12 @@ mod test {
         peers.add_discovered_node(peer, socket_addr);
 
         match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
             PeerAction::Connect { peer_id, remote_addr } => {
                 assert_eq!(peer_id, peer);
                 assert_eq!(remote_addr, socket_addr);
@@ -951,6 +957,12 @@ mod test {
         let mut peers = PeersManager::new(config);
         peers.add_discovered_node(peer, socket_addr);
 
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
                 assert_eq!(peer_id, peer);
@@ -1006,6 +1018,12 @@ mod test {
         peers.add_discovered_node(peer, socket_addr);
 
         match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
                 assert_eq!(peer_id, peer);
             }
@@ -1026,6 +1044,12 @@ mod test {
             )),
         );
 
+        match event!(peers) {
+            PeerAction::PeerRemoved(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
         match event!(peers) {
             PeerAction::BanPeer { peer_id } => {
                 assert_eq!(peer_id, peer);
@@ -1050,6 +1074,12 @@ mod test {
         peers.add_discovered_node(peer, socket_addr);
 
         match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
                 assert_eq!(peer_id, peer);
             }
@@ -1070,6 +1100,12 @@ mod test {
             )),
         );
 
+        match event!(peers) {
+            PeerAction::PeerRemoved(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
         match event!(peers) {
             PeerAction::BanPeer { peer_id } => {
                 assert_eq!(peer_id, peer);
@@ -1150,6 +1186,12 @@ mod test {
         peers.add_discovered_node(peer, socket_addr);
 
         match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
             PeerAction::Connect { peer_id, remote_addr } => {
                 assert_eq!(peer_id, peer);
                 assert_eq!(remote_addr, socket_addr);
@@ -1188,6 +1230,12 @@ mod test {
         peers.add_discovered_node(peer, socket_addr);
 
         match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
             PeerAction::Connect { peer_id, remote_addr } => {
                 assert_eq!(peer_id, peer);
                 assert_eq!(remote_addr, socket_addr);
@@ -1200,6 +1248,12 @@ mod test {
 
         peers.remove_discovered_node(peer);
 
+        match event!(peers) {
+            PeerAction::PeerRemoved(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
         match event!(peers) {
             PeerAction::Disconnect { peer_id, .. } => {
                 assert_eq!(peer_id, peer);

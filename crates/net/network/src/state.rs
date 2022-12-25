@@ -287,10 +287,10 @@ where
                 self.ban_discovery(peer_id, ip_addr)
             }
             PeerAction::DiscoveryBanIp { ip_addr } => self.ban_ip_discovery(ip_addr),
-            PeerAction::NotifyPeerAdded(peer_id) => {
+            PeerAction::PeerAdded(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerAdded(peer_id))
             }
-            PeerAction::NotifyPeerRemoved(peer_id) => {
+            PeerAction::PeerRemoved(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
             }
             PeerAction::BanPeer { .. } => {}
