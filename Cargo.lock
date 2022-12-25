@@ -3893,6 +3893,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-rpc-builder"
+version = "0.1.0"
+
+[[package]]
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
