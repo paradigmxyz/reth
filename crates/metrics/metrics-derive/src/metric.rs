@@ -45,7 +45,7 @@ impl<'a> Metric<'a> {
             } else {
                 return Err(Error::new_spanned(
                     self.field,
-                    format!("Unsupported metric type {:?} {:?}", self.field.ty, &*COUNTER_TY),
+                    format!("Unsupported metric type {:?}", self.field.ty),
                 ))
             }
         };
