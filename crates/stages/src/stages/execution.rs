@@ -177,6 +177,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
 
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
+
+            // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
+            // revm can take more then default allocated stack space. For this case we are using
+            // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
+            // we can see to set more accurate stack size or even optimize revm to move more data to
+            // heap.
             let changeset = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)

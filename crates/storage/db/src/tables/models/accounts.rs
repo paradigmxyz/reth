@@ -6,20 +6,37 @@ use crate::{
     Error,
 };
 use bytes::Bytes;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::Compact;
 use reth_primitives::{Account, Address, TransitionId};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
-/// TODO there should be `not_existing` boolean or Account be made as `Option` to
-/// handle scenario where account was not present before transaction.
-#[main_codec]
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     pub address: Address,
     /// Account state before the transaction.
     pub info: Option<Account>,
+}
+
+// NOTE: Removing main_codec and manually encode subkey
+// and compress second part of the value. If we have compression
+// over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
+impl Compact for AccountBeforeTx {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        // for now put full bytes and later compress it.
+        buf.put_slice(&self.address.to_fixed_bytes()[..]);
+        self.info.to_compact(buf) + 32
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    where
+        Self: Sized,
+    {
+        let address = Address::from_slice(&buf[..20]);
+        let (info, out) = <Option<Account>>::from_compact(&buf[20..], len - 20);
+        (Self { address, info }, out)
+    }
 }
 
 /// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]
