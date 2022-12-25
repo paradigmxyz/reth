@@ -3585,7 +3585,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-metrics"
+name = "reth-metrics-derive"
 version = "0.1.0"
 dependencies = [
  "metrics",
@@ -3787,7 +3787,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
- "reth-metrics",
+ "reth-metrics-derive",
  "reth-network",
  "reth-primitives",
  "reth-provider",

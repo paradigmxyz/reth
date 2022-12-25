@@ -1,6 +1,6 @@
 use metrics::Counter;
 use reth_interfaces::p2p::error::DownloadError;
-use reth_metrics::Metrics;
+use reth_metrics_derive::Metrics;
 use std::fmt;
 
 /// Stagedsync header metrics
