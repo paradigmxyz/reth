@@ -56,7 +56,7 @@ fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<Metric<'_>>> {
         return Err(Error::new_spanned(node, "only structs are supported"))
     };
 
-    let mut metrics = vec![];
+    let mut metrics = Vec::with_capacity(data.fields.len());
     for field in data.fields.iter() {
         let metric_attr = {
             let mut metric_iter = field.attrs.iter().filter(|a| a.path.is_ident("metric"));
