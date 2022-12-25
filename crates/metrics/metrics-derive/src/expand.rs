@@ -1,7 +1,7 @@
 use quote::{quote, ToTokens};
 use syn::{
-    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Lit, LitStr, MetaNameValue,
-    Result, Token,
+    punctuated::Punctuated, token::Token, Attribute, Data, DeriveInput, Error, Lit, LitStr,
+    MetaNameValue, Result, Token,
 };
 
 use crate::{metric::Metric, with_attrs::WithAttrs};
@@ -58,7 +58,7 @@ pub(crate) struct MetricsAttr {
 }
 
 fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
-    let parsed = parse_single_attribute(node, "metrics")?
+    let parsed = parse_single_required_attr(node, "metrics")?
         .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
     let mut parsed_iter = parsed.into_iter();
     if let Some(kv) = parsed_iter.next() {
@@ -79,47 +79,90 @@ fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<Metric<'_>>> {
 
     let mut metrics = Vec::with_capacity(data.fields.len());
     for field in data.fields.iter() {
-        let parsed = parse_single_attribute(field, "metric")?
-            .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
         let (mut describe, mut rename) = (None, None);
-        for kv in parsed {
-            if kv.path.is_ident("describe") {
-                if describe.is_some() {
-                    return Err(Error::new_spanned(kv, "Duplicate `describe` value provided."))
+        if let Some(metric_attr) = parse_single_attr(field, "metric")? {
+            let parsed = metric_attr
+                .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
+            for kv in parsed {
+                if kv.path.is_ident("describe") {
+                    if describe.is_some() {
+                        return Err(Error::new_spanned(kv, "Duplicate `describe` value provided."))
+                    }
+                    describe = Some(parse_str_lit(kv.lit)?);
+                } else if kv.path.is_ident("rename") {
+                    if rename.is_some() {
+                        return Err(Error::new_spanned(kv, "Duplicate `rename` value provided."))
+                    }
+                    rename = Some(parse_str_lit(kv.lit)?)
+                } else {
+                    return Err(Error::new_spanned(kv, "Unsupported attribute entry."))
                 }
-                describe = Some(parse_str_lit(kv.lit)?);
-            } else if kv.path.is_ident("rename") {
-                if rename.is_some() {
-                    return Err(Error::new_spanned(kv, "Duplicate `rename` value provided."))
-                }
-                rename = Some(parse_str_lit(kv.lit)?)
-            } else {
-                return Err(Error::new_spanned(kv, "Unsupported attribute entry."))
             }
         }
-        let Some(describe) = describe else {
-            return Err(Error::new_spanned(field,"`describe` must be provided."))
+
+        let description = match describe {
+            Some(lit_str) => lit_str.value(),
+            // Parse docs only if `describe` attribute was not provided
+            None => match parse_docs_to_string(field)? {
+                Some(docs_str) => docs_str,
+                None => {
+                    return Err(Error::new_spanned(
+                        field,
+                        "Either doc comments or `describe` must be provided.",
+                    ))
+                }
+            },
         };
-        metrics.push(Metric::new(field, describe, rename));
+
+        metrics.push(Metric::new(field, description, rename));
     }
 
     Ok(metrics)
 }
 
-fn parse_single_attribute<'a, T: WithAttrs + ToTokens>(
+fn parse_single_attr<'a, T: WithAttrs + ToTokens>(
     token: &'a T,
     ident: &str,
-) -> Result<&'a Attribute> {
+) -> Result<Option<&'a Attribute>> {
     let mut attr_iter = token.attrs().iter().filter(|a| a.path.is_ident(ident));
     if let Some(attr) = attr_iter.next() {
         if attr_iter.next().is_none() {
-            Ok(attr)
+            Ok(Some(attr))
         } else {
             Err(Error::new_spanned(attr, format!("Duplicate `#[{ident}(..)]` attribute provided.")))
         }
     } else {
+        Ok(None)
+    }
+}
+
+fn parse_single_required_attr<'a, T: WithAttrs + ToTokens>(
+    token: &'a T,
+    ident: &str,
+) -> Result<&'a Attribute> {
+    if let Some(attr) = parse_single_attr(token, ident)? {
+        Ok(attr)
+    } else {
         Err(Error::new_spanned(token, format!("`#[{ident}(..)]` attribute must be provided.")))
     }
+}
+
+fn parse_docs_to_string<T: WithAttrs>(token: &T) -> Result<Option<String>> {
+    let mut doc_str = None;
+    for attr in token.attrs().iter() {
+        let meta = attr.parse_meta()?;
+        if let syn::Meta::NameValue(meta) = meta {
+            if let syn::Lit::Str(doc) = meta.lit {
+                let doc_value = doc.value().trim().to_string();
+                doc_str = Some(
+                    doc_str
+                        .map(|prev_doc_value| format!("{prev_doc_value} {doc_value}"))
+                        .unwrap_or(doc_value),
+                );
+            }
+        }
+    }
+    Ok(doc_str)
 }
 
 fn parse_str_lit(lit: Lit) -> Result<LitStr> {

@@ -7,16 +7,12 @@ use reth_metrics_derive::Metrics;
 #[metrics(scope = "stages.headers")]
 pub struct HeaderMetrics {
     /// Number of headers successfully retrieved
-    #[metric(rename = "counter", describe = "Number of headers successfully retrieved")]
     pub headers_counter: Counter,
     /// Number of timeout errors while requesting headers
-    #[metric(describe = "Number of timeout errors while requesting headers")]
     pub timeout_errors: Counter,
     /// Number of validation errors while requesting headers
-    #[metric(describe = "Number of validation errors while requesting headers")]
     pub validation_errors: Counter,
-    /// Elapsed time of successful header requests
-    #[metric(describe = "Number of unexpected errors while requesting headers")]
+    /// Number of unexpected errors while requesting headers
     pub unexpected_errors: Counter,
 }
 

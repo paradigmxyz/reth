@@ -13,13 +13,13 @@ const GAUGE_TY: Lazy<LooseTypePath> =
 
 pub(crate) struct Metric<'a> {
     pub(crate) field: &'a Field,
-    describe: LitStr,
+    description: String,
     rename: Option<LitStr>,
 }
 
 impl<'a> Metric<'a> {
-    pub(crate) fn new(field: &'a Field, describe: LitStr, rename: Option<LitStr>) -> Self {
-        Self { field, describe, rename }
+    pub(crate) fn new(field: &'a Field, description: String, rename: Option<LitStr>) -> Self {
+        Self { field, description, rename }
     }
 
     pub(crate) fn metric_name(&self, scope: &LitStr) -> String {
@@ -55,7 +55,7 @@ impl<'a> Metric<'a> {
 
     pub(crate) fn describe_stmt(&self, scope: &LitStr) -> Result<proc_macro2::TokenStream> {
         let metric_name = self.metric_name(scope);
-        let description = &self.describe;
+        let description = &self.description;
         let ty = LooseTypePath::parse_from_ty(self.field.ty.clone())?;
 
         let descriptor = {
