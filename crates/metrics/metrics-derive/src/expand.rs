@@ -1,7 +1,7 @@
 use quote::{quote, ToTokens};
 use syn::{
-    punctuated::Punctuated, token::Token, Attribute, Data, DeriveInput, Error, Lit, LitStr,
-    MetaNameValue, Result, Token,
+    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Lit, LitStr, MetaNameValue,
+    Result, Token,
 };
 
 use crate::{metric::Metric, with_attrs::WithAttrs};
@@ -108,7 +108,7 @@ fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<Metric<'_>>> {
                 None => {
                     return Err(Error::new_spanned(
                         field,
-                        "Either doc comments or `describe` must be provided.",
+                        "Either doc comment or `describe` must be provided.",
                     ))
                 }
             },
