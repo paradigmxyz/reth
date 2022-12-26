@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
-use futures_util::StreamExt;
+use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -73,63 +73,57 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(tx, stage_progress).await?;
+        let mut current_progress = input.stage_progress.unwrap_or_default();
+        self.update_head::<DB>(tx, current_progress).await?;
 
         // Lookup the head and tip of the sync range
-        let (head, tip) = self.get_head_and_tip(tx, stage_progress).await?;
+        let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
         debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
-        let mut current_progress = stage_progress;
-        let mut stream =
-            self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold as usize);
+        let downloaded_headers: Result<Vec<SealedHeader>, DownloadError> =
+            self.downloader.stream(head.clone(), tip).try_collect().await;
         // The stage relies on the downloader to return the headers
         // in descending order starting from the tip down to
         // the local head (latest block in db)
-        while let Some(headers) = stream.next().await {
-            match headers.into_iter().collect::<Result<Vec<_>, _>>() {
-                Ok(res) => {
-                    info!(target: "sync::stages::headers", len = res.len(), "Received headers");
-                    self.metrics.headers_counter.increment(res.len() as u64);
+        match downloaded_headers {
+            Ok(res) => {
+                info!(target: "sync::stages::headers", len = res.len(), "Received headers");
+                self.metrics.headers_counter.increment(res.len() as u64);
+                let max_received_block_number = res[0].number;
 
-                    // Perform basic response validation
-                    self.validate_header_response(&res)?;
-                    let write_progress =
-                        self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
-                    current_progress = current_progress.max(write_progress);
-                }
-                Err(e) => {
-                    self.metrics.update_headers_error_metrics(&e);
-                    match e {
-                        DownloadError::Timeout => {
-                            warn!(target: "sync::stages::headers", "No response for header request");
-                            return Err(StageError::Recoverable(DownloadError::Timeout.into()))
-                        }
-                        DownloadError::HeaderValidation { hash, error } => {
-                            error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
-                            return Err(StageError::Validation { block: stage_progress, error })
-                        }
-                        error => {
-                            error!(target: "sync::stages::headers", ?error, "Unexpected error");
-                            return Err(StageError::Recoverable(error.into()))
-                        }
+                // Perform basic response validation
+                self.validate_header_response(&res)?;
+
+                let write_progress = self
+                    .write_headers::<DB>(tx, res, self.commit_threshold)
+                    .await?
+                    .unwrap_or_default();
+                current_progress = current_progress.max(write_progress);
+                // Write total difficulty values after headers have been inserted
+                debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
+                self.write_td::<DB>(tx, &head)?;
+
+                let done = current_progress == max_received_block_number;
+                return Ok(ExecOutput { stage_progress: current_progress, done })
+            }
+            Err(e) => {
+                self.metrics.update_headers_error_metrics(&e);
+                match e {
+                    DownloadError::Timeout => {
+                        warn!(target: "sync::stages::headers", "No response for header request");
+                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
+                    }
+                    DownloadError::HeaderValidation { hash, error } => {
+                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
+                        return Err(StageError::Validation { block: current_progress, error })
+                    }
+                    error => {
+                        error!(target: "sync::stages::headers", ?error, "Unexpected error");
+                        return Err(StageError::Recoverable(error.into()))
                     }
                 }
             }
-        }
-
-        // Write total difficulty values after all headers have been inserted
-        debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
-        self.write_td::<DB>(tx, &head)?;
-
-        let stage_progress = current_progress.max(
-            tx.cursor::<tables::CanonicalHeaders>()?
-                .last()?
-                .map(|(num, _)| num)
-                .unwrap_or_default(),
-        );
-
-        Ok(ExecOutput { stage_progress, done: true })
+        };
     }
 
     /// Unwind the stage.
@@ -207,6 +201,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
             None => self.next_fork_choice_state(&head.hash()).await.head_block_hash,
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
+
         Ok((head, tip))
     }
 
@@ -235,10 +230,12 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     }
 
     /// Write downloaded headers to the database
+    /// Only writes a max of `max_blocks_to_write` headers
     async fn write_headers<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
+        max_blocks_to_write: u64,
     ) -> Result<Option<BlockNumber>, StageError> {
         let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
         let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
@@ -246,7 +243,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         let mut latest = None;
         // Since the headers were returned in descending order,
         // iterate them in the reverse order
-        for header in headers.into_iter().rev() {
+        for header in headers.into_iter().rev().take(max_blocks_to_write as usize) {
             if header.number == 0 {
                 continue
             }
@@ -390,9 +387,10 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done: true, stage_progress })
-                if stage_progress == tip.number
+            Ok(ExecOutput { done: false, stage_progress })
+                if stage_progress == stage_progress
         );
+
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
