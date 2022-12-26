@@ -3602,6 +3602,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-metrics-derive"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "serial_test",
+ "syn",
+ "trybuild",
+]
+
+[[package]]
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
@@ -3802,6 +3815,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
+ "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -5035,6 +5049,21 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
+
+[[package]]
+name = "trybuild"
+version = "1.0.73"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed01de3de062db82c0920b5cabe804f88d599a3f217932292597c678c903754d"
+dependencies = [
+ "glob",
+ "once_cell",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "termcolor",
+ "toml",
+]
 
 [[package]]
 name = "typenum"
