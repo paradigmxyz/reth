@@ -12,7 +12,7 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::Capabilities,
-    error::{EthStreamError, HandshakeError, P2PStreamError},
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
@@ -136,7 +136,7 @@ impl ActiveSession {
         match msg {
             msg @ EthMessage::Status(_) => {
                 return Some((
-                    EthStreamError::HandshakeError(HandshakeError::StatusNotInHandshake),
+                    EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
                     msg,
                 ))
             }

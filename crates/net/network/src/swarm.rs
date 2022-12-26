@@ -8,7 +8,7 @@ use crate::{
 use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    error::EthStreamError,
+    errors::EthStreamError,
     Status,
 };
 use reth_primitives::PeerId;
