@@ -4,12 +4,18 @@ use syn::{Error, Field, LitStr, Result};
 
 use crate::loose_path::LooseTypePath;
 
-const COUNTER_TY: Lazy<LooseTypePath> =
-    Lazy::new(|| LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Counter }).unwrap());
-const HISTOGRAM_TY: Lazy<LooseTypePath> =
-    Lazy::new(|| LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Histogram }).unwrap());
-const GAUGE_TY: Lazy<LooseTypePath> =
-    Lazy::new(|| LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Gauge }).unwrap());
+const COUNTER_TY: Lazy<LooseTypePath> = Lazy::new(|| {
+    LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Counter })
+        .expect("failed to parse `metrics::Counter`")
+});
+const HISTOGRAM_TY: Lazy<LooseTypePath> = Lazy::new(|| {
+    LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Histogram })
+        .expect("failed to parse `metrics::Histogram`")
+});
+const GAUGE_TY: Lazy<LooseTypePath> = Lazy::new(|| {
+    LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Gauge })
+        .expect("failed to parse `metrics::Gauge`")
+});
 
 pub(crate) struct Metric<'a> {
     pub(crate) field: &'a Field,
