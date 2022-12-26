@@ -1,6 +1,6 @@
 //! Transaction pool metrics.
 
-use metrics::{describe_counter, register_counter, Counter};
+use metrics::Counter;
 use reth_metrics_derive::Metrics;
 
 /// Transaction pool metrics
