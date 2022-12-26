@@ -14,21 +14,3 @@ pub struct TxPoolMetrics {
     /// Number of removed transactions from the pool
     pub(crate) removed_transactions: Counter,
 }
-
-// impl TxPoolMetrics {
-//     /// Describe transaction pool metrics
-//     pub fn describe() {
-//         describe_counter!(
-//             "transaction_pool.inserted_transactions",
-//             "Number of transactions inserted in the pool"
-//         );
-//         describe_counter!(
-//             "transaction_pool.invalid_transactions",
-//             "Number of invalid transactions"
-//         );
-//         describe_counter!(
-//             "transaction_pool.removed_transactions",
-//             "Number of removed transactions from the pool"
-//         );
-//     }
-// }
