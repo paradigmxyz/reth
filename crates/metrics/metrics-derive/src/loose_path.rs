@@ -15,7 +15,7 @@ impl LooseTypePath {
 impl PartialEq for LooseTypePath {
     fn eq(&self, other: &Self) -> bool {
         match (self.0.path.segments.last(), other.0.path.segments.last()) {
-            (Some(seg1), Some(seg2)) => seg1 == seg2,
+            (Some(seg1), Some(seg2)) => seg1.eq(seg2),
             _ => false,
         }
     }
