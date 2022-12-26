@@ -396,9 +396,29 @@ pub fn execute<DB: StateProvider>(
         return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
     }
 
+    let mut db = evm.db.expect("It is set at the start of the function");
+    let block_reward = block_reward_changeset(header, ommers, &mut db, config)?;
+
+    Ok(ExecutionResult { changesets, block_reward })
+}
+
+/// Calculate Block reward changeset
+pub fn block_reward_changeset<DB: StateProvider>(
+    header: &Header,
+    ommers: &[Header],
+    db: &mut SubState<DB>,
+    config: &Config,
+) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
     // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
     // to config.
-    let block_reward = match header.number {
+
+    // From yellowpapper Page 15:
+    // 11.3. Reward Application. The application of rewards to a block involves raising the balance
+    // of the accounts of the beneficiary address of the block and each ommer by a certain
+    // amount. We raise the block’s beneficiary account by Rblock; for each ommer, we raise the
+    // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
+    // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
+    match header.number {
         n if n >= config.spec_upgrades.paris => None,
         n if n >= config.spec_upgrades.petersburg => Some(WEI_2ETH),
         n if n >= config.spec_upgrades.byzantium => Some(WEI_3ETH),
@@ -407,8 +427,14 @@ pub fn execute<DB: StateProvider>(
     .map(|reward| -> Result<_, _> {
         let mut reward_beneficiaries: BTreeMap<H160, u128> = BTreeMap::new();
         // Calculate Uncle reward
+        // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
         for ommer in ommers {
             let ommer_reward = ((8 + ommer.number - header.number) as u128 * reward) >> 3;
+            // From yellowpaper Page 15:
+            // If there are collisions of the beneficiary addresses between ommers and the block
+            // (i.e. two ommers with the same beneficiary address or an ommer with the
+            // same beneficiary address as the present block), additions are applied
+            // cumulatively
             *reward_beneficiaries.entry(ommer.beneficiary).or_default() += ommer_reward;
         }
         // insert main block reward
@@ -416,9 +442,6 @@ pub fn execute<DB: StateProvider>(
             reward + (reward >> 5) * ommers.len() as u128;
 
         // apply block rewards to beneficiaries (Main block and ommers);
-        // it is okay to unwrap the db.
-        let mut db = evm.db.expect("It is set at the start of the function");
-
         reward_beneficiaries
             .into_iter()
             .map(|(beneficiary, reward)| -> Result<_, _> {
@@ -440,9 +463,7 @@ pub fn execute<DB: StateProvider>(
             })
             .collect::<Result<BTreeMap<_, _>, _>>()
     })
-    .transpose()?;
-
-    Ok(ExecutionResult { changesets, block_reward })
+    .transpose()
 }
 
 #[cfg(test)]
