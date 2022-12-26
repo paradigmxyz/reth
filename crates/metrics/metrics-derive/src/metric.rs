@@ -1,9 +1,9 @@
 use quote::quote;
 use syn::{Error, Field, LitStr, Result, Type};
 
-const COUNTER_TY: &'static str = "Counter";
-const HISTOGRAM_TY: &'static str = "Histogram";
-const GAUGE_TY: &'static str = "Gauge";
+const COUNTER_TY: &str = "Counter";
+const HISTOGRAM_TY: &str = "Histogram";
+const GAUGE_TY: &str = "Gauge";
 
 pub(crate) struct Metric<'a> {
     pub(crate) field: &'a Field,
