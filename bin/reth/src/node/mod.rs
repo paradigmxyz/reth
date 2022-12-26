@@ -83,7 +83,7 @@ impl Command {
     /// Execute `node` command
     // TODO: RPC
     pub async fn execute(&self) -> eyre::Result<()> {
-        let config: Config = confy::load_path(&self.config)?;
+        let config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!("reth {} starting", crate_version!());
 
         info!("Opening database at {}", &self.db);

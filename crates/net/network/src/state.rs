@@ -262,8 +262,9 @@ where
             DiscoveryEvent::Discovered(peer, addr) => {
                 self.peers_manager.add_discovered_node(peer, addr);
             }
-            DiscoveryEvent::EnrForkId(peer, fork_id) => {
-                self.peers_manager.set_discovered_fork_id(peer, fork_id);
+            DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
+                self.queued_messages
+                    .push_back(StateAction::DiscoveredEnrForkId { peer_id, fork_id });
             }
         }
     }
@@ -279,11 +280,19 @@ where
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
             PeerAction::DisconnectBannedIncoming { peer_id } => {
-                // TODO: can IP ban
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
-            PeerAction::DiscoveryBan { peer_id, ip_addr } => self.ban_discovery(peer_id, ip_addr),
+            PeerAction::DiscoveryBanPeerId { peer_id, ip_addr } => {
+                self.ban_discovery(peer_id, ip_addr)
+            }
+            PeerAction::DiscoveryBanIp { ip_addr } => self.ban_ip_discovery(ip_addr),
+            PeerAction::PeerAdded(peer_id) => {
+                self.queued_messages.push_back(StateAction::PeerAdded(peer_id))
+            }
+            PeerAction::PeerRemoved(peer_id) => {
+                self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
+            }
             PeerAction::BanPeer { .. } => {}
             PeerAction::UnBanPeer { .. } => {}
         }
@@ -455,4 +464,14 @@ pub(crate) enum StateAction {
         /// Why the disconnect was initiated
         reason: Option<DisconnectReason>,
     },
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    DiscoveredEnrForkId {
+        peer_id: PeerId,
+        /// The reported [`ForkId`] by this peer.
+        fork_id: ForkId,
+    },
+    /// A peer was added
+    PeerAdded(PeerId),
+    /// A peer was dropped
+    PeerRemoved(PeerId),
 }

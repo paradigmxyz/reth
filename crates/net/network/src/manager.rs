@@ -51,7 +51,6 @@ use std::{
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, info, trace, warn};
-
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -561,6 +560,14 @@ where
                         messages,
                     });
                 }
+                SwarmEvent::PeerAdded(peer_id) => {
+                    info!(target: "net", ?peer_id, "Peer added");
+                    this.event_listeners.send(NetworkEvent::PeerAdded(peer_id));
+                }
+                SwarmEvent::PeerRemoved(peer_id) => {
+                    info!(target: "net", ?peer_id, "Peer dropped");
+                    this.event_listeners.send(NetworkEvent::PeerRemoved(peer_id));
+                }
                 SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                     trace!(
@@ -575,7 +582,7 @@ where
                     let mut reason = None;
                     if let Some(ref err) = error {
                         // If the connection was closed due to an error, we report the peer
-                        this.swarm.state_mut().peers_mut().on_connection_dropped(
+                        this.swarm.state_mut().peers_mut().on_active_session_dropped(
                             &remote_addr,
                             &peer_id,
                             err,
@@ -583,7 +590,10 @@ where
                         reason = err.as_disconnected();
                     } else {
                         // Gracefully disconnected
-                        this.swarm.state_mut().peers_mut().on_disconnected(peer_id);
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_active_session_gracefully_closed(peer_id);
                     }
 
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id, reason });
@@ -595,10 +605,17 @@ where
                         ?error,
                         "Incoming pending session failed"
                     );
-                    this.swarm.state_mut().peers_mut().on_closed_incoming_pending_session();
 
-                    if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
-                        this.swarm.state_mut().ban_ip_discovery(remote_addr.ip());
+                    if let Some(ref err) = error {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_dropped(remote_addr, err);
+                    } else {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_gracefully_closed();
                     }
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
@@ -609,12 +626,18 @@ where
                         ?error,
                         "Outgoing pending session failed"
                     );
-                    let peers = this.swarm.state_mut().peers_mut();
-                    peers.on_closed_outgoing_pending_session(&peer_id);
-                    peers.apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
 
-                    if error.map(|err| err.merits_discovery_ban()).unwrap_or_default() {
-                        this.swarm.state_mut().ban_discovery(peer_id, remote_addr.ip());
+                    if let Some(ref err) = error {
+                        this.swarm.state_mut().peers_mut().on_pending_session_dropped(
+                            &remote_addr,
+                            &peer_id,
+                            err,
+                        );
+                    } else {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .on_pending_session_gracefully_closed(&peer_id);
                     }
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
@@ -667,6 +690,10 @@ pub enum NetworkEvent {
         /// The status of the peer to which a session was established.
         status: Status,
     },
+    /// Event emitted when a new peer is added
+    PeerAdded(PeerId),
+    /// Event emitted when a new peer is removed
+    PeerRemoved(PeerId),
 }
 
 /// Bundles all listeners for [`NetworkEvent`]s.

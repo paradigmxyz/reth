@@ -312,6 +312,8 @@ where
                     msg,
                 })
             }
+            // TODO Add remaining events
+            _ => {}
         }
     }
 
