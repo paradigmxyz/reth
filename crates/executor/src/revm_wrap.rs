@@ -67,11 +67,17 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
 }
 
 /// Fill block environment from Block.
-pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header) {
+pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
     block_env.number = evmU256::from(header.number);
     block_env.coinbase = B160(header.beneficiary.0);
     block_env.timestamp = evmU256::from(header.timestamp);
-    block_env.difficulty = evmU256::from_limbs(header.difficulty.0);
+    if after_merge {
+        block_env.prevrandao = Some(B256(header.mix_hash.0));
+        block_env.difficulty = evmU256::ZERO;
+    } else {
+        block_env.difficulty = evmU256::from_limbs(header.difficulty.0);
+        block_env.prevrandao = None;
+    }
     block_env.basefee = evmU256::from(header.base_fee_per_gas.unwrap_or_default());
     block_env.gas_limit = evmU256::from(header.gas_limit);
 }

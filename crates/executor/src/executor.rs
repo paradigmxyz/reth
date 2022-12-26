@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::StateProvider;
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
-    Return, B160, EVM, U256 as evmU256,
+    Return, SpecId, B160, EVM, U256 as evmU256,
 };
 use std::collections::BTreeMap;
 
@@ -312,12 +312,13 @@ pub fn execute<DB: StateProvider>(
     let mut evm = EVM::new();
     evm.database(db);
 
+    let spec_id = config.spec_upgrades.revm_spec(header.number);
     evm.env.cfg.chain_id = evmU256::from_limbs(config.chain_id.0);
     evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(header.number);
     evm.env.cfg.perf_all_precompiles_have_balance = false;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
-    revm_wrap::fill_block_env(&mut evm.env.block, header);
+    revm_wrap::fill_block_env(&mut evm.env.block, header, spec_id >= SpecId::MERGE);
     let mut cumulative_gas_used = 0;
     // output of verification
     let mut changesets = Vec::with_capacity(transactions.len());
