@@ -16,7 +16,7 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    error::EthStreamError,
+    errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
