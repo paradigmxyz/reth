@@ -29,6 +29,9 @@ enr = { version = "0.7.0",  default-features = false, features = ["rust-secp256k
 tokio = { version = "1", features = ["io-util", "net", "time"] }
 tokio-stream = "0.1"
 
+# io
+serde = "1.0"
+
 # misc
 bytes = "1.2"
 generic-array = "0.14"

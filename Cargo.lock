@@ -3422,6 +3422,7 @@ dependencies = [
  "reth-rlp-derive",
  "reth-tracing",
  "secp256k1 0.24.2",
+ "serde",
  "thiserror",
  "tokio",
  "tokio-stream",
