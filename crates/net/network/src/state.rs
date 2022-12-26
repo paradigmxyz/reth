@@ -384,16 +384,19 @@ where
             for (id, peer) in self.active_peers.iter_mut() {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
-                        Poll::Ready(Err(err)) => {
-                            error!(
-                                target : "net",
-                                ?id,
-                                ?err,
-                                "Request canceled, response channel closed."
-                            );
-                            disconnect_sessions.push(*id);
+                        Poll::Ready(res) => {
+                            // check if the error is due to a closed channel to the session
+                            if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
+                                error!(
+                                    target : "net",
+                                    ?id,
+                                    "Request canceled, response channel closed."
+                                );
+                                disconnect_sessions.push(*id);
+                            }
+
+                            received_responses.push((*id, res));
                         }
-                        Poll::Ready(Ok(resp)) => received_responses.push((*id, resp)),
                         Poll::Pending => {
                             // not ready yet, store again.
                             peer.pending_response = Some(response);

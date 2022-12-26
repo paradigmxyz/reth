@@ -392,11 +392,8 @@ impl Future for ActiveSession {
                         // not ready yet
                         this.received_requests.push(req);
                     }
-                    Poll::Ready(Ok(resp)) => {
+                    Poll::Ready(resp) => {
                         this.handle_outgoing_response(req.request_id, resp);
-                    }
-                    Poll::Ready(Err(_)) => {
-                        // ignore on error
                     }
                 }
             }

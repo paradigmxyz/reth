@@ -34,6 +34,11 @@ impl RequestError {
     pub fn is_retryable(&self) -> bool {
         matches!(self, RequestError::Timeout | RequestError::ConnectionDropped)
     }
+
+    /// Whether the error happened because the channel was closed.
+    pub fn is_channel_closed(&self) -> bool {
+        matches!(self, RequestError::ChannelClosed)
+    }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for RequestError {
