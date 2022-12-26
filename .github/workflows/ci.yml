@@ -58,6 +58,8 @@ jobs:
   eth-blockchain:
     name: Ethereum blockchain Tests (Stable)
     runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -67,7 +69,7 @@ jobs:
         with:
           repository: ethereum/tests
           path: ethtests
-          submodules: recursive,
+          submodules: recursive
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
@@ -81,7 +83,7 @@ jobs:
           cache-on-failure: true
 
       - name: Run Ethereum tests
-        run: RUST_LOG=info,sync=error cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
+        run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
 
   fuzz:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
