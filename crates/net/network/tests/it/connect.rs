@@ -5,7 +5,7 @@ use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
     types::Address,
-    utils::{ChainConfig, CliqueConfig, Genesis, Geth},
+    utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
 };
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
