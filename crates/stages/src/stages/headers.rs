@@ -1,5 +1,5 @@
 use crate::{
-    db::Transaction, stage_metrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
@@ -455,6 +455,10 @@ mod tests {
         use crate::{
             stage_metrics::HeaderMetrics,
             stages::headers::HeaderStage,
+<<<<<<< HEAD
+=======
+            metrics::HeaderMetrics,
+>>>>>>> 681c801 (Refactor metrics describers for consistency)
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
                 UnwindStageTestRunner,

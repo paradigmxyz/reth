@@ -28,7 +28,12 @@ use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::{
     stage_metrics::HeaderMetrics,
     stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
+<<<<<<< HEAD
+=======
+    metrics::HeaderMetrics,
+>>>>>>> 681c801 (Refactor metrics describers for consistency)
 };
+use reth_transaction_pool::metrics::TxPoolMetrics;
 use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
 
@@ -93,7 +98,9 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!("Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
+            // Describe metrics
             HeaderMetrics::describe();
+            TxPoolMetrics::describe();
         }
 
         let chain_id = self.chain.consensus.chain_id;
