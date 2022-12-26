@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, stage_metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -21,7 +21,6 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
-use stage_metrics::HeaderMetrics;
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
