@@ -60,8 +60,9 @@ pub(crate) struct MetricsAttr {
 }
 
 fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
-    let parsed = parse_single_required_attr(node, "metrics")?
-        .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
+    let metrics_attr = parse_single_required_attr(node, "metrics")?;
+    let parsed =
+        metrics_attr.parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
     let mut parsed_iter = parsed.into_iter();
     if let Some(kv) = parsed_iter.next() {
         if !kv.path.is_ident("scope") || parsed_iter.next().is_some() {
@@ -70,7 +71,7 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
 
         Ok(MetricsAttr { scope: parse_str_lit(kv.lit)? })
     } else {
-        return Err(Error::new_spanned(node, "`scope = ..` must be set."))
+        return Err(Error::new_spanned(metrics_attr, "`scope = ..` must be set."))
     }
 }
 
@@ -128,10 +129,13 @@ fn parse_single_attr<'a, T: WithAttrs + ToTokens>(
 ) -> Result<Option<&'a Attribute>> {
     let mut attr_iter = token.attrs().iter().filter(|a| a.path.is_ident(ident));
     if let Some(attr) = attr_iter.next() {
-        if attr_iter.next().is_none() {
-            Ok(Some(attr))
+        if let Some(next_attr) = attr_iter.next() {
+            Err(Error::new_spanned(
+                next_attr,
+                format!("Duplicate `#[{ident}(..)]` attribute provided."),
+            ))
         } else {
-            Err(Error::new_spanned(attr, format!("Duplicate `#[{ident}(..)]` attribute provided.")))
+            Ok(Some(attr))
         }
     } else {
         Ok(None)

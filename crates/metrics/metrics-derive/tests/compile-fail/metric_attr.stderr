@@ -1,0 +1,49 @@
+error: Either doc comment or `describe` must be provided.
+  --> tests/compile-fail/metric_attr.rs:12:5
+   |
+12 |     gauge: Gauge,
+   |     ^^^^^^^^^^^^
+
+error: Either doc comment or `describe` must be provided.
+  --> tests/compile-fail/metric_attr.rs:18:5
+   |
+18 | /     #[metric()]
+19 | |     gauge: Gauge,
+   | |________________^
+
+error: Unsupported attribute entry.
+  --> tests/compile-fail/metric_attr.rs:25:14
+   |
+25 |     #[metric(random = "value")]
+   |              ^^^^^^^^^^^^^^^^
+
+error: Value **must** be a string literal.
+  --> tests/compile-fail/metric_attr.rs:32:25
+   |
+32 |     #[metric(describe = 123)]
+   |                         ^^^
+
+error: Value **must** be a string literal.
+  --> tests/compile-fail/metric_attr.rs:39:23
+   |
+39 |     #[metric(rename = 123)]
+   |                       ^^^
+
+error: Duplicate `describe` value provided.
+  --> tests/compile-fail/metric_attr.rs:46:29
+   |
+46 |     #[metric(describe = "", describe = "")]
+   |                             ^^^^^^^^^^^^^
+
+error: Duplicate `rename` value provided.
+  --> tests/compile-fail/metric_attr.rs:53:33
+   |
+53 |     #[metric(rename = "_gauge", rename = "_gauge")]
+   |                                 ^^^^^^^^^^^^^^^^^
+
+error: Unsupported metric type Path(TypePath { qself: None, path: Path { leading_colon: None, segments: [PathSegment { ident: Ident { ident: "String", span: #0 bytes(1122..1128) }, arguments: None }] } })
+  --> tests/compile-fail/metric_attr.rs:60:5
+   |
+60 | /     #[metric(describe = "")]
+61 | |     gauge: String,
+   | |_________________^

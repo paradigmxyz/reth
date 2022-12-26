@@ -25,7 +25,7 @@ impl<'a> Metric<'a> {
     pub(crate) fn metric_name(&self, scope: &LitStr) -> String {
         let scope = scope.value();
         let metric = match self.rename.as_ref() {
-            Some(name) => name.token().to_string(),
+            Some(name) => name.value(),
             None => self.field.ident.as_ref().map(ToString::to_string).unwrap_or_default(),
         };
         format!("{scope}.{metric}")
