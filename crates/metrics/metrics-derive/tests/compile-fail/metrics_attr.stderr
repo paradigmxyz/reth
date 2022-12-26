@@ -1,0 +1,11 @@
+error: `#[metrics(..)]` attribute must be provided.
+ --> tests/compile-fail/metrics_attr.rs:7:1
+  |
+7 | struct CustomMetrics;
+  | ^^^^^^^^^^^^^^^^^^^^^
+
+error: Duplicate `#[metrics(..)]` attribute provided.
+  --> tests/compile-fail/metrics_attr.rs:11:1
+   |
+11 | #[metrics()]
+   | ^^^^^^^^^^^^

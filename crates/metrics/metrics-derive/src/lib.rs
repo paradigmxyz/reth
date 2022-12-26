@@ -35,7 +35,7 @@ mod with_attrs;
 /// struct CustomMetrics {
 ///     /// A gauge with doc comment description.
 ///     gauge: Gauge,
-///     #[metric(rename = "second_gauge", describe = "A counter with metric attribute description.")]
+///     #[metric(rename = "second_gauge", describe = "A gauge with metric attribute description.")]
 ///     gauge2: Gauge,
 ///     /// Some doc comment
 ///     #[metric(describe = "Metric attribute description will be preffered over doc comment.")]
@@ -79,7 +79,7 @@ mod with_attrs;
 ///     /// Describe all exposed metrics
 ///     pub fn describe() {
 ///         metrics::describe_gauge!("metrics.custom.gauge", "A gauge with doc comment description.");
-///         metrics::describe_gauge!("metrics.custom.second_gauge", "A counter with metric attribute description.");
+///         metrics::describe_gauge!("metrics.custom.second_gauge", "A gauge with metric attribute description.");
 ///         metrics::describe_counter!("metrics.custom.counter", "Metric attribute description will be preffered over doc comment.");
 ///         metrics::describe_histogram!("metrics.custom.histogram", "A renamed histogram.");
 ///     }
