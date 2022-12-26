@@ -1,7 +1,7 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use crate::{
     capability::{Capability, SharedCapability},
-    error::{P2PHandshakeError, P2PStreamError},
+    errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage,
 };

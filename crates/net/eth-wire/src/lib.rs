@@ -9,7 +9,7 @@
 pub mod builder;
 pub mod capability;
 mod disconnect;
-pub mod error;
+pub mod errors;
 mod ethstream;
 mod hello;
 mod p2pstream;

@@ -135,7 +135,7 @@ where
 
         let mut bodies = bodies.into_iter();
 
-        let mut responses = vec![];
+        let mut responses = Vec::with_capacity(headers.len());
         for header in headers.into_iter().cloned() {
             // If the header has no txs / ommers, just push it and continue
             if header.is_empty() {
