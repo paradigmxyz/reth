@@ -73,18 +73,18 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let mut current_progress = input.stage_progress.unwrap_or_default();
+        let current_progress = input.stage_progress.unwrap_or_default();
         self.update_head::<DB>(tx, current_progress).await?;
 
         // Lookup the head and tip of the sync range
         let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
         debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
+        // The downloader returns the headers in descending order starting from the tip
+        // down to the local head (latest block in db)
         let downloaded_headers: Result<Vec<SealedHeader>, DownloadError> =
             self.downloader.stream(head.clone(), tip).try_collect().await;
-        // The stage relies on the downloader to return the headers
-        // in descending order starting from the tip down to
-        // the local head (latest block in db)
+
         match downloaded_headers {
             Ok(res) => {
                 info!(target: "sync::stages::headers", len = res.len(), "Received headers");
@@ -94,17 +94,19 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 // Perform basic response validation
                 self.validate_header_response(&res)?;
 
+                // Write a maximum of `commit_threshold` headers, starting from local head onwards
                 let write_progress = self
                     .write_headers::<DB>(tx, res, self.commit_threshold)
                     .await?
                     .unwrap_or_default();
-                current_progress = current_progress.max(write_progress);
-                // Write total difficulty values after headers have been inserted
+
+                // Update total difficulty values after headers have been inserted
                 debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
                 self.write_td::<DB>(tx, &head)?;
 
-                let done = current_progress == max_received_block_number;
-                return Ok(ExecOutput { stage_progress: current_progress, done })
+                // If there are more headers left to write, return false
+                let done = write_progress == max_received_block_number;
+                return Ok(ExecOutput { stage_progress: write_progress, done })
             }
             Err(e) => {
                 self.metrics.update_headers_error_metrics(&e);
@@ -370,7 +372,7 @@ mod tests {
     #[tokio::test]
     async fn execute_with_linear_downloader() {
         let mut runner = HeadersTestRunner::with_linear_downloader();
-        let (stage_progress, previous_stage) = (1000, 1200);
+        let (stage_progress, previous_stage) = (200, 1200);
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -385,12 +387,19 @@ mod tests {
         runner.consensus.update_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { done: false, stage_progress })
-                if stage_progress == stage_progress
-        );
+        // First execution should return false, since we only commit 500 headers at a time
+        assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: sp }) if sp == stage_progress + 500);
 
+        // Next execution should complete the stage.
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress + 500),
+        };
+        let rx = runner.execute(input);
+        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress: sp }) if sp == stage_progress + 1000);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -505,7 +514,7 @@ mod tests {
                     client: self.client.clone(),
                     downloader: self.downloader.clone(),
                     network_handle: self.network_handle.clone(),
-                    commit_threshold: 100,
+                    commit_threshold: 500,
                     metrics: HeaderMetrics::default(),
                 }
             }
