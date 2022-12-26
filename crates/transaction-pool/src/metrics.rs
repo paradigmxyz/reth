@@ -1,7 +1,7 @@
 //! Transaction pool metrics.
 
-use std::fmt;
 use metrics::{describe_counter, register_counter, Counter};
+use std::fmt;
 
 /// Transaction pool metrics
 pub struct TxPoolMetrics {
@@ -20,7 +20,10 @@ impl TxPoolMetrics {
             "transaction_pool.inserted_transactions",
             "Number of transactions inserted in the pool"
         );
-        describe_counter!("transaction_pool.invalid_transactions", "Number of invalid transactions");
+        describe_counter!(
+            "transaction_pool.invalid_transactions",
+            "Number of invalid transactions"
+        );
         describe_counter!(
             "transaction_pool.removed_transactions",
             "Number of removed transactions from the pool"

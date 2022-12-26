@@ -455,10 +455,6 @@ mod tests {
         use crate::{
             stage_metrics::HeaderMetrics,
             stages::headers::HeaderStage,
-<<<<<<< HEAD
-=======
-            metrics::HeaderMetrics,
->>>>>>> 681c801 (Refactor metrics describers for consistency)
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
                 UnwindStageTestRunner,

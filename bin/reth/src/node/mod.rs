@@ -28,10 +28,6 @@ use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::{
     stage_metrics::HeaderMetrics,
     stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
-<<<<<<< HEAD
-=======
-    metrics::HeaderMetrics,
->>>>>>> 681c801 (Refactor metrics describers for consistency)
 };
 use reth_transaction_pool::metrics::TxPoolMetrics;
 use std::{net::SocketAddr, path::Path, sync::Arc};
