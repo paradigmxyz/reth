@@ -67,7 +67,7 @@ jobs:
         with:
           repository: ethereum/tests
           path: ethtests
-          submodules: recursive,
+          submodules: recursive
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
