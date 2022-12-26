@@ -14,7 +14,6 @@ use syn::{parse_macro_input, DeriveInput};
 extern crate proc_macro;
 
 mod expand;
-mod loose_path;
 mod metric;
 mod with_attrs;
 
