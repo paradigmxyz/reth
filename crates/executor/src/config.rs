@@ -96,12 +96,12 @@ impl SpecUpgrades {
 
     /// New homestead enabled spec
     pub fn new_frontier_activated() -> Self {
-        Self { frontier: 0, ..Self::new_ethereum() }
+        Self { frontier: 0, ..Self::new_homestead_activated() }
     }
 
     /// New tangerine enabled spec
     pub fn new_tangerine_whistle_activated() -> Self {
-        Self { tangerine_whistle: 0, ..Self::new_homestead_activated() }
+        Self { tangerine_whistle: 0, ..Self::new_frontier_activated() }
     }
 
     /// New spurious_dragon enabled spec
