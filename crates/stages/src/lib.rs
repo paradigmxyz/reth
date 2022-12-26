@@ -27,6 +27,12 @@ mod test_utils;
 /// Implementations of stages.
 pub mod stages;
 
+/// Describers for stages metrics.
+pub mod stages_metrics_describer;
+
+/// Stages metrics.
+pub mod stages_metrics;
+
 pub use db::Transaction;
 pub use error::*;
 pub use id::*;

@@ -37,7 +37,7 @@ use state::*;
 ///   Done[Done]
 ///   Error[Error]
 ///   subgraph Unwind
-///     StartUnwind(Unwind by unwind priority)
+///     StartUnwind(Unwind in reverse order of execution)
 ///     UnwindStage(Unwind stage)
 ///     NextStageToUnwind(Next stage)
 ///   end
@@ -68,11 +68,8 @@ use state::*;
 /// # Unwinding
 ///
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
-/// pipeline will unwind the stages according to their unwind priority. It is also possible to
+/// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
-///
-/// The unwind priority is set with [Pipeline::push_with_unwind_priority]. Stages with higher unwind
-/// priorities are unwound first.
 // ANCHOR: struct-Pipeline
 pub struct Pipeline<DB: Database> {
     stages: Vec<QueuedStage<DB>>,
@@ -104,23 +101,11 @@ impl<DB: Database> Pipeline<DB> {
     }
 
     /// Add a stage to the pipeline.
-    ///
-    /// # Unwinding
-    ///
-    /// The unwind priority is set to 0.
-    pub fn push<S>(self, stage: S) -> Self
+    pub fn push<S>(mut self, stage: S) -> Self
     where
         S: Stage<DB> + 'static,
     {
-        self.push_with_unwind_priority(stage, 0)
-    }
-
-    /// Add a stage to the pipeline, specifying the unwind priority.
-    pub fn push_with_unwind_priority<S>(mut self, stage: S, unwind_priority: usize) -> Self
-    where
-        S: Stage<DB> + 'static,
-    {
-        self.stages.push(QueuedStage { stage: Box::new(stage), unwind_priority });
+        self.stages.push(QueuedStage { stage: Box::new(stage) });
         self
     }
 
@@ -214,18 +199,12 @@ impl<DB: Database> Pipeline<DB> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Sort stages by unwind priority
-        let mut unwind_pipeline = {
-            let mut stages: Vec<_> = self.stages.iter_mut().enumerate().collect();
-            stages.sort_by(|a, b| a.1.unwind_priority.cmp(&b.1.unwind_priority));
-            stages.reverse();
-            stages
-        };
+        // Unwind stages in reverse order of execution
+        let unwind_pipeline = self.stages.iter_mut().rev();
 
-        // Unwind stages in reverse order of priority (i.e. higher priority = first)
         let mut tx = Transaction::new(db)?;
 
-        for (_, QueuedStage { stage, .. }) in unwind_pipeline.iter_mut() {
+        for QueuedStage { stage, .. } in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
@@ -269,8 +248,6 @@ impl<DB: Database> Pipeline<DB> {
 struct QueuedStage<DB: Database> {
     /// The actual stage to execute.
     stage: Box<dyn Stage<DB>>,
-    /// The unwind priority of the stage.
-    unwind_priority: usize,
 }
 
 impl<DB: Database> QueuedStage<DB> {
@@ -447,6 +424,11 @@ mod tests {
                         .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
                         .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
                 )
+                .push(
+                    TestStage::new(StageId("C"))
+                        .add_exec(Ok(ExecOutput { stage_progress: 20, done: true }))
+                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                )
                 .set_max_block(Some(10));
 
             // Sync first
@@ -460,6 +442,14 @@ mod tests {
         assert_eq!(
             ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
             vec![
+                PipelineEvent::Unwinding {
+                    stage_id: StageId("C"),
+                    input: UnwindInput { stage_progress: 20, unwind_to: 1, bad_block: None }
+                },
+                PipelineEvent::Unwound {
+                    stage_id: StageId("C"),
+                    result: UnwindOutput { stage_progress: 1 },
+                },
                 PipelineEvent::Unwinding {
                     stage_id: StageId("B"),
                     input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
@@ -550,83 +540,6 @@ mod tests {
                 PipelineEvent::Ran {
                     stage_id: StageId("B"),
                     result: ExecOutput { stage_progress: 10, done: true },
-                },
-            ]
-        );
-    }
-
-    /// Unwinds a pipeline with unwind priorities specified.
-    ///
-    /// The stages are inserted in the order A, B, C.
-    ///
-    /// By default, the pipeline is unwound in reverse insert order, i.e. C, B, A.
-    /// In this test we reorder it to be B, C, A by setting these unwind priorities:
-    ///
-    /// - Stage A: 1
-    /// - Stage B: 10 (higher is more priority)
-    /// - Stage C: 5
-    #[tokio::test]
-    async fn unwind_priority() {
-        let (tx, rx) = channel(2);
-        let db = test_utils::create_test_db(EnvKind::RW);
-
-        // Run pipeline
-        tokio::spawn(async move {
-            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>>::new()
-                .push_with_unwind_priority(
-                    TestStage::new(StageId("A"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                    1,
-                )
-                .push_with_unwind_priority(
-                    TestStage::new(StageId("B"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                    10,
-                )
-                .push_with_unwind_priority(
-                    TestStage::new(StageId("C"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                    5,
-                )
-                .set_max_block(Some(10));
-
-            // Sync first
-            pipeline.run(db.clone()).await.expect("Could not run pipeline");
-
-            // Unwind
-            pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
-        });
-
-        // Check that the stages were unwound in reverse order
-        assert_eq!(
-            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
-            vec![
-                PipelineEvent::Unwinding {
-                    stage_id: StageId("B"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
-                },
-                PipelineEvent::Unwound {
-                    stage_id: StageId("B"),
-                    result: UnwindOutput { stage_progress: 1 },
-                },
-                PipelineEvent::Unwinding {
-                    stage_id: StageId("C"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
-                },
-                PipelineEvent::Unwound {
-                    stage_id: StageId("C"),
-                    result: UnwindOutput { stage_progress: 1 },
-                },
-                PipelineEvent::Unwinding {
-                    stage_id: StageId("A"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
-                },
-                PipelineEvent::Unwound {
-                    stage_id: StageId("A"),
-                    result: UnwindOutput { stage_progress: 1 },
                 },
             ]
         );

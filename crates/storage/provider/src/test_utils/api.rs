@@ -39,4 +39,8 @@ impl HeaderProvider for TestApi {
     fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
         Ok(None)
     }
+
+    fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
+        Ok(None)
+    }
 }

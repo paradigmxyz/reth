@@ -14,15 +14,19 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-types = { path = "../rpc-types" }
-reth-provider = { path = "../../storage/provider"}
+reth-provider = { path = "../../storage/provider" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-network = { path = "../network" }
+reth-consensus = { path = "../../consensus", features = ["serde"] }
 
 # rpc
 jsonrpsee = { version = "0.16" }
 
-# misc
+# async
 async-trait = "0.1"
+tokio = { version = "1", features = ["sync"] }
+
+# misc
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

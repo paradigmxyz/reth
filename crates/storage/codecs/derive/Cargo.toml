@@ -6,6 +6,14 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "../README.md"
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+  # Used in proc macros
+  "serde",
+  # Used in proc macros
+  "parity-scale-codec"
+]
+
 [lib]
 proc-macro = true
 

@@ -308,7 +308,7 @@ impl NetworkEventStream {
         while let Some(ev) = self.inner.next().await {
             match ev {
                 NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
-                NetworkEvent::SessionEstablished { .. } => continue,
+                _ => continue,
             }
         }
         None
@@ -317,8 +317,8 @@ impl NetworkEventStream {
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => continue,
                 NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                _ => continue,
             }
         }
         None
@@ -363,6 +363,10 @@ impl HeaderProvider for MockEthProvider {
     fn header_by_number(&self, num: u64) -> reth_interfaces::Result<Option<Header>> {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number == num).cloned())
+    }
+
+    fn header_td(&self, _hash: &BlockHash) -> reth_interfaces::Result<Option<U256>> {
+        todo!()
     }
 }
 

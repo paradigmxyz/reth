@@ -133,6 +133,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
         for (header, body) in block_batch.iter() {
+            let num = header.number;
+            tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -175,7 +177,13 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
 
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
-            let change_set = std::thread::scope(|scope| {
+
+            // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
+            // revm can take more then default allocated stack space. For this case we are using
+            // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
+            // we can see to set more accurate stack size or even optimize revm to move more data to
+            // heap.
+            let changeset = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
                     .spawn_scoped(scope, || {
@@ -193,7 +201,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push(change_set);
+            block_change_patches.push(changeset);
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
@@ -203,9 +211,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // apply changes to plain database.
         for results in block_change_patches.into_iter() {
             // insert state change set
-            for result in results.changeset.into_iter() {
+            for result in results.changesets.into_iter() {
                 // TODO insert to transitionId to tx_index
-                for (address, account_change_set) in result.state_diff.into_iter() {
+                for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
@@ -230,13 +238,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             storage_id.clone(),
                             StorageEntry { key: hkey, value: old_value },
                         )?;
+                        tracing::debug!(
+                            target = "sync::stages::execution",
+                            "{address} setting storage:{key} ({old_value} -> {new_value})"
+                        );
 
-                        if new_value.is_zero() {
-                            tx.delete::<tables::PlainStorageState>(
-                                address,
-                                Some(StorageEntry { key: hkey, value: old_value }),
-                            )?;
-                        } else {
+                        // Always delete old value as duplicate table put will not override it
+                        tx.delete::<tables::PlainStorageState>(
+                            address,
+                            Some(StorageEntry { key: hkey, value: old_value }),
+                        )?;
+                        if !new_value.is_zero() {
                             tx.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
@@ -259,7 +271,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
 
             // If there is block reward we will add account changeset to db
-            // TODO add apply_block_reward_changeset to db tx fn which maybe takes an option.
             if let Some(block_reward_changeset) = results.block_reward {
                 // we are sure that block reward index is present.
                 for (address, changeset) in block_reward_changeset.into_iter() {
@@ -375,7 +386,7 @@ mod tests {
 
     use super::*;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_primitives::{hex_literal::hex, keccak256, Account, BlockLocked, H160, U256};
+    use reth_primitives::{hex_literal::hex, keccak256, Account, SealedBlock, H160, U256};
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
 
@@ -391,9 +402,9 @@ mod tests {
             stage_progress: None,
         };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
-        let genesis = BlockLocked::decode(&mut genesis_rlp).unwrap();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let block = BlockLocked::decode(&mut block_rlp).unwrap();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
         insert_canonical_block(tx.deref_mut(), &genesis, true).unwrap();
         insert_canonical_block(tx.deref_mut(), &block, true).unwrap();
         tx.commit().unwrap();
@@ -476,9 +487,9 @@ mod tests {
             stage_progress: None,
         };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
-        let genesis = BlockLocked::decode(&mut genesis_rlp).unwrap();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let block = BlockLocked::decode(&mut block_rlp).unwrap();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
         insert_canonical_block(tx.deref_mut(), &genesis, true).unwrap();
         insert_canonical_block(tx.deref_mut(), &block, true).unwrap();
         tx.commit().unwrap();

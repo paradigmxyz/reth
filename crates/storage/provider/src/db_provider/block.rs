@@ -1,16 +1,25 @@
 use crate::{BlockProvider, ChainInfo, HeaderProvider, ProviderImpl};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockNumber, Header, H256, U256};
+use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, Header, H256, U256};
 
 impl<DB: Database> HeaderProvider for ProviderImpl<DB> {
-    fn header(&self, block_hash: &reth_primitives::BlockHash) -> Result<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         self.db.view(|tx| tx.get::<tables::Headers>((0, *block_hash).into()))?.map_err(Into::into)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
         if let Some(hash) = self.db.view(|tx| tx.get::<tables::CanonicalHeaders>(num))?? {
             self.header(&hash)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
+        if let Some(num) = self.db.view(|tx| tx.get::<tables::HeaderNumbers>(*hash))?? {
+            let td = self.db.view(|tx| tx.get::<tables::HeaderTD>((num, *hash).into()))??;
+            Ok(td.map(|v| v.0))
         } else {
             Ok(None)
         }
