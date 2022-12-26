@@ -91,9 +91,10 @@ impl SessionError for EthStreamError {
     fn should_backoff(&self) -> bool {
         matches!(
             self,
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
-                P2PHandshakeError::NoResponse
-            ))
+            EthStreamError::HandshakeError(HandshakeError::NoResponse) |
+                EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+                    P2PHandshakeError::NoResponse
+                ))
         ) || self
             .as_disconnected()
             .map(|reason| {
