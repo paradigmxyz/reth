@@ -27,12 +27,11 @@ use reth_network::{
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::{
+    metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
         sender_recovery::SenderRecoveryStage,
     },
-    stages_metrics::HeaderMetrics,
-    stages_metrics_describer,
 };
 use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
@@ -98,7 +97,7 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!("Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
-            stages_metrics_describer::describe();
+            HeaderMetrics::describe();
         }
 
         let chain_id = self.chain.consensus.chain_id;

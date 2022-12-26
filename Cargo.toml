@@ -28,5 +28,6 @@ members = [
     "crates/tracing",
     "crates/tasks",
     "crates/transaction-pool",
+    "crates/metrics/metrics-derive",
 ]
 default-members = ["bin/reth"]
