@@ -7,7 +7,7 @@ use crate::{
     session::{Direction, PendingSessionHandshakeError},
 };
 use futures::StreamExt;
-use reth_eth_wire::{error::EthStreamError, DisconnectReason};
+use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
 use reth_primitives::{ForkId, PeerId};
 use std::{
@@ -871,7 +871,7 @@ mod test {
         PeersConfig,
     };
     use reth_eth_wire::{
-        error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
+        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
     };
     use reth_net_common::ban_list::BanList;
@@ -1042,8 +1042,8 @@ mod test {
         peers.on_pending_session_dropped(
             &socket_addr,
             &peer,
-            &PendingSessionHandshakeError::Eth(EthStreamError::HandshakeError(
-                HandshakeError::NoResponse,
+            &PendingSessionHandshakeError::Eth(EthStreamError::EthHandshakeError(
+                EthHandshakeError::NoResponse,
             )),
         );
 
