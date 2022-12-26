@@ -95,6 +95,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut headers = tx.cursor::<tables::Headers>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor::<tables::BlockBodies>()?;
+        // Get ommers with canonical hashes.
+        let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
         // Get transaction of the block that we are executing.
         let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -116,8 +118,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
             .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody), StageError> {
-                // TODO see if walker next has better performance then seek_exact calls.
+            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
+                // NOTE: It probably will be faster to fetch all items from one table with cursor,
+                // but to reduce complexity we are using `seek_exact` to skip some
+                // edge cases that can happen.
                 let (_, header) =
                     headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
                         number: key.number(),
@@ -126,13 +130,16 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (_, body) = bodies_cursor
                     .seek_exact(*key)?
                     .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                Ok((header, body))
+                let (_, stored_ommers) = ommers_cursor
+                    .seek_exact(*key)?
+                    .ok_or(DatabaseIntegrityError::Ommers { number: key.number() })?;
+                Ok((header, body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body) in block_batch.iter() {
+        for (header, body, ommers) in block_batch.iter() {
             let num = header.number;
             tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
             // iterate over all transactions
@@ -192,6 +199,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         reth_executor::executor::execute_and_verify_receipt(
                             header,
                             &recovered_transactions,
+                            ommers,
                             &self.config,
                             state_provider,
                         )

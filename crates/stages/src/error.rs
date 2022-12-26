@@ -83,6 +83,12 @@ pub enum DatabaseIntegrityError {
         /// The block hash key
         hash: H256,
     },
+    /// A ommers are missing.
+    #[error("Block ommers not found for block #{number}")]
+    Ommers {
+        /// The block number key
+        number: BlockNumber,
+    },
     /// A block body is missing.
     #[error("Block body not found for block #{number}")]
     BlockBody {
