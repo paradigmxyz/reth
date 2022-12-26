@@ -89,7 +89,13 @@ impl SessionError for EthStreamError {
     }
 
     fn should_backoff(&self) -> bool {
-        self.as_disconnected()
+        matches!(
+            self,
+            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+                P2PHandshakeError::NoResponse
+            ))
+        ) || self
+            .as_disconnected()
             .map(|reason| {
                 matches!(
                     reason,
@@ -145,6 +151,11 @@ mod tests {
         ));
 
         assert_eq!(err.as_disconnected(), Some(DisconnectReason::TooManyPeers));
+        assert!(err.should_backoff());
+
+        let err = EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+            P2PHandshakeError::NoResponse,
+        ));
         assert!(err.should_backoff());
     }
 }
