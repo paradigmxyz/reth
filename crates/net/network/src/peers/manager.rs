@@ -871,7 +871,7 @@ mod test {
         PeersConfig,
     };
     use reth_eth_wire::{
-        error::{EthStreamError, P2PHandshakeError, P2PStreamError},
+        error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
     };
     use reth_net_common::ban_list::BanList;
@@ -981,6 +981,69 @@ mod test {
             &peer,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
                 DisconnectReason::TooManyPeers,
+            )),
+        );
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(peers.ban_list.is_banned_peer(&peer));
+        assert!(peers.peers.get(&peer).is_some());
+
+        tokio::time::sleep(backoff_duration).await;
+
+        match event!(peers) {
+            PeerAction::UnBanPeer { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_backoff_on_no_response() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+
+        let backoff_duration = Duration::from_secs(3);
+        let config = PeersConfig { backoff_duration, ..Default::default() };
+        let mut peers = PeersManager::new(config);
+        peers.add_discovered_node(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        peers.on_pending_session_dropped(
+            &socket_addr,
+            &peer,
+            &PendingSessionHandshakeError::Eth(EthStreamError::HandshakeError(
+                HandshakeError::NoResponse,
             )),
         );
 
