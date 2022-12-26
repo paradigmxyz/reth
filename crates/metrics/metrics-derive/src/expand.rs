@@ -10,8 +10,8 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let ty = &node.ident;
     let ident_name = ty.to_string();
 
-    let metrics_attr = parse_metrics_attr(&node)?;
-    let metric_fields = parse_metric_fields(&node)?;
+    let metrics_attr = parse_metrics_attr(node)?;
+    let metric_fields = parse_metric_fields(node)?;
 
     let default_fields = metric_fields
         .iter()
@@ -66,12 +66,12 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
     let mut parsed_iter = parsed.into_iter();
     if let Some(kv) = parsed_iter.next() {
         if !kv.path.is_ident("scope") || parsed_iter.next().is_some() {
-            return Err(Error::new_spanned(kv, "Only single `scope = ..` value is supported."))
+            Err(Error::new_spanned(kv, "Only single `scope = ..` value is supported."))
+        } else {
+            Ok(MetricsAttr { scope: parse_str_lit(kv.lit)? })
         }
-
-        Ok(MetricsAttr { scope: parse_str_lit(kv.lit)? })
     } else {
-        return Err(Error::new_spanned(metrics_attr, "`scope = ..` must be set."))
+        Err(Error::new_spanned(metrics_attr, "`scope = ..` must be set."))
     }
 }
 
