@@ -38,6 +38,10 @@ pub struct NetworkConfig<C> {
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
     pub boot_nodes: HashSet<NodeRecord>,
+    /// Nodes to always connect to.
+    pub trusted_nodes: HashSet<NodeRecord>,
+    /// If true, the node will connect only to trusted peers.
+    pub connect_trusted_nodes_only: bool,
     /// How to set up discovery.
     pub discovery_v4_config: Discv4Config,
     /// Address to use for discovery
@@ -290,7 +294,7 @@ impl<C> NetworkConfigBuilder<C> {
         let Self {
             client,
             secret_key,
-            mut discovery_v4_builder,
+            discovery_v4_builder,
             boot_nodes,
             trusted_nodes,
             connect_trusted_nodes_only,
@@ -324,14 +328,12 @@ impl<C> NetworkConfigBuilder<C> {
             ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
         });
 
-        discovery_v4_builder
-            .add_trusted_nodes(trusted_nodes)
-            .set_connect_trusted_nodes_only(connect_trusted_nodes_only);
-
         NetworkConfig {
             client,
             secret_key,
             boot_nodes,
+            trusted_nodes,
+            connect_trusted_nodes_only,
             discovery_v4_config: discovery_v4_builder.build(),
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
