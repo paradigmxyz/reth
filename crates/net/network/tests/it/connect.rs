@@ -3,7 +3,10 @@
 use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
-use ethers_core::utils::{Genesis, Geth};
+use ethers_core::{
+    types::Address,
+    utils::{ChainConfig, CliqueConfig, Genesis, Geth},
+};
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
@@ -18,7 +21,12 @@ use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::task;
 
 // The timeout for tests that create a GethInstance
@@ -70,9 +78,33 @@ fn unused_tcp_udp() -> (SocketAddr, SocketAddr) {
         .expect("Failed to create UDP listener to find unused port");
     let udp_addr = udp_listener
         .local_addr()
-        .expect("Failed to read TCP listener local_addr to find unused port");
+        .expect("Failed to read UDP listener local_addr to find unused port");
 
     (tcp_addr, udp_addr)
+}
+
+/// Creates a chain config with Clique, using the given chain id and setting the provided address
+/// as the single clique singer. Funds the given address with max coins.
+fn clique_genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
+    let config = ChainConfig {
+        chain_id,
+        clique: Some(CliqueConfig { period: 1, epoch: 30000 }),
+        ..Default::default()
+    };
+
+    let mut alloc = HashMap::new();
+    alloc.insert(
+        signer_addr,
+        GenesisAccount { balance: ethers_core::types::U256::MAX, ..Default::default() },
+    );
+
+    Genesis {
+        config,
+        alloc,
+        difficulty: ethers_core::types::U256::one(),
+        gas_limit: ethers_core::types::U64::MAX,
+        ..Default::default()
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -559,4 +591,11 @@ async fn test_geth_disconnect() {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn sync_from_clique_geth() {
+    reth_tracing::init_tracing();
+    tokio::time::timeout(GETH_TIMEOUT, async move {}).await.unwrap();
 }
