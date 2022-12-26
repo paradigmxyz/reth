@@ -10,7 +10,7 @@
 //!
 //! # Metrics
 //!
-//! This library exposes metrics via. the [`metrics`][metrics] crate:
+//! This library exposes metrics via the [`metrics`][metrics_core] crate:
 //!
 //! - `stage.progress{stage}`: The block number each stage has currently reached.
 
@@ -28,7 +28,7 @@ mod test_utils;
 pub mod stages;
 
 /// Stage metrics.
-pub mod stage_metrics;
+pub mod metrics;
 
 pub use db::Transaction;
 pub use error::*;
@@ -38,4 +38,4 @@ pub use stage::*;
 
 // NOTE: Needed so the link in the module-level rustdoc works.
 #[allow(unused_extern_crates)]
-extern crate metrics;
+extern crate metrics as metrics_core;

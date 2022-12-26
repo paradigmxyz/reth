@@ -1,5 +1,5 @@
 use crate::{
-    db::Transaction, stage_metrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
@@ -21,7 +21,6 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
-use stage_metrics::HeaderMetrics;
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -453,7 +452,7 @@ mod tests {
 
     mod test_runner {
         use crate::{
-            stage_metrics::HeaderMetrics,
+            metrics::HeaderMetrics,
             stages::headers::HeaderStage,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,

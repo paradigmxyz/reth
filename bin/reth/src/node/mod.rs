@@ -26,7 +26,7 @@ use reth_network::{
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::{
-    stage_metrics::HeaderMetrics,
+    metrics::HeaderMetrics,
     stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
 };
 use std::{net::SocketAddr, path::Path, sync::Arc};
