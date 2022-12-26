@@ -1,23 +1,82 @@
-use crate::{proto::Octets, PeerId};
+use crate::{keccak256, PeerId};
 use bytes::{Buf, BufMut};
 use generic_array::GenericArray;
-use reth_primitives::keccak256;
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     fmt::Write,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     num::ParseIntError,
     str::FromStr,
 };
 use url::{Host, Url};
 
+/// IpAddr octets
+#[derive(Debug, Copy, Clone)]
+pub enum Octets {
+    /// Ipv4 Octet variant
+    V4([u8; 4]),
+    /// Ipv6 Octet variant
+    V6([u8; 16]),
+}
+
+impl From<Octets> for IpAddr {
+    fn from(value: Octets) -> Self {
+        match value {
+            Octets::V4(o) => IpAddr::from(o),
+            Octets::V6(o) => {
+                let ipv6 = Ipv6Addr::from(o);
+                // If the ipv6 is ipv4 compatible/mapped, simply return the ipv4.
+                if let Some(ipv4) = ipv6.to_ipv4() {
+                    IpAddr::V4(ipv4)
+                } else {
+                    IpAddr::V6(ipv6)
+                }
+            }
+        }
+    }
+}
+
+impl Encodable for Octets {
+    fn encode(&self, out: &mut dyn BufMut) {
+        let octets = match self {
+            Octets::V4(ref o) => &o[..],
+            Octets::V6(ref o) => &o[..],
+        };
+        octets.encode(out)
+    }
+}
+
+impl Decodable for Octets {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let h = Header::decode(buf)?;
+        if h.list {
+            return Err(DecodeError::UnexpectedList)
+        }
+        let o = match h.payload_length {
+            4 => {
+                let mut to = [0_u8; 4];
+                to.copy_from_slice(&buf[..4]);
+                Octets::V4(to)
+            }
+            16 => {
+                let mut to = [0u8; 16];
+                to.copy_from_slice(&buf[..16]);
+                Octets::V6(to)
+            }
+            _ => return Err(DecodeError::UnexpectedLength),
+        };
+        buf.advance(h.payload_length);
+        Ok(o)
+    }
+}
+
 /// The key type for the table.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) struct NodeKey(pub(crate) PeerId);
+pub struct NodeKey(pub(crate) PeerId);
 
 impl From<PeerId> for NodeKey {
     fn from(value: PeerId) -> Self {
@@ -35,7 +94,7 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
 
 /// Converts a `PeerId` into the required `Key` type for the table
 #[inline]
-pub(crate) fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
+pub fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
     discv5::kbucket::Key::from(NodeKey::from(node))
 }
 
@@ -84,7 +143,7 @@ impl NodeRecord {
     /// Returns the key type for the kademlia table
     #[must_use]
     #[inline]
-    pub(crate) fn key(&self) -> discv5::Key<NodeKey> {
+    pub fn key(&self) -> discv5::Key<NodeKey> {
         NodeKey(self.id).into()
     }
 }

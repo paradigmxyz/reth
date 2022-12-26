@@ -3412,7 +3412,6 @@ dependencies = [
  "bytes",
  "discv5",
  "enr 0.7.0",
- "generic-array",
  "hex",
  "public-ip",
  "rand 0.8.5",
@@ -3422,12 +3421,10 @@ dependencies = [
  "reth-rlp-derive",
  "reth-tracing",
  "secp256k1 0.24.2",
- "serde",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -3668,16 +3665,20 @@ dependencies = [
  "bytes",
  "crc",
  "derive_more",
+ "discv5",
  "ethbloom",
  "ethers-core",
+ "generic-array",
  "hash-db",
  "hex",
  "hex-literal",
  "modular-bitfield",
  "parity-scale-codec",
  "plain_hasher",
+ "rand 0.8.5",
  "reth-codecs",
  "reth-rlp",
+ "reth-rlp-derive",
  "secp256k1 0.24.2",
  "serde",
  "serde_json",
@@ -3686,6 +3687,7 @@ dependencies = [
  "thiserror",
  "tiny-keccak",
  "triehash",
+ "url",
 ]
 
 [[package]]

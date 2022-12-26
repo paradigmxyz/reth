@@ -29,15 +29,10 @@ enr = { version = "0.7.0",  default-features = false, features = ["rust-secp256k
 tokio = { version = "1", features = ["io-util", "net", "time"] }
 tokio-stream = "0.1"
 
-# io
-serde = "1.0"
-
 # misc
 bytes = "1.2"
-generic-array = "0.14"
 tracing = "0.1"
 thiserror = "1.0"
-url = "2.3"
 hex = "0.4"
 public-ip = "0.2"
 rand = { version = "0.8", optional = true }

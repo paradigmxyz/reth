@@ -19,7 +19,6 @@
 //! [`DiscoveryUpdate`] that listeners will receive.
 use crate::{
     error::{DecodePacketError, Discv4Error},
-    node::{kad_key, NodeKey},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
 use bytes::{Bytes, BytesMut};
@@ -58,8 +57,7 @@ mod proto;
 
 mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};
-mod node;
-pub use node::NodeRecord;
+use reth_primitives::{kad_key, NodeKey, NodeRecord};
 
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
@@ -139,8 +137,8 @@ impl Discv4 {
     /// use std::str::FromStr;
     /// use rand::thread_rng;
     /// use secp256k1::SECP256K1;
-    /// use reth_primitives::PeerId;
-    /// use reth_discv4::{Discv4, Discv4Config, NodeRecord};
+    /// use reth_primitives::{NodeRecord, PeerId};
+    /// use reth_discv4::{Discv4, Discv4Config};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
     ///  let mut rng = thread_rng();
