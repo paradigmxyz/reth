@@ -8,10 +8,6 @@ use std::io;
 #[allow(missing_docs)]
 pub enum EthStreamError {
     #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Rlp(#[from] reth_rlp::DecodeError),
-    #[error(transparent)]
     P2PStreamError(#[from] P2PStreamError),
     #[error(transparent)]
     EthHandshakeError(#[from] EthHandshakeError),
@@ -29,6 +25,18 @@ impl EthStreamError {
         } else {
             None
         }
+    }
+}
+
+impl From<io::Error> for EthStreamError {
+    fn from(err: io::Error) -> Self {
+        P2PStreamError::from(err).into()
+    }
+}
+
+impl From<reth_rlp::DecodeError> for EthStreamError {
+    fn from(err: reth_rlp::DecodeError) -> Self {
+        P2PStreamError::from(err).into()
     }
 }
 
