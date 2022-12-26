@@ -479,6 +479,9 @@ where
             NetworkHandleMessage::GetPeerInfo(tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
             }
+			NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
+				let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
+			}
         }
     }
 }

@@ -488,6 +488,21 @@ impl SessionManager {
 
         peers
     }
+
+	pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+		match self.active_sessions.get(&peer_id) {
+			Some(x) => {
+				Some(PeerInfo {
+					remote_id: x.remote_id,
+					direction: x.direction,
+					remote_addr: x.remote_addr,
+					capabilities: x.capabilities.clone(),
+					client_version: x.client_version.clone(),
+				})
+			},
+			None => None,
+		}
+	}
 }
 
 /// Events produced by the [`SessionManager`]

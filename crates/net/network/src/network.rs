@@ -212,6 +212,8 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
-    /// Get PeerInfo
+    /// Get PeerInfo fro all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
+	/// Get PeerInfo for a specific peer
+	GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
 }
