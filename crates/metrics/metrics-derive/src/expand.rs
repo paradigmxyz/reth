@@ -45,7 +45,9 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
         }
 
         impl #ty {
-            /// Describe all exposed metrics
+            /// Describe all exposed metrics. Internally calls `describe_*` macros from
+            /// the metrics crate according to the metric type.
+            /// Ref: https://docs.rs/metrics/0.20.1/metrics/index.html#macros
             pub fn describe() {
                 #(#describe_stmts;)*
             }
