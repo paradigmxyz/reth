@@ -9,14 +9,14 @@ use revm::{
     BlockEnv, TransactTo, TxEnv, B160, B256, U256 as evmU256,
 };
 
-/// SubState of database. Uses revm internal cache with binding to reth DbExecutor trait.
+/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
 pub type SubState<DB> = CacheDB<State<DB>>;
 
-/// Wrapper around ExeuctorDb that implements revm database trait
+/// Wrapper around StateProvider that implements revm database trait
 pub struct State<DB: StateProvider>(pub DB);
 
 impl<DB: StateProvider> State<DB> {
-    /// Create new State with generic ExecutorDb.
+    /// Create new State with generic StateProvider.
     pub fn new(db: DB) -> Self {
         Self(db)
     }
@@ -31,7 +31,7 @@ impl<DB: StateProvider> State<DB> {
         &mut self.0
     }
 
-    /// Consume State and return inner DbExecutable.
+    /// Consume State and return inner StateProvider.
     pub fn into_inner(self) -> DB {
         self.0
     }

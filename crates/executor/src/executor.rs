@@ -590,7 +590,7 @@ mod tests {
 
         assert_eq!(changesets.new_bytecodes.len(), 0, "No new bytecodes");
 
-        // check torage
+        // check storage
         let storage = &changesets.changeset.get(&account1).unwrap().storage;
         assert_eq!(storage.len(), 1, "Only one storage change");
         assert_eq!(
