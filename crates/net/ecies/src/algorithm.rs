@@ -24,6 +24,12 @@ use std::convert::TryFrom;
 
 const PROTOCOL_VERSION: usize = 4;
 
+/// Computes the shared secret with ECDH and strips the y coordinate after computing the shared
+/// secret.
+///
+/// This uses the given remote public key and local (ephemeral) secret key to [compute a shared
+/// secp256k1 point](secp256k1::ecdh::shared_secret_point) and slices off the y coordinate from the
+/// returned pair, returning only the bytes of the x coordinate as a [`H256`].
 fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> H256 {
     H256::from_slice(&secp256k1::ecdh::shared_secret_point(public_key, secret_key)[..32])
 }
@@ -332,6 +338,8 @@ impl ECIES {
         self.parse_auth_unencrypted(unencrypted)
     }
 
+    /// Create an `ack` message using the internal nonce, local ephemeral public key, and RLPx
+    /// ECIES protocol version.
     fn create_ack_unencrypted(&self) -> impl AsRef<[u8]> {
         #[derive(RlpEncodable, RlpMaxEncodedLen)]
         struct S {
@@ -354,7 +362,8 @@ impl ECIES {
         buf
     }
 
-    /// Write an ack message to the given buffer.
+    // TODO: document more
+    /// Write an `ack` message to the given buffer.
     pub fn write_ack(&mut self, out: &mut BytesMut) {
         let unencrypted = self.create_ack_unencrypted();
 
@@ -378,6 +387,13 @@ impl ECIES {
         self.setup_frame(true);
     }
 
+    /// Parse the incoming `ack` message from the given `data` bytes, which are assumed to be
+    /// unencrypted. This parses the remote ephemeral pubkey and nonce from the message, and uses
+    /// ECDH to compute the shared secret. The shared secret is the x coordinate of the point
+    /// returned by ECDH.
+    ///
+    /// This sets the `remote_ephemeral_public_key` and `remote_nonce`, and
+    /// `ephemeral_shared_secret` fields in the ECIES state.
     fn parse_ack_unencrypted(&mut self, data: &[u8]) -> Result<(), ECIESError> {
         let mut data = Rlp::new(data)?;
         self.remote_ephemeral_public_key =
@@ -399,6 +415,7 @@ impl ECIES {
         Ok(())
     }
 
+    // TODO: document
     fn setup_frame(&mut self, incoming: bool) {
         let mut hasher = Keccak256::new();
         for el in &if incoming {
@@ -453,6 +470,7 @@ impl ECIES {
         out
     }
 
+    // TODO: document
     pub fn write_header(&mut self, out: &mut BytesMut, size: usize) {
         let mut buf = [0u8; 8];
         BigEndian::write_uint(&mut buf, size as u64, 3);
