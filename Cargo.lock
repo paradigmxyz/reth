@@ -1375,7 +1375,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/rjected/ethers-rs?branch=expose-clique-config#7f3f6a87e2cca77e9522f4b91bd66530192db1c9"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/rjected/ethers-rs?branch=expose-clique-config#7f3f6a87e2cca77e9522f4b91bd66530192db1c9"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -5971,3 +5971,8 @@ dependencies = [
  "syn",
  "synstructure",
 ]
+
+[[patch.unused]]
+name = "ethers"
+version = "1.0.2"
+source = "git+https://github.com/rjected/ethers-rs?branch=expose-clique-config#7f3f6a87e2cca77e9522f4b91bd66530192db1c9"
