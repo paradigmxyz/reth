@@ -1,16 +1,16 @@
 //! Support for handling peer sessions.
-pub use crate::message::PeerRequestSender;
 use crate::{
     message::PeerMessage,
     session::{
         active::ActiveSession,
         config::SessionCounter,
         handle::{
-            ActiveSessionHandle, ActiveSessionMessage, PeerInfo, PendingSessionEvent,
-            PendingSessionHandle, SessionCommand,
+            ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+            SessionCommand,
         },
     },
 };
+pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::stream::ECIESStream;

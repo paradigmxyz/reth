@@ -3,6 +3,7 @@ use crate::{
     manager::NetworkEvent,
     message::PeerRequest,
     peers::{PeersHandle, ReputationChangeKind},
+    session::PeerInfo,
     FetchClient,
 };
 use parking_lot::Mutex;
@@ -212,5 +213,5 @@ pub(crate) enum NetworkHandleMessage {
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
     /// Get PeerInfo
-    GetPeerInfo,
+    GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
 }
