@@ -51,7 +51,8 @@ const EXECUTION: StageId = StageId("Execution");
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage {
-    config: Config,
+    /// Executor configuration.
+    pub config: Config,
 }
 
 impl Default for ExecutionStage {
