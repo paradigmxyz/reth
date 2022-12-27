@@ -63,7 +63,8 @@ pub fn should_skip(path: &Path) -> bool {
         path.file_name() == Some(OsStr::new("Call50000_sha256.json")) ||
         path.file_name() == Some(OsStr::new("static_Call50000_sha256.json")) ||
         path.file_name() == Some(OsStr::new("loopMul.json")) ||
-        path.file_name() == Some(OsStr::new("CALLBlake2f_MaxRounds.json"))
+        path.file_name() == Some(OsStr::new("CALLBlake2f_MaxRounds.json")) ||
+        path.file_name() == Some(OsStr::new("shiftCombinations.json"))
     {
         return true
     }
@@ -79,12 +80,14 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
     if should_skip(path) {
         return Ok(())
     }
+    info!("Executing test from path: {path:?}");
 
     for (name, suite) in suites.0 {
         if matches!(
             suite.network,
             ForkSpec::ByzantiumToConstantinopleAt5 |
                 ForkSpec::Constantinople |
+                ForkSpec::ConstantinopleFix |
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
                 ForkSpec::MergePush0,
@@ -96,7 +99,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         let pre_state = suite.pre.0;
 
-        debug!("Executing test: {name} for spec: {:?}", suite.network);
+        debug!("Executing {:?} spec: {:?}", name, suite.network);
 
         let spec_upgrades: SpecUpgrades = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;

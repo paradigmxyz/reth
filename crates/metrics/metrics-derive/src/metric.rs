@@ -1,21 +1,11 @@
-use once_cell::sync::Lazy;
 use quote::quote;
-use syn::{Error, Field, LitStr, Result};
+use syn::{Error, Field, LitStr, Result, Type};
 
-use crate::loose_path::LooseTypePath;
+use crate::expand::MetricsAttr;
 
-const COUNTER_TY: Lazy<LooseTypePath> = Lazy::new(|| {
-    LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Counter })
-        .expect("failed to parse `metrics::Counter`")
-});
-const HISTOGRAM_TY: Lazy<LooseTypePath> = Lazy::new(|| {
-    LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Histogram })
-        .expect("failed to parse `metrics::Histogram`")
-});
-const GAUGE_TY: Lazy<LooseTypePath> = Lazy::new(|| {
-    LooseTypePath::parse_from_ty(syn::parse_quote! { metrics::Gauge })
-        .expect("failed to parse `metrics::Gauge`")
-});
+const COUNTER_TY: &str = "Counter";
+const HISTOGRAM_TY: &str = "Histogram";
+const GAUGE_TY: &str = "Gauge";
 
 pub(crate) struct Metric<'a> {
     pub(crate) field: &'a Field,
@@ -24,58 +14,60 @@ pub(crate) struct Metric<'a> {
 }
 
 impl<'a> Metric<'a> {
+    const DEFAULT_SEPARATOR: &str = "_";
+
     pub(crate) fn new(field: &'a Field, description: String, rename: Option<LitStr>) -> Self {
         Self { field, description, rename }
     }
 
-    pub(crate) fn metric_name(&self, scope: &LitStr) -> String {
-        let scope = scope.value();
+    pub(crate) fn metric_name(&self, config: &MetricsAttr) -> String {
+        let scope = config.scope.value();
         let metric = match self.rename.as_ref() {
             Some(name) => name.value(),
             None => self.field.ident.as_ref().map(ToString::to_string).unwrap_or_default(),
         };
-        format!("{scope}.{metric}")
+        match config.separator.as_ref() {
+            Some(separator) => format!("{scope}{}{metric}", separator.value()),
+            None => format!("{scope}{}{metric}", Metric::DEFAULT_SEPARATOR),
+        }
     }
 
-    pub(crate) fn register_stmt(&self, scope: &LitStr) -> Result<proc_macro2::TokenStream> {
-        let metric_name = self.metric_name(scope);
-        let ty = LooseTypePath::parse_from_ty(self.field.ty.clone())?;
+    pub(crate) fn register_stmt(&self, config: &MetricsAttr) -> Result<proc_macro2::TokenStream> {
+        let metric_name = self.metric_name(config);
 
-        let registrar = {
-            if ty.eq(&*COUNTER_TY) {
-                quote! { metrics::register_counter! }
-            } else if ty.eq(&*HISTOGRAM_TY) {
-                quote! { metrics::register_histogram! }
-            } else if ty.eq(&*GAUGE_TY) {
-                quote! { metrics::register_gauge! }
-            } else {
-                return Err(Error::new_spanned(
-                    self.field,
-                    format!("Unsupported metric type {:?}", self.field.ty),
-                ))
+        if let Type::Path(ref path_ty) = self.field.ty {
+            if let Some(last) = path_ty.path.segments.last() {
+                let registrar = match last.ident.to_string().as_str() {
+                    COUNTER_TY => quote! { metrics::register_counter! },
+                    HISTOGRAM_TY => quote! { metrics::register_histogram! },
+                    GAUGE_TY => quote! { metrics::register_gauge! },
+                    _ => return Err(Error::new_spanned(path_ty, "Unsupported metric type")),
+                };
+
+                return Ok(quote! { #registrar(#metric_name) })
             }
-        };
+        }
 
-        Ok(quote! { #registrar(#metric_name) })
+        Err(Error::new_spanned(&self.field.ty, "Unsupported metric type"))
     }
 
-    pub(crate) fn describe_stmt(&self, scope: &LitStr) -> Result<proc_macro2::TokenStream> {
-        let metric_name = self.metric_name(scope);
+    pub(crate) fn describe_stmt(&self, config: &MetricsAttr) -> Result<proc_macro2::TokenStream> {
+        let metric_name = self.metric_name(config);
         let description = &self.description;
-        let ty = LooseTypePath::parse_from_ty(self.field.ty.clone())?;
 
-        let descriptor = {
-            if ty.eq(&*COUNTER_TY) {
-                quote! { metrics::describe_counter! }
-            } else if ty.eq(&*HISTOGRAM_TY) {
-                quote! { metrics::describe_histogram! }
-            } else if ty.eq(&*GAUGE_TY) {
-                quote! { metrics::describe_gauge! }
-            } else {
-                return Err(Error::new_spanned(self.field, "Unsupported metric type"))
+        if let Type::Path(ref path_ty) = self.field.ty {
+            if let Some(last) = path_ty.path.segments.last() {
+                let descriptor = match last.ident.to_string().as_str() {
+                    COUNTER_TY => quote! { metrics::describe_counter! },
+                    HISTOGRAM_TY => quote! { metrics::describe_histogram! },
+                    GAUGE_TY => quote! { metrics::describe_gauge! },
+                    _ => return Err(Error::new_spanned(path_ty, "Unsupported metric type")),
+                };
+
+                return Ok(quote! { #descriptor(#metric_name, #description) })
             }
-        };
+        }
 
-        Ok(quote! { #descriptor(#metric_name, #description) })
+        Err(Error::new_spanned(&self.field.ty, "Unsupported metric type"))
     }
 }

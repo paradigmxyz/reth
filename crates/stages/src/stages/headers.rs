@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, stage_metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -452,7 +452,7 @@ mod tests {
 
     mod test_runner {
         use crate::{
-            stage_metrics::HeaderMetrics,
+            metrics::HeaderMetrics,
             stages::headers::HeaderStage,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,

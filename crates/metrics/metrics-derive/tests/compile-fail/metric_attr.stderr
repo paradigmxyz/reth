@@ -1,10 +1,10 @@
-error: Either doc comment or `describe` must be provided.
+error: Either doc comment or `describe = ..` must be set.
   --> tests/compile-fail/metric_attr.rs:12:5
    |
 12 |     gauge: Gauge,
    |     ^^^^^^^^^^^^
 
-error: Either doc comment or `describe` must be provided.
+error: Either doc comment or `describe = ..` must be set.
   --> tests/compile-fail/metric_attr.rs:18:5
    |
 18 | /     #[metric()]
@@ -41,9 +41,8 @@ error: Duplicate `rename` value provided.
 53 |     #[metric(rename = "_gauge", rename = "_gauge")]
    |                                 ^^^^^^^^^^^^^^^^^
 
-error: Unsupported metric type Path(TypePath { qself: None, path: Path { leading_colon: None, segments: [PathSegment { ident: Ident { ident: "String", span: #0 bytes(1122..1128) }, arguments: None }] } })
-  --> tests/compile-fail/metric_attr.rs:60:5
+error: Unsupported metric type
+  --> tests/compile-fail/metric_attr.rs:61:12
    |
-60 | /     #[metric(describe = "")]
-61 | |     gauge: String,
-   | |_________________^
+61 |     gauge: String,
+   |            ^^^^^^

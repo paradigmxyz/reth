@@ -77,11 +77,11 @@ impl SpecUpgrades {
         }
     }
 
-    /// New homestead enabled spec
-    pub fn new_homestead_activated() -> Self {
+    /// New frontier enabled spec
+    pub fn new_frontier_activated() -> Self {
         Self {
-            homestead: 0,
-            frontier: u64::MAX,
+            frontier: 0,
+            homestead: u64::MAX,
             tangerine_whistle: u64::MAX,
             spurious_dragon: u64::MAX,
             byzantium: u64::MAX,
@@ -95,8 +95,8 @@ impl SpecUpgrades {
     }
 
     /// New homestead enabled spec
-    pub fn new_frontier_activated() -> Self {
-        Self { frontier: 0, ..Self::new_ethereum() }
+    pub fn new_homestead_activated() -> Self {
+        Self { homestead: 0, ..Self::new_frontier_activated() }
     }
 
     /// New tangerine enabled spec
