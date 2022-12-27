@@ -471,9 +471,7 @@ impl SessionManager {
         }
     }
 
-    pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
-        let mut peers: Vec<PeerInfo> = Vec::new();
-
+    pub(crate) async fn get_peer_info(&self) -> Vec<PeerInfo> {
         let peers: Vec<PeerInfo> = self
             .active_sessions
             .iter()
@@ -489,7 +487,7 @@ impl SessionManager {
         peers
     }
 
-	pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+	pub(crate) async fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
 		match self.active_sessions.get(&peer_id) {
 			Some(x) => {
 				Some(PeerInfo {
