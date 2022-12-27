@@ -29,7 +29,7 @@ use discv5::{
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{ForkId, PeerId, H256};
+use reth_primitives::{kad_key, ForkId, NodeKey, PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -57,7 +57,9 @@ mod proto;
 
 mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};
-use reth_primitives::{kad_key, NodeKey, NodeRecord};
+
+// reexport NodeRecord primitive
+pub use reth_primitives::NodeRecord;
 
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
