@@ -151,6 +151,7 @@ where
     }
 
     /// Request handler for an incoming request for transactions
+    // ANCHOR: fn-on_get_pooled_transactions
     fn on_get_pooled_transactions(
         &mut self,
         peer_id: PeerId,
@@ -172,6 +173,7 @@ where
             let _ = response.send(Ok(resp));
         }
     }
+    // ANCHOR_END: fn-on_get_pooled_transactions
 
     /// Invoked when a new transaction is pending.
     ///
@@ -184,6 +186,7 @@ where
     /// complete transaction object if it is unknown to them. The dissemination of complete
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
+    // ANCHOR: fn-on_new_transactions-propagate_transactions
     fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
         trace!(target: "net::tx", "Start propagating transactions");
 
@@ -236,8 +239,10 @@ where
 
         propagated
     }
+    // ANCHOR_END: fn-on_new_transactions-propagate_transactions
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
+    // ANCHOR: fn-on_new_pooled_transactions
     fn on_new_pooled_transactions(&mut self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let mut transactions = msg.0;
@@ -264,6 +269,7 @@ where
             }
         }
     }
+    // ANCHOR_END: fn-on_new_pooled_transactions
 
     /// Handles dedicated transaction events related tot the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
@@ -290,6 +296,7 @@ where
     }
 
     /// Handles a received event related to common network events.
+    // ANCHOR: fn-on_network_event
     fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::SessionClosed { peer_id, .. } => {
@@ -318,8 +325,10 @@ where
             }
         }
     }
+    // ANCHOR_END: fn-on_network_event
 
     /// Starts the import process for the given transactions.
+    // ANCHOR: fn-import_transactions
     fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<TransactionSigned>) {
         let mut has_bad_transactions = false;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -360,6 +369,7 @@ where
             self.report_bad_message(peer_id);
         }
     }
+    // ANCHOR_END: fn-import_transactions
 
     fn report_bad_message(&self, peer_id: PeerId) {
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
@@ -388,6 +398,7 @@ where
 {
     type Output = ();
 
+    // ANCHOR: fn-poll
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -451,6 +462,7 @@ where
 
         Poll::Pending
     }
+    // ANCHOR_END: fn-poll
 }
 
 /// An inflight request for `PooledTransactions` from a peer

@@ -77,6 +77,7 @@ where
     C: BlockProvider + HeaderProvider,
 {
     /// Returns the list of requested heders
+    // ANCHOR:fn-get_headers_response
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
@@ -141,6 +142,7 @@ where
 
         headers
     }
+    // ANCHOR_END:fn-get_headers_response
 
     fn on_headers_request(
         &mut self,
@@ -152,6 +154,7 @@ where
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
 
+    // ANCHOR: fn-on_bodies_request
     fn on_bodies_request(
         &mut self,
         _peer_id: PeerId,
@@ -184,6 +187,7 @@ where
 
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
+    // ANCHOR_END: fn-on_bodies_request
 }
 
 /// An endless future.
@@ -195,6 +199,7 @@ where
 {
     type Output = ();
 
+    // ANCHOR: fn-poll
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -215,6 +220,7 @@ where
             }
         }
     }
+    // ANCHOR_END: fn-poll
 }
 
 /// Represents a handled [`GetBlockHeaders`] requests

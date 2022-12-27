@@ -81,6 +81,20 @@ While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`
 
 In the pipeline, the `NetworkHandle` is used to instantiate the `FetchClient` - which we'll get into next - and is used in the `HeaderStage` to update the node's ["status"](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#status-0x00) (record the the total difficulty, hash, and height of the last processed block).
 
+[File: crates/stages/src/stages/headers.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/headers.rs)
+```rust,no_run,no_playground
+async fn update_head<DB: Database>(
+    &self,
+    tx: &Transaction<'_, DB>,
+    height: BlockNumber,
+) -> Result<(), StageError> {
+    // --snip--
+    self.network_handle.update_status(height, block_key.hash(), td);
+    // --snip--
+
+}
+```
+
 Now that we have some understanding about the internals of the network management task, let's look at a higher-level abstraction that can be used to retrieve data from other peers: the `FetchClient`.
 
 ### Using `FetchClient` to Get Data in the Pipeline Stages
@@ -89,8 +103,7 @@ The `FetchClient` struct, similar to `NetworkHandle`, can be shared across threa
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/fetch/client.rs anchor=struct-FetchClient}}
 
-The `request_tx` field is a handle to a channel that can be used to send requests for downloading data, and 
-The `peers_handle` field is a wrapper struct around a handle to a channel that can be used to send messages for applying manual changes to the peer set.
+The `request_tx` field is a handle to a channel that can be used to send requests for downloading data, and the `peers_handle` field is a wrapper struct around a handle to a channel that can be used to send messages for applying manual changes to the peer set.
 
 #### Instantiating the `FetchClient`
 
@@ -116,11 +129,26 @@ In the pipeline used by the main Reth binary, the `HeaderStage` uses a `LinearDo
 
 A `FetchClient` is passed in to the `client` field, and the `get_headers` method it implements gets used when polling the stream created by the `LinearDownloader` in the `execute` method of the `HeaderStage`.
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/downloaders/src/headers/linear.rs anchor=fn-get_or_init_fut}}
+
 In the `BodyStage` configured by the main binary, a `ConcurrentDownloader` is used:
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/downloaders/src/bodies/concurrent.rs anchor=struct-ConcurrentDownloader}}
 
 Here, similarly, a `FetchClient` is passed in to the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `ConcurrentDownloader` in the `execute` method of the `BodyStage`.
+
+[File: crates/net/downloaders/src/bodies/concurrent.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/bodies/concurrent.rs)
+```rust,no_run,no_playground
+async fn fetch_bodies(
+    &self,
+    headers: Vec<&SealedHeader>,
+) -> DownloadResult<Vec<BlockResponse>> {
+    // --snip--
+    let (peer_id, bodies) =
+        self.client.get_block_bodies(headers_with_txs_and_ommers).await?.split();
+    // --snip--
+}
+```
 
 ---
 
@@ -144,17 +172,23 @@ As the `NetworkManager` is polled and listens for events from peers passed throu
 
 Being an endless future, the core of the ETH requests task's functionality is in its `poll` method implementation. As the `EthRequestHandler` is polled, it listens for any ETH requests coming through the channel, and handles them accordingly. At the time of writing, the ETH requests task can handle the [`GetBlockHeaders`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03) and [`GetBlockBodies`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockbodies-0x05) requests.
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/eth_requests.rs anchor=fn-poll}}
+
 The handling of these requests is fairly straightforward. The `GetBlockHeaders` payload is the following:
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/eth-wire/src/types/blocks.rs anchor=struct-GetBlockHeaders}}
 
 In handling this request, the ETH requests task attempts, starting with `start_block`, to fetch the associated header from the database, increment/decrement the block number to fetch by `skip` depending on the `direction` while checking for overflow/underflow, and checks that bounds specifying the maximum numbers of headers or bytes to send have not been breached.
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/eth_requests.rs anchor=fn-get_headers_response}}
+
 The `GetBlockBodies` payload is simpler, it just contains a vector of requested block hashes:
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/eth-wire/src/types/blocks.rs anchor=struct-GetBlockBodies}}
 
 In handling this request, similarly, the ETH requests task attempts, for each hash in the requested order, to fetch the block body (transactions & ommers), while checking that bounds specifying the maximum numbers of bodies or bytes to send have not been breached.
+
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/eth_requests.rs anchor=fn-on_bodies_request}}
 
 ---
 
@@ -186,6 +220,8 @@ Let's get a view into the transactionst task's operation by walking through the 
 The `poll` method lays out an order of operations for the transactions task. It begins by draining the `TransactionsManager.network_events`, `TransactionsManager.command_rx`, and `TransactionsManager.transaction_events` streams, in this order.
 Then, it checks on all the current `TransactionsManager.inflight_requests`, which are requests sent by the node to its peers for full transaction objects. After this, it checks on the status of completed `TransactionsManager.pool_imports` events, which are transactions that are being imported into the node's transaction pool. Finally, it drains the new `TransactionsManager.pending_transactions` events from the transaction pool.
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/transactions.rs anchor=fn-poll}}
+
 Let's go through the handling occurring during each of these steps, in order, starting with the draining of the `TransactionsManager.network_events` stream.
 
 #### Handling `NetworkEvent`s
@@ -214,6 +250,8 @@ The `request_tx` field on the `Peer` is used the sender end of a channel to send
 
 After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of the transactions in the node's transaction pool are sent to the peer in a [`NewPooledTransactionHashes` message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08).
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/transactions.rs anchor=fn-on_network_event}}
+
 #### Handling `TransactionsCommand`s
 
 Next in the `poll` method, `TransactionsCommand`s sent through the `TransactionsManager.command_rx` stream are handled. These are the next to be handled as they are those sent manually via the `TransactionsHandle`, giving them precedence over transactions-related requests picked up from the network. The `TransactionsCommand` enum has the following form:
@@ -223,6 +261,8 @@ Next in the `poll` method, `TransactionsCommand`s sent through the `Transactions
 `TransactionsCommand`s are handled by the `on_command` method. This method responds to the, at the time of writing, sole variant of the `TransactionsCommand` enum, `TransactionsCommand::PropagateHash`, with the `on_new_transactions` method, passing in an iterator consisting of the single hash contained by the variant (though this method can be called with many transaction hashes).
 
 `on_new_transactions` propagates the full transaction object, with the signer attached, to a small random sample of peers using the `propagate_transactions` method. Then, it notifies all other peers of the hash of the new transaction, so that they can request the full transaction object if they don't already have it.
+
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/transactions.rs anchor=fn-on_new_transactions-propagate_transactions}}
 
 #### Handling `NetworkTransactionEvent`s
 
@@ -244,6 +284,8 @@ To understand this a bit better, let's double back and examine what `Transaction
 
 `TransactionsManager.pool_imports` is a set of futures representing the transactions which are currently in the process of being imported to the node's transaction pool. This process is asynchronous due to the validation of the transaction that must occur, thus we need to keep a handle on the generated future.
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/transactions.rs anchor=fn-import_transactions}}
+
 **`NetworkTransactionEvent::IncomingPooledTransactionHashes`**
 
 This event is generated from the [`NewPooledTransactionHashes` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08), and is handled by the `on_new_pooled_transactions` method.
@@ -254,11 +296,15 @@ Here, it begins by adding the transaction hashes included in the `NewPooledTrans
 
 As you can see, this struct also contains a `response` channel from which the peer's response can later be polled.
 
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/transactions.rs anchor=fn-on_new_pooled_transactions}}
+
 **`NetworkTransactionEvent::GetPooledTransactions`**
 
 This event is generated from the [`GetPooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09), and is handled by the `on_get_pooled_transactions` method.
 
 Here, it collects _all_ the transactions in the node's transaction pool, recovers their signers, adds their hashes to the LRU cache of the requesting peer, and sends them to the peer in a [`PooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#pooledtransactions-0x0a). This is sent through the `response` channel that's stored as a field of the `NetworkTransaction::GetPooledTransactions` variant itself.
+
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/transactions.rs anchor=fn-on_get_pooled_transactions}}
 
 #### Checking on `inflight_requests`
 

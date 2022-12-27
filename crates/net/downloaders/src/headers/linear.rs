@@ -194,6 +194,7 @@ where
     }
 
     /// Get a current future or instantiate a new one
+    // ANCHOR: fn-get_or_init_fut
     fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
         match self.request.take() {
             None => {
@@ -214,6 +215,7 @@ where
             Some(fut) => fut,
         }
     }
+    // ANCHOR_END: fn-get_or_init_fut
 
     /// Tries to fuse the future with a new request.
     ///
