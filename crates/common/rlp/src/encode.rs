@@ -217,6 +217,17 @@ where
     }
 }
 
+use std::net::IpAddr;
+
+impl Encodable for IpAddr {
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self {
+            IpAddr::V4(ref o) => (&o.octets()[..]).encode(out),
+            IpAddr::V6(ref o) => (&o.octets()[..]).encode(out),
+        }
+    }
+}
+
 #[cfg(feature = "ethnum")]
 mod ethnum_support {
     use super::*;
