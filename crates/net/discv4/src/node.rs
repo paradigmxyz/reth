@@ -21,7 +21,7 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
 
 impl From<&NodeRecord> for NodeKey {
     fn from(node: &NodeRecord) -> Self {
-        NodeKey(node.id).into()
+        NodeKey(node.id)
     }
 }
 
