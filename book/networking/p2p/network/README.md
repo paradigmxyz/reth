@@ -208,12 +208,12 @@ Unlike the ETH requests task, but like the network management task's `NetworkHan
 ### Input Streams to the Transactions Task
 
 We'll touch on most of the fields in the `TransactionsManager` as the chapter continues, but some worth noting now are the 4 streams from which inputs to the task are fed:
-- `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consist soley of events related to transactions emitted by the network.
+- `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consist solely of events related to transactions emitted by the network.
 - `network_events`: A listener for `NetworkEvent`s sent from the `NetworkManager`, which consist of other "meta" events such as sessions with peers being established or closed.
 - `command_rx`: A listener for `TransactionsCommand`s sent from the `TransactionsHandle`
 - `pending`: A listener for new pending transactions added to the `TransactionPool`
 
-Let's get a view into the transactionst task's operation by walking through the `TransactionManager::poll` method.
+Let's get a view into the transactions task's operation by walking through the `TransactionManager::poll` method.
 
 ### The Operation of the Transactions Task
 
