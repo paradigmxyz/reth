@@ -31,13 +31,12 @@ tokio-stream = "0.1"
 
 # misc
 bytes = "1.2"
-generic-array = "0.14"
 tracing = "0.1"
 thiserror = "1.0"
-url = "2.3"
 hex = "0.4"
 public-ip = "0.2"
 rand = { version = "0.8", optional = true }
+generic-array = "0.14"
 
 [dev-dependencies]
 rand = "0.8"
