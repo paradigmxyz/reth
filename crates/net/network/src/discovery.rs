@@ -2,8 +2,8 @@
 
 use crate::error::NetworkError;
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, NodeRecord};
-use reth_primitives::{ForkId, PeerId};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},

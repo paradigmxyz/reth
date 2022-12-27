@@ -19,7 +19,6 @@
 //! [`DiscoveryUpdate`] that listeners will receive.
 use crate::{
     error::{DecodePacketError, Discv4Error},
-    node::{kad_key, NodeKey},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
 use bytes::{Bytes, BytesMut};
@@ -58,8 +57,12 @@ mod proto;
 
 mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};
+
 mod node;
-pub use node::NodeRecord;
+use node::{kad_key, NodeKey};
+
+// reexport NodeRecord primitive
+pub use reth_primitives::NodeRecord;
 
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
@@ -139,8 +142,8 @@ impl Discv4 {
     /// use std::str::FromStr;
     /// use rand::thread_rng;
     /// use secp256k1::SECP256K1;
-    /// use reth_primitives::PeerId;
-    /// use reth_discv4::{Discv4, Discv4Config, NodeRecord};
+    /// use reth_primitives::{NodeRecord, PeerId};
+    /// use reth_discv4::{Discv4, Discv4Config};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
     ///  let mut rng = thread_rng();
@@ -384,7 +387,7 @@ impl Discv4Service {
         tasks.spawn(async move { send_loop(udp, egress_rx).await });
 
         let kbuckets = KBucketsTable::new(
-            local_node_record.key(),
+            NodeKey::from(&local_node_record).into(),
             Duration::from_secs(60),
             MAX_NODES_PER_BUCKET,
             None,
@@ -1831,7 +1834,7 @@ mod tests {
     fn test_insert() {
         let local_node_record = rng_record(&mut rand::thread_rng());
         let mut kbuckets: KBucketsTable<NodeKey, NodeEntry> = KBucketsTable::new(
-            local_node_record.key(),
+            NodeKey::from(&local_node_record).into(),
             Duration::from_secs(60),
             MAX_NODES_PER_BUCKET,
             None,
