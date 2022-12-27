@@ -64,6 +64,11 @@ How the metrics are exposed to the end-user is determined by the CLI.
 - `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
 - `stages.headers.request_time`: Elapsed time of successful header requests
 
+#### Transaction Pool
+- `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
+- `transaction_pool.invalid_transactions`: Number of invalid transactions 
+- `transaction_pool.removed_transactions`: Number of removed transactions from the pool
+
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html
 [metrics.KeyName]: https://docs.rs/metrics/latest/metrics/struct.KeyName.html

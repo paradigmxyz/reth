@@ -3,6 +3,7 @@ use crate::{
     config::MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::PoolError,
     identifier::{SenderId, TransactionId},
+    metrics::TxPoolMetrics,
     pool::{
         best::BestTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
@@ -85,6 +86,8 @@ pub struct TxPool<T: TransactionOrdering> {
     basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
+    /// Transaction pool metrics
+    metrics: TxPoolMetrics,
 }
 
 // === impl TxPool ===
@@ -99,6 +102,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_pool: Default::default(),
             all_transactions: AllTransactions::new(config.max_account_slots),
             config,
+            metrics: Default::default(),
         }
     }
 
@@ -161,6 +165,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Remove all transaction that were included in the block
         for tx_hash in &event.mined_transactions {
             self.remove_transaction_by_hash(tx_hash);
+            // Update removed transactions metric
+            self.metrics.removed_transactions.increment(1);
         }
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
@@ -215,6 +221,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
+                // Update inserted transactions metric
+                self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
@@ -231,14 +239,23 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                 Ok(res)
             }
-            Err(InsertErr::Underpriced { existing, .. }) => {
-                Err(PoolError::ReplacementUnderpriced(existing))
-            }
-            Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap }) => {
-                Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
-            }
-            Err(InsertErr::ExceededSenderTransactionsCapacity { transaction }) => {
-                Err(PoolError::SpammerExceededCapacity(transaction.sender(), *transaction.hash()))
+            Err(e) => {
+                // Update invalid transactions metric
+                self.metrics.invalid_transactions.increment(1);
+                match e {
+                    InsertErr::Underpriced { existing, .. } => {
+                        Err(PoolError::ReplacementUnderpriced(existing))
+                    }
+                    InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap } => {
+                        Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
+                    }
+                    InsertErr::ExceededSenderTransactionsCapacity { transaction } => {
+                        Err(PoolError::SpammerExceededCapacity(
+                            transaction.sender(),
+                            *transaction.hash(),
+                        ))
+                    }
+                }
             }
         }
     }
