@@ -4,7 +4,7 @@ use reth_metrics_derive::Metrics;
 
 /// Stagedsync header metrics
 #[derive(Metrics)]
-#[metrics(scope = "stages.headers")]
+#[metrics(scope = "stages_headers")]
 pub struct HeaderMetrics {
     /// Number of headers successfully retrieved
     pub headers_counter: Counter,

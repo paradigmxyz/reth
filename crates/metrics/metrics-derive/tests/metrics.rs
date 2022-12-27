@@ -9,7 +9,7 @@ use serial_test::serial;
 
 #[allow(dead_code)]
 #[derive(Metrics)]
-#[metrics(scope = "metrics.custom")]
+#[metrics(scope = "metrics_custom")]
 struct CustomMetrics {
     /// A gauge with doc comment description.
     gauge: Gauge,
@@ -34,7 +34,7 @@ fn describe_metrics() {
 
     assert_eq!(RECORDER.metrics_len(), 4);
 
-    let gauge = RECORDER.get_metric("metrics.custom.gauge");
+    let gauge = RECORDER.get_metric("metrics_custom_gauge");
     assert!(gauge.is_some());
     assert_eq!(
         gauge.unwrap(),
@@ -44,7 +44,7 @@ fn describe_metrics() {
         }
     );
 
-    let second_gauge = RECORDER.get_metric("metrics.custom.second_gauge");
+    let second_gauge = RECORDER.get_metric("metrics_custom_second_gauge");
     assert!(second_gauge.is_some());
     assert_eq!(
         second_gauge.unwrap(),
@@ -54,7 +54,7 @@ fn describe_metrics() {
         }
     );
 
-    let counter = RECORDER.get_metric("metrics.custom.counter");
+    let counter = RECORDER.get_metric("metrics_custom_counter");
     assert!(counter.is_some());
     assert_eq!(
         counter.unwrap(),
@@ -66,7 +66,7 @@ fn describe_metrics() {
         }
     );
 
-    let histogram = RECORDER.get_metric("metrics.custom.histogram");
+    let histogram = RECORDER.get_metric("metrics_custom_histogram");
     assert!(histogram.is_some());
     assert_eq!(
         histogram.unwrap(),
@@ -88,19 +88,19 @@ fn register_metrics() {
 
     assert_eq!(RECORDER.metrics_len(), 4);
 
-    let gauge = RECORDER.get_metric("metrics.custom.gauge");
+    let gauge = RECORDER.get_metric("metrics_custom_gauge");
     assert!(gauge.is_some());
     assert_eq!(gauge.unwrap(), TestMetric { ty: TestMetricTy::Gauge, description: None });
 
-    let second_gauge = RECORDER.get_metric("metrics.custom.second_gauge");
+    let second_gauge = RECORDER.get_metric("metrics_custom_second_gauge");
     assert!(second_gauge.is_some());
     assert_eq!(second_gauge.unwrap(), TestMetric { ty: TestMetricTy::Gauge, description: None });
 
-    let counter = RECORDER.get_metric("metrics.custom.counter");
+    let counter = RECORDER.get_metric("metrics_custom_counter");
     assert!(counter.is_some());
     assert_eq!(counter.unwrap(), TestMetric { ty: TestMetricTy::Counter, description: None });
 
-    let histogram = RECORDER.get_metric("metrics.custom.histogram");
+    let histogram = RECORDER.get_metric("metrics_custom_histogram");
     assert!(histogram.is_some());
     assert_eq!(histogram.unwrap(), TestMetric { ty: TestMetricTy::Histogram, description: None });
 

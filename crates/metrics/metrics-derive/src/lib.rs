@@ -30,7 +30,7 @@ mod with_attrs;
 /// use metrics::{Counter, Gauge, Histogram};
 ///
 /// #[derive(Metrics)]
-/// #[metrics(scope = "metrics.custom")]
+/// #[metrics(scope = "metrics_custom")]
 /// struct CustomMetrics {
 ///     /// A gauge with doc comment description.
 ///     gauge: Gauge,
@@ -60,10 +60,10 @@ mod with_attrs;
 /// impl Default for CustomMetrics {
 ///     fn default() -> Self {
 ///         Self {
-///             gauge: metrics::register_gauge!("metrics.custom.gauge"),
-///             gauge2: metrics::register_gauge!("metrics.custom.second_gauge"),
-///             counter: metrics::register_counter!("metrics.custom.counter"),
-///             histo: metrics::register_histogram!("metrics.custom.histogram"),
+///             gauge: metrics::register_gauge!("metrics_custom_gauge"),
+///             gauge2: metrics::register_gauge!("metrics_custom_second_gauge"),
+///             counter: metrics::register_counter!("metrics_custom_counter"),
+///             histo: metrics::register_histogram!("metrics_custom_histogram"),
 ///         }
 ///     }
 /// }
@@ -77,10 +77,10 @@ mod with_attrs;
 /// impl CustomMetrics {
 ///     /// Describe all exposed metrics
 ///     pub fn describe() {
-///         metrics::describe_gauge!("metrics.custom.gauge", "A gauge with doc comment description.");
-///         metrics::describe_gauge!("metrics.custom.second_gauge", "A gauge with metric attribute description.");
-///         metrics::describe_counter!("metrics.custom.counter", "Metric attribute description will be preffered over doc comment.");
-///         metrics::describe_histogram!("metrics.custom.histogram", "A renamed histogram.");
+///         metrics::describe_gauge!("metrics_custom_gauge", "A gauge with doc comment description.");
+///         metrics::describe_gauge!("metrics_custom_second_gauge", "A gauge with metric attribute description.");
+///         metrics::describe_counter!("metrics_custom_counter", "Metric attribute description will be preffered over doc comment.");
+///         metrics::describe_histogram!("metrics_custom_histogram", "A renamed histogram.");
 ///     }
 /// }
 /// ```

@@ -1,10 +1,10 @@
-error: Either doc comment or `describe` must be provided.
+error: Either doc comment or `describe = ..` must be set.
   --> tests/compile-fail/metric_attr.rs:12:5
    |
 12 |     gauge: Gauge,
    |     ^^^^^^^^^^^^
 
-error: Either doc comment or `describe` must be provided.
+error: Either doc comment or `describe = ..` must be set.
   --> tests/compile-fail/metric_attr.rs:18:5
    |
 18 | /     #[metric()]
