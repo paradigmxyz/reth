@@ -35,27 +35,7 @@ Steps 5-6 are of interest to us as they consume items from the `network` crate:
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=bin/reth/src/node/mod.rs anchor=snippet-execute}}
 
-The variables `network` and `fetch_client` are of types `NetworkHandle` and `FetchClient`, respectively. These are the two main interfaces for interacting with the P2P network, and are currently used in the `HeaderStage` and `BodyStage`.
-
-Let's walk through how each is implemented, and then apply that knowledge to understand how they are used in the pipeline.
-
-### Interacting with the Network Management Task Using `NetworkHandle`
-
-The `NetworkHandle` struct is a client for the network management task that can be shared across threads. It wraps an `Arc` around the `NetworkInner` struct, defined as follows:
-
-{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/network.rs anchor=struct-NetworkInner}}
-
-The field of note here is `to_manager_tx`, which is a handle that can be used to send messages in a channel to an instance of the `NetworkManager` struct.
-
-{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/manager.rs anchor=struct-NetworkManager}}
-
-Now we're getting to the meat of the `network` crate! The `NetworkManager` struct represents the "Network Management" task described above. It is implemented as an endless [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html) that can be thought of as a "hub" process which listens for messages from the `NetworkHandle` or the node's peers and dispatches messages to the other tasks, while keeping track of the state of the network.
-
-While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`](https://docs.rs/tokio/0.2.4/tokio/task/index.html), the `NetworkHandle` can be passed around and shared, enabling access to the `NetworkManager` from anywhere by sending requests & commands through the appropriate channels.
-
-#### Instantiating the `NetworkHandle`
-
-Back in the `execute` method of the `"node"` CLI command, we saw the `NetworkHandle` get returned from a call to `start_network`. Sounds important, doesn't it?
+Let's begin by taking a look at the line where the network is started, with the call, unsurprisingly, to `start_network`. Sounds important, doesn't it?
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=bin/reth/src/node/mod.rs anchor=fn-start_network}}
 
@@ -73,9 +53,29 @@ The discovery task progresses as the network management task is polled, handling
 
 TODO: Go into more depth about `Swarm`?
 
+We'll touch more on the `NetworkManager` shortly! It's perhaps the most important struct in this crate.
+
 More information about the discovery task can be found in the [discv4](../discv4/README.md) chapter.
 
 The ETH requests and transactions task will be explained in their own sections, following this one.
+
+The variable `network` returned from `start_network` and the variable `fetch_client` returned from `network.fetch_client` are of types `NetworkHandle` and `FetchClient`, respectively. These are the two main interfaces for interacting with the P2P network, and are currently used in the `HeaderStage` and `BodyStage`.
+
+Let's walk through how each is implemented, and then apply that knowledge to understand how they are used in the pipeline. In doing so, we'll dig deeper under the hood inside the network management task to get a sense of what's going on.
+
+### Interacting with the Network Management Task Using `NetworkHandle`
+
+The `NetworkHandle` struct is a client for the network management task that can be shared across threads. It wraps an `Arc` around the `NetworkInner` struct, defined as follows:
+
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/network.rs anchor=struct-NetworkInner}}
+
+The field of note here is `to_manager_tx`, which is a handle that can be used to send messages in a channel to an instance of the `NetworkManager` struct.
+
+{{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/manager.rs anchor=struct-NetworkManager}}
+
+Now we're getting to the meat of the `network` crate! The `NetworkManager` struct represents the "Network Management" task described above. It is implemented as an endless [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html) that can be thought of as a "hub" process which listens for messages from the `NetworkHandle` or the node's peers and dispatches messages to the other tasks, while keeping track of the state of the network.
+
+While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`](https://docs.rs/tokio/0.2.4/tokio/task/index.html), the `NetworkHandle` can be passed around and shared, enabling access to the `NetworkManager` from anywhere by sending requests & commands through the appropriate channels.
 
 #### Usage of `NetworkHandle` in the Pipeline
 
