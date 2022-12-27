@@ -25,6 +25,9 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
 pub struct PeersHandle {
@@ -561,7 +564,7 @@ impl Default for PeersManager {
 }
 
 /// Tracks stats about connected nodes
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
     num_outbound: usize,
@@ -787,20 +790,28 @@ pub enum PeerAction {
 }
 
 /// Config type for initiating a [`PeersManager`] instance
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub refill_slots_interval: Duration,
     /// Restrictions on connections.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub connection_info: ConnectionInfo,
     /// How to weigh reputation changes.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub reputation_weights: ReputationChangeWeights,
     /// Restrictions on PeerIds and Ips.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
     /// How long to ban bad peers.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_duration: Duration,
     /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
     /// [`DisconnectReason::TooManyPeers`].
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub backoff_duration: Duration,
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,

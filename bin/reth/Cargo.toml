@@ -19,7 +19,7 @@ reth-consensus = { path = "../../crates/consensus", features = ["serde"] }
 reth-executor = { path = "../../crates/executor" }
 # reth-rpc = {path = "../../crates/net/rpc"}
 reth-rlp = { path = "../../crates/common/rlp" }
-reth-network = {path = "../../crates/net/network" }
+reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-downloaders = {path = "../../crates/net/downloaders" }
 
 # tracing
