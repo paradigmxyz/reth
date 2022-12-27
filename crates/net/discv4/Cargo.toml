@@ -36,6 +36,7 @@ thiserror = "1.0"
 hex = "0.4"
 public-ip = "0.2"
 rand = { version = "0.8", optional = true }
+generic-array = "0.14"
 
 [dev-dependencies]
 rand = "0.8"

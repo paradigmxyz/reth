@@ -29,7 +29,7 @@ use discv5::{
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{kad_key, ForkId, NodeKey, PeerId, H256};
+use reth_primitives::{ForkId, PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -57,6 +57,9 @@ mod proto;
 
 mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};
+
+mod node;
+use node::{kad_key, record_key, NodeKey};
 
 // reexport NodeRecord primitive
 pub use reth_primitives::NodeRecord;
@@ -384,7 +387,7 @@ impl Discv4Service {
         tasks.spawn(async move { send_loop(udp, egress_rx).await });
 
         let kbuckets = KBucketsTable::new(
-            local_node_record.key(),
+            record_key(&local_node_record),
             Duration::from_secs(60),
             MAX_NODES_PER_BUCKET,
             None,
@@ -1741,6 +1744,7 @@ mod tests {
     use crate::{
         bootnodes::mainnet_nodes,
         mock::{create_discv4, create_discv4_with_config, rng_record},
+        node::record_key,
     };
     use reth_primitives::{hex_literal::hex, ForkHash};
 
@@ -1831,7 +1835,7 @@ mod tests {
     fn test_insert() {
         let local_node_record = rng_record(&mut rand::thread_rng());
         let mut kbuckets: KBucketsTable<NodeKey, NodeEntry> = KBucketsTable::new(
-            local_node_record.key(),
+            record_key(&local_node_record),
             Duration::from_secs(60),
             MAX_NODES_PER_BUCKET,
             None,

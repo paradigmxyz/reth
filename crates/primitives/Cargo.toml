@@ -18,7 +18,6 @@ reth-rlp-derive = { path = "../common/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
 # ethereum
-discv5 = { git = "https://github.com/sigp/discv5" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
@@ -44,7 +43,6 @@ hex-literal = "0.3"
 modular-bitfield = "0.11.2"
 derive_more = "0.99"
 url = "2.3"
-generic-array = "0.14"
 
 # proof related
 triehash = "0.8"

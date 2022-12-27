@@ -1,6 +1,5 @@
-use crate::{keccak256, PeerId};
+use crate::PeerId;
 use bytes::{Buf, BufMut};
-use generic_array::GenericArray;
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
@@ -74,30 +73,6 @@ impl Decodable for Octets {
     }
 }
 
-/// The key type for the table.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct NodeKey(pub(crate) PeerId);
-
-impl From<PeerId> for NodeKey {
-    fn from(value: PeerId) -> Self {
-        NodeKey(value)
-    }
-}
-
-impl From<NodeKey> for discv5::Key<NodeKey> {
-    fn from(value: NodeKey) -> Self {
-        let hash = keccak256(value.0.as_bytes());
-        let hash = *GenericArray::from_slice(hash.as_bytes());
-        discv5::Key::new_raw(value, hash)
-    }
-}
-
-/// Converts a `PeerId` into the required `Key` type for the table
-#[inline]
-pub fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
-    discv5::kbucket::Key::from(NodeKey::from(node))
-}
-
 /// Represents a ENR in discv4.
 ///
 /// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
@@ -138,13 +113,6 @@ impl NodeRecord {
     #[must_use]
     pub fn udp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.udp_port)
-    }
-
-    /// Returns the key type for the kademlia table
-    #[must_use]
-    #[inline]
-    pub fn key(&self) -> discv5::Key<NodeKey> {
-        NodeKey(self.id).into()
     }
 }
 
