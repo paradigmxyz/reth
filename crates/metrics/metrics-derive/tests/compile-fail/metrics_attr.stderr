@@ -9,3 +9,64 @@ error: Duplicate `#[metrics(..)]` attribute provided.
    |
 11 | #[metrics()]
    | ^^^^^^^^^^^^
+
+error: `scope = ..` must be set.
+  --> tests/compile-fail/metrics_attr.rs:15:1
+   |
+15 | / #[metrics()]
+16 | | struct CustomMetrics3;
+   | |______________________^
+
+error: expected literal
+  --> tests/compile-fail/metrics_attr.rs:19:19
+   |
+19 | #[metrics(scope = value)]
+   |                   ^^^^^
+
+error: Value **must** be a string literal.
+  --> tests/compile-fail/metrics_attr.rs:23:19
+   |
+23 | #[metrics(scope = 123)]
+   |                   ^^^
+
+error: Value must match regex ^[a-zA-Z_:][a-zA-Z0-9_:]*$
+  --> tests/compile-fail/metrics_attr.rs:27:19
+   |
+27 | #[metrics(scope = "some.scope")]
+   |                   ^^^^^^^^^^^^
+
+error: Duplicate `scope` value provided.
+  --> tests/compile-fail/metrics_attr.rs:31:33
+   |
+31 | #[metrics(scope = "some_scope", scope = "another_scope")]
+   |                                 ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: expected literal
+  --> tests/compile-fail/metrics_attr.rs:35:23
+   |
+35 | #[metrics(separator = value)]
+   |                       ^^^^^
+
+error: Value **must** be a string literal.
+  --> tests/compile-fail/metrics_attr.rs:39:23
+   |
+39 | #[metrics(separator = 123)]
+   |                       ^^^
+
+error: Unsupported `separator` value. Supported: `:` and `_`.
+  --> tests/compile-fail/metrics_attr.rs:43:11
+   |
+43 | #[metrics(separator = ".")]
+   |           ^^^^^^^^^^^^^^^
+
+error: Duplicate `separator` value provided.
+  --> tests/compile-fail/metrics_attr.rs:47:28
+   |
+47 | #[metrics(separator = "_", separator = ":")]
+   |                            ^^^^^^^^^^^^^^^
+
+error: Unsupported attribute entry.
+  --> tests/compile-fail/metrics_attr.rs:51:11
+   |
+51 | #[metrics(random = "value")]
+   |           ^^^^^^^^^^^^^^^^

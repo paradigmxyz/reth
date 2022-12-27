@@ -3609,6 +3609,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
+ "regex",
  "serial_test",
  "syn",
  "trybuild",
