@@ -51,7 +51,7 @@ The discovery task progresses as the network management task is polled, handling
 
 {{#template ../../../templates/source_and_github.md path_to_root=../../../../ path=crates/net/network/src/swarm.rs anchor=struct-Swarm}}
 
-TODO: Go into more depth about `Swarm`?
+The `Swarm` struct glues together incoming connections from peers, managing sessions with peers, and recording the network's state (e.g. number of active peers, genesis hash of the network, etc.). It emits these as `SwarmEvent`s to the `NetworkManager`, and routes commands and events between the `SessionManager` and `NetworkState` structs that it holds.
 
 We'll touch more on the `NetworkManager` shortly! It's perhaps the most important struct in this crate.
 
@@ -82,7 +82,7 @@ While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`
 In the pipeline, the `NetworkHandle` is used to instantiate the `FetchClient` - which we'll get into next - and is used in the `HeaderStage` to update the node's ["status"](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#status-0x00) (record the the total difficulty, hash, and height of the last processed block).
 
 [File: crates/stages/src/stages/headers.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/headers.rs)
-```rust,no_run,no_playground
+```rust,ignore
 async fn update_head<DB: Database>(
     &self,
     tx: &Transaction<'_, DB>,
@@ -138,7 +138,7 @@ In the `BodyStage` configured by the main binary, a `ConcurrentDownloader` is us
 Here, similarly, a `FetchClient` is passed in to the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `ConcurrentDownloader` in the `execute` method of the `BodyStage`.
 
 [File: crates/net/downloaders/src/bodies/concurrent.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/bodies/concurrent.rs)
-```rust,no_run,no_playground
+```rust,ignore
 async fn fetch_bodies(
     &self,
     headers: Vec<&SealedHeader>,
@@ -244,8 +244,6 @@ Begins by inserting a `Peer` into `TransactionsManager.peers` by `peer_id`, whic
 
 Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of. 
 
-TODO: Is the cache actually _used_ anywhere? (I.e., is `contains` called anywhere on it?) I can't find any such cases...
-
 The `request_tx` field on the `Peer` is used the sender end of a channel to send requests to the session with the peer.
 
 After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of the transactions in the node's transaction pool are sent to the peer in a [`NewPooledTransactionHashes` message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08).
@@ -311,8 +309,6 @@ Here, it collects _all_ the transactions in the node's transaction pool, recover
 Once all the network activity is handled by draining `TransactionsManager.network_events`, `TransactionsManager.command_rx`, and `TransactionsManager.transaction_events` streams, the `poll` method moves on to checking the status of all `inflight_requests`.
 
 Here, for each in-flight request, `GetPooledTxRequest.response` field gets polled. If the request is still pending, it remains in the `TransactionsManager.inflight_requests` vector. If the request successfully received a `PooledTransactions` response from the peer, they get handled by the `import_transactions` method (described above). Otherwise, if there was some error in polling the response, we call `report_bad_message` (also described above) on the peer's ID.
-
-TODO: The way we iterate over `inflight_requests` (using `swap_remove` and `push`) doesn't preserve the order of pending requests - do we care?
 
 #### Checking on `pool_imports`
 
