@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -82,31 +82,32 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
         // The downloader returns the headers in descending order starting from the tip
         // down to the local head (latest block in db)
-        let downloaded_headers: Result<Vec<SealedHeader>, DownloadError> =
-            self.downloader.stream(head.clone(), tip).try_collect().await;
+        let downloaded_headers: Result<Vec<SealedHeader>, DownloadError> = self
+            .downloader
+            .stream(head.clone(), tip)
+            .take(self.commit_threshold as usize) // Only stream [self.commit_threshold] headers
+            .try_collect()
+            .await;
 
         match downloaded_headers {
             Ok(res) => {
                 info!(target: "sync::stages::headers", len = res.len(), "Received headers");
                 self.metrics.headers_counter.increment(res.len() as u64);
-                let max_received_block_number = res[0].number;
 
                 // Perform basic response validation
                 self.validate_header_response(&res)?;
 
-                // Write a maximum of `commit_threshold` headers, starting from local head onwards
-                let write_progress = self
-                    .write_headers::<DB>(tx, res, self.commit_threshold)
-                    .await?
-                    .unwrap_or_default();
+                // Write the headers to db
+                self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
 
-                // Update total difficulty values after headers have been inserted
-                debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
-                self.write_td::<DB>(tx, &head)?;
-
-                // If there are more headers left to write, return false
-                let done = write_progress == max_received_block_number;
-                return Ok(ExecOutput { stage_progress: write_progress, done })
+                if let Some(last_header_num) = self.has_reached_sync(tx, current_progress).await? {
+                    // Update total difficulty values after we have reached fork choice
+                    debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
+                    self.write_td::<DB>(tx, &head)?;
+                    return Ok(ExecOutput { stage_progress: last_header_num, done: true })
+                } else {
+                    return Ok(ExecOutput { stage_progress: current_progress, done: false })
+                }
             }
             Err(e) => {
                 self.metrics.update_headers_error_metrics(&e);
@@ -162,6 +163,41 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         Ok(())
     }
 
+    async fn has_reached_sync<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        stage_progress: u64,
+    ) -> Result<Option<u64>, StageError> {
+        let (head_num, head_hash) = tx
+            .cursor::<tables::CanonicalHeaders>()?
+            .seek_exact(stage_progress)?
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
+
+        let mut curr_num = head_num;
+        let mut curr_hash = head_hash;
+
+        // Walk over  inserted headers, and check for gaps
+        match tx.get_block_numhash(head_num + 1) {
+            Ok(start_key) => {
+                // TODO: Maybe we can merge this with write_td?
+                for entry in tx.cursor::<tables::Headers>()?.walk(start_key)? {
+                    let (key, next_header) = entry?;
+                    if key.0 .0 != (curr_num + 1) || (curr_hash != next_header.parent_hash) {
+                        return Ok(None)
+                    }
+                    curr_num = key.0 .0;
+                    curr_hash = key.0 .1;
+                }
+                let fork_choice_state =
+                    self.next_fork_choice_state(&head_hash).await.head_block_hash;
+                if fork_choice_state == curr_hash {
+                    return Ok(Some(curr_num))
+                }
+                Ok(None)
+            }
+            Err(_) => Ok(None),
+        }
+    }
     /// Get the head and tip of the range we need to sync
     async fn get_head_and_tip<DB: Database>(
         &self,
@@ -232,12 +268,10 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     }
 
     /// Write downloaded headers to the database
-    /// Only writes a max of `max_blocks_to_write` headers
     async fn write_headers<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
-        max_blocks_to_write: u64,
     ) -> Result<Option<BlockNumber>, StageError> {
         let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
         let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
@@ -245,7 +279,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         let mut latest = None;
         // Since the headers were returned in descending order,
         // iterate them in the reverse order
-        for header in headers.into_iter().rev().take(max_blocks_to_write as usize) {
+        for header in headers.into_iter().rev() {
             if header.number == 0 {
                 continue
             }
@@ -260,7 +294,6 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
             cursor_header.insert(key, header)?;
             cursor_canonical.insert(key.number(), key.hash())?;
         }
-
         Ok(latest)
     }
 
@@ -372,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn execute_with_linear_downloader() {
         let mut runner = HeadersTestRunner::with_linear_downloader();
-        let (stage_progress, previous_stage) = (200, 1200);
+        let (stage_progress, previous_stage) = (1000, 1200);
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -387,19 +420,7 @@ mod tests {
         runner.consensus.update_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        // First execution should return false, since we only commit 500 headers at a time
-        assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: sp }) if sp == stage_progress + 500);
-
-        // Next execution should complete the stage.
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress + 500),
-        };
-        let rx = runner.execute(input);
-        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
-
-        let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress: sp }) if sp == stage_progress + 1000);
+        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
