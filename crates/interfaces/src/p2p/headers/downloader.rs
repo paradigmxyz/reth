@@ -12,7 +12,6 @@ use reth_primitives::{SealedHeader, H256};
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
-// ANCHOR: trait-HeaderDownloader
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeaderDownloader: Downloader {
     /// Stream the headers
@@ -24,7 +23,6 @@ pub trait HeaderDownloader: Downloader {
         Ok(())
     }
 }
-// ANCHOR_END: trait-HeaderDownloader
 
 /// Validate whether the header is valid in relation to it's parent
 ///
