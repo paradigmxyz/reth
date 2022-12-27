@@ -13,66 +13,6 @@ use std::{
 };
 use url::{Host, Url};
 
-/// IpAddr octets
-#[derive(Debug, Copy, Clone)]
-pub enum Octets {
-    /// Ipv4 Octet variant
-    V4([u8; 4]),
-    /// Ipv6 Octet variant
-    V6([u8; 16]),
-}
-
-impl From<Octets> for IpAddr {
-    fn from(value: Octets) -> Self {
-        match value {
-            Octets::V4(o) => IpAddr::from(o),
-            Octets::V6(o) => {
-                let ipv6 = Ipv6Addr::from(o);
-                // If the ipv6 is ipv4 compatible/mapped, simply return the ipv4.
-                if let Some(ipv4) = ipv6.to_ipv4() {
-                    IpAddr::V4(ipv4)
-                } else {
-                    IpAddr::V6(ipv6)
-                }
-            }
-        }
-    }
-}
-
-impl Encodable for Octets {
-    fn encode(&self, out: &mut dyn BufMut) {
-        let octets = match self {
-            Octets::V4(ref o) => &o[..],
-            Octets::V6(ref o) => &o[..],
-        };
-        octets.encode(out)
-    }
-}
-
-impl Decodable for Octets {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let h = Header::decode(buf)?;
-        if h.list {
-            return Err(DecodeError::UnexpectedList)
-        }
-        let o = match h.payload_length {
-            4 => {
-                let mut to = [0_u8; 4];
-                to.copy_from_slice(&buf[..4]);
-                Octets::V4(to)
-            }
-            16 => {
-                let mut to = [0u8; 16];
-                to.copy_from_slice(&buf[..16]);
-                Octets::V6(to)
-            }
-            _ => return Err(DecodeError::UnexpectedLength),
-        };
-        buf.advance(h.payload_length);
-        Ok(o)
-    }
-}
-
 /// Represents a ENR in discv4.
 ///
 /// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
@@ -232,6 +172,66 @@ impl Decodable for NodeRecord {
         b.advance(rem);
         *buf = *b;
         Ok(this)
+    }
+}
+
+/// IpAddr octets
+#[derive(Debug, Copy, Clone)]
+pub enum Octets {
+    /// Ipv4 Octet variant
+    V4([u8; 4]),
+    /// Ipv6 Octet variant
+    V6([u8; 16]),
+}
+
+impl From<Octets> for IpAddr {
+    fn from(value: Octets) -> Self {
+        match value {
+            Octets::V4(o) => IpAddr::from(o),
+            Octets::V6(o) => {
+                let ipv6 = Ipv6Addr::from(o);
+                // If the ipv6 is ipv4 compatible/mapped, simply return the ipv4.
+                if let Some(ipv4) = ipv6.to_ipv4() {
+                    IpAddr::V4(ipv4)
+                } else {
+                    IpAddr::V6(ipv6)
+                }
+            }
+        }
+    }
+}
+
+impl Encodable for Octets {
+    fn encode(&self, out: &mut dyn BufMut) {
+        let octets = match self {
+            Octets::V4(ref o) => &o[..],
+            Octets::V6(ref o) => &o[..],
+        };
+        octets.encode(out)
+    }
+}
+
+impl Decodable for Octets {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let h = Header::decode(buf)?;
+        if h.list {
+            return Err(DecodeError::UnexpectedList)
+        }
+        let o = match h.payload_length {
+            4 => {
+                let mut to = [0_u8; 4];
+                to.copy_from_slice(&buf[..4]);
+                Octets::V4(to)
+            }
+            16 => {
+                let mut to = [0u8; 16];
+                to.copy_from_slice(&buf[..16]);
+                Octets::V6(to)
+            }
+            _ => return Err(DecodeError::UnexpectedLength),
+        };
+        buf.advance(h.payload_length);
+        Ok(o)
     }
 }
 
