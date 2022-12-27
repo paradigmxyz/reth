@@ -282,7 +282,7 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Sets the trusted nodes.
+    /// Sets the "connect to trusted nodes only" flag.
     pub fn set_connect_trusted_nodes_only(mut self, connect_trusted_nodes_only: bool) -> Self {
         self.connect_trusted_nodes_only = connect_trusted_nodes_only;
         self
