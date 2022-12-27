@@ -78,11 +78,6 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
                 return Err(Error::new_spanned(kv, "Duplicate `scope` value provided."))
             }
             let scope_lit = parse_str_lit(&kv.lit)?;
-            println!(
-                "validating scope {} {:?}",
-                scope_lit.value(),
-                validate_metric_name(&scope_lit)
-            );
             validate_metric_name(&scope_lit)?;
             scope = Some(scope_lit);
         } else if kv.path.is_ident("separator") {
