@@ -308,4 +308,28 @@ mod tests {
         let node: NodeRecord = url.parse().unwrap();
         assert_eq!(url, &format!("{node}"));
     }
+
+    #[test]
+    fn test_node_serialize() {
+        let node = NodeRecord{
+            address: IpAddr::V4([10, 3, 58, 6].into()),
+            tcp_port: 30303u16,
+            udp_port: 30301u16,
+            id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+        };
+        let ser = serde_json::to_string::<NodeRecord>(&node).expect("couldn't serialize");
+        assert_eq!(ser, "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"")
+    }
+
+    #[test]
+    fn test_node_deserialize() {
+        let url = "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"";
+        let node: NodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
+        assert_eq!(node, NodeRecord{
+            address: IpAddr::V4([10, 3, 58, 6].into()),
+            tcp_port: 30303u16,
+            udp_port: 30301u16,
+            id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+        })
+    }
 }
