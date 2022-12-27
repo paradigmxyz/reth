@@ -27,7 +27,7 @@ use tracing::{trace, warn};
 /// A swarm emits [`SwarmEvent`]s when polled.
 ///
 /// The manages the [`ConnectionListener`] and delegates new incoming connections to the
-/// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
+/// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
 /// Following diagram gives displays the dataflow contained in the [`Swarm`]
@@ -61,6 +61,7 @@ use tracing::{trace, warn};
 ///   fetchRequest --> |request Headers, Bodies| StateFetch
 ///   State --> |poll pending requests| StateFetch
 /// ```
+// ANCHOR: struct-Swarm
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
@@ -70,6 +71,7 @@ pub(crate) struct Swarm<C> {
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
 }
+// ANCHOR_END: struct-Swarm
 
 // === impl Swarm ===
 

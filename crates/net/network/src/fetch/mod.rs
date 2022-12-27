@@ -25,6 +25,7 @@ pub use client::FetchClient;
 /// peers and sends the response once ready.
 ///
 /// This type maintains a list of connected peers that are available for requests.
+// ANCHOR: struct-StateFetcher
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
     inflight_headers_requests:
@@ -43,6 +44,7 @@ pub struct StateFetcher {
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest>,
 }
+// ANCHOR_END: struct-StateFetcher
 
 // === impl StateSyncer ===
 

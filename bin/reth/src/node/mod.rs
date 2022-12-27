@@ -105,6 +105,7 @@ impl Command {
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         info!("Connecting to p2p");
+        // ANCHOR: snippet-execute
         let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
@@ -154,6 +155,7 @@ impl Command {
         // Run pipeline
         info!("Starting pipeline");
         pipeline.run(db.clone()).await?;
+        // ANCHOR_END: snippet-execute
 
         info!("Finishing up");
         Ok(())
@@ -222,6 +224,7 @@ fn network_config<DB: Database>(
 }
 
 /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
+// ANCHOR: fn-start_network
 async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
 where
     C: BlockProvider + HeaderProvider + 'static,
@@ -235,3 +238,4 @@ where
     tokio::task::spawn(eth);
     Ok(handle)
 }
+// ANCHOR_END: fn-start_network
