@@ -12,7 +12,7 @@
 //!
 //! This library exposes metrics via the [`metrics`][metrics_core] crate:
 //!
-//! - `stage.progress{stage}`: The block number each stage has currently reached.
+//! - `stage_progress{stage}`: The block number each stage has currently reached.
 
 mod db;
 mod error;
