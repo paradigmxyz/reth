@@ -138,6 +138,8 @@ where
     }
 
     /// Event hook for a disconnected session for the given peer.
+    ///
+    /// This will remove the peer from the available set of peers and close all inflight requests.
     pub(crate) fn on_session_closed(&mut self, peer: PeerId) {
         self.active_peers.remove(&peer);
         self.state_fetcher.on_session_closed(&peer);
@@ -298,11 +300,6 @@ where
         }
     }
 
-    /// Disconnect the session
-    fn on_session_disconnected(&mut self, peer: PeerId) {
-        self.active_peers.remove(&peer);
-    }
-
     /// Sends The message to the peer's session and queues in a response.
     ///
     /// Caution: this will replace an already pending response. It's the responsibility of the
@@ -377,7 +374,7 @@ where
             }
 
             // need to buffer results here to make borrow checker happy
-            let mut disconnect_sessions = Vec::new();
+            let mut closed_sessions = Vec::new();
             let mut received_responses = Vec::new();
 
             // poll all connected peers for responses
@@ -390,12 +387,16 @@ where
                                 error!(
                                     target : "net",
                                     ?id,
-                                    "Request canceled, response channel closed."
+                                    "Request canceled, response channel from session closed."
                                 );
-                                disconnect_sessions.push(*id);
+                                // if the channel is closed, this means the peer session is also
+                                // closed, in which case we can invoke the [Self::on_closed_session]
+                                // immediately, preventing followup requests and propagate the
+                                // connection dropped error
+                                closed_sessions.push(*id);
+                            } else {
+                                received_responses.push((*id, res));
                             }
-
-                            received_responses.push((*id, res));
                         }
                         Poll::Pending => {
                             // not ready yet, store again.
@@ -405,8 +406,8 @@ where
                 }
             }
 
-            for peer in disconnect_sessions {
-                self.on_session_disconnected(peer)
+            for peer in closed_sessions {
+                self.on_session_closed(peer)
             }
 
             for (peer_id, resp) in received_responses {
