@@ -3,7 +3,7 @@ use bytes::{Buf, BufMut};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
-use serde::{Deserialize, Serialize};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
     fmt::Write,
@@ -77,7 +77,7 @@ impl Decodable for Octets {
 ///
 /// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
 /// message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
 pub struct NodeRecord {
     /// The Address of a node.
     pub address: IpAddr,
