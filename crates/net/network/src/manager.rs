@@ -434,7 +434,7 @@ where
     }
 
     /// Handler for received messages from a handle
-    async fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
+    fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
         match msg {
             NetworkHandleMessage::EventListener(tx) => {
                 self.event_listeners.listeners.push(tx);
@@ -477,10 +477,10 @@ where
                 }
             }
             NetworkHandleMessage::GetPeerInfo(tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info().await);
+                let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
             }
 			NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
-				let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id).await);
+				let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
 			}
         }
     }

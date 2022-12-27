@@ -67,15 +67,15 @@ impl ActiveSessionHandle {
 #[allow(unused)]
 pub struct PeerInfo {
     /// Announced capabilities of the peer
-    pub capabilities: Arc<Capabilities>,
+    pub(crate) capabilities: Arc<Capabilities>,
     /// The identifier of the remote peer
-    pub remote_id: PeerId,
+    pub(crate) remote_id: PeerId,
     /// The client's name and version
-    pub client_version: String,
+    pub(crate) client_version: String,
     /// The address we're connected to
-    pub remote_addr: SocketAddr,
+    pub(crate) remote_addr: SocketAddr,
     /// The direction of the session
-    pub direction: Direction,
+    pub(crate) direction: Direction,
 }
 
 /// Events a pending session can produce.
@@ -95,6 +95,7 @@ pub(crate) enum PendingSessionEvent {
         status: Status,
         conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
         direction: Direction,
+		client_id: String,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
