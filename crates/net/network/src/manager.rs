@@ -79,6 +79,7 @@ use tracing::{error, info, trace, warn};
 ///   ethrequest <--> |ETH request handing| NetworkManager
 ///   discovery --> |Discovered peers| NetworkManager
 /// ```
+// ANCHOR: struct-NetworkManager
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
@@ -103,6 +104,7 @@ pub struct NetworkManager<C> {
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
 }
+// ANCHOR_END: struct-NetworkManager
 
 // === impl NetworkManager ===
 impl<C> NetworkManager<C> {
@@ -154,8 +156,8 @@ where
             ..
         } = config;
 
-        let peers_manger = PeersManager::new(peers_config);
-        let peers_handle = peers_manger.handle();
+        let peers_manager = PeersManager::new(peers_config);
+        let peers_handle = peers_manager.handle();
 
         let incoming = ConnectionListener::bind(listener_addr).await?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
@@ -176,7 +178,7 @@ where
             hello_message,
             fork_filter,
         );
-        let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
+        let state = NetworkState::new(client, discovery, peers_manager, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
 
@@ -670,6 +672,7 @@ where
 ///
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
+// ANCHOR: enum-NetworkEvent
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     /// Closed the peer session.
@@ -695,6 +698,7 @@ pub enum NetworkEvent {
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
 }
+// ANCHOR_END: enum-NetworkEvent
 
 /// Bundles all listeners for [`NetworkEvent`]s.
 #[derive(Default)]

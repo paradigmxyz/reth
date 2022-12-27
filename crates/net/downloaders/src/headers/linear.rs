@@ -21,6 +21,7 @@ use std::{
 };
 
 /// Download headers in batches
+// ANCHOR: struct-LinearDownloader
 #[derive(Debug)]
 pub struct LinearDownloader<C, H> {
     /// The consensus client
@@ -32,6 +33,7 @@ pub struct LinearDownloader<C, H> {
     /// The number of retries for downloading
     pub request_retries: usize,
 }
+// ANCHOR_END: struct-LinearDownloader
 
 impl<C, H> Downloader for LinearDownloader<C, H>
 where
@@ -192,6 +194,7 @@ where
     }
 
     /// Get a current future or instantiate a new one
+    // ANCHOR: fn-get_or_init_fut
     fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
         match self.request.take() {
             None => {
@@ -212,6 +215,7 @@ where
             Some(fut) => fut,
         }
     }
+    // ANCHOR_END: fn-get_or_init_fut
 
     /// Tries to fuse the future with a new request.
     ///
