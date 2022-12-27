@@ -41,10 +41,10 @@ pub trait TransactionValidator: Send + Sync + 'static {
     /// Implementers of this trait must ensure that the transaction is correct, i.e. that it
     /// complies with at least all static constraints, which includes checking for:
     ///
-    ///     * chain id
-    ///     * gas limit
-    ///     * max cost
-    ///     * nonce >= next nonce of the sender
+    ///    * chain id
+    ///    * gas limit
+    ///    * max cost
+    ///    * nonce >= next nonce of the sender
     ///
     /// The transaction pool makes no assumptions about the validity of the transaction at the time
     /// of this call before it inserts it. However, the validity of this transaction is still

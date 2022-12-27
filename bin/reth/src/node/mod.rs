@@ -17,6 +17,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_downloaders::{bodies, headers};
+use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{
     config::{mainnet_nodes, parse_nodes, rng_secret_key},
@@ -26,9 +27,11 @@ use reth_network::{
 use reth_primitives::{Account, Header, H256};
 use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::{
-    stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
-    stages_metrics::HeaderMetrics,
-    stages_metrics_describer,
+    metrics::HeaderMetrics,
+    stages::{
+        bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
+        sender_recovery::SenderRecoveryStage,
+    },
 };
 use std::{net::SocketAddr, path::Path, sync::Arc};
 use tracing::{debug, info};
@@ -94,7 +97,7 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!("Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
-            stages_metrics_describer::describe();
+            HeaderMetrics::describe();
         }
 
         let chain_id = self.chain.consensus.chain_id;
@@ -137,7 +140,8 @@ impl Command {
             .push(SenderRecoveryStage {
                 batch_size: config.stages.sender_recovery.batch_size,
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
-            });
+            })
+            .push(ExecutionStage { config: ExecutorConfig::new_ethereum() });
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);

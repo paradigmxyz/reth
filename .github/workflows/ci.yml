@@ -55,6 +55,35 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           flags: unit-tests
+  eth-blockchain:
+    name: Ethereum blockchain Tests (Stable)
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error 
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Checkout ethereum/tests
+        uses: actions/checkout@v2
+        with:
+          repository: ethereum/tests
+          path: ethtests
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Run Ethereum tests
+        run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
 
   fuzz:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will

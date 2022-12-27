@@ -5,8 +5,8 @@ use crate::{
     peers::PeersConfig,
     session::SessionsConfig,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, ForkFilter, Hardfork, PeerId, H256, MAINNET_GENESIS};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_primitives::{Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{

@@ -2,6 +2,7 @@
 
 use crate::util;
 use clap::Parser;
+use eyre::eyre;
 use std::path::PathBuf;
 use tracing::{error, info};
 /// Models for parsing JSON blockchain tests
@@ -45,6 +46,10 @@ impl Command {
 
         info!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
 
-        Ok(())
+        if num_of_failed != 0 {
+            Err(eyre!("Failed {num_of_failed} tests"))
+        } else {
+            Ok(())
+        }
     }
 }

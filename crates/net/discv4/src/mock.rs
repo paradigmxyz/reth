@@ -3,13 +3,12 @@
 #![allow(missing_docs, unused)]
 
 use crate::{
-    node::NodeRecord,
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex_literal::hex, ForkHash, ForkId, H256};
+use reth_primitives::{hex_literal::hex, ForkHash, ForkId, NodeRecord, H256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},

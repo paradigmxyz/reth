@@ -1,16 +1,16 @@
 #![allow(missing_docs)]
 
-use crate::{error::DecodePacketError, node::NodeRecord, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{error::DecodePacketError, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enr::Enr;
-use reth_primitives::{keccak256, ForkId, H256};
+use reth_primitives::{keccak256, ForkId, NodeRecord, Octets, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     SecretKey, SECP256K1,
 };
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::IpAddr;
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
@@ -456,64 +456,6 @@ impl Decodable for Pong {
         *buf = *b;
 
         Ok(this)
-    }
-}
-
-/// IpAddr octets
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Octets {
-    V4([u8; 4]),
-    V6([u8; 16]),
-}
-
-impl From<Octets> for IpAddr {
-    fn from(value: Octets) -> Self {
-        match value {
-            Octets::V4(o) => IpAddr::from(o),
-            Octets::V6(o) => {
-                let ipv6 = Ipv6Addr::from(o);
-                // If the ipv6 is ipv4 compatible/mapped, simply return the ipv4.
-                if let Some(ipv4) = ipv6.to_ipv4() {
-                    IpAddr::V4(ipv4)
-                } else {
-                    IpAddr::V6(ipv6)
-                }
-            }
-        }
-    }
-}
-
-impl Encodable for Octets {
-    fn encode(&self, out: &mut dyn BufMut) {
-        let octets = match self {
-            Octets::V4(ref o) => &o[..],
-            Octets::V6(ref o) => &o[..],
-        };
-        octets.encode(out)
-    }
-}
-
-impl Decodable for Octets {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let h = Header::decode(buf)?;
-        if h.list {
-            return Err(DecodeError::UnexpectedList)
-        }
-        let o = match h.payload_length {
-            4 => {
-                let mut to = [0_u8; 4];
-                to.copy_from_slice(&buf[..4]);
-                Octets::V4(to)
-            }
-            16 => {
-                let mut to = [0u8; 16];
-                to.copy_from_slice(&buf[..16]);
-                Octets::V6(to)
-            }
-            _ => return Err(DecodeError::UnexpectedLength),
-        };
-        buf.advance(h.payload_length);
-        Ok(o)
     }
 }
 

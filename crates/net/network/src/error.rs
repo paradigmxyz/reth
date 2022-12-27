@@ -2,7 +2,7 @@
 
 use crate::session::PendingSessionHandshakeError;
 use reth_eth_wire::{
-    error::{EthStreamError, HandshakeError, P2PHandshakeError, P2PStreamError},
+    errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
 use std::fmt;
@@ -48,7 +48,7 @@ impl SessionError for EthStreamError {
             EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
                 P2PHandshakeError::NonHelloMessageInHandshake,
             )) => true,
-            EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
+            EthStreamError::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
             _ => false,
         }
     }
@@ -83,7 +83,7 @@ impl SessionError for EthStreamError {
                         P2PStreamError::MismatchedProtocolVersion { .. }
                 )
             }
-            EthStreamError::HandshakeError(err) => !matches!(err, HandshakeError::NoResponse),
+            EthStreamError::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
             _ => false,
         }
     }
@@ -91,9 +91,10 @@ impl SessionError for EthStreamError {
     fn should_backoff(&self) -> bool {
         matches!(
             self,
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
-                P2PHandshakeError::NoResponse
-            ))
+            EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse) |
+                EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+                    P2PHandshakeError::NoResponse
+                ))
         ) || self
             .as_disconnected()
             .map(|reason| {
