@@ -19,14 +19,14 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
     }
 }
 
+impl From<&NodeRecord> for NodeKey {
+    fn from(node: &NodeRecord) -> Self {
+        NodeKey(node.id).into()
+    }
+}
+
 /// Converts a `PeerId` into the required `Key` type for the table
 #[inline]
 pub(crate) fn kad_key(node: PeerId) -> discv5::Key<NodeKey> {
     discv5::kbucket::Key::from(NodeKey::from(node))
-}
-
-/// Returns the key type for the kademlia table
-#[inline]
-pub(crate) fn record_key(node: &NodeRecord) -> discv5::Key<NodeKey> {
-    NodeKey(node.id).into()
 }
