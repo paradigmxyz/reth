@@ -1,4 +1,5 @@
 //! Configuration files.
+use reth_primitives::NodeRecord;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
@@ -85,7 +86,7 @@ impl Default for SenderRecoveryConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PeersConfig {
     /// Trusted nodes to connect to.
-    pub trusted_nodes: Vec<String>,
+    pub trusted_nodes: Vec<NodeRecord>,
     /// Connect to trusted nodes only?
     pub connect_trusted_nodes_only: bool,
 }
