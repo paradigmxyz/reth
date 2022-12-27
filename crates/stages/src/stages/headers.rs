@@ -100,13 +100,19 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                 // Write the headers to db
                 self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
 
-                if let Some(last_header_num) = self.has_reached_sync(tx, current_progress).await? {
+                if self.is_stage_done(tx, current_progress).await? {
                     // Update total difficulty values after we have reached fork choice
                     debug!(target: "sync::stages::headers", head = ?head.hash(), "Writing total difficulty");
                     self.write_td::<DB>(tx, &head)?;
-                    return Ok(ExecOutput { stage_progress: last_header_num, done: true })
+                    let stage_progress = current_progress.max(
+                        tx.cursor::<tables::CanonicalHeaders>()?
+                            .last()?
+                            .map(|(num, _)| num)
+                            .unwrap_or_default(),
+                    );
+                    Ok(ExecOutput { stage_progress, done: true })
                 } else {
-                    return Ok(ExecOutput { stage_progress: current_progress, done: false })
+                    Ok(ExecOutput { stage_progress: current_progress, done: false })
                 }
             }
             Err(e) => {
@@ -126,7 +132,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
                     }
                 }
             }
-        };
+        }
     }
 
     /// Unwind the stage.
@@ -163,41 +169,19 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         Ok(())
     }
 
-    async fn has_reached_sync<DB: Database>(
+    async fn is_stage_done<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
-    ) -> Result<Option<u64>, StageError> {
-        let (head_num, head_hash) = tx
-            .cursor::<tables::CanonicalHeaders>()?
+    ) -> Result<bool, StageError> {
+        let mut header_cursor = tx.cursor::<tables::CanonicalHeaders>()?;
+        let (head_num, _) = header_cursor
             .seek_exact(stage_progress)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
-
-        let mut curr_num = head_num;
-        let mut curr_hash = head_hash;
-
-        // Walk over  inserted headers, and check for gaps
-        match tx.get_block_numhash(head_num + 1) {
-            Ok(start_key) => {
-                // TODO: Maybe we can merge this with write_td?
-                for entry in tx.cursor::<tables::Headers>()?.walk(start_key)? {
-                    let (key, next_header) = entry?;
-                    if key.0 .0 != (curr_num + 1) || (curr_hash != next_header.parent_hash) {
-                        return Ok(None)
-                    }
-                    curr_num = key.0 .0;
-                    curr_hash = key.0 .1;
-                }
-                let fork_choice_state =
-                    self.next_fork_choice_state(&head_hash).await.head_block_hash;
-                if fork_choice_state == curr_hash {
-                    return Ok(Some(curr_num))
-                }
-                Ok(None)
-            }
-            Err(_) => Ok(None),
-        }
+        // Check if the next entry is congruent
+        Ok(header_cursor.next()?.map(|(next_num, _)| head_num + 1 == next_num).unwrap_or_default())
     }
+
     /// Get the head and tip of the range we need to sync
     async fn get_head_and_tip<DB: Database>(
         &self,
