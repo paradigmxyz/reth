@@ -15,7 +15,6 @@ use reth_primitives::{PeerId, WithPeerId, H256};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Front-end API for fetching data from the network.
-// ANCHOR: struct-FetchClient
 #[derive(Debug)]
 pub struct FetchClient {
     /// Sender half of the request channel.
@@ -23,7 +22,6 @@ pub struct FetchClient {
     /// The handle to the peers
     pub(crate) peers_handle: PeersHandle,
 }
-// ANCHOR_END: struct-FetchClient
 
 impl DownloadClient for FetchClient {
     fn report_bad_message(&self, peer_id: PeerId) {
@@ -31,7 +29,6 @@ impl DownloadClient for FetchClient {
     }
 }
 
-// ANCHOR: trait-HeadersClient-BodiesClient
 #[async_trait::async_trait]
 impl HeadersClient for FetchClient {
     /// Sends a `GetBlockHeaders` request to an available peer.
@@ -50,4 +47,3 @@ impl BodiesClient for FetchClient {
         rx.await?
     }
 }
-// ANCHOR_END: trait-HeadersClient-BodiesClient

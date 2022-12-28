@@ -122,8 +122,6 @@ pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
         self.s.to_big_endian(&mut sig[32..64]);
         sig[64] = self.odd_y_parity as u8;
 
-        // NOTE: we are removing error from underlying crypto library as it will restrain primitive
-        // errors and we care only if recovery is passing or not.
         secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
     }
 ```

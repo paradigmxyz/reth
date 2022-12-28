@@ -30,7 +30,6 @@ pub fn rng_secret_key() -> SecretKey {
 }
 
 /// All network related initialization settings.
-// ANCHOR: struct-NetworkConfig
 pub struct NetworkConfig<C> {
     /// The client type that can interact with the chain.
     pub client: Arc<C>,
@@ -70,7 +69,6 @@ pub struct NetworkConfig<C> {
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
 }
-// ANCHOR_END: struct-NetworkConfig
 
 // === impl NetworkConfig ===
 
