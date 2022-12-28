@@ -4,10 +4,12 @@ use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::Address,
-    utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
+    types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest},
+    utils::{ChainConfig, Genesis, GenesisAccount, Geth},
 };
+use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Http, Middleware, Provider};
+use ethers_signers::{LocalWallet, Signer};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::DisconnectReason;
@@ -40,13 +42,12 @@ fn enr_to_peer_id(enr: Enr<SigningKey>) -> PeerId {
     enr.public_key().encode_uncompressed().into()
 }
 
-/// Creates a new Geth, using the provided genesis config, with an unused p2p port and temporary
-/// data dir.
+/// Creates a new Geth with an unused p2p port and temporary data dir.
 ///
 /// Returns the new Geth and the temporary directory.
-fn create_new_geth(config: Genesis) -> (Geth, tempfile::TempDir) {
+fn create_new_geth() -> (Geth, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let geth = Geth::new().data_dir(temp_dir.path()).p2p_port(unused_port()).genesis(config);
+    let geth = Geth::new().data_dir(temp_dir.path()).p2p_port(unused_port());
 
     (geth, temp_dir)
 }
@@ -83,19 +84,20 @@ fn unused_tcp_udp() -> (SocketAddr, SocketAddr) {
     (tcp_addr, udp_addr)
 }
 
-/// Creates a chain config with Clique, using the given chain id and setting the provided address
-/// as the single clique singer. Funds the given address with max coins.
-fn clique_genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
-    let config = ChainConfig {
-        chain_id,
-        clique: Some(CliqueConfig { period: 1, epoch: 30000 }),
-        ..Default::default()
-    };
+/// Creates a chain config using the given chain id.
+/// Funds the given address with max coins.
+fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
+    let config = ChainConfig { chain_id, ..Default::default() };
 
     let mut alloc = HashMap::new();
     alloc.insert(
         signer_addr,
-        GenesisAccount { balance: ethers_core::types::U256::MAX, ..Default::default() },
+        GenesisAccount {
+            balance: ethers_core::types::U256::MAX,
+            nonce: None,
+            code: None,
+            storage: None,
+        },
     );
 
     Genesis {
@@ -597,5 +599,121 @@ async fn test_geth_disconnect() {
 #[serial_test::serial]
 async fn sync_from_clique_geth() {
     reth_tracing::init_tracing();
-    tokio::time::timeout(GETH_TIMEOUT, async move {}).await.unwrap();
+    tokio::time::timeout(GETH_TIMEOUT, async move {
+        // first create a signer that we will fund so we can make transactions
+        let chain_id = 1337u64;
+        let wallet = LocalWallet::new(&mut rand::thread_rng()).with_chain_id(chain_id);
+        let our_address = wallet.address();
+
+        let (geth, data_dir) = create_new_geth();
+
+        // print datadir for debugging
+        println!("geth datadir: {:?}", data_dir);
+
+        // === fund wallet ===
+
+        // create a pre-funded geth
+        let genesis = genesis_funded(chain_id, wallet.address());
+        let geth = geth.genesis(genesis).chain_id(chain_id);
+
+        // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
+        // we need to clone it because we will be reusing the geth config when we restart p2p
+        let instance = geth.clone().spawn();
+
+        // set up ethers provider
+        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), instance.port()).to_string();
+        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider =
+            SignerMiddleware::new_with_provider_chain(provider, wallet.clone()).await.unwrap();
+
+        // === produce blocks ===
+
+        // first get the balance and make sure its not zero
+        let balance = provider.get_balance(our_address, None).await.unwrap();
+        assert_ne!(balance, 0u64.into());
+
+        // check the chain id (for debugging)
+        let other_chain_id = provider.get_chainid().await.unwrap();
+
+        println!("chain id: {:?}", other_chain_id);
+        println!("balance: {:?}", balance);
+
+        // TODO: this doesn't work due to invalid sender - why?
+        // when this works change the max nonce to something higher
+        for nonce in 0u64..1 {
+            // create transactions to send to geth
+            let _tx: TypedTransaction = TransactionRequest::new()
+                .to(ethers_core::types::H160::zero())
+                .value(ethers_core::types::U256::from(1u64))
+                .nonce(nonce)
+                .chain_id(chain_id)
+                .into();
+
+            // let's use the signer middleware
+            // TODO: re-add
+            // let pending_tx = provider.send_transaction(tx, None).await.unwrap();
+            // println!("pending tx: {:?}", pending_tx);
+        }
+
+        // get block
+        let block = provider.get_block_number().await.unwrap();
+        println!("block: {}", block);
+        // assert!(block > 0.into());
+
+        // === restart geth with p2p ===
+
+        // drop geth and restart with p2p
+        drop(instance);
+        let geth = geth.disable_discovery();
+        let instance = geth.spawn();
+
+        // TODO: start rest of reth - so we can test syncing
+        // can we make better test utils to simplify some of the initialization code?
+        // and reduce some of the reuse?
+        // TODO: gather genesis information for the test chain to populate a status
+
+        // === network ===
+
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let (reth_p2p, reth_disc) = unused_tcp_udp();
+        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+            .listener_addr(reth_p2p)
+            .discovery_addr(reth_disc)
+            .build();
+        let network = NetworkManager::new(config).await.unwrap();
+
+        let handle = network.handle().clone();
+        tokio::task::spawn(network);
+
+        // create networkeventstream to get the next session established event easily
+        let mut events = handle.event_listener();
+        let geth_p2p_port = instance.p2p_port().unwrap();
+        let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
+
+        // we need to reinitialize the provider because the rpc port may have changed
+        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), instance.port()).to_string();
+        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+
+        // === ensure p2p is active ===
+
+        // get the peer id we should be expecting
+        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+
+        // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
+        handle.add_peer(geth_peer_id, geth_socket);
+
+        match events.next().await {
+            Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
+            _ => panic!("Expected a peer added event"),
+        }
+
+        if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
+            assert_eq!(peer_id, geth_peer_id);
+        } else {
+            panic!("Expected a session established event");
+        }
+    })
+    .await
+    .unwrap();
 }

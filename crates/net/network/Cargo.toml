@@ -70,6 +70,8 @@ reth-transaction-pool = { path = "../../transaction-pool", features = ["test-uti
 
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-middleware = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 
 enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"] }
 
