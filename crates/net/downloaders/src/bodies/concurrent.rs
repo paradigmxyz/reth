@@ -17,7 +17,6 @@ use std::{borrow::Borrow, sync::Arc};
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
-// ANCHOR: struct-ConcurrentDownloader
 #[derive(Debug)]
 pub struct ConcurrentDownloader<Client, Consensus> {
     /// The bodies client
@@ -31,7 +30,6 @@ pub struct ConcurrentDownloader<Client, Consensus> {
     /// The maximum number of requests to send concurrently.
     concurrency: usize,
 }
-// ANCHOR_END: struct-ConcurrentDownloader
 
 impl<Client, Consensus> Downloader for ConcurrentDownloader<Client, Consensus>
 where

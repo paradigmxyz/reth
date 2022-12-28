@@ -38,12 +38,10 @@ const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
-// ANCHOR: struct-TransactionsHandle
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
 }
-// ANCHOR_END: struct-TransactionsHandle
 
 // === impl TransactionsHandle ===
 
@@ -74,7 +72,6 @@ impl TransactionsHandle {
 ///
 /// It is directly connected to the [`TransactionPool`] to retrieve requested transactions and
 /// propagate new transactions over the network.
-// ANCHOR: struct-TransactionsManager
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<Pool> {
     /// Access to the transaction pool.
@@ -105,7 +102,6 @@ pub struct TransactionsManager<Pool> {
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
 }
-// ANCHOR_END: struct-TransactionsManager
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
     /// Sets up a new instance.
@@ -151,7 +147,6 @@ where
     }
 
     /// Request handler for an incoming request for transactions
-    // ANCHOR: fn-on_get_pooled_transactions
     fn on_get_pooled_transactions(
         &mut self,
         peer_id: PeerId,
@@ -173,7 +168,6 @@ where
             let _ = response.send(Ok(resp));
         }
     }
-    // ANCHOR_END: fn-on_get_pooled_transactions
 
     /// Invoked when a new transaction is pending.
     ///
@@ -186,7 +180,6 @@ where
     /// complete transaction object if it is unknown to them. The dissemination of complete
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
-    // ANCHOR: fn-on_new_transactions-propagate_transactions
     fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
         trace!(target: "net::tx", "Start propagating transactions");
 
@@ -239,10 +232,8 @@ where
 
         propagated
     }
-    // ANCHOR_END: fn-on_new_transactions-propagate_transactions
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
-    // ANCHOR: fn-on_new_pooled_transactions
     fn on_new_pooled_transactions(&mut self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let mut transactions = msg.0;
@@ -269,7 +260,6 @@ where
             }
         }
     }
-    // ANCHOR_END: fn-on_new_pooled_transactions
 
     /// Handles dedicated transaction events related tot the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
@@ -296,7 +286,6 @@ where
     }
 
     /// Handles a received event related to common network events.
-    // ANCHOR: fn-on_network_event
     fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::SessionClosed { peer_id, .. } => {
@@ -327,10 +316,8 @@ where
             _ => {}
         }
     }
-    // ANCHOR_END: fn-on_network_event
 
     /// Starts the import process for the given transactions.
-    // ANCHOR: fn-import_transactions
     fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<TransactionSigned>) {
         let mut has_bad_transactions = false;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -371,7 +358,6 @@ where
             self.report_bad_message(peer_id);
         }
     }
-    // ANCHOR_END: fn-import_transactions
 
     fn report_bad_message(&self, peer_id: PeerId) {
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
@@ -400,7 +386,6 @@ where
 {
     type Output = ();
 
-    // ANCHOR: fn-poll
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -464,39 +449,31 @@ where
 
         Poll::Pending
     }
-    // ANCHOR_END: fn-poll
 }
 
 /// An inflight request for `PooledTransactions` from a peer
 #[allow(missing_docs)]
-// ANCHOR: struct-GetPooledTxRequest
 struct GetPooledTxRequest {
     peer_id: PeerId,
     response: oneshot::Receiver<RequestResult<PooledTransactions>>,
 }
-// ANCHOR_END: struct-GetPooledTxRequest
 
 /// Tracks a single peer
-// ANCHOR: struct-Peer
 struct Peer {
     /// Keeps track of transactions that we know the peer has seen.
     transactions: LruCache<H256>,
     /// A communication channel directly to the session task.
     request_tx: PeerRequestSender,
 }
-// ANCHOR_END: struct-Peer
 
 /// Commands to send to the [`TransactionManager`]
-// ANCHOR: enum-TransactionsCommand
 enum TransactionsCommand {
     PropagateHash(H256),
 }
-// ANCHOR_END: enum-TransactionsCommand
 
 /// All events related to transactions emitted by the network.
 #[derive(Debug)]
 #[allow(missing_docs)]
-// ANCHOR: enum-NetworkTransactionEvent
 pub enum NetworkTransactionEvent {
     /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
@@ -509,4 +486,3 @@ pub enum NetworkTransactionEvent {
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
 }
-// ANCHOR_END: enum-NetworkTransactionEvent
