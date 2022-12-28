@@ -21,6 +21,7 @@ igd = { git = "https://github.com/stevefan1999-personal/rust-igd", features = [
 # misc
 tracing = "0.1"
 pin-project-lite = "0.2.9"
+tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
