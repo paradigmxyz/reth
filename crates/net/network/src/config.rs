@@ -38,10 +38,6 @@ pub struct NetworkConfig<C> {
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
     pub boot_nodes: HashSet<NodeRecord>,
-    /// Nodes to always connect to.
-    pub trusted_nodes: HashSet<NodeRecord>,
-    /// If true, the node will connect only to trusted peers.
-    pub connect_trusted_nodes_only: bool,
     /// How to set up discovery.
     pub discovery_v4_config: Discv4Config,
     /// Address to use for discovery
@@ -112,10 +108,6 @@ pub struct NetworkConfigBuilder<C> {
     discovery_v4_builder: Discv4ConfigBuilder,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
-    /// Nodes we always want to connect to.
-    trusted_nodes: HashSet<NodeRecord>,
-    /// If we should connect to trusted nodes only.
-    connect_trusted_nodes_only: bool,
     /// Address to use for discovery
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
@@ -154,8 +146,6 @@ impl<C> NetworkConfigBuilder<C> {
             secret_key,
             discovery_v4_builder: Default::default(),
             boot_nodes: Default::default(),
-            trusted_nodes: Default::default(),
-            connect_trusted_nodes_only: false,
             discovery_addr: None,
             listener_addr: None,
             peers_config: None,
@@ -270,24 +260,6 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Add a trusted node.
-    pub fn add_trusted_node(mut self, node: NodeRecord) -> Self {
-        self.trusted_nodes.insert(node);
-        self
-    }
-
-    /// Adds multiple trusted nodes.
-    pub fn add_trusted_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
-        self.trusted_nodes.extend(nodes);
-        self
-    }
-
-    /// Sets the "connect to trusted nodes only" flag.
-    pub fn set_connect_trusted_nodes_only(mut self, connect_trusted_nodes_only: bool) -> Self {
-        self.connect_trusted_nodes_only = connect_trusted_nodes_only;
-        self
-    }
-
     /// Consumes the type and creates the actual [`NetworkConfig`]
     pub fn build(self) -> NetworkConfig<C> {
         let peer_id = self.get_peer_id();
@@ -296,8 +268,6 @@ impl<C> NetworkConfigBuilder<C> {
             secret_key,
             discovery_v4_builder,
             boot_nodes,
-            trusted_nodes,
-            connect_trusted_nodes_only,
             discovery_addr,
             listener_addr,
             peers_config,
@@ -332,8 +302,6 @@ impl<C> NetworkConfigBuilder<C> {
             client,
             secret_key,
             boot_nodes,
-            trusted_nodes,
-            connect_trusted_nodes_only,
             discovery_v4_config: discovery_v4_builder.build(),
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))

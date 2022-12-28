@@ -216,10 +216,12 @@ fn network_config<DB: Database>(
     genesis_hash: H256,
     config: &Config,
 ) -> NetworkConfig<ProviderImpl<DB>> {
+    let peer_config = reth_network::PeersConfig::default()
+        .with_trusted_nodes(config.peers.trusted_nodes.clone())
+        .with_connect_trusted_nodes_only(config.peers.connect_trusted_nodes_only);
     NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
         .boot_nodes(mainnet_nodes())
-        .add_trusted_nodes(config.peers.trusted_nodes.clone())
-        .set_connect_trusted_nodes_only(config.peers.connect_trusted_nodes_only)
+        .peer_config(peer_config)
         .genesis_hash(genesis_hash)
         .chain_id(chain_id)
         .build()

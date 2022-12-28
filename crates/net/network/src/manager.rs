@@ -33,7 +33,6 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_discv4::NodeRecord;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
@@ -148,7 +147,6 @@ where
             block_import,
             network_mode,
             boot_nodes,
-            trusted_nodes,
             executor,
             hello_message,
             status,
@@ -156,8 +154,8 @@ where
             ..
         } = config;
 
-        let peers_manger = PeersManager::new(peers_config);
-        let peers_handle = peers_manger.handle();
+        let peers_manager = PeersManager::new(peers_config);
+        let peers_handle = peers_manager.handle();
 
         let incoming = ConnectionListener::bind(listener_addr).await?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
@@ -178,11 +176,7 @@ where
             hello_message,
             fork_filter,
         );
-        let mut state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
-
-        for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
-            state.add_peer_address(id, SocketAddr::from((address, tcp_port)));
-        }
+        let state = NetworkState::new(client, discovery, peers_manager, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
 
