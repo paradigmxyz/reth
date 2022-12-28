@@ -10,10 +10,11 @@
 use igd::aio::search_gateway;
 use pin_project_lite::pin_project;
 use std::{
-    future::Future,
+    future::{poll_fn, Future},
     net::IpAddr,
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tracing::warn;
 
@@ -38,6 +39,72 @@ impl NatResolver {
     }
 }
 
+/// With this type you can resolve the external public IP address on an interval basis.
+#[must_use = "Does nothing unless polled"]
+pub struct ResolveNatInterval {
+    resolver: NatResolver,
+    future: Option<ResolveFut>,
+    interval: tokio::time::Interval,
+}
+
+// === impl ResolveNatInterval ===
+
+impl ResolveNatInterval {
+    fn with_interval(resolver: NatResolver, interval: tokio::time::Interval) -> Self {
+        Self { resolver, future: None, interval }
+    }
+
+    /// Creates a new [ResolveNatInterval] that attempts to resolve the public IP with interval of
+    /// period. See also [tokio::time::interval]
+    #[track_caller]
+    pub fn interval(resolver: NatResolver, period: Duration) -> Self {
+        let interval = tokio::time::interval(period);
+        Self::with_interval(resolver, interval)
+    }
+
+    /// Creates a new [ResolveNatInterval] that attempts to resolve the public IP with interval of
+    /// period with the first attempt starting at `sart`. See also [tokio::time::interval_at]
+    #[track_caller]
+    pub fn interval_at(
+        resolver: NatResolver,
+        start: tokio::time::Instant,
+        period: Duration,
+    ) -> Self {
+        let interval = tokio::time::interval_at(start, period);
+        Self::with_interval(resolver, interval)
+    }
+
+    /// Completes when the next [IpAddr] in the interval has been reached.
+    pub async fn tick(&mut self) -> Option<IpAddr> {
+        let ip = poll_fn(|cx| self.poll_tick(cx));
+        ip.await
+    }
+
+    /// Polls for the next resolved [IpAddr] in the interval to be reached.
+    ///
+    /// This method can return the following values:
+    ///
+    ///  * `Poll::Pending` if the next [IpAddr] has not yet been resolved.
+    ///  * `Poll::Ready(Option<IpAddr>)` if the next [IpAddr] has been resolved. This returns `None`
+    ///    if the attempt was unsuccessful.
+    pub fn poll_tick(&mut self, cx: &mut Context<'_>) -> Poll<Option<IpAddr>> {
+        if self.interval.poll_tick(cx).is_ready() {
+            self.future = Some(Box::pin(self.resolver.external_addr()));
+        }
+
+        if let Some(mut fut) = self.future.take() {
+            match fut.as_mut().poll(cx) {
+                Poll::Ready(ip) => return Poll::Ready(ip),
+                Poll::Pending => {
+                    self.future = Some(fut);
+                }
+            }
+        }
+
+        Poll::Pending
+    }
+}
+
 /// Attempts to produce an IP address with all builtin resolvers (best effort).
 pub async fn external_ip() -> Option<IpAddr> {
     external_addr_with(NatResolver::Any).await
@@ -58,7 +125,7 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     }
 }
 
-type ResolveFut = Pin<Box<dyn Future<Output = Option<IpAddr>>>>;
+type ResolveFut = Pin<Box<dyn Future<Output = Option<IpAddr>> + Send>>;
 
 pin_project! {
     /// A future that resolves the first ip via all configured resolvers
@@ -132,6 +199,18 @@ mod tests {
     async fn get_external_ip() {
         reth_tracing::init_tracing();
         let ip = external_ip().await;
+        dbg!(ip);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn get_external_ip_interval() {
+        reth_tracing::init_tracing();
+        let mut interval = ResolveNatInterval::interval(Default::default(), Duration::from_secs(5));
+
+        let ip = interval.tick().await;
+        dbg!(ip);
+        let ip = interval.tick().await;
         dbg!(ip);
     }
 }
