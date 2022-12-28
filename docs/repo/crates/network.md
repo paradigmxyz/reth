@@ -435,7 +435,6 @@ pub struct EthRequestHandler<C> {
     client: Arc<C>,
     /// Used for reporting peers.
     #[allow(unused)]
-    // TODO use to report spammers
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
