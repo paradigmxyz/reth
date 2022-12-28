@@ -1,12 +1,15 @@
 //! Network config support
 
 use crate::{
+    error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
     peers::PeersConfig,
     session::SessionsConfig,
+    NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS};
+use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -94,6 +97,23 @@ impl<C> NetworkConfig<C> {
     pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
         self
+    }
+}
+
+impl<C> NetworkConfig<C>
+where
+    C: BlockProvider + HeaderProvider + 'static,
+{
+    /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
+    pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
+        let client = self.client.clone();
+        let (handle, network, _txpool, eth) =
+            NetworkManager::builder(self).await?.request_handler(client).split_with_handle();
+
+        tokio::task::spawn(network);
+        // TODO: tokio::task::spawn(txpool);
+        tokio::task::spawn(eth);
+        Ok(handle)
     }
 }
 

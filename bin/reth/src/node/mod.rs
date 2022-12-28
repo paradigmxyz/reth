@@ -19,9 +19,7 @@ use reth_db::{
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_primitives::{Account, Header, H256};
-use reth_provider::{BlockProvider, HeaderProvider};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -102,7 +100,7 @@ impl Command {
 
         info!("Connecting to p2p");
         let network =
-            start_network(config.network_config(db.clone(), chain_id, genesis_hash)).await?;
+            config.network_config(db.clone(), chain_id, genesis_hash).start_network().await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own
@@ -203,19 +201,4 @@ fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, ret
 
     tx.commit()?;
     Ok(hash)
-}
-
-/// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
-async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
-where
-    C: BlockProvider + HeaderProvider + 'static,
-{
-    let client = config.client.clone();
-    let (handle, network, _txpool, eth) =
-        NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
-
-    tokio::task::spawn(network);
-    // TODO: tokio::task::spawn(txpool);
-    tokio::task::spawn(eth);
-    Ok(handle)
 }
