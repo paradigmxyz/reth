@@ -95,15 +95,15 @@ impl SessionError for EthStreamError {
                 EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
                     P2PHandshakeError::NoResponse
                 ))
-        ) || self
-            .as_disconnected()
-            .map(|reason| {
-                matches!(
-                    reason,
-                    DisconnectReason::TooManyPeers | DisconnectReason::AlreadyConnected
-                )
-            })
-            .unwrap_or_default()
+        ) || self.as_io().is_some() ||
+            self.as_disconnected()
+                .map(|reason| {
+                    matches!(
+                        reason,
+                        DisconnectReason::TooManyPeers | DisconnectReason::AlreadyConnected
+                    )
+                })
+                .unwrap_or_default()
     }
 }
 
