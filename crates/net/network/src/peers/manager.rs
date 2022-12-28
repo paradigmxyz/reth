@@ -9,9 +9,9 @@ use crate::{
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
-use reth_primitives::{ForkId, PeerId};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
     net::{IpAddr, SocketAddr},
     task::{Context, Poll},
@@ -105,6 +105,8 @@ impl PeersManager {
             ban_list,
             ban_duration,
             backoff_duration,
+            trusted_nodes,
+            ..
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -112,8 +114,14 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_duration) / 2;
 
+        let mut peers = HashMap::with_capacity(trusted_nodes.len());
+
+        for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
+            peers.entry(id).or_insert_with(|| Peer::new(SocketAddr::from((address, tcp_port))));
+        }
+
         Self {
-            peers: Default::default(),
+            peers,
             manager_tx,
             handle_rx: UnboundedReceiverStream::new(handle_rx),
             queued_actions: Default::default(),
@@ -794,6 +802,10 @@ pub struct PeersConfig {
     /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
     /// [`DisconnectReason::TooManyPeers`].
     pub backoff_duration: Duration,
+    /// Trusted nodes to connect to.
+    pub trusted_nodes: HashSet<NodeRecord>,
+    /// Connect to trusted nodes only?
+    pub connect_trusted_nodes_only: bool,
 }
 
 impl Default for PeersConfig {
@@ -807,6 +819,8 @@ impl Default for PeersConfig {
             ban_duration: Duration::from_secs(60 * 60 * 12),
             // backoff peers for 1h
             backoff_duration: Duration::from_secs(60 * 60),
+            trusted_nodes: Default::default(),
+            connect_trusted_nodes_only: false,
         }
     }
 }
@@ -840,9 +854,15 @@ impl PeersConfig {
         self
     }
 
-    /// How often to recheck free slots for outbound connections
-    pub fn with_slot_refill_interval(mut self, interval: Duration) -> Self {
-        self.refill_slots_interval = interval;
+    /// Nodes to always connect to.
+    pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
+        self.trusted_nodes = nodes;
+        self
+    }
+
+    /// Connect only to trusted nodes.
+    pub fn with_connect_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
+        self.connect_trusted_nodes_only = trusted_only;
         self
     }
 }
