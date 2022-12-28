@@ -5,6 +5,7 @@
 
 use bytes::{Bytes, BytesMut};
 use reth_net_common::ban_list::BanList;
+use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_primitives::NodeRecord;
 use reth_rlp::Encodable;
 use std::{
@@ -54,6 +55,11 @@ pub struct Discv4Config {
     pub enable_eip868: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
     pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
+    /// If configured, try to resolve public ip
+    pub external_ip_resolver: Option<NatResolver>,
+    /// If configured and a `external_ip_resolver` is configured, try to resolve the external ip
+    /// using this interval.
+    pub resolve_external_ip_interval: Option<Duration>,
 }
 
 impl Discv4Config {
@@ -85,6 +91,14 @@ impl Discv4Config {
         }
         self
     }
+
+    /// Returns the corresponding [`ResolveNatInterval`], if a [NatResolver] and an interval was
+    /// configured
+    pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
+        let resolver = self.external_ip_resolver?;
+        let interval = self.resolve_external_ip_interval?;
+        Some(ResolveNatInterval::interval(resolver, interval))
+    }
 }
 
 impl Default for Discv4Config {
@@ -113,6 +127,9 @@ impl Default for Discv4Config {
             enable_lookup: true,
             enable_eip868: true,
             additional_eip868_rlp_pairs: Default::default(),
+            external_ip_resolver: Some(Default::default()),
+            /// By default retry public IP using a 5min interval
+            resolve_external_ip_interval: Some(Duration::from_secs(60 * 5)),
         }
     }
 }
@@ -244,6 +261,21 @@ impl Discv4ConfigBuilder {
     /// Adds multiple boot nodes
     pub fn add_boot_nodes(&mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> &mut Self {
         self.config.bootstrap_nodes.extend(nodes);
+        self
+    }
+
+    /// Configures if and how the external IP of the node should be resolved.
+    pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
+        self.config.external_ip_resolver = external_ip_resolver;
+        self
+    }
+
+    /// Sets the interval at which the external IP is to be resolved.
+    pub fn resolve_external_ip_interval(
+        &mut self,
+        resolve_external_ip_interval: Option<Duration>,
+    ) -> &mut Self {
+        self.config.resolve_external_ip_interval = resolve_external_ip_interval;
         self
     }
 
