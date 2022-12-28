@@ -3893,6 +3893,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-rpc-builder"
+version = "0.1.0"
+dependencies = [
+ "jsonrpsee",
+ "reth-ipc",
+ "reth-provider",
+ "reth-rpc",
+ "reth-transaction-pool",
+ "serde",
+ "strum",
+]
+
+[[package]]
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
