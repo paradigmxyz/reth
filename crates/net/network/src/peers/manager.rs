@@ -795,23 +795,20 @@ pub enum PeerAction {
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
-    #[cfg_attr(feature = "serde", serde(skip))]
+    // #[cfg_attr(feature = "serde", serde(flatten))]
     pub refill_slots_interval: Duration,
     /// Restrictions on connections.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub connection_info: ConnectionInfo,
     /// How to weigh reputation changes.
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub reputation_weights: ReputationChangeWeights,
     /// Restrictions on PeerIds and Ips.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
     /// How long to ban bad peers.
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_duration: Duration,
     /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
     /// [`DisconnectReason::TooManyPeers`].
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub backoff_duration: Duration,
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,
