@@ -79,7 +79,6 @@ use tracing::{error, info, trace, warn};
 ///   ethrequest <--> |ETH request handing| NetworkManager
 ///   discovery --> |Discovered peers| NetworkManager
 /// ```
-// ANCHOR: struct-NetworkManager
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
@@ -104,7 +103,6 @@ pub struct NetworkManager<C> {
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
 }
-// ANCHOR_END: struct-NetworkManager
 
 // === impl NetworkManager ===
 impl<C> NetworkManager<C> {
@@ -672,7 +670,6 @@ where
 ///
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
-// ANCHOR: enum-NetworkEvent
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
     /// Closed the peer session.
@@ -698,7 +695,6 @@ pub enum NetworkEvent {
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
 }
-// ANCHOR_END: enum-NetworkEvent
 
 /// Bundles all listeners for [`NetworkEvent`]s.
 #[derive(Default)]

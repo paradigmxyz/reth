@@ -61,7 +61,6 @@ use tracing::{trace, warn};
 ///   fetchRequest --> |request Headers, Bodies| StateFetch
 ///   State --> |poll pending requests| StateFetch
 /// ```
-// ANCHOR: struct-Swarm
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
@@ -71,7 +70,6 @@ pub(crate) struct Swarm<C> {
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
 }
-// ANCHOR_END: struct-Swarm
 
 // === impl Swarm ===
 

@@ -167,7 +167,6 @@ impl StatusUpdater for NetworkHandle {
     }
 }
 
-// ANCHOR: struct-NetworkInner
 #[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
@@ -183,7 +182,6 @@ struct NetworkInner {
     /// The mode of the network
     network_mode: NetworkMode,
 }
-// ANCHOR_END: struct-NetworkInner
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[allow(missing_docs)]

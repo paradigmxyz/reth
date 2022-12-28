@@ -22,7 +22,6 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-// ANCHOR: struct-SealedBlock
 #[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 pub struct SealedBlock {
     /// Locked block header.
@@ -32,7 +31,6 @@ pub struct SealedBlock {
     /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
 }
-// ANCHOR_END: struct-SealedBlock
 
 impl SealedBlock {
     /// Header hash.
