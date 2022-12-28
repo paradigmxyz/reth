@@ -94,6 +94,20 @@ impl NetworkHandle {
         rx.await
     }
 
+	/// Returns [`PeerInfo`] for all connected peers
+	pub async fn get_peers(&self) -> Result<Vec<PeerInfo>, oneshot::error::RecvError> {
+		let (tx, rx) = oneshot::channel();
+		let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
+		rx.await
+	}
+
+	/// Returns [`PeerInfo`] for a given peer
+	pub async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, oneshot::error::RecvError> {
+		let (tx, rx) = oneshot::channel();
+		let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
+		rx.await
+	}
+
     /// Returns the mode of the network, either pow, or pos
     pub fn mode(&self) -> &NetworkMode {
         &self.inner.network_mode
