@@ -114,8 +114,14 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_duration) / 2;
 
-        let mut manager = Self {
-            peers: Default::default(),
+        let mut peers = HashMap::with_capacity(trusted_nodes.len());
+
+        for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
+            peers.entry(id).or_insert_with(|| Peer::new(SocketAddr::from((address, tcp_port))));
+        }
+
+        Self {
+            peers,
             manager_tx,
             handle_rx: UnboundedReceiverStream::new(handle_rx),
             queued_actions: Default::default(),
@@ -129,13 +135,7 @@ impl PeersManager {
             ban_list,
             ban_duration,
             backoff_duration,
-        };
-
-        for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
-            manager.add_discovered_node(id, SocketAddr::from((address, tcp_port)));
         }
-
-        manager
     }
 
     /// Returns a new [`PeersHandle`] that can send commands to this type.
