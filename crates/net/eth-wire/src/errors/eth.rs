@@ -26,6 +26,14 @@ impl EthStreamError {
             None
         }
     }
+
+    /// Returns the [io::Error] if it was caused by IO
+    pub fn as_io(&self) -> Option<&io::Error> {
+        if let EthStreamError::P2PStreamError(P2PStreamError::Io(io)) = self {
+            return Some(io)
+        }
+        None
+    }
 }
 
 impl From<io::Error> for EthStreamError {
