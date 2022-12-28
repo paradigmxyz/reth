@@ -1,7 +1,13 @@
 //! Configuration files.
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
-use reth_primitives::NodeRecord;
+use reth_db::database::Database;
+use reth_network::{
+    config::{mainnet_nodes, rng_secret_key},
+    NetworkConfig,
+};
+use reth_primitives::{NodeRecord, H256};
+use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
@@ -12,6 +18,26 @@ pub struct Config {
     pub stages: StageConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
+}
+
+impl Config {
+    /// Initializes network config from read data
+    pub fn network_config<DB: Database>(
+        &self,
+        db: Arc<DB>,
+        chain_id: u64,
+        genesis_hash: H256,
+    ) -> NetworkConfig<ProviderImpl<DB>> {
+        let peer_config = reth_network::PeersConfig::default()
+            .with_trusted_nodes(self.peers.trusted_nodes.clone())
+            .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
+        NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
+            .boot_nodes(mainnet_nodes())
+            .peer_config(peer_config)
+            .genesis_hash(genesis_hash)
+            .chain_id(chain_id)
+            .build()
+    }
 }
 
 /// Configuration for each stage in the pipeline.
@@ -84,7 +110,7 @@ impl Default for SenderRecoveryConfig {
     }
 }
 
-/// Configuration for each stage in the pipeline.
+/// Configuration for peer managing.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PeersConfig {
     /// Trusted nodes to connect to.
