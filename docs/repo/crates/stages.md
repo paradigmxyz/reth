@@ -116,14 +116,14 @@ Following a successful `BodyStage`, the `SenderRecoveryStage` starts to execute.
 [File: crates/primitives/src/transaction/signature.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/transaction/signature.rs)
 ```rust,ignore
 pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
-        let mut sig: [u8; 65] = [0; 65];
+    let mut sig: [u8; 65] = [0; 65];
 
-        self.r.to_big_endian(&mut sig[0..32]);
-        self.s.to_big_endian(&mut sig[32..64]);
-        sig[64] = self.odd_y_parity as u8;
+    self.r.to_big_endian(&mut sig[0..32]);
+    self.s.to_big_endian(&mut sig[32..64]);
+    sig[64] = self.odd_y_parity as u8;
 
-        secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
-    }
+    secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
+}
 ```
 
 In an [ECDSA (Elliptic Curve Digital Signature Algorithm) signature](https://wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm), the "r", "s", and "v" values are three pieces of data that are used to mathematically verify the authenticity of a digital signature. ECDSA is a widely used algorithm for generating and verifying digital signatures, and it is often used in cryptocurrencies like Ethereum.
