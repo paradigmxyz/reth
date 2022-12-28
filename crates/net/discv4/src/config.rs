@@ -96,7 +96,7 @@ impl Discv4Config {
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
         let resolver = self.external_ip_resolver?;
-        let perdiod = self.resolve_external_ip_interval?;
+        let interval = self.resolve_external_ip_interval?;
         Some(ResolveNatInterval::interval(resolver, perdiod))
     }
 }
