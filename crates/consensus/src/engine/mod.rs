@@ -1,5 +1,4 @@
 use futures::StreamExt;
-use rayon::prelude::*;
 use reth_executor::{
     executor,
     revm_wrap::{State, SubState},
@@ -206,7 +205,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
 
         let (header, body, _) = block.split();
         let transactions = body
-            .into_par_iter()
+            .into_iter()
             .map(|tx| {
                 let tx_hash = tx.hash;
                 tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })

@@ -3460,7 +3460,6 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "futures",
- "rayon",
  "reth-executor",
  "reth-interfaces",
  "reth-primitives",
