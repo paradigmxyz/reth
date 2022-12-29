@@ -23,9 +23,8 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2022-12-27
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
@@ -105,9 +104,8 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2022-12-27
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
