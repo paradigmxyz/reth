@@ -1,7 +1,7 @@
 //! Listeners for the transaction-pool
 
 use crate::{pool::events::TransactionEvent, traits::PropagateKind};
-use reth_primitives::{rpc::TxHash, H256};
+use reth_primitives::{TxHash, H256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::UnboundedSender;
 
