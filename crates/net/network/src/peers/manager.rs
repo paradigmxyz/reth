@@ -300,7 +300,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 self.connection_info.decr_state(entry.get().state);
 
-                if entry.get().remove_after_disconnect && !entry.get().kind.is_trusted() {
+                if entry.get().remove_after_disconnect && !entry.get().is_trusted() {
                     // this peer should be removed from the set
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
@@ -429,7 +429,7 @@ impl PeersManager {
     /// Removes the tracked node from the set.
     pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
         let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
-        if entry.get().kind.is_trusted() {
+        if entry.get().is_trusted() {
             return
         }
         let mut peer = entry.remove();
@@ -460,8 +460,7 @@ impl PeersManager {
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
-            peer.state.is_unconnected() &&
-                (!self.connect_trusted_nodes_only || peer.kind.is_trusted())
+            peer.state.is_unconnected() && (!self.connect_trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
@@ -702,6 +701,12 @@ impl Peer {
     fn unban(&mut self) {
         self.reputation = DEFAULT_REPUTATION
     }
+
+    /// Returns whether this peer is trusted
+    #[inline]
+    fn is_trusted(&self) -> bool {
+        matches!(self.kind, PeerKind::Trusted)
+    }
 }
 
 /// Outcomes when a reputation change is applied to a peer
@@ -766,14 +771,6 @@ enum PeerKind {
     Basic,
     /// Trusted peer.
     Trusted,
-}
-
-impl PeerKind {
-    /// Returns whether this peer is trusted
-    #[inline]
-    fn is_trusted(&self) -> bool {
-        matches!(self, Self::Trusted)
-    }
 }
 
 /// Commands the [`PeersManager`] listens for.
