@@ -482,10 +482,30 @@ pub(crate) enum StateAction {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use reth_provider::test_utils::NoopProvider;
+    use crate::discovery::Discovery;
+    use crate::fetch::StateFetcher;
+    use crate::peers::PeersManager;
     use crate::state::NetworkState;
 
-    fn state() -> NetworkState<T>
+    /// Returns a testing instance of the [NetworkState].
+    fn state() -> NetworkState<NoopProvider> {
+        let peers = PeersManager::default();
+        let handle = peers.handle();
+        NetworkState {
+            active_peers: Default::default(),
+            peers_manager: Default::default(),
+            queued_messages: Default::default(),
+            client: Arc::new(NoopProvider::default()),
+            discovery: Discovery::noop(),
+            genesis_hash: Default::default(),
+            state_fetcher: StateFetcher::new(handle),
+        }
+    }
 
     #[tokio::test]
-    async fn test_dropped_active_session() {}
+    async fn test_dropped_active_session() {
+
+    }
 }
