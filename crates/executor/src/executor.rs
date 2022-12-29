@@ -482,7 +482,7 @@ mod tests {
         hex_literal::hex, keccak256, Account, Address, Bytes, SealedBlock, StorageKey, H160, H256,
         U256,
     };
-    use reth_provider::{AccountProvider, StateProvider};
+    use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
 
     use super::*;
@@ -519,6 +519,12 @@ mod tests {
         }
     }
 
+    impl BlockHashProvider for StateProviderTest {
+        fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
+            Ok(self.block_hash.get(&number).cloned())
+        }
+    }
+
     impl StateProvider for StateProviderTest {
         fn storage(
             &self,
@@ -533,10 +539,6 @@ mod tests {
 
         fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {
             Ok(self.contracts.get(&code_hash).cloned())
-        }
-
-        fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
-            Ok(self.block_hash.get(&number).cloned())
         }
     }
 

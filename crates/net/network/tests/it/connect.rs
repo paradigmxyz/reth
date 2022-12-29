@@ -12,7 +12,7 @@ use reth_eth_wire::DisconnectReason;
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::{NodeRecord, PeerId};
-use reth_provider::test_utils::TestApi;
+use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task;
@@ -94,7 +94,7 @@ async fn test_already_connected() {
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(TestApi::default());
+    let client = Arc::new(NoopProvider::default());
     let p1 = PeerConfig::default();
 
     // initialize two peers with the same identifier
@@ -140,8 +140,9 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config =
-        NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).discovery(discv4).build();
+    let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        .discovery(discv4)
+        .build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -161,7 +162,7 @@ async fn test_connect_with_builder() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let client = Arc::new(TestApi::default());
+    let client = Arc::new(NoopProvider::default());
     let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
@@ -209,7 +210,7 @@ async fn test_incoming_node_id_blacklist() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30303);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30304);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .peer_config(peer_config)
@@ -259,7 +260,7 @@ async fn test_incoming_connect_with_single_geth() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30306);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .build();
@@ -294,7 +295,7 @@ async fn test_outgoing_connect_with_single_geth() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30307);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30308);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .build();
@@ -341,7 +342,7 @@ async fn test_geth_disconnect() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30309);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30310);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .build();

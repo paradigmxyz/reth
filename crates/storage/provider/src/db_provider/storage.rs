@@ -1,5 +1,7 @@
 use super::ProviderImpl;
-use crate::{AccountProvider, Error, StateProvider, StateProviderFactory};
+use crate::{
+    block::BlockHashProvider, AccountProvider, Error, StateProvider, StateProviderFactory,
+};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::{Database, DatabaseGAT},
@@ -78,6 +80,12 @@ impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplHistory<'a, TX> {
     }
 }
 
+impl<'a, TX: DbTx<'a>> BlockHashProvider for StateProviderImplHistory<'a, TX> {
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        StateProviderImplRefHistory::new(&self.tx, self.transition).block_hash(number)
+    }
+}
+
 impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         StateProviderImplRefHistory::new(&self.tx, self.transition).storage(account, storage_key)
@@ -85,10 +93,6 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplHistory<'a, TX> {
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         StateProviderImplRefHistory::new(&self.tx, self.transition).bytecode_by_hash(code_hash)
-    }
-
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        StateProviderImplRefHistory::new(&self.tx, self.transition).block_hash(number)
     }
 }
 /// State provider with given hash
@@ -120,6 +124,13 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for StateProviderImplRefHistory<'a, '
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         // TODO add when AccountHistory is defined
         Ok(None)
+    }
+}
+
+impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for StateProviderImplRefHistory<'a, 'b, TX> {
+    /// Get block hash by number.
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        self.tx.get::<tables::CanonicalHeaders>(number.as_u64()).map_err(Into::into)
     }
 }
 
@@ -156,11 +167,6 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for StateProviderImplRefHistory<'a, 'b,
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
     }
-
-    /// Get block hash by number.
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        self.tx.get::<tables::CanonicalHeaders>(number.as_u64()).map_err(Into::into)
-    }
 }
 
 /// State provider for latests state
@@ -185,6 +191,12 @@ impl<'a, TX: DbTx<'a>> AccountProvider for StateProviderImplLatest<'a, TX> {
     }
 }
 
+impl<'a, TX: DbTx<'a>> BlockHashProvider for StateProviderImplLatest<'a, TX> {
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        StateProviderImplRefLatest::new(&self.db).block_hash(number)
+    }
+}
+
 impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplLatest<'a, TX> {
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         StateProviderImplRefLatest::new(&self.db).storage(account, storage_key)
@@ -192,10 +204,6 @@ impl<'a, TX: DbTx<'a>> StateProvider for StateProviderImplLatest<'a, TX> {
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         StateProviderImplRefLatest::new(&self.db).bytecode_by_hash(code_hash)
-    }
-
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        StateProviderImplRefLatest::new(&self.db).block_hash(number)
     }
 }
 
@@ -221,6 +229,13 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for StateProviderImplRefLatest<'a, 'b
     }
 }
 
+impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for StateProviderImplRefLatest<'a, 'b, TX> {
+    /// Get block hash by number.
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        self.db.get::<tables::CanonicalHeaders>(number.as_u64()).map_err(Into::into)
+    }
+}
+
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for StateProviderImplRefLatest<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
@@ -236,10 +251,5 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for StateProviderImplRefLatest<'a, 'b, 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
-    }
-
-    /// Get block hash by number.
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        self.db.get::<tables::CanonicalHeaders>(number.as_u64()).map_err(Into::into)
     }
 }

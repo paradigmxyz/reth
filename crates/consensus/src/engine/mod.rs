@@ -1,11 +1,15 @@
 use futures::StreamExt;
+use reth_executor::{
+    executor,
+    revm_wrap::{State, SubState},
+};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     rpc::BlockId,
     Header, SealedBlock, TransactionSigned, H64,
 };
-use reth_provider::{BlockProvider, HeaderProvider};
+use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -21,8 +25,9 @@ use std::{
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-mod error;
 use crate::Config;
+
+mod error;
 pub use error::{EngineApiError, EngineApiResult};
 
 /// The Engine API response sender
@@ -51,6 +56,7 @@ pub trait ConsensusEngine {
 }
 
 /// Message type for communicating with [EthConsensusEngine]
+#[derive(Debug)]
 pub enum EngineMessage {
     /// New payload message
     NewPayload(ExecutionPayload, EngineApiSender<PayloadStatus>),
@@ -72,16 +78,17 @@ pub enum EngineMessage {
 /// The consensus engine API implementation
 #[must_use = "EthConsensusEngine does nothing unless polled."]
 pub struct EthConsensusEngine<Client> {
+    client: Arc<Client>,
     /// Consensus configuration
     config: Config,
-    client: Arc<Client>,
-    /// Placeholder for storing future blocks
-    local_store: HashMap<H64, ExecutionPayload>, // TODO: bound
-    // remote_store: HashMap<H64, ExecutionPayload>,
     rx: UnboundedReceiverStream<EngineMessage>,
+    // TODO: Placeholder for storing future blocks. Make cache bounded.
+    // Use [lru](https://crates.io/crates/lru) crate
+    local_store: HashMap<H64, ExecutionPayload>,
+    // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
-impl<Client: HeaderProvider + BlockProvider> EthConsensusEngine<Client> {
+impl<Client: HeaderProvider + BlockProvider + StateProvider> EthConsensusEngine<Client> {
     fn on_message(&mut self, msg: EngineMessage) {
         match msg {
             EngineMessage::GetPayload(payload_id, tx) => {
@@ -105,8 +112,8 @@ impl<Client: HeaderProvider + BlockProvider> EthConsensusEngine<Client> {
     /// `base_fee_per_gas` fields.
     ///
     /// NOTE: The log bloom is assumed to be validated during serialization.
-    /// NOTE: Ommers hash is validated upon computing block hash and comparing the value with
-    /// `payload.block_hash`.
+    /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
+    /// comparing the value with `payload.block_hash`.
     /// Ref: https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145
     fn try_construct_block(&self, payload: ExecutionPayload) -> EngineApiResult<SealedBlock> {
         if payload.extra_data.len() > 32 {
@@ -155,7 +162,9 @@ impl<Client: HeaderProvider + BlockProvider> EthConsensusEngine<Client> {
     }
 }
 
-impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEngine<Client> {
+impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
+    for EthConsensusEngine<Client>
+{
     fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload> {
         self.local_store.get(&payload_id).cloned()
     }
@@ -194,9 +203,29 @@ impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEng
             })
         }
 
-        // TODO: execute block
-
-        Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block.hash()))
+        let (header, body, _) = block.split();
+        let transactions = body
+            .into_iter()
+            .map(|tx| {
+                let tx_hash = tx.hash;
+                tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
+            })
+            .collect::<Result<Vec<_>, EngineApiError>>()?;
+        let state_provider = SubState::new(State::new(&*self.client));
+        let config = (&self.config).into();
+        match executor::execute_and_verify_receipt(
+            &header,
+            &transactions,
+            &[],
+            &config,
+            state_provider,
+        ) {
+            Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, header.hash())),
+            Err(err) => Ok(PayloadStatus::new(
+                PayloadStatusEnum::Invalid { validation_error: err.to_string() },
+                header.parent_hash, // The parent hash is already in our database hence it is valid
+            )),
+        }
     }
 
     fn fork_choice_updated(
@@ -221,6 +250,8 @@ impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEng
         if !finalized_block_hash.is_zero() && !self.client.is_known(&finalized_block_hash)? {
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
         }
+
+        // TODO: update tip
 
         let chain_info = self.client.chain_info()?;
         Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
@@ -274,7 +305,7 @@ impl<Client: HeaderProvider + BlockProvider> ConsensusEngine for EthConsensusEng
 
 impl<Client> Future for EthConsensusEngine<Client>
 where
-    Client: HeaderProvider + BlockProvider + Unpin,
+    Client: HeaderProvider + BlockProvider + StateProvider + Unpin,
 {
     type Output = ();
 
