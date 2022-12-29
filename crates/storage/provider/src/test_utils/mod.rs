@@ -1,3 +1,5 @@
-mod api;
+mod mock;
+mod noop;
 
-pub use api::TestApi;
+pub use mock::{ExtendedAccount, MockEthProvider};
+pub use noop::NoopProvider;

@@ -58,10 +58,10 @@
 //! use std::sync::Arc;
 //! use reth_network::config::{rng_secret_key, mainnet_nodes};
 //! use reth_network::{NetworkConfig, NetworkManager};
-//! use reth_provider::test_utils::TestApi;
+//! use reth_provider::test_utils::NoopProvider;
 //!
 //! // This block provider implementation is used for testing purposes.
-//! let client = Arc::new(TestApi::default());
+//! let client = Arc::new(NoopProvider::default());
 //!
 //! // The key that's used for encrypting sessions and to identify our node.
 //! let local_key = rng_secret_key();
@@ -83,7 +83,7 @@
 //! ### Configure all components of the Network with the [`NetworkBuilder`]
 //!
 //! ```
-//! use reth_provider::test_utils::TestApi;
+//! use reth_provider::test_utils::NoopProvider;
 //! use reth_transaction_pool::TransactionPool;
 //! use std::sync::Arc;
 //! use reth_discv4::bootnodes::mainnet_nodes;
@@ -91,7 +91,7 @@
 //! use reth_network::{NetworkConfig, NetworkManager};
 //! async fn launch<Pool: TransactionPool>(pool: Pool) {
 //!     // This block provider implementation is used for testing purposes.
-//!     let client = Arc::new(TestApi::default());
+//!     let client = Arc::new(NoopProvider::default());
 //!
 //!     // The key that's used for encrypting sessions and to identify our node.
 //!     let local_key = rng_secret_key();
