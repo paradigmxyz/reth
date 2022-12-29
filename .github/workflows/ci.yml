@@ -23,8 +23,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2022-12-27
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
@@ -104,8 +105,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2022-12-27
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
@@ -143,8 +145,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2022-12-27
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
