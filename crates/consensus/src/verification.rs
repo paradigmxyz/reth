@@ -57,9 +57,8 @@ pub fn validate_header_standalone(
             return Err(Error::TheMergeOmmerRootIsNotEmpty)
         }
 
-        if header.mix_hash != H256::zero() {
-            return Err(Error::TheMergeMixHashIsNotZero)
-        }
+        // mixHash is used instead of difficulty inside EVM
+        // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
     }
 
     Ok(())
