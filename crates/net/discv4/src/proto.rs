@@ -3,7 +3,7 @@
 use crate::{error::DecodePacketError, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enr::Enr;
-use reth_primitives::{keccak256, ForkId, NodeRecord, Octets, H256};
+use reth_primitives::{keccak256, ForkId, NodeRecord, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
@@ -194,9 +194,9 @@ impl Decodable for NodeEndpoint {
             return Err(DecodeError::UnexpectedString)
         }
         let started_len = b.len();
-        let octets = Octets::decode(b)?;
+
         let this = Self {
-            address: octets.into(),
+            address: Decodable::decode(b)?,
             udp_port: Decodable::decode(b)?,
             tcp_port: Decodable::decode(b)?,
         };
@@ -219,16 +219,12 @@ impl Encodable for NodeEndpoint {
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct RlpEndpoint {
-            octets: Octets,
+            address: IpAddr,
             udp_port: u16,
             tcp_port: u16,
         }
-
-        let octets = match self.address {
-            IpAddr::V4(addr) => Octets::V4(addr.octets()),
-            IpAddr::V6(addr) => Octets::V6(addr.octets()),
-        };
-        let p = RlpEndpoint { octets, udp_port: self.udp_port, tcp_port: self.tcp_port };
+        let p =
+            RlpEndpoint { address: self.address, udp_port: self.udp_port, tcp_port: self.tcp_port };
         p.encode(out)
     }
 }
