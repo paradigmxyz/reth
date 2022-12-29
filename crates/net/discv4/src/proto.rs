@@ -180,53 +180,11 @@ pub struct Packet {
 }
 
 /// Represents the `from`, `to` fields in the packets
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct NodeEndpoint {
     pub address: IpAddr,
     pub udp_port: u16,
     pub tcp_port: u16,
-}
-impl Decodable for NodeEndpoint {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let b = &mut &**buf;
-        let rlp_head = Header::decode(b)?;
-        if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
-        }
-        let started_len = b.len();
-
-        let this = Self {
-            address: Decodable::decode(b)?,
-            udp_port: Decodable::decode(b)?,
-            tcp_port: Decodable::decode(b)?,
-        };
-        // the ENR record can contain additional entries that we skip
-        let consumed = started_len - b.len();
-        if consumed > rlp_head.payload_length {
-            return Err(DecodeError::ListLengthMismatch {
-                expected: rlp_head.payload_length,
-                got: consumed,
-            })
-        }
-        let rem = rlp_head.payload_length - consumed;
-        b.advance(rem);
-        *buf = *b;
-        Ok(this)
-    }
-}
-
-impl Encodable for NodeEndpoint {
-    fn encode(&self, out: &mut dyn BufMut) {
-        #[derive(RlpEncodable)]
-        struct RlpEndpoint {
-            address: IpAddr,
-            udp_port: u16,
-            tcp_port: u16,
-        }
-        let p =
-            RlpEndpoint { address: self.address, udp_port: self.udp_port, tcp_port: self.tcp_port };
-        p.encode(out)
-    }
 }
 
 impl From<NodeRecord> for NodeEndpoint {
