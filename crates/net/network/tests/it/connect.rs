@@ -133,6 +133,75 @@ async fn test_already_connected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_get_peer() {
+    reth_tracing::init_tracing();
+    let mut net = Testnet::default();
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let client = Arc::new(NoopProvider::default());
+    let p1 = PeerConfig::default();
+    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
+
+    net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+    let handle2 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
+
+    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
+
+    let peers = handle0.get_peers().await.unwrap();
+    assert_eq!(handle0.num_connected_peers(), peers.len());
+    dbg!(peers);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_get_peer_by_id() {
+    reth_tracing::init_tracing();
+    let mut net = Testnet::default();
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let client = Arc::new(NoopProvider::default());
+    let p1 = PeerConfig::default();
+    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
+
+    net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+    let handle2 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
+
+    let peer = handle0.get_peer_by_id(*handle1.peer_id()).await.unwrap();
+    assert!(peer.is_some());
+
+    let peer = handle0.get_peer_by_id(*handle2.peer_id()).await.unwrap();
+    assert!(peer.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_with_boot_nodes() {
     reth_tracing::init_tracing();
