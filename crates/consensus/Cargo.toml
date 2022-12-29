@@ -21,17 +21,15 @@ async-trait = "0.1.57"
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
 
-# common
+# misc
 thiserror = "1.0.37"
 auto_impl = "1.0"
-
-# io
+rayon = "1.6.0"
 serde = { version = "1.0", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5.0"
 reth-provider = { path = "../storage/provider", features = ["test-utils"] }
-reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 
 [features]
 serde = ["dep:serde"]

@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use rayon::prelude::*;
 use reth_executor::{
     executor,
     revm_wrap::{State, SubState},
@@ -204,14 +205,14 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
 
         let (header, body, _) = block.split();
         let transactions = body
-            .into_iter()
+            .into_par_iter()
             .map(|tx| {
                 let tx_hash = tx.hash;
                 tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
             })
             .collect::<Result<Vec<_>, EngineApiError>>()?;
         let state_provider = SubState::new(State::new(&*self.client));
-        let config = self.config.clone().into();
+        let config = (&self.config).into();
         match executor::execute_and_verify_receipt(
             &header,
             &transactions,

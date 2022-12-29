@@ -77,8 +77,8 @@ impl Default for Config {
     }
 }
 
-impl From<Config> for ExecutorConfig {
-    fn from(value: Config) -> Self {
+impl From<&Config> for ExecutorConfig {
+    fn from(value: &Config) -> Self {
         Self {
             chain_id: value.chain_id.into(),
             spec_upgrades: SpecUpgrades {
