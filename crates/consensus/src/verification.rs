@@ -3,7 +3,7 @@ use crate::{config, Config};
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     BlockNumber, Header, SealedBlock, SealedHeader, Transaction, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, H256, U256,
+    TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
 use std::{
@@ -57,9 +57,8 @@ pub fn validate_header_standalone(
             return Err(Error::TheMergeOmmerRootIsNotEmpty)
         }
 
-        if header.mix_hash != H256::zero() {
-            return Err(Error::TheMergeMixHashIsNotZero)
-        }
+        // mixHash is used instead of difficulty inside EVM
+        // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
     }
 
     Ok(())
