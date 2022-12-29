@@ -1,4 +1,5 @@
 //! Reth block execution/validation configuration and constants
+use reth_executor::{Config as ExecutorConfig, SpecUpgrades};
 use reth_primitives::BlockNumber;
 
 #[cfg(feature = "serde")]
@@ -72,6 +73,27 @@ impl Default for Config {
             london_block: 12965000,
             paris_block: 15537394,
             merge_terminal_total_difficulty: 58750000000000000000000,
+        }
+    }
+}
+
+impl From<&Config> for ExecutorConfig {
+    fn from(value: &Config) -> Self {
+        Self {
+            chain_id: value.chain_id.into(),
+            spec_upgrades: SpecUpgrades {
+                frontier: 0,
+                homestead: value.homestead_block,
+                tangerine_whistle: value.eip_150_block,
+                spurious_dragon: value.eip_158_block,
+                byzantium: value.byzantium_block,
+                petersburg: value.petersburg_block,
+                istanbul: value.istanbul_block,
+                berlin: value.berlin_block,
+                london: value.london_block,
+                paris: value.paris_block,
+                shanghai: u64::MAX, // TODO: change once known
+            },
         }
     }
 }

@@ -13,6 +13,7 @@ reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
 reth-rlp = { path = "../common/rlp" }
 reth-rpc-types = { path = "../net/rpc-types" }
+reth-executor = { path = "../executor" }
 
 # async
 futures = "0.3"
@@ -20,11 +21,9 @@ async-trait = "0.1.57"
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
 
-# common
+# misc
 thiserror = "1.0.37"
 auto_impl = "1.0"
-
-# io
 serde = { version = "1.0", optional = true }
 
 [features]
