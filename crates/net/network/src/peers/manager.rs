@@ -300,7 +300,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 self.connection_info.decr_state(entry.get().state);
 
-                if entry.get().remove_after_disconnect {
+                if entry.get().remove_after_disconnect && !entry.get().kind.is_trusted() {
                     // this peer should be removed from the set
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
