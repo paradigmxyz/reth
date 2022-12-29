@@ -3457,7 +3457,6 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
- "assert_matches",
  "async-trait",
  "auto_impl",
  "futures",
