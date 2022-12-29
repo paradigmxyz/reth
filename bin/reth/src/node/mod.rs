@@ -19,13 +19,7 @@ use reth_db::{
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_network::{
-    config::{mainnet_nodes, rng_secret_key},
-    error::NetworkError,
-    NetworkConfig, NetworkHandle, NetworkManager,
-};
 use reth_primitives::{Account, Header, H256};
-use reth_provider::{db_provider::ProviderImpl, BlockProvider, HeaderProvider};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -105,7 +99,8 @@ impl Command {
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         info!("Connecting to p2p");
-        let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
+        let network =
+            config.network_config(db.clone(), chain_id, genesis_hash).start_network().await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own
@@ -206,32 +201,4 @@ fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, ret
 
     tx.commit()?;
     Ok(hash)
-}
-
-// TODO: This should be based on some external config
-fn network_config<DB: Database>(
-    db: Arc<DB>,
-    chain_id: u64,
-    genesis_hash: H256,
-) -> NetworkConfig<ProviderImpl<DB>> {
-    NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
-        .boot_nodes(mainnet_nodes())
-        .genesis_hash(genesis_hash)
-        .chain_id(chain_id)
-        .build()
-}
-
-/// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
-async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
-where
-    C: BlockProvider + HeaderProvider + 'static,
-{
-    let client = config.client.clone();
-    let (handle, network, _txpool, eth) =
-        NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
-
-    tokio::task::spawn(network);
-    // TODO: tokio::task::spawn(txpool);
-    tokio::task::spawn(eth);
-    Ok(handle)
 }

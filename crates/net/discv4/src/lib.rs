@@ -542,6 +542,7 @@ impl Discv4Service {
     pub fn spawn(mut self) -> JoinHandle<()> {
         tokio::task::spawn(async move {
             self.bootstrap();
+
             while let Some(event) = self.next().await {
                 trace!(target : "discv4", ?event,  "processed");
             }
