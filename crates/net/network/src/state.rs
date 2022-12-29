@@ -484,14 +484,18 @@ pub(crate) enum StateAction {
 mod tests {
     use crate::{
         discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
-        state::NetworkState,
+        state::NetworkState, PeerRequest,
     };
-    use reth_eth_wire::{BlockBody, capability::{Capabilities, Capability}, EthVersion, Status};
-    use reth_primitives::{H256, Header, PeerId};
+    use reth_eth_wire::{
+        capability::{Capabilities, Capability},
+        BlockBodies, BlockBody, EthVersion, Status,
+    };
+    use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_primitives::{Header, PeerId, H256};
     use reth_provider::test_utils::NoopProvider;
-    use std::sync::Arc;
+    use std::{future::poll_fn, sync::Arc};
     use tokio::sync::mpsc;
-    use reth_interfaces::p2p::bodies::client::BodiesClient;
+    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     /// Returns a testing instance of the [NetworkState].
     fn state() -> NetworkState<NoopProvider> {
@@ -512,6 +516,8 @@ mod tests {
         Arc::new(vec![Capability::from(EthVersion::Eth67)].into())
     }
 
+    // tests that ongoing requests are answered with connection dropped if the session that received
+    // that request is drops the request object.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_dropped_active_session() {
         let mut state = state();
@@ -525,18 +531,39 @@ mod tests {
 
         assert!(state.active_peers.contains_key(&peer_id));
 
-        let body = BlockBody {
-            ommers: vec![
-                Header::default()
-            ],
-            ..Default::default()
-        };
+        let body = BlockBody { ommers: vec![Header::default()], ..Default::default() };
 
+        let body_response = body.clone();
+
+        // this mimics an active session that receives the requests from the state
         tokio::task::spawn(async move {
+            let mut stream = ReceiverStream::new(session_rx);
+            let resp = stream.next().await.unwrap();
+            match resp {
+                PeerRequest::GetBlockBodies { response, .. } => {
+                    response.send(Ok(BlockBodies(vec![body_response]))).unwrap();
+                }
+                _ => unreachable!(),
+            }
 
+            // wait for the next request, then drop
+            let _resp = stream.next().await.unwrap();
         });
 
-        let body = client.get_block_bodies(vec![H256::random()]).await;
+        // spawn the state as future
+        tokio::task::spawn(async move {
+            loop {
+                poll_fn(|cx| state.poll(cx)).await;
+            }
+        });
 
+        // send requests to the state via the client
+        let (peer, bodies) = client.get_block_bodies(vec![H256::random()]).await.unwrap().split();
+        assert_eq!(peer, peer_id);
+        assert_eq!(bodies, vec![body]);
+
+        let resp = client.get_block_bodies(vec![H256::random()]).await;
+        assert!(resp.is_err());
+        assert_eq!(resp.unwrap_err(), RequestError::ConnectionDropped);
     }
 }

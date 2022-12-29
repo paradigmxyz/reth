@@ -141,7 +141,8 @@ impl Discv4 {
     #[cfg(feature = "mock")]
     pub fn noop() -> Self {
         let (to_service, _rx) = mpsc::channel(1);
-        let local_addr = ( IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into();
+        let local_addr =
+            (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into();
         Self { local_addr, to_service }
     }
 

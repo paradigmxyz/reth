@@ -10,7 +10,7 @@ pub type RequestResult<T> = Result<T, RequestError>;
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error, Clone, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum RequestError {
     #[error("Closed channel to the peer.")]
