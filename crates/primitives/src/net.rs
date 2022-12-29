@@ -1,13 +1,12 @@
 use crate::PeerId;
-use bytes::{Buf, BufMut};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header};
+use reth_rlp::RlpDecodable;
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
     fmt::Write,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     num::ParseIntError,
     str::FromStr,
 };
@@ -17,7 +16,18 @@ use url::{Host, Url};
 ///
 /// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
 /// message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    SerializeDisplay,
+    DeserializeFromStr,
+    RlpEncodable,
+    RlpDecodable,
+)]
 pub struct NodeRecord {
     /// The Address of a node.
     pub address: IpAddr,
@@ -125,121 +135,12 @@ impl FromStr for NodeRecord {
     }
 }
 
-impl Encodable for NodeRecord {
-    fn encode(&self, out: &mut dyn BufMut) {
-        #[derive(RlpEncodable)]
-        struct EncodeNode {
-            octets: Octets,
-            udp_port: u16,
-            tcp_port: u16,
-            id: PeerId,
-        }
-
-        let octets = match self.address {
-            IpAddr::V4(addr) => Octets::V4(addr.octets()),
-            IpAddr::V6(addr) => Octets::V6(addr.octets()),
-        };
-        let node =
-            EncodeNode { octets, udp_port: self.udp_port, tcp_port: self.tcp_port, id: self.id };
-        node.encode(out)
-    }
-}
-
-impl Decodable for NodeRecord {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let b = &mut &**buf;
-        let rlp_head = reth_rlp::Header::decode(b)?;
-        if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
-        }
-        let started_len = b.len();
-        let octets = Octets::decode(b)?;
-        let this = Self {
-            address: octets.into(),
-            udp_port: Decodable::decode(b)?,
-            tcp_port: Decodable::decode(b)?,
-            id: Decodable::decode(b)?,
-        };
-        // the ENR record can contain additional entries that we skip
-        let consumed = started_len - b.len();
-        if consumed > rlp_head.payload_length {
-            return Err(DecodeError::ListLengthMismatch {
-                expected: rlp_head.payload_length,
-                got: consumed,
-            })
-        }
-        let rem = rlp_head.payload_length - consumed;
-        b.advance(rem);
-        *buf = *b;
-        Ok(this)
-    }
-}
-
-/// IpAddr octets
-#[derive(Debug, Copy, Clone)]
-pub enum Octets {
-    /// Ipv4 Octet variant
-    V4([u8; 4]),
-    /// Ipv6 Octet variant
-    V6([u8; 16]),
-}
-
-impl From<Octets> for IpAddr {
-    fn from(value: Octets) -> Self {
-        match value {
-            Octets::V4(o) => IpAddr::from(o),
-            Octets::V6(o) => {
-                let ipv6 = Ipv6Addr::from(o);
-                // If the ipv6 is ipv4 compatible/mapped, simply return the ipv4.
-                if let Some(ipv4) = ipv6.to_ipv4() {
-                    IpAddr::V4(ipv4)
-                } else {
-                    IpAddr::V6(ipv6)
-                }
-            }
-        }
-    }
-}
-
-impl Encodable for Octets {
-    fn encode(&self, out: &mut dyn BufMut) {
-        let octets = match self {
-            Octets::V4(ref o) => &o[..],
-            Octets::V6(ref o) => &o[..],
-        };
-        octets.encode(out)
-    }
-}
-
-impl Decodable for Octets {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let h = Header::decode(buf)?;
-        if h.list {
-            return Err(DecodeError::UnexpectedList)
-        }
-        let o = match h.payload_length {
-            4 => {
-                let mut to = [0_u8; 4];
-                to.copy_from_slice(&buf[..4]);
-                Octets::V4(to)
-            }
-            16 => {
-                let mut to = [0u8; 16];
-                to.copy_from_slice(&buf[..16]);
-                Octets::V6(to)
-            }
-            _ => return Err(DecodeError::UnexpectedLength),
-        };
-        buf.advance(h.payload_length);
-        Ok(o)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
+    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_noderecord_codec_ipv4() {
