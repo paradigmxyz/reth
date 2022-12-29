@@ -471,9 +471,9 @@ impl SessionManager {
         }
     }
 
+    /// Returns [`PeerInfo`] for all connected peers
     pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
-        let peers: Vec<PeerInfo> = self
-            .active_sessions
+        self.active_sessions
             .values()
             .map(|session| PeerInfo {
                 remote_id: session.remote_id,
@@ -481,19 +481,20 @@ impl SessionManager {
                 remote_addr: session.remote_addr,
                 capabilities: session.capabilities.clone(),
                 client_version: session.client_version.clone(),
-            } as PeerInfo)
-            .collect();
-
-        peers
+            })
+            .collect()
     }
 
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
     pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
-        self.active_sessions.get(&peer_id).map(|x| PeerInfo {
-            remote_id: x.remote_id,
-            direction: x.direction,
-            remote_addr: x.remote_addr,
-            capabilities: x.capabilities.clone(),
-            client_version: x.client_version.clone(),
+        self.active_sessions.get(&peer_id).map(|session| PeerInfo {
+            remote_id: session.remote_id,
+            direction: session.direction,
+            remote_addr: session.remote_addr,
+            capabilities: session.capabilities.clone(),
+            client_version: session.client_version.clone(),
         })
     }
 }

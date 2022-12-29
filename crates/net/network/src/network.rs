@@ -101,7 +101,9 @@ impl NetworkHandle {
         rx.await
     }
 
-    /// Returns [`PeerInfo`] for a given peer
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
     pub async fn get_peer_by_id(
         &self,
         peer_id: PeerId,

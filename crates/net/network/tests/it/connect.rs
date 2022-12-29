@@ -139,7 +139,7 @@ async fn test_get_peer() {
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(TestApi::default());
+    let client = Arc::new(NoopProvider::default());
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
     let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
@@ -174,7 +174,7 @@ async fn test_get_peer_by_id() {
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(TestApi::default());
+    let client = Arc::new(NoopProvider::default());
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
     let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
