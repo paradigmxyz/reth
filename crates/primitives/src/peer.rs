@@ -27,6 +27,11 @@ impl<T> WithPeerId<T> {
         &self.1
     }
 
+    /// Returns ownership of the underlying data.
+    pub fn into_data(self) -> T {
+        self.1
+    }
+
     /// Transform the data
     pub fn transform<F: From<T>>(self) -> WithPeerId<F> {
         WithPeerId(self.0, self.1.into())

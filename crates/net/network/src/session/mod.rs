@@ -356,7 +356,7 @@ impl SessionManager {
 
                 let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
 
-                let messages = PeerRequestSender { peer_id, to_session_tx };
+                let messages = PeerRequestSender::new(peer_id, to_session_tx);
 
                 let session = ActiveSession {
                     next_id: 0,

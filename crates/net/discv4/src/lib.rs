@@ -64,8 +64,8 @@ use node::{kad_key, NodeKey};
 // reexport NodeRecord primitive
 pub use reth_primitives::NodeRecord;
 
-#[cfg(any(test, feature = "mock"))]
-pub mod mock;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 use reth_net_nat::ResolveNatInterval;
 /// reexport to get public ip.
@@ -133,6 +133,17 @@ impl Discv4 {
         service.spawn();
 
         Ok(discv4)
+    }
+
+    /// Returns a new instance with the given channel directly
+    ///
+    /// NOTE: this is only intended for test setups.
+    #[cfg(feature = "test-utils")]
+    pub fn noop() -> Self {
+        let (to_service, _rx) = mpsc::channel(1);
+        let local_addr =
+            (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into();
+        Self { local_addr, to_service }
     }
 
     /// Binds a new UdpSocket and creates the service
@@ -1764,7 +1775,7 @@ mod tests {
     use super::*;
     use crate::{
         bootnodes::mainnet_nodes,
-        mock::{create_discv4, create_discv4_with_config, rng_record},
+        test_utils::{create_discv4, create_discv4_with_config, rng_record},
     };
     use reth_primitives::{hex_literal::hex, ForkHash};
 

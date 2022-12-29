@@ -463,7 +463,7 @@ impl Decodable for Pong {
 mod tests {
     use super::*;
     use crate::{
-        mock::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
+        test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
     use bytes::BytesMut;
