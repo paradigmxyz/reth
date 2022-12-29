@@ -93,6 +93,8 @@ pub(crate) struct PeersManager {
     /// How long peers to which we could not connect for non-fatal reasons, e.g.
     /// [`DisconnectReason::TooManyPeers`], are put in time out.
     backoff_duration: Duration,
+    /// If non-trusted peers should be connected to
+    connect_trusted_nodes_only: bool,
 }
 
 impl PeersManager {
@@ -106,6 +108,7 @@ impl PeersManager {
             ban_duration,
             backoff_duration,
             trusted_nodes,
+            connect_trusted_nodes_only,
             ..
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
@@ -117,7 +120,7 @@ impl PeersManager {
         let mut peers = HashMap::with_capacity(trusted_nodes.len());
 
         for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
-            peers.entry(id).or_insert_with(|| Peer::new(SocketAddr::from((address, tcp_port))));
+            peers.entry(id).or_insert_with(|| Peer::trusted(SocketAddr::from((address, tcp_port))));
         }
 
         Self {
@@ -135,6 +138,7 @@ impl PeersManager {
             ban_list,
             ban_duration,
             backoff_duration,
+            connect_trusted_nodes_only,
         }
     }
 
@@ -451,7 +455,10 @@ impl PeersManager {
     ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
-        let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| peer.state.is_unconnected());
+        let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
+            peer.state.is_unconnected() &&
+                (!self.connect_trusted_nodes_only || peer.kind.is_trusted())
+        });
 
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
@@ -630,6 +637,8 @@ pub struct Peer {
     fork_id: Option<ForkId>,
     /// Whether the entry should be removed after an existing session was terminated.
     remove_after_disconnect: bool,
+    /// The kind of peer
+    kind: PeerKind,
 }
 
 // === impl Peer ===
@@ -639,6 +648,10 @@ impl Peer {
         Self::with_state(addr, Default::default())
     }
 
+    fn trusted(addr: SocketAddr) -> Self {
+        Self { kind: PeerKind::Trusted, ..Self::new(addr) }
+    }
+
     fn with_state(addr: SocketAddr, state: PeerConnectionState) -> Self {
         Self {
             addr,
@@ -646,6 +659,7 @@ impl Peer {
             reputation: DEFAULT_REPUTATION,
             fork_id: None,
             remove_after_disconnect: false,
+            kind: Default::default(),
         }
     }
 
@@ -737,6 +751,24 @@ impl PeerConnectionState {
     #[inline]
     fn is_unconnected(&self) -> bool {
         matches!(self, PeerConnectionState::Idle)
+    }
+}
+
+/// Represents the kind of peer
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+enum PeerKind {
+    /// Non-trusted peer.
+    #[default]
+    NonTrusted,
+    /// Trusted peer.
+    Trusted,
+}
+
+impl PeerKind {
+    /// Returns whether this peer is trusted
+    #[inline]
+    fn is_trusted(&self) -> bool {
+        matches!(self, Self::Trusted)
     }
 }
 
