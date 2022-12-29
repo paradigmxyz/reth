@@ -218,10 +218,11 @@ impl Decodable for bool {
     }
 }
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
+#[cfg(feature = "std")]
 impl Decodable for std::net::IpAddr {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
         let h = Header::decode(buf)?;
         if h.list {
             return Err(DecodeError::UnexpectedList)
