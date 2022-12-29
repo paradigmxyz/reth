@@ -135,6 +135,16 @@ impl Discv4 {
         Ok(discv4)
     }
 
+    /// Returns a new instance with the given channel directly
+    ///
+    /// NOTE: this is only intended for test setups.
+    #[cfg(feature = "mock")]
+    pub fn noop() -> Self {
+        let (to_service, _rx) = mpsc::channel(1);
+        let local_addr = ( IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into();
+        Self { local_addr, to_service }
+    }
+
     /// Binds a new UdpSocket and creates the service
     ///
     /// ```

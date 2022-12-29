@@ -479,3 +479,13 @@ pub(crate) enum StateAction {
     /// A peer was dropped
     PeerRemoved(PeerId),
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::state::NetworkState;
+
+    fn state() -> NetworkState<T>
+
+    #[tokio::test]
+    async fn test_dropped_active_session() {}
+}
