@@ -1,6 +1,5 @@
 use crate::PeerId;
-use bytes::{Buf, BufMut};
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use reth_rlp::RlpDecodable;
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -17,7 +16,18 @@ use url::{Host, Url};
 ///
 /// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
 /// message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    SerializeDisplay,
+    DeserializeFromStr,
+    RlpEncodable,
+    RlpDecodable,
+)]
 pub struct NodeRecord {
     /// The Address of a node.
     pub address: IpAddr,
@@ -125,60 +135,12 @@ impl FromStr for NodeRecord {
     }
 }
 
-impl Encodable for NodeRecord {
-    fn encode(&self, out: &mut dyn BufMut) {
-        #[derive(RlpEncodable)]
-        struct EncodeNode {
-            address: IpAddr,
-            udp_port: u16,
-            tcp_port: u16,
-            id: PeerId,
-        }
-        let node = EncodeNode {
-            address: self.address,
-            udp_port: self.udp_port,
-            tcp_port: self.tcp_port,
-            id: self.id,
-        };
-        node.encode(out)
-    }
-}
-
-impl Decodable for NodeRecord {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let b = &mut &**buf;
-        let rlp_head = reth_rlp::Header::decode(b)?;
-        if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
-        }
-        let started_len = b.len();
-        let address = IpAddr::decode(b)?;
-        let this = Self {
-            address,
-            udp_port: Decodable::decode(b)?,
-            tcp_port: Decodable::decode(b)?,
-            id: Decodable::decode(b)?,
-        };
-        // the ENR record can contain additional entries that we skip
-        let consumed = started_len - b.len();
-        if consumed > rlp_head.payload_length {
-            return Err(DecodeError::ListLengthMismatch {
-                expected: rlp_head.payload_length,
-                got: consumed,
-            })
-        }
-        let rem = rlp_head.payload_length - consumed;
-        b.advance(rem);
-        *buf = *b;
-        Ok(this)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
+    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_noderecord_codec_ipv4() {
