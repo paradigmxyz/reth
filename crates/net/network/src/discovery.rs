@@ -160,11 +160,10 @@ impl Discovery {
                 udp_port: 0,
                 id: PeerId::random(),
             },
-            discv4: Discv4::noop(),
-            discv4_updates: ReceiverStream::new(rx),
-            _dsicv4_config: Default::default(),
+            discv4: Some(Discv4::noop()),
+            discv4_updates: Some(ReceiverStream::new(rx)),
             queued_events: Default::default(),
-            _discv4_service: tokio::task::spawn(async move {}),
+            _discv4_service: Some(tokio::task::spawn(async move {})),
         }
     }
 }
