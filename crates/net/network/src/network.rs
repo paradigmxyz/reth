@@ -3,6 +3,7 @@ use crate::{
     manager::NetworkEvent,
     message::PeerRequest,
     peers::{PeersHandle, ReputationChangeKind},
+    session::PeerInfo,
     FetchClient,
 };
 use parking_lot::Mutex;
@@ -90,6 +91,25 @@ impl NetworkHandle {
     pub async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
+        rx.await
+    }
+
+    /// Returns [`PeerInfo`] for all connected peers
+    pub async fn get_peers(&self) -> Result<Vec<PeerInfo>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
+        rx.await
+    }
+
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
+    pub async fn get_peer_by_id(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<PeerInfo>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
         rx.await
     }
 
@@ -211,4 +231,8 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
+    /// Get PeerInfo fro all the peers
+    GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
+    /// Get PeerInfo for a specific peer
+    GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
 }

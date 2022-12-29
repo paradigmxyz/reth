@@ -47,6 +47,10 @@ pub(crate) struct ActiveSessionHandle {
     pub(crate) capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
     pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
+    /// The client's name and version
+    pub(crate) client_version: String,
+    /// The address we're connected to
+    pub(crate) remote_addr: SocketAddr,
 }
 
 // === impl ActiveSessionHandle ===
@@ -57,6 +61,21 @@ impl ActiveSessionHandle {
         // Note: we clone the sender which ensures the channel has capacity to send the message
         let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
     }
+}
+
+#[derive(Debug)]
+#[allow(unused)]
+pub struct PeerInfo {
+    /// Announced capabilities of the peer
+    pub(crate) capabilities: Arc<Capabilities>,
+    /// The identifier of the remote peer
+    pub(crate) remote_id: PeerId,
+    /// The client's name and version
+    pub(crate) client_version: String,
+    /// The address we're connected to
+    pub(crate) remote_addr: SocketAddr,
+    /// The direction of the session
+    pub(crate) direction: Direction,
 }
 
 /// Events a pending session can produce.
@@ -76,6 +95,7 @@ pub(crate) enum PendingSessionEvent {
         status: Status,
         conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
         direction: Direction,
+        client_id: String,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
