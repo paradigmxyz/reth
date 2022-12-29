@@ -394,7 +394,7 @@ where
             this.on_network_event(event);
         }
 
-        // drain network/peer related events
+        // drain commands
         while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
             this.on_command(cmd);
         }
@@ -475,7 +475,7 @@ enum TransactionsCommand {
 #[derive(Debug)]
 #[allow(missing_docs)]
 pub enum NetworkTransactionEvent {
-    /// Received list of transactions to the given peer.
+    /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
     IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },

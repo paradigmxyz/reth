@@ -2,7 +2,7 @@
 
 // <https://github.com/ledgerwatch/erigon/blob/610e648dc43ec8cd6563313e28f06f534a9091b3/params/bootnodes.go>
 
-use crate::node::NodeRecord;
+use reth_primitives::NodeRecord;
 
 /// Ethereum Foundation Go Bootnodes
 pub static MAINNET_BOOTNODES : [&str; 8] = [

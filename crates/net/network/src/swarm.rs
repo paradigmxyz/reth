@@ -27,7 +27,7 @@ use tracing::{trace, warn};
 /// A swarm emits [`SwarmEvent`]s when polled.
 ///
 /// The manages the [`ConnectionListener`] and delegates new incoming connections to the
-/// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
+/// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
 /// Following diagram gives displays the dataflow contained in the [`Swarm`]

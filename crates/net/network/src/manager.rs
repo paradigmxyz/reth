@@ -154,8 +154,8 @@ where
             ..
         } = config;
 
-        let peers_manger = PeersManager::new(peers_config);
-        let peers_handle = peers_manger.handle();
+        let peers_manager = PeersManager::new(peers_config);
+        let peers_handle = peers_manager.handle();
 
         let incoming = ConnectionListener::bind(listener_addr).await?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
@@ -176,7 +176,7 @@ where
             hello_message,
             fork_filter,
         );
-        let state = NetworkState::new(client, discovery, peers_manger, genesis_hash);
+        let state = NetworkState::new(client, discovery, peers_manager, genesis_hash);
 
         let swarm = Swarm::new(incoming, sessions, state);
 

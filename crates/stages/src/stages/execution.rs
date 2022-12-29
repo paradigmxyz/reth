@@ -51,7 +51,8 @@ const EXECUTION: StageId = StageId("Execution");
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage {
-    config: Config,
+    /// Executor configuration.
+    pub config: Config,
 }
 
 impl Default for ExecutionStage {
@@ -195,7 +196,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .stack_size(50 * 1024 * 1024)
                     .spawn_scoped(scope, || {
                         // execute and store output to results
-                        // ANCHOR: snippet-block_change_patches
                         reth_executor::executor::execute_and_verify_receipt(
                             header,
                             &recovered_transactions,
@@ -203,7 +203,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             &self.config,
                             state_provider,
                         )
-                        // ANCHOR_END: snippet-block_change_patches
                     })
                     .expect("Expects that thread name is not null");
                 handle.join().expect("Expects for thread to not panic")
