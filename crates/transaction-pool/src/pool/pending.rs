@@ -3,7 +3,7 @@ use crate::{
     pool::{best::BestTransactions, size::SizeTracker},
     TransactionOrdering, ValidPoolTransaction,
 };
-use reth_primitives::rpc::TxHash;
+use reth_primitives::TxHash;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
