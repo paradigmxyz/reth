@@ -1,5 +1,4 @@
 //! Support for handling peer sessions.
-pub use crate::message::PeerRequestSender;
 use crate::{
     message::PeerMessage,
     session::{
@@ -11,6 +10,7 @@ use crate::{
         },
     },
 };
+pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
@@ -323,6 +323,7 @@ impl SessionManager {
                 conn,
                 status,
                 direction,
+                client_id,
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -383,6 +384,8 @@ impl SessionManager {
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
+                    client_version: client_id,
+                    remote_addr,
                 };
 
                 self.active_sessions.insert(peer_id, handle);
@@ -466,6 +469,33 @@ impl SessionManager {
                 }
             }
         }
+    }
+
+    /// Returns [`PeerInfo`] for all connected peers
+    pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
+        self.active_sessions
+            .values()
+            .map(|session| PeerInfo {
+                remote_id: session.remote_id,
+                direction: session.direction,
+                remote_addr: session.remote_addr,
+                capabilities: session.capabilities.clone(),
+                client_version: session.client_version.clone(),
+            })
+            .collect()
+    }
+
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
+    pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+        self.active_sessions.get(&peer_id).map(|session| PeerInfo {
+            remote_id: session.remote_id,
+            direction: session.direction,
+            remote_addr: session.remote_addr,
+            capabilities: session.capabilities.clone(),
+            client_version: session.client_version.clone(),
+        })
     }
 }
 
@@ -765,5 +795,6 @@ async fn authenticate_stream(
         status: their_status,
         conn: eth_stream,
         direction,
+        client_id: their_hello.client_version,
     }
 }
