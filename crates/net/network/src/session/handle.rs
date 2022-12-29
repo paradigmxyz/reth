@@ -6,7 +6,7 @@ use crate::{
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    error::EthStreamError,
+    errors::EthStreamError,
     DisconnectReason, EthStream, P2PStream, Status,
 };
 use reth_primitives::PeerId;

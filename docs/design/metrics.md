@@ -32,7 +32,7 @@ Each metric is identified by a [`Key`][metrics.Key], which itself is composed of
 
 The `KeyName` represents the actual metric name, and the labels are used to further drill down into the metric.
 
-For example, a metric that represents stage progress would have a key name of `stage.progress` and a `stage` label that can be used to get the progress of individual stages.
+For example, a metric that represents stage progress would have a key name of `stage_progress` and a `stage` label that can be used to get the progress of individual stages.
 
 There will only ever exist one description per metric `KeyName`; it is not possible to add a description for a label, or a `KeyName`/`Label` group.
 
@@ -63,6 +63,11 @@ How the metrics are exposed to the end-user is determined by the CLI.
 - `stages.headers.validation_errors`: Number of validation errors while requesting headers
 - `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
 - `stages.headers.request_time`: Elapsed time of successful header requests
+
+#### Transaction Pool
+- `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
+- `transaction_pool.invalid_transactions`: Number of invalid transactions 
+- `transaction_pool.removed_transactions`: Number of removed transactions from the pool
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html

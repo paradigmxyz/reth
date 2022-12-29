@@ -70,13 +70,11 @@ use state::*;
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
-// ANCHOR: struct-Pipeline
 pub struct Pipeline<DB: Database> {
     stages: Vec<QueuedStage<DB>>,
     max_block: Option<BlockNumber>,
     events_sender: MaybeSender<PipelineEvent>,
 }
-// ANCHOR_END: struct-Pipeline
 
 impl<DB: Database> Default for Pipeline<DB> {
     fn default() -> Self {

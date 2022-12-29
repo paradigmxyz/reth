@@ -1,4 +1,4 @@
-use crate::{BlockProvider, ChainInfo, HeaderProvider, ProviderImpl};
+use crate::{block::BlockHashProvider, BlockProvider, ChainInfo, HeaderProvider, ProviderImpl};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, Header, H256, U256};
@@ -26,6 +26,15 @@ impl<DB: Database> HeaderProvider for ProviderImpl<DB> {
     }
 }
 
+impl<DB: Database> BlockHashProvider for ProviderImpl<DB> {
+    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+        // TODO: This unwrap is potentially unsafe
+        self.db
+            .view(|tx| tx.get::<tables::CanonicalHeaders>(number.try_into().unwrap()))?
+            .map_err(Into::into)
+    }
+}
+
 impl<DB: Database> BlockProvider for ProviderImpl<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         Ok(ChainInfo {
@@ -43,12 +52,5 @@ impl<DB: Database> BlockProvider for ProviderImpl<DB> {
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))?.map_err(Into::into)
-    }
-
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        // TODO: This unwrap is potentially unsafe
-        self.db
-            .view(|tx| tx.get::<tables::CanonicalHeaders>(number.try_into().unwrap()))?
-            .map_err(Into::into)
     }
 }

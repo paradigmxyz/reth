@@ -1,4 +1,4 @@
-use crate::error::PingerError;
+use crate::errors::PingerError;
 use std::{
     pin::Pin,
     task::{Context, Poll},

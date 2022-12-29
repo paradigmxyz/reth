@@ -12,7 +12,6 @@ use jsonrpsee::{
     },
     server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerHandle},
 };
-use parity_tokio_ipc::Endpoint;
 use std::{
     future::Future,
     io,
@@ -26,6 +25,9 @@ use tokio::{
 };
 use tower::{layer::util::Identity, Service};
 use tracing::{trace, warn};
+
+// re-export so can be used during builder setup
+pub use parity_tokio_ipc::Endpoint;
 
 mod connection;
 mod future;

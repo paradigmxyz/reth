@@ -51,7 +51,8 @@ const EXECUTION: StageId = StageId("Execution");
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage {
-    config: Config,
+    /// Executor configuration.
+    pub config: Config,
 }
 
 impl Default for ExecutionStage {
@@ -95,6 +96,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut headers = tx.cursor::<tables::Headers>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor::<tables::BlockBodies>()?;
+        // Get ommers with canonical hashes.
+        let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
         // Get transaction of the block that we are executing.
         let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -116,8 +119,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
             .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody), StageError> {
-                // TODO see if walker next has better performance then seek_exact calls.
+            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
+                // NOTE: It probably will be faster to fetch all items from one table with cursor,
+                // but to reduce complexity we are using `seek_exact` to skip some
+                // edge cases that can happen.
                 let (_, header) =
                     headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
                         number: key.number(),
@@ -126,13 +131,18 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (_, body) = bodies_cursor
                     .seek_exact(*key)?
                     .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                Ok((header, body))
+                let (_, stored_ommers) = ommers_cursor
+                    .seek_exact(*key)?
+                    .ok_or(DatabaseIntegrityError::Ommers { number: key.number() })?;
+                Ok((header, body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body) in block_batch.iter() {
+        for (header, body, ommers) in block_batch.iter() {
+            let num = header.number;
+            tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -175,25 +185,30 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
 
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
-            let change_set = std::thread::scope(|scope| {
+
+            // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
+            // revm can take more then default allocated stack space. For this case we are using
+            // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
+            // we can see to set more accurate stack size or even optimize revm to move more data to
+            // heap.
+            let changeset = std::thread::scope(|scope| {
                 let handle = std::thread::Builder::new()
                     .stack_size(50 * 1024 * 1024)
                     .spawn_scoped(scope, || {
                         // execute and store output to results
-                        // ANCHOR: snippet-block_change_patches
                         reth_executor::executor::execute_and_verify_receipt(
                             header,
                             &recovered_transactions,
+                            ommers,
                             &self.config,
                             state_provider,
                         )
-                        // ANCHOR_END: snippet-block_change_patches
                     })
                     .expect("Expects that thread name is not null");
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push(change_set);
+            block_change_patches.push(changeset);
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
@@ -203,9 +218,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // apply changes to plain database.
         for results in block_change_patches.into_iter() {
             // insert state change set
-            for result in results.changeset.into_iter() {
+            for result in results.changesets.into_iter() {
                 // TODO insert to transitionId to tx_index
-                for (address, account_change_set) in result.state_diff.into_iter() {
+                for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
@@ -230,13 +245,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             storage_id.clone(),
                             StorageEntry { key: hkey, value: old_value },
                         )?;
+                        tracing::debug!(
+                            target = "sync::stages::execution",
+                            "{address} setting storage:{key} ({old_value} -> {new_value})"
+                        );
 
-                        if new_value.is_zero() {
-                            tx.delete::<tables::PlainStorageState>(
-                                address,
-                                Some(StorageEntry { key: hkey, value: old_value }),
-                            )?;
-                        } else {
+                        // Always delete old value as duplicate table put will not override it
+                        tx.delete::<tables::PlainStorageState>(
+                            address,
+                            Some(StorageEntry { key: hkey, value: old_value }),
+                        )?;
+                        if !new_value.is_zero() {
                             tx.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
@@ -259,7 +278,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
 
             // If there is block reward we will add account changeset to db
-            // TODO add apply_block_reward_changeset to db tx fn which maybe takes an option.
             if let Some(block_reward_changeset) = results.block_reward {
                 // we are sure that block reward index is present.
                 for (address, changeset) in block_reward_changeset.into_iter() {

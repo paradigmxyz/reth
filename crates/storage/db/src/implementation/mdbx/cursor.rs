@@ -103,6 +103,18 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
         self.inner.next_dup().map_err(|e| Error::Read(e.into()))?.map(decode_value::<T>).transpose()
     }
 
+    fn seek_by_key_subkey(
+        &mut self,
+        key: <T as Table>::Key,
+        subkey: <T as DupSort>::SubKey,
+    ) -> ValueOnlyResult<T> {
+        self.inner
+            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+            .map_err(|e| Error::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
+    }
+
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
     fn walk_dup<'cursor>(
         &'cursor mut self,
