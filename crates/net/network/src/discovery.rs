@@ -24,15 +24,13 @@ pub struct Discovery {
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
-    discv4: Discv4,
+    discv4: Option<Discv4>,
     /// All KAD table updates from the discv4 service.
-    discv4_updates: ReceiverStream<DiscoveryUpdate>,
-    /// The initial config for the discv4 service
-    _dsicv4_config: Discv4Config,
+    discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
     /// The handle to the spawned discv4 service
-    _discv4_service: JoinHandle<()>,
+    _discv4_service: Option<JoinHandle<()>>,
 }
 
 impl Discovery {
@@ -43,23 +41,29 @@ impl Discovery {
     pub async fn new(
         discovery_addr: SocketAddr,
         sk: SecretKey,
-        dsicv4_config: Discv4Config,
+        discv4_config: Option<Discv4Config>,
     ) -> Result<Self, NetworkError> {
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
-        let (discv4, mut discv4_service) =
-            Discv4::bind(discovery_addr, local_enr, sk, dsicv4_config.clone())
+        let (discv4, 
+            discv4_updates, 
+            _discv4_service
+        ) = if let Some(disc_config) = discv4_config {
+            let (discv4, mut discv4_service) =
+                Discv4::bind(discovery_addr, local_enr, sk, disc_config)
                 .await
                 .map_err(NetworkError::Discovery)?;
-        let discv4_updates = discv4_service.update_stream();
-
-        // spawn the service
-        let _discv4_service = discv4_service.spawn();
+            let discv4_updates = discv4_service.update_stream();
+            // spawn the service
+            let _discv4_service = discv4_service.spawn();
+            (Some(discv4), Some(discv4_updates), Some(_discv4_service))
+        } else {
+            (None, None, None)
+        };
 
         Ok(Self {
             local_enr,
             discv4,
             discv4_updates,
-            _dsicv4_config: dsicv4_config,
             _discv4_service,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
@@ -69,17 +73,23 @@ impl Discovery {
     /// Updates the `eth:ForkId` field in discv4.
     #[allow(unused)]
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
-        self.discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
+        if let Some(discv4) = &self.discv4 {
+            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
+        }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip(&self, ip: IpAddr) {
-        self.discv4.ban_ip(ip)
+        if let Some(discv4) = &self.discv4 {
+            discv4.ban_ip(ip)
+        }
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
-        self.discv4.ban(peer_id, ip)
+        if let Some(discv4) = &self.discv4 {
+            discv4.ban(peer_id, ip)
+        }
     }
 
     /// Returns the id with which the local identifies itself in the network
@@ -122,7 +132,9 @@ impl Discovery {
             }
 
             // drain the update stream
-            while let Poll::Ready(Some(update)) = self.discv4_updates.poll_next_unpin(cx) {
+            while let Some(Poll::Ready(Some(update))) = self.discv4_updates.as_mut().map(
+                |disc_updates|
+                disc_updates.poll_next_unpin(cx)) {
                 self.on_discv4_update(update)
             }
 

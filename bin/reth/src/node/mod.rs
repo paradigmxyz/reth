@@ -75,6 +75,10 @@ pub struct Command {
     /// NOTE: This is a temporary flag
     #[arg(long = "debug.tip")]
     tip: Option<H256>,
+
+    /// Disable the discovery service.
+    #[arg(short, long)]
+    disable_discovery: bool,
 }
 
 impl Command {
@@ -100,7 +104,12 @@ impl Command {
 
         info!("Connecting to p2p");
         let network =
-            config.network_config(db.clone(), chain_id, genesis_hash).start_network().await?;
+            config.network_config(
+                db.clone(), 
+                chain_id, 
+                genesis_hash,
+                self.disable_discovery,
+            ).start_network().await?;
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own

@@ -42,7 +42,7 @@ pub struct NetworkConfig<C> {
     /// All boot nodes to start network discovery with.
     pub boot_nodes: HashSet<NodeRecord>,
     /// How to set up discovery.
-    pub discovery_v4_config: Discv4Config,
+    pub discovery_v4_config: Option<Discv4Config>,
     /// Address to use for discovery
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
@@ -89,7 +89,7 @@ impl<C> NetworkConfig<C> {
 
     /// Sets the config to use for the discovery v4 protocol.
     pub fn set_discovery_v4(mut self, discovery_config: Discv4Config) -> Self {
-        self.discovery_v4_config = discovery_config;
+        self.discovery_v4_config = Some(discovery_config);
         self
     }
 
@@ -125,7 +125,7 @@ pub struct NetworkConfigBuilder<C> {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to set up discovery.
-    discovery_v4_builder: Discv4ConfigBuilder,
+    discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
     /// Address to use for discovery
@@ -164,7 +164,7 @@ impl<C> NetworkConfigBuilder<C> {
         Self {
             client,
             secret_key,
-            discovery_v4_builder: Default::default(),
+            discovery_v4_builder: Some(Default::default()),
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
@@ -270,7 +270,7 @@ impl<C> NetworkConfigBuilder<C> {
 
     /// Sets the discv4 config to use.
     pub fn discovery(mut self, builder: Discv4ConfigBuilder) -> Self {
-        self.discovery_v4_builder = builder;
+        self.discovery_v4_builder = Some(builder);
         self
     }
 
@@ -278,6 +278,19 @@ impl<C> NetworkConfigBuilder<C> {
     pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         self.boot_nodes = nodes.into_iter().collect();
         self
+    }
+
+    /// Sets the discovery service off on true.
+    pub fn set_discovery(mut self, disable_discovery: bool) -> Self {
+        if disable_discovery {
+            self.disable_discovery();
+        }
+        self
+    }
+
+    /// disables discovery.
+    pub fn disable_discovery(&mut self) {
+        self.discovery_v4_builder = None;
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -322,7 +335,7 @@ impl<C> NetworkConfigBuilder<C> {
             client,
             secret_key,
             boot_nodes,
-            discovery_v4_config: discovery_v4_builder.build(),
+            discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
             }),
