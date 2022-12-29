@@ -322,3 +322,240 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use bytes::BytesMut;
+    use reth_interfaces::test_utils::generators::random_block;
+    use reth_primitives::H256;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_rlp::Encodable;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    fn payload_from_block(block: SealedBlock) -> ExecutionPayload {
+        let transactions = block
+            .body
+            .iter()
+            .map(|tx| {
+                let mut encoded = BytesMut::new();
+                tx.encode(&mut encoded);
+                encoded.freeze().into()
+            })
+            .collect();
+        ExecutionPayload {
+            parent_hash: block.parent_hash,
+            fee_recipient: block.beneficiary,
+            state_root: block.state_root,
+            receipts_root: block.receipts_root,
+            logs_bloom: block.logs_bloom,
+            prev_randao: block.mix_hash,
+            block_number: block.number.into(),
+            gas_limit: block.gas_limit.into(),
+            gas_used: block.gas_used.into(),
+            timestamp: block.timestamp.into(),
+            extra_data: block.extra_data.clone().into(),
+            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default().into(),
+            block_hash: block.hash(),
+            transactions,
+            withdrawal: None,
+        }
+    }
+
+    mod new_payload {
+        use super::*;
+
+        #[tokio::test]
+        async fn new_payload_known() {
+            let (tx, rx) = unbounded_channel();
+            let client = Arc::new(MockEthProvider::default());
+            let engine = EthConsensusEngine {
+                client: client.clone(),
+                config: Config::default(),
+                local_store: Default::default(),
+                rx: UnboundedReceiverStream::new(rx),
+            };
+
+            tokio::spawn(engine);
+
+            let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
+            let block_hash = block.hash();
+            let execution_payload = payload_from_block(block.clone());
+
+            client.add_header(block_hash, block.header.unseal());
+
+            let (result_tx, result_rx) = oneshot::channel();
+            tx.send(EngineMessage::NewPayload(execution_payload, result_tx))
+                .expect("failed to send engine msg");
+
+            let result = result_rx.await;
+            assert_matches!(result, Ok(Ok(_)));
+            let expected_result = PayloadStatus::new(PayloadStatusEnum::Valid, block_hash);
+            assert_eq!(result.unwrap().unwrap(), expected_result);
+        }
+    }
+
+    // non exhaustive tests for engine_getPayload
+    // TODO: amend when block building is implemented
+    mod get_payload {
+        use super::*;
+
+        #[tokio::test]
+        async fn payload_unknown() {
+            let (tx, rx) = unbounded_channel();
+            let engine = EthConsensusEngine {
+                client: Arc::new(MockEthProvider::default()),
+                config: Config::default(),
+                local_store: Default::default(),
+                rx: UnboundedReceiverStream::new(rx),
+            };
+
+            tokio::spawn(engine);
+
+            let payload_id = H64::random();
+
+            let (result_tx, result_rx) = oneshot::channel();
+            tx.send(EngineMessage::GetPayload(payload_id, result_tx))
+                .expect("failed to send engine msg");
+
+            assert_matches!(result_rx.await, Ok(Err(EngineApiError::PayloadUnknown)));
+        }
+    }
+
+    // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
+    mod exchange_transition_configuration {
+        use super::*;
+
+        #[tokio::test]
+        async fn terminal_td_mismatch() {
+            let (tx, rx) = unbounded_channel();
+            let config = Config::default();
+            let engine = EthConsensusEngine {
+                client: Arc::new(MockEthProvider::default()),
+                config: config.clone(),
+                local_store: Default::default(),
+                rx: UnboundedReceiverStream::new(rx),
+            };
+
+            tokio::spawn(engine);
+
+            let transition_config = TransitionConfiguration {
+                terminal_total_difficulty: (config.merge_terminal_total_difficulty + 1).into(),
+                ..Default::default()
+            };
+
+            let (result_tx, result_rx) = oneshot::channel();
+            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ))
+            .expect("failed to send engine msg");
+
+            assert_matches!(
+                result_rx.await,
+                Ok(Err(EngineApiError::TerminalTD { execution, consensus }))
+                    if execution == config.merge_terminal_total_difficulty.into()
+                        && consensus == transition_config.terminal_total_difficulty.into()
+            );
+        }
+
+        #[tokio::test]
+        async fn terminal_block_hash_mismatch() {
+            let (tx, rx) = unbounded_channel();
+            let client = Arc::new(MockEthProvider::default());
+            let config = Config::default();
+            let engine = EthConsensusEngine {
+                client: client.clone(),
+                config: config.clone(),
+                local_store: Default::default(),
+                rx: UnboundedReceiverStream::new(rx),
+            };
+
+            tokio::spawn(engine);
+
+            let terminal_block_number = 1000;
+            let consensus_terminal_block = random_block(terminal_block_number, None, None, None);
+            let execution_terminal_block = random_block(terminal_block_number, None, None, None);
+
+            let transition_config = TransitionConfiguration {
+                terminal_total_difficulty: config.merge_terminal_total_difficulty.into(),
+                terminal_block_hash: consensus_terminal_block.hash(),
+                terminal_block_number,
+            };
+
+            // Unknown block number
+            let (result_tx, result_rx) = oneshot::channel();
+            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ))
+            .expect("failed to send engine msg");
+
+            assert_matches!(
+                result_rx.await,
+                Ok(Err(EngineApiError::TerminalBlockHash { execution, consensus }))
+                    if execution.is_none()
+                        && consensus == transition_config.terminal_block_hash
+            );
+
+            // Add block and to provider local store and test for mismatch
+            client.add_block(
+                execution_terminal_block.hash(),
+                execution_terminal_block.clone().unseal(),
+            );
+
+            let (result_tx, result_rx) = oneshot::channel();
+            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ))
+            .expect("failed to send engine msg");
+
+            assert_matches!(
+                result_rx.await,
+                Ok(Err(EngineApiError::TerminalBlockHash { execution, consensus }))
+                    if execution == Some(execution_terminal_block.hash())
+                        && consensus == transition_config.terminal_block_hash
+            );
+        }
+
+        #[tokio::test]
+        async fn configurations_match() {
+            let (tx, rx) = unbounded_channel();
+            let client = Arc::new(MockEthProvider::default());
+            let config = Config::default();
+            let engine = EthConsensusEngine {
+                client: client.clone(),
+                config: config.clone(),
+                local_store: Default::default(),
+                rx: UnboundedReceiverStream::new(rx),
+            };
+
+            tokio::spawn(engine);
+
+            let terminal_block_number = 1000;
+            let terminal_block = random_block(terminal_block_number, None, None, None);
+
+            let transition_config = TransitionConfiguration {
+                terminal_total_difficulty: config.merge_terminal_total_difficulty.into(),
+                terminal_block_hash: terminal_block.hash(),
+                terminal_block_number,
+            };
+
+            client.add_block(terminal_block.hash(), terminal_block.clone().unseal());
+
+            let (result_tx, result_rx) = oneshot::channel();
+            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ))
+            .expect("failed to send engine msg");
+
+            assert_matches!(
+                result_rx.await,
+                Ok(Ok(config)) if config == transition_config
+            );
+        }
+    }
+}
