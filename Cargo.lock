@@ -3913,6 +3913,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "reth-primitives",
  "reth-rlp",
  "serde",

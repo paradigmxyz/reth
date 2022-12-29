@@ -327,44 +327,67 @@ where
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use bytes::BytesMut;
     use reth_interfaces::test_utils::generators::random_block;
     use reth_primitives::H256;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rlp::Encodable;
     use tokio::sync::mpsc::unbounded_channel;
-
-    fn payload_from_block(block: SealedBlock) -> ExecutionPayload {
-        let transactions = block
-            .body
-            .iter()
-            .map(|tx| {
-                let mut encoded = BytesMut::new();
-                tx.encode(&mut encoded);
-                encoded.freeze().into()
-            })
-            .collect();
-        ExecutionPayload {
-            parent_hash: block.parent_hash,
-            fee_recipient: block.beneficiary,
-            state_root: block.state_root,
-            receipts_root: block.receipts_root,
-            logs_bloom: block.logs_bloom,
-            prev_randao: block.mix_hash,
-            block_number: block.number.into(),
-            gas_limit: block.gas_limit.into(),
-            gas_used: block.gas_used.into(),
-            timestamp: block.timestamp.into(),
-            extra_data: block.extra_data.clone().into(),
-            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default().into(),
-            block_hash: block.hash(),
-            transactions,
-            withdrawal: None,
-        }
-    }
 
     mod new_payload {
         use super::*;
+        use bytes::{Bytes, BytesMut};
+        use reth_primitives::Block;
+
+        #[tokio::test]
+        async fn payload_validation() {
+            let (_tx, rx) = unbounded_channel();
+            let engine = EthConsensusEngine {
+                client: Arc::new(MockEthProvider::default()),
+                config: Config::default(),
+                local_store: Default::default(),
+                rx: UnboundedReceiverStream::new(rx),
+            };
+
+            let block = random_block(100, Some(H256::random()), Some(3), Some(0));
+            let transform_block = |f: Box<dyn FnOnce(Block) -> Block>| {
+                let unsealed = block.clone().unseal();
+                let transformed: Block = f(unsealed);
+                SealedBlock {
+                    header: transformed.header.seal(),
+                    body: transformed.body,
+                    ommers: transformed.ommers.into_iter().map(Header::seal).collect(),
+                }
+            };
+
+            let block_with_valid_extra_data = transform_block(Box::new(|mut b: Block| {
+                b.header.extra_data = BytesMut::zeroed(32).freeze().into();
+                b
+            }));
+            assert_matches!(engine.try_construct_block(block_with_valid_extra_data.into()), Ok(_));
+
+            let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze().into();
+            let invalid_extra_data_block = transform_block(Box::new(|mut b: Block| {
+                b.header.extra_data = block_with_invalid_extra_data.clone();
+                b
+            }));
+            assert_matches!(
+                engine.try_construct_block(invalid_extra_data_block.into()),
+                Err(EngineApiError::PayloadExtraData(data)) if data == block_with_invalid_extra_data
+            );
+
+            let block_with_zero_base_fee = transform_block(Box::new(|mut b: Block| {
+                b.header.base_fee_per_gas = Some(0);
+                b
+            }));
+            assert_matches!(
+                engine.try_construct_block(block_with_zero_base_fee.into()),
+                Err(EngineApiError::PayloadBaseFee(val)) if val == 0.into()
+            );
+
+            // let payload_with_invalid_txs: ExecutionPayload = block.clone().into();
+            // payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
+            //     tx.fre
+            // });
+        }
 
         #[tokio::test]
         async fn new_payload_known() {
@@ -381,7 +404,7 @@ mod tests {
 
             let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
             let block_hash = block.hash();
-            let execution_payload = payload_from_block(block.clone());
+            let execution_payload = block.clone().into();
 
             client.add_header(block_hash, block.header.unseal());
 
