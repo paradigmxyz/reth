@@ -84,6 +84,7 @@ pub struct EthConsensusEngine<Client> {
     config: Config,
     rx: UnboundedReceiverStream<EngineMessage>,
     // TODO: Placeholder for storing future blocks. Make cache bounded.
+    // Use [lru](https://crates.io/crates/lru) crate
     local_store: HashMap<H64, ExecutionPayload>,
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
