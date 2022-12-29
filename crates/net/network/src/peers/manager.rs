@@ -761,9 +761,9 @@ impl PeerConnectionState {
 /// Represents the kind of peer
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 enum PeerKind {
-    /// Non-trusted peer.
+    /// Basic peer kind.
     #[default]
-    NonTrusted,
+    Basic,
     /// Trusted peer.
     Trusted,
 }
