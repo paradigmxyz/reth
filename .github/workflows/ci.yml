@@ -143,7 +143,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
