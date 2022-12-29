@@ -218,6 +218,33 @@ impl Decodable for bool {
     }
 }
 
+#[cfg(feature = "std")]
+impl Decodable for std::net::IpAddr {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        let h = Header::decode(buf)?;
+        if h.list {
+            return Err(DecodeError::UnexpectedList)
+        }
+        let o = match h.payload_length {
+            4 => {
+                let mut to = [0_u8; 4];
+                to.copy_from_slice(&buf[..4]);
+                IpAddr::V4(Ipv4Addr::from(to))
+            }
+            16 => {
+                let mut to = [0u8; 16];
+                to.copy_from_slice(&buf[..16]);
+                IpAddr::V6(Ipv6Addr::from(to))
+            }
+            _ => return Err(DecodeError::UnexpectedLength),
+        };
+        buf.advance(h.payload_length);
+        Ok(o)
+    }
+}
+
 #[cfg(feature = "ethnum")]
 decode_integer!(ethnum::U256);
 

@@ -98,9 +98,10 @@ impl Command {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
-        info!("Connecting to p2p");
         let network =
             config.network_config(db.clone(), chain_id, genesis_hash).start_network().await?;
+
+        info!(peer_id = ?network.peer_id(), local_addr = %network.local_addr(), "Started p2p networking");
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own

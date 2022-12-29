@@ -43,7 +43,7 @@ pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
-pub use net::{NodeRecord, Octets};
+pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use storage::StorageEntry;

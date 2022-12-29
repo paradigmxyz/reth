@@ -131,9 +131,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (_, body) = bodies_cursor
                     .seek_exact(*key)?
                     .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                let (_, stored_ommers) = ommers_cursor
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::Ommers { number: key.number() })?;
+                let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
+
                 Ok((header, body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
