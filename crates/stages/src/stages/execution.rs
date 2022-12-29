@@ -119,7 +119,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
             .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody, Option<Vec<Header>>), StageError> {
+            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
                 // NOTE: It probably will be faster to fetch all items from one table with cursor,
                 // but to reduce complexity we are using `seek_exact` to skip some
                 // edge cases that can happen.
@@ -131,11 +131,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (_, body) = bodies_cursor
                     .seek_exact(*key)?
                     .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                if let Some((_, stored_ommers)) = ommers_cursor.seek_exact(*key)? {
-                    return Ok((header, body, Some(stored_ommers.ommers)))
-                }
-                //.ok_or(DatabaseIntegrityError::Ommers { number: key.number() })?;
-                Ok((header, body, None))
+                let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
+                Ok((header, body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
