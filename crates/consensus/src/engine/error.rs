@@ -29,6 +29,12 @@ pub enum EngineApiError {
         /// Latest available timestamp.
         latest: u64,
     },
+    /// Failed to recover transaction signer.
+    #[error("Failed to recover signer for payload transaction: {hash:?}")]
+    PayloadSignerRecovery {
+        /// The hash of the failed transaction
+        hash: H256,
+    },
     /// Received pre-merge payload.
     #[error("Received pre-merge payload.")]
     PayloadPreMerge,
@@ -47,7 +53,7 @@ pub enum EngineApiError {
     },
     /// Terminal block hash mismatch during transition configuration exchange.
     #[error(
-        "Invalid transition terminal block hash. Execution: {execution:?}. Consensus: {consensus}"
+        "Invalid transition terminal block hash. Execution: {execution:?}. Consensus: {consensus:?}"
     )]
     TerminalBlockHash {
         /// Execution terminal block hash. `None` if block number is not found in the database.

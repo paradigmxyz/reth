@@ -1,0 +1,18 @@
+[package]
+name = "reth-rpc-builder"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+description = "Helpers for configuring RPC"
+
+[dependencies]
+# reth
+reth-rpc = { path = "../rpc" }
+reth-ipc = { path = "../ipc" }
+reth-provider = { path = "../../storage/provider" }
+reth-transaction-pool = { path = "../../transaction-pool" }
+
+jsonrpsee = { version = "0.16", features = ["server"] }
+strum = { version = "0.24", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }

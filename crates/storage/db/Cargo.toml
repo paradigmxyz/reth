@@ -45,7 +45,7 @@ reth-db = { path = ".", features = ["test-utils","bench"]}
 # needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1 = "0.24.2"
 
-reth-interfaces = { path = "../../interfaces",features=["bench"] }
+reth-interfaces = { path = "../../interfaces", features=["bench"] }
 async-trait = "0.1.58"
 
 [features]

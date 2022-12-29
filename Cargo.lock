@@ -3457,9 +3457,11 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "auto_impl",
  "futures",
+ "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -3817,6 +3819,7 @@ dependencies = [
  "hex-literal",
  "modular-bitfield",
  "parity-scale-codec",
+ "parking_lot 0.12.1",
  "postcard",
  "rand 0.8.5",
  "reth-codecs",
@@ -3890,6 +3893,19 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "serde_json",
+]
+
+[[package]]
+name = "reth-rpc-builder"
+version = "0.1.0"
+dependencies = [
+ "jsonrpsee",
+ "reth-ipc",
+ "reth-provider",
+ "reth-rpc",
+ "reth-transaction-pool",
+ "serde",
+ "strum",
 ]
 
 [[package]]

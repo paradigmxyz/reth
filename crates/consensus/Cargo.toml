@@ -13,6 +13,7 @@ reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
 reth-rlp = { path = "../common/rlp" }
 reth-rpc-types = { path = "../net/rpc-types" }
+reth-executor = { path = "../executor" }
 
 # async
 futures = "0.3"
@@ -26,6 +27,11 @@ auto_impl = "1.0"
 
 # io
 serde = { version = "1.0", optional = true }
+
+[dev-dependencies]
+assert_matches = "1.5.0"
+reth-provider = { path = "../storage/provider", features = ["test-utils"] }
+reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 
 [features]
 serde = ["dep:serde"]
