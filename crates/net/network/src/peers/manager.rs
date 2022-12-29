@@ -428,24 +428,28 @@ impl PeersManager {
 
     /// Removes the tracked node from the set.
     pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
-        if let Some(mut peer) = self.peers.remove(&peer_id) {
-            trace!(target : "net::peers",  ?peer_id, "remove discovered node");
-            self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
+        let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
+        if entry.get().kind.is_trusted() {
+            return
+        }
+        let mut peer = entry.remove();
 
-            if peer.state.is_connected() {
-                debug!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
-                // we terminate the active session here, but only remove the peer after the session
-                // was disconnected, this prevents the case where the session is scheduled for
-                // disconnect but the node is immediately rediscovered, See also
-                // [`Self::on_disconnected()`]
-                peer.remove_after_disconnect = true;
-                peer.state.disconnect();
-                self.peers.insert(peer_id, peer);
-                self.queued_actions.push_back(PeerAction::Disconnect {
-                    peer_id,
-                    reason: Some(DisconnectReason::DisconnectRequested),
-                })
-            }
+        trace!(target : "net::peers",  ?peer_id, "remove discovered node");
+        self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
+
+        if peer.state.is_connected() {
+            debug!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
+            // we terminate the active session here, but only remove the peer after the session
+            // was disconnected, this prevents the case where the session is scheduled for
+            // disconnect but the node is immediately rediscovered, See also
+            // [`Self::on_disconnected()`]
+            peer.remove_after_disconnect = true;
+            peer.state.disconnect();
+            self.peers.insert(peer_id, peer);
+            self.queued_actions.push_back(PeerAction::Disconnect {
+                peer_id,
+                reason: Some(DisconnectReason::DisconnectRequested),
+            })
         }
     }
 
