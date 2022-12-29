@@ -326,7 +326,7 @@ impl SessionManager {
                 conn,
                 status,
                 direction,
-				client_id,
+                client_id,
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -387,8 +387,8 @@ impl SessionManager {
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
-					client_version: client_id,
-					remote_addr,
+                    client_version: client_id,
+                    remote_addr,
                 };
 
                 self.active_sessions.insert(peer_id, handle);
@@ -490,20 +490,18 @@ impl SessionManager {
         peers
     }
 
-	pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
-		match self.active_sessions.get(&peer_id) {
-			Some(x) => {
-				Some(PeerInfo {
-					remote_id: x.remote_id,
-					direction: x.direction,
-					remote_addr: x.remote_addr,
-					capabilities: x.capabilities.clone(),
-					client_version: x.client_version.clone(),
-				})
-			},
-			None => None,
-		}
-	}
+    pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+        match self.active_sessions.get(&peer_id) {
+            Some(x) => Some(PeerInfo {
+                remote_id: x.remote_id,
+                direction: x.direction,
+                remote_addr: x.remote_addr,
+                capabilities: x.capabilities.clone(),
+                client_version: x.client_version.clone(),
+            }),
+            None => None,
+        }
+    }
 }
 
 /// Events produced by the [`SessionManager`]
@@ -815,6 +813,6 @@ async fn authenticate_stream(
         status: their_status,
         conn: eth_stream,
         direction,
-		client_id: their_hello.client_version,
+        client_id: their_hello.client_version,
     }
 }

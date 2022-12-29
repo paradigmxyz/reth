@@ -95,7 +95,7 @@ pub(crate) enum PendingSessionEvent {
         status: Status,
         conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
         direction: Direction,
-		client_id: String,
+        client_id: String,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {

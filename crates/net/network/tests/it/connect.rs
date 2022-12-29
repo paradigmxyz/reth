@@ -130,7 +130,7 @@ async fn test_get_peer() {
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-	let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
     let client = Arc::new(TestApi::default());
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
@@ -151,13 +151,12 @@ async fn test_get_peer() {
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
-	handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
-	let _ = listener0.next_session_established().await.unwrap();
+    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
 
-	
-	let peers = handle0.get_peers().await.unwrap();
-	assert_eq!(handle0.num_connected_peers(), peers.len());
-	dbg!(peers);
+    let peers = handle0.get_peers().await.unwrap();
+    assert_eq!(handle0.num_connected_peers(), peers.len());
+    dbg!(peers);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -166,7 +165,7 @@ async fn test_get_peer_by_id() {
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-	let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
     let client = Arc::new(TestApi::default());
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
@@ -186,12 +185,12 @@ async fn test_get_peer_by_id() {
 
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
-	
-	let peer = handle0.get_peer_by_id(*handle1.peer_id()).await.unwrap();
-	assert!(peer.is_some());
 
-	let peer = handle0.get_peer_by_id(*handle2.peer_id()).await.unwrap();
-	assert!(peer.is_none());
+    let peer = handle0.get_peer_by_id(*handle1.peer_id()).await.unwrap();
+    assert!(peer.is_some());
+
+    let peer = handle0.get_peer_by_id(*handle2.peer_id()).await.unwrap();
+    assert!(peer.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
