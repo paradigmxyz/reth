@@ -44,4 +44,4 @@ tokio = { version = "1", features = ["full"] }
 reth-tracing = { path = "../../tracing" }
 
 [features]
-mock = ["rand"]
+test-utils = ["rand"]

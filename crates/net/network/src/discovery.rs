@@ -133,6 +133,30 @@ impl Discovery {
     }
 }
 
+#[cfg(test)]
+impl Discovery {
+    /// Returns a Discovery instance that does nothing and is intended for testing purposes.
+    ///
+    /// NOTE: This instance does nothing
+    pub(crate) fn noop() -> Self {
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Self {
+            discovered_nodes: Default::default(),
+            local_enr: NodeRecord {
+                address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                tcp_port: 0,
+                udp_port: 0,
+                id: PeerId::random(),
+            },
+            discv4: Discv4::noop(),
+            discv4_updates: ReceiverStream::new(rx),
+            _dsicv4_config: Default::default(),
+            queued_events: Default::default(),
+            _discv4_service: tokio::task::spawn(async move {}),
+        }
+    }
+}
+
 /// Events produced by the [`Discovery`] manager.
 pub enum DiscoveryEvent {
     /// A new node was discovered

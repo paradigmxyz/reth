@@ -160,15 +160,12 @@ pub enum PeerResponse {
 
 impl PeerResponse {
     /// Polls the type to completion.
-    pub(crate) fn poll(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<PeerResponseResult, oneshot::error::RecvError>> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PeerResponseResult> {
         macro_rules! poll_request {
             ($response:ident, $item:ident, $cx:ident) => {
                 match ready!($response.poll_unpin($cx)) {
-                    Ok(res) => Ok(PeerResponseResult::$item(res.map(|item| item.0))),
-                    Err(err) => Err(err),
+                    Ok(res) => PeerResponseResult::$item(res.map(|item| item.0)),
+                    Err(err) => PeerResponseResult::$item(Err(err.into())),
                 }
             };
         }
@@ -240,6 +237,17 @@ impl PeerResponseResult {
         }
     }
 
+    /// Returns the `Err` value if the result is an error.
+    pub fn err(&self) -> Option<&RequestError> {
+        match self {
+            PeerResponseResult::BlockHeaders(res) => res.as_ref().err(),
+            PeerResponseResult::BlockBodies(res) => res.as_ref().err(),
+            PeerResponseResult::PooledTransactions(res) => res.as_ref().err(),
+            PeerResponseResult::NodeData(res) => res.as_ref().err(),
+            PeerResponseResult::Receipts(res) => res.as_ref().err(),
+        }
+    }
+
     /// Returns whether this result is an error.
     #[allow(unused)]
     pub fn is_err(&self) -> bool {
@@ -265,6 +273,11 @@ pub struct PeerRequestSender {
 // === impl PeerRequestSender ===
 
 impl PeerRequestSender {
+    /// Constructs a new sender instance that's wired to a session
+    pub(crate) fn new(peer_id: PeerId, to_session_tx: mpsc::Sender<PeerRequest>) -> Self {
+        Self { peer_id, to_session_tx }
+    }
+
     /// Attempts to immediately send a message on this Sender
     pub fn try_send(&self, req: PeerRequest) -> Result<(), TrySendError<PeerRequest>> {
         self.to_session_tx.try_send(req)
