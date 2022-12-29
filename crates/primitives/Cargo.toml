@@ -25,6 +25,7 @@ ethbloom = { version = "0.13", features = ["codec"] }
 
 # crypto
 secp256k1 = { version = "0.24.2", default-features = false, features = [
+    "global-context",
     "alloc",
     "recovery",
 ] }
