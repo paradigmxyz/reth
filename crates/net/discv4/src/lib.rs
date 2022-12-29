@@ -49,7 +49,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 pub mod bootnodes;
 pub mod error;
@@ -67,8 +67,9 @@ pub use reth_primitives::NodeRecord;
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
 
+use reth_net_nat::ResolveNatInterval;
 /// reexport to get public ip.
-pub use public_ip;
+pub use reth_net_nat::{external_ip, NatResolver};
 
 /// The default port for discv4 via UDP
 ///
@@ -361,6 +362,8 @@ pub struct Discv4Service {
     evict_expired_requests_interval: Interval,
     /// Interval when to resend pings.
     ping_interval: Interval,
+    /// The interval at which to attempt resolving external IP again.
+    resolve_external_ip_interval: Option<ResolveNatInterval>,
     /// How this services is configured
     config: Discv4Config,
 }
@@ -453,8 +456,9 @@ impl Discv4Service {
             lookup_interval: self_lookup_interval,
             ping_interval,
             evict_expired_requests_interval,
-            config,
             lookup_rotator,
+            resolve_external_ip_interval: config.resolve_external_ip_interval(),
+            config,
         }
     }
 
@@ -464,6 +468,16 @@ impl Discv4Service {
             Some(self.local_eip_868_enr.seq())
         } else {
             None
+        }
+    }
+
+    /// Sets the given ip address as the node's external IP in the node record announced in
+    /// discovery
+    pub fn set_external_ip_addr(&mut self, external_ip: IpAddr) {
+        if self.local_node_record.address != external_ip {
+            info!(target : "discv4",  ?external_ip, "Updating external ip");
+            self.local_node_record.address = external_ip;
+            let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
         }
     }
 
@@ -1249,6 +1263,12 @@ impl Discv4Service {
         // re-ping some peers
         if self.ping_interval.poll_tick(cx).is_ready() {
             self.re_ping_oldest();
+        }
+
+        if let Some(Poll::Ready(Some(ip))) =
+            self.resolve_external_ip_interval.as_mut().map(|r| r.poll_tick(cx))
+        {
+            self.set_external_ip_addr(ip);
         }
 
         // process all incoming commands
