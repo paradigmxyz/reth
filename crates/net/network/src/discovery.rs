@@ -10,7 +10,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     task::{Context, Poll},
 };
-use tokio::{task::JoinHandle};
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
 /// An abstraction over the configured discovery protocol.
@@ -139,11 +139,11 @@ impl Discovery {
     ///
     /// NOTE: This instance does nothing
     pub(crate) fn noop() -> Self {
-        let (_tx, rx) = mpsc::channel(1);
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
         Self {
             discovered_nodes: Default::default(),
             local_enr: NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
                 tcp_port: 0,
                 udp_port: 0,
                 id: PeerId::random(),

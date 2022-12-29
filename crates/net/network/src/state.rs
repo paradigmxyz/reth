@@ -482,12 +482,16 @@ pub(crate) enum StateAction {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use crate::{
+        discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
+        state::NetworkState,
+    };
+    use reth_eth_wire::{BlockBody, capability::{Capabilities, Capability}, EthVersion, Status};
+    use reth_primitives::{H256, Header, PeerId};
     use reth_provider::test_utils::NoopProvider;
-    use crate::discovery::Discovery;
-    use crate::fetch::StateFetcher;
-    use crate::peers::PeersManager;
-    use crate::state::NetworkState;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use reth_interfaces::p2p::bodies::client::BodiesClient;
 
     /// Returns a testing instance of the [NetworkState].
     fn state() -> NetworkState<NoopProvider> {
@@ -504,8 +508,35 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    fn capabilities() -> Arc<Capabilities> {
+        Arc::new(vec![Capability::from(EthVersion::Eth67)].into())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_dropped_active_session() {
+        let mut state = state();
+        let client = state.fetch_client();
+
+        let peer_id = PeerId::random();
+        let (tx, session_rx) = mpsc::channel(1);
+        let peer_tx = PeerRequestSender::new(peer_id, tx);
+
+        state.on_session_activated(peer_id, capabilities(), Status::default(), peer_tx);
+
+        assert!(state.active_peers.contains_key(&peer_id));
+
+        let body = BlockBody {
+            ommers: vec![
+                Header::default()
+            ],
+            ..Default::default()
+        };
+
+        tokio::task::spawn(async move {
+
+        });
+
+        let body = client.get_block_bodies(vec![H256::random()]).await;
 
     }
 }

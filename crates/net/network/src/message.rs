@@ -273,6 +273,11 @@ pub struct PeerRequestSender {
 // === impl PeerRequestSender ===
 
 impl PeerRequestSender {
+    /// Constructs a new sender instance that's wired to a session
+    pub(crate) fn new(peer_id: PeerId, to_session_tx: mpsc::Sender<PeerRequest>) -> Self {
+        Self { peer_id, to_session_tx }
+    }
+
     /// Attempts to immediately send a message on this Sender
     pub fn try_send(&self, req: PeerRequest) -> Result<(), TrySendError<PeerRequest>> {
         self.to_session_tx.try_send(req)
