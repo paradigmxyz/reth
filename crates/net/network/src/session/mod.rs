@@ -473,7 +473,9 @@ impl SessionManager {
 
     pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
         let peers: Vec<PeerInfo> = self
-            .active_sessions.values().map(|session| PeerInfo {
+            .active_sessions
+            .values()
+            .map(|session| PeerInfo {
                 remote_id: session.remote_id,
                 direction: session.direction,
                 remote_addr: session.remote_addr,
@@ -487,12 +489,12 @@ impl SessionManager {
 
     pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
         self.active_sessions.get(&peer_id).map(|x| PeerInfo {
-                remote_id: x.remote_id,
-                direction: x.direction,
-                remote_addr: x.remote_addr,
-                capabilities: x.capabilities.clone(),
-                client_version: x.client_version.clone(),
-            })
+            remote_id: x.remote_id,
+            direction: x.direction,
+            remote_addr: x.remote_addr,
+            capabilities: x.capabilities.clone(),
+            client_version: x.client_version.clone(),
+        })
     }
 }
 

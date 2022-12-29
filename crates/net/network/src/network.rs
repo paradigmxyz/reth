@@ -102,7 +102,10 @@ impl NetworkHandle {
     }
 
     /// Returns [`PeerInfo`] for a given peer
-    pub async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, oneshot::error::RecvError> {
+    pub async fn get_peer_by_id(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<PeerInfo>, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
         rx.await
