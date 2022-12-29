@@ -101,7 +101,7 @@ impl Command {
         let network =
             config.network_config(db.clone(), chain_id, genesis_hash).start_network().await?;
 
-        info!(peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Started p2p networking");
+        info!(peer_id = ?network.peer_id(), local_addr = %network.local_addr(), "Started p2p networking");
 
         // TODO: Are most of these Arcs unnecessary? For example, fetch client is completely
         // cloneable on its own
