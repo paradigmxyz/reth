@@ -3,7 +3,7 @@ use crate::{config, Config};
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     BlockNumber, Header, SealedBlock, SealedHeader, Transaction, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, H256, U256,
+    TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
 use std::{
