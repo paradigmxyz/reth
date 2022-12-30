@@ -102,13 +102,10 @@ impl Command {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
-        let network =
-            config.network_config(
-                db.clone(), 
-                chain_id, 
-                genesis_hash,
-                self.disable_discovery,
-            ).start_network().await?;
+        let network = config
+            .network_config(db.clone(), chain_id, genesis_hash, self.disable_discovery)
+            .start_network()
+            .await?;
 
         info!(peer_id = ?network.peer_id(), local_addr = %network.local_addr(), "Started p2p networking");
 
