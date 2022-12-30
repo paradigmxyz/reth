@@ -166,7 +166,7 @@ where
             disc_config.add_eip868_pair("eth", status.forkid);
             disc_config
         });
-        
+
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();

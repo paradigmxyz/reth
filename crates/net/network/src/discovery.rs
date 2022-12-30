@@ -44,14 +44,11 @@ impl Discovery {
         discv4_config: Option<Discv4Config>,
     ) -> Result<Self, NetworkError> {
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
-        let (discv4, 
-            discv4_updates, 
-            _discv4_service
-        ) = if let Some(disc_config) = discv4_config {
+        let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
             let (discv4, mut discv4_service) =
                 Discv4::bind(discovery_addr, local_enr, sk, disc_config)
-                .await
-                .map_err(NetworkError::Discovery)?;
+                    .await
+                    .map_err(NetworkError::Discovery)?;
             let discv4_updates = discv4_service.update_stream();
             // spawn the service
             let _discv4_service = discv4_service.spawn();
@@ -132,9 +129,9 @@ impl Discovery {
             }
 
             // drain the update stream
-            while let Some(Poll::Ready(Some(update))) = self.discv4_updates.as_mut().map(
-                |disc_updates|
-                disc_updates.poll_next_unpin(cx)) {
+            while let Some(Poll::Ready(Some(update))) =
+                self.discv4_updates.as_mut().map(|disc_updates| disc_updates.poll_next_unpin(cx))
+            {
                 self.on_discv4_update(update)
             }
 
@@ -151,7 +148,6 @@ impl Discovery {
     ///
     /// NOTE: This instance does nothing
     pub(crate) fn noop() -> Self {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
         Self {
             discovered_nodes: Default::default(),
             local_enr: NodeRecord {
@@ -160,10 +156,10 @@ impl Discovery {
                 udp_port: 0,
                 id: PeerId::random(),
             },
-            discv4: Some(Discv4::noop()),
-            discv4_updates: Some(ReceiverStream::new(rx)),
+            discv4: Default::default(),
+            discv4_updates: Default::default(),
             queued_events: Default::default(),
-            _discv4_service: Some(tokio::task::spawn(async move {})),
+            _discv4_service: Default::default(),
         }
     }
 }
