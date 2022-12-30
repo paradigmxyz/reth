@@ -460,13 +460,22 @@ impl PeersManager {
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
-            peer.state.is_unconnected() && (!self.connect_trusted_nodes_only || peer.is_trusted())
+            peer.state.is_unconnected() &&
+                !peer.is_banned() &&
+                (!self.connect_trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
 
+        if best_peer.1.is_trusted() {
+            return Some((*best_peer.0, best_peer.1))
+        }
+
         for maybe_better in unconnected {
+            if maybe_better.1.is_trusted() {
+                return Some((*maybe_better.0, maybe_better.1))
+            }
             match (maybe_better.1.fork_id.as_ref(), best_peer.1.fork_id.as_ref()) {
                 (Some(_), Some(_)) | (None, None) => {
                     if maybe_better.1.reputation > best_peer.1.reputation {
@@ -474,9 +483,7 @@ impl PeersManager {
                     }
                 }
                 (Some(_), None) => {
-                    if !maybe_better.1.is_banned() {
-                        best_peer = maybe_better;
-                    }
+                    best_peer = maybe_better;
                 }
                 _ => {}
             }
