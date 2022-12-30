@@ -2,7 +2,7 @@
 
 ## Getting Started
 - [Introduction](./README.md)
-- [Hardware requirements](./getting_started/README.md)
+- [System requirements](./getting_started/system_requirement.md)
 - [Installation Reth](./getting_started/README.md)
 
 ## [Fundamentals](./fundamentals/README.md)
