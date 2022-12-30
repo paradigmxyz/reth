@@ -1,9 +1,17 @@
-[Introduction](./README.md)
+# Reth Book
 
-# Getting Started
+## Getting Started
+- [Introduction](./README.md)
+- [Hardware requirements](./getting_started/README.md)
+- [Installation Reth](./getting_started/README.md)
 
-- [Installation](./installation.md)
-- [First Steps with Reth]()
-<!-- An overview of all the flags, how they work and how to configure the node   -->
-- [Configuring The Node]()
-- [Running Reth]()
+## [Fundamentals](./fundamentals/README.md)
+- [Introduction](./fundamentals/introduction.md)
+- [Node](./fundamentals/node.md)
+- [Command-Line Options](./fundamentals/command-line_options.md)
+- [Logs](./fundamentals/logs.md)
+
+## [Monitoring](./monitoring/READE.md)
+- [Matrics](./monitoring/matrics.md)
+
+## [FAQ](./faq/README.md)
