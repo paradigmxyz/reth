@@ -52,12 +52,14 @@ impl ExtendedAccount {
 impl MockEthProvider {
     /// Add block to local block store
     pub fn add_block(&self, hash: H256, block: Block) {
+        self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
 
     /// Add multiple blocks to local block store
     pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (H256, Block)>) {
         for (hash, block) in iter.into_iter() {
+            self.add_header(hash, block.header.clone());
             self.add_block(hash, block)
         }
     }
