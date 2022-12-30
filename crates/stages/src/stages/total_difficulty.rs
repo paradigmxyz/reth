@@ -42,8 +42,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         let start_block = stage_progress + 1;
         let end_block = previous_stage_progress.min(start_block + self.commit_threshold);
-        // TODO: debug!(target: "sync::stages::total_difficulty", head = ?head.hash(), "Writing
-        // total difficulty");
 
         if start_block > end_block {
             info!(target: "sync::stages::total_difficulty", stage_progress, "Target block already reached");
