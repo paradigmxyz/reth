@@ -6,3 +6,5 @@ pub mod execution;
 pub mod headers;
 /// The sender recovery stage.
 pub mod sender_recovery;
+/// The total difficulty stage
+pub mod total_difficulty;
