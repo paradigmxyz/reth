@@ -57,7 +57,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut cursor_headers = tx.cursor_mut::<tables::Headers>()?;
 
         // Get latest total difficulty
-        let last_header_key = tx.get_block_numhash(stage_progress)?.into();
+        let last_header_key = tx.get_block_numhash(stage_progress)?;
         let last_entry = cursor_td
             .seek_exact(last_header_key)?
             .ok_or(DatabaseIntegrityError::TotalDifficulty { number: last_header_key.number() })?;
