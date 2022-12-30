@@ -1,10 +1,18 @@
 # System Requirements
 
 ## Hardware
+- 64-bit architecture.
+- We recommend a minimum of 16GB RAM 
+- We recommend using an SSD or NVMe, as an HDD may cause the node to fall behind the chain tip. Note that SSD performance can deteriorate when close to capacity.
+
+
+### Archive node
 - For an Archive node of Ethereum Mainnet, we recommend at least 3TB storage space: 1.8TB for state and 200GB for temp files 
 
-- We recommend using an SSD or NVMe, as an HDD may cause the node to fall behind the chain tip. Note that SSD performance can deteriorate when close to capacity.
-- We recommend a minimum of 16GB RAM and a 64-bit architecture.
+### Full node
+- For an Ethereum Mainnet Full node, we recommend at least 400GB of storage.
+
+
 
 ## Software
 - rustc 1.66.0 (69f9c33d7 2022-12-12)
