@@ -2,7 +2,9 @@
 
 #![allow(missing_docs)]
 
-use reth_primitives::{Address, BlockNumber, Bloom, Bytes, H256, H64, U256, U64};
+use bytes::BytesMut;
+use reth_primitives::{Address, BlockNumber, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
+use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
@@ -29,6 +31,37 @@ pub struct ExecutionPayload {
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
+}
+
+impl From<SealedBlock> for ExecutionPayload {
+    fn from(value: SealedBlock) -> Self {
+        let transactions = value
+            .body
+            .iter()
+            .map(|tx| {
+                let mut encoded = BytesMut::new();
+                tx.encode(&mut encoded);
+                encoded.freeze().into()
+            })
+            .collect();
+        ExecutionPayload {
+            parent_hash: value.parent_hash,
+            fee_recipient: value.beneficiary,
+            state_root: value.state_root,
+            receipts_root: value.receipts_root,
+            logs_bloom: value.logs_bloom,
+            prev_randao: value.mix_hash,
+            block_number: value.number.into(),
+            gas_limit: value.gas_limit.into(),
+            gas_used: value.gas_used.into(),
+            timestamp: value.timestamp.into(),
+            extra_data: value.extra_data.clone().into(),
+            base_fee_per_gas: value.base_fee_per_gas.unwrap_or_default().into(),
+            block_hash: value.hash(),
+            transactions,
+            withdrawal: None,
+        }
+    }
 }
 
 /// This structure maps onto the validator withdrawal object from the beacon chain spec.

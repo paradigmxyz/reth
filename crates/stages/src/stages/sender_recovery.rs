@@ -161,7 +161,7 @@ mod tests {
         (stage_progress..input.previous_stage_progress() + 1)
             .map(|number| -> Result<SealedBlock, TestRunnerError> {
                 let tx_count = Some((number == stage_progress + 10) as u8);
-                let block = random_block(number, None, tx_count);
+                let block = random_block(number, None, tx_count, None);
                 current_tx_id = runner.insert_block(current_tx_id, &block, false)?;
                 Ok(block)
             })
