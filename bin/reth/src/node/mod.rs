@@ -75,6 +75,10 @@ pub struct Command {
     /// NOTE: This is a temporary flag
     #[arg(long = "debug.tip")]
     tip: Option<H256>,
+
+    /// Disable the discovery service.
+    #[arg(short, long)]
+    disable_discovery: bool,
 }
 
 impl Command {
@@ -98,8 +102,10 @@ impl Command {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
-        let network =
-            config.network_config(db.clone(), chain_id, genesis_hash).start_network().await?;
+        let network = config
+            .network_config(db.clone(), chain_id, genesis_hash, self.disable_discovery)
+            .start_network()
+            .await?;
 
         info!(peer_id = ?network.peer_id(), local_addr = %network.local_addr(), "Started p2p networking");
 

@@ -160,9 +160,12 @@ where
         let incoming = ConnectionListener::bind(listener_addr).await?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
-        // merge configured boot nodes
-        discovery_v4_config.bootstrap_nodes.extend(boot_nodes.clone());
-        discovery_v4_config.add_eip868_pair("eth", status.forkid);
+        discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
+            // merge configured boot nodes
+            disc_config.bootstrap_nodes.extend(boot_nodes.clone());
+            disc_config.add_eip868_pair("eth", status.forkid);
+            disc_config
+        });
 
         let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
         // need to retrieve the addr here since provided port could be `0`
