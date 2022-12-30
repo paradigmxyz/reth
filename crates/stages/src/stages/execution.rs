@@ -16,7 +16,7 @@ use reth_executor::{
     Config,
 };
 use reth_primitives::{Address, Header, StorageEntry, TransactionSignedEcRecovered, H256, U256};
-use reth_provider::StateProviderImplRefLatest;
+use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -181,7 +181,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 .collect();
 
             // for now use default eth config
-            let state_provider = SubState::new(State::new(StateProviderImplRefLatest::new(&**tx)));
+            let state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
 
