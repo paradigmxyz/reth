@@ -1116,6 +1116,9 @@ impl Discv4Service {
                     );
                     self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
                 }
+                BucketEntry::SelfEntry => {
+                    // we received our own node entry
+                }
                 _ => self.find_node(&closest, ctx.clone()),
             }
         }
