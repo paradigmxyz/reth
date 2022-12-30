@@ -439,7 +439,11 @@ mod tests {
             },
             ExecInput, ExecOutput, UnwindInput,
         };
-        use reth_db::{models::blocks::BlockNumHash, tables, transaction::DbTx};
+        use reth_db::{
+            models::blocks::BlockNumHash,
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
         use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
             p2p::headers::downloader::HeaderDownloader,
@@ -448,7 +452,7 @@ mod tests {
                 TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
             },
         };
-        use reth_primitives::{BlockNumber, SealedHeader};
+        use reth_primitives::{BlockNumber, SealedHeader, U256};
         use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -500,6 +504,10 @@ mod tests {
                 let start = input.stage_progress.unwrap_or_default();
                 let head = random_header(start, None);
                 self.tx.insert_headers(std::iter::once(&head))?;
+                // patch td table for `update_head` call
+                self.tx.commit(|tx| {
+                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::zero().into())
+                })?;
 
                 // use previous progress as seed size
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
