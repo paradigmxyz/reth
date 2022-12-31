@@ -1,5 +1,7 @@
 # System Requirements
 
+Please note: The information provided is only a rough estimate based on current node implementations, and may not be representative of all node implementations. We plan to conduct benchmarking and optimization tests to ensure the best performance for each specific audience.
+
 ## Hardware
 - 64-bit architecture.
 - We recommend a minimum of 16GB RAM 
