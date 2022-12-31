@@ -1,6 +1,7 @@
 //! Database debugging tool
 use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
+use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
@@ -11,7 +12,7 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use tracing::info;
+use tracing::{error, info};
 
 /// `reth db` command
 #[derive(Debug, Parser)]
@@ -78,6 +79,10 @@ impl Command {
         match &self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
+                let mut stats_table = ComfyTable::new();
+                stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+                stats_table.set_header(["Table Name", "# Entries", "Total Size (KB)"]);
+
                 tool.db.view(|tx| {
                     for table in tables::TABLES.iter().map(|(_, name)| name) {
                         let table_db =
@@ -97,16 +102,17 @@ impl Command {
                         let overflow_pages = stats.overflow_pages();
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
-                        info!(
-                            target: "reth::cli",
-                            "Table {} has {} entries (total size: {} KB)",
-                            table,
-                            stats.entries(),
-                            table_size / 1024
-                        );
+
+                        let mut row = Row::new();
+                        row.add_cell(Cell::new(table))
+                            .add_cell(Cell::new(stats.entries()))
+                            .add_cell(Cell::new(table_size / 1024));
+                        stats_table.add_row(row);
                     }
                     Ok::<(), eyre::Report>(())
                 })??;
+
+                println!("{stats_table}");
             }
             Subcommands::Seed { len } => {
                 tool.seed(*len)?;
@@ -153,13 +159,13 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
         macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr  => [$($table:ident,)*]) => {
+            ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
                 match $arg {
                     $(stringify!($table) => {
                         self.list_table::<tables::$table>($start, $len)?
                     },)*
                     _ => {
-                        tracing::error!(target: "reth::cli", "Unknown table.");
+                        error!("Unknown table.");
                         return Ok(())
                     }
                 }
@@ -199,7 +205,32 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             walker.skip(start).take(len).collect::<Vec<_>>()
         })?;
 
-        println!("{data:?}");
+        if data.is_empty() {
+            error!("Table is empty.");
+            return Ok(())
+        }
+
+        let mut table = ComfyTable::new();
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(["Entry Index", "Key", "Value"]);
+        for (i, entry) in data.into_iter().enumerate() {
+            match entry {
+                Ok((key, value)) => {
+                    let mut row = Row::new();
+                    row.add_cell(Cell::new(format!("{}", start + i)))
+                        // TODO: Cleanly format key / value types
+                        // For tables with longer decompressed values, i.e. `Headers`, formatting
+                        // the value via the `Debug` trait breaks the table's formatting.
+                        .add_cell(Cell::new(format!("{key:?}")))
+                        .add_cell(Cell::new(format!("{value:?}")));
+                    table.add_row(row);
+                }
+                Err(e) => eyre::bail!(e),
+            }
+        }
+
+        println!("{table}");
+
         Ok(())
     }
 
