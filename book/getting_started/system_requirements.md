@@ -4,15 +4,15 @@
 
 ## Hardware
 - 64-bit architecture.
-- We recommend a minimum of 16GB RAM 
+- We recommend a minimum of 8GB RAM 
 - We recommend using an SSD or NVMe, as an HDD may cause the node to fall behind the chain tip. Note that SSD performance can deteriorate when close to capacity.
 
 
 ### Archive node
-- For an Archive node of Ethereum Mainnet, we recommend at least 3TB storage space: 1.8TB for state and 200GB for temp files 
+- TODO: We will update the disk usage estimate once it is ready.
 
 ### Full node
-- For an Ethereum Mainnet Full node, we recommend at least 400GB of storage.
+- TODO: We will update the disk usage estimate once it is ready.
 
 
 
