@@ -8,6 +8,7 @@ use crate::{
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
+use fdlimit::raise_fd_limit;
 use reth_consensus::BeaconConsensus;
 use reth_db::{
     cursor::DbCursorRO,
@@ -85,6 +86,10 @@ impl Command {
     /// Execute `node` command
     // TODO: RPC
     pub async fn execute(&self) -> eyre::Result<()> {
+        // Raise the fd limit of the process.
+        // Does not do anything on windows.
+        raise_fd_limit();
+
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!("reth {} starting", crate_version!());
 
