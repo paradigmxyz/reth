@@ -8,6 +8,7 @@ use crate::{
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
+use fdlimit::raise_fd_limit;
 use reth_consensus::BeaconConsensus;
 use reth_db::{
     cursor::DbCursorRO,
@@ -87,6 +88,9 @@ impl Command {
     pub async fn execute(&self) -> eyre::Result<()> {
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!("reth {} starting", crate_version!());
+
+        let new_limit = raise_fd_limit().expect("Failed to raise the fd limit of the binary");
+        info!("Raising the fd limit of the binary to {}", new_limit);
 
         info!("Opening database at {}", &self.db);
         let db = Arc::new(init_db(&self.db)?);

@@ -1438,6 +1438,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fdlimit"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c4c9e43643f5a3be4ca5b67d26b98031ff9db6806c3440ae32e02e3ceac3f1b"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "ff"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3415,6 +3424,7 @@ dependencies = [
  "confy",
  "dirs-next",
  "eyre",
+ "fdlimit",
  "futures",
  "metrics",
  "metrics-exporter-prometheus",
