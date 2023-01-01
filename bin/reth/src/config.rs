@@ -1,12 +1,12 @@
 //! Configuration files.
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use reth_db::database::Database;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig,
+    NetworkConfig, PeersConfig,
 };
-use reth_primitives::{NodeRecord, H256};
+use reth_primitives::H256;
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -110,13 +110,4 @@ impl Default for SenderRecoveryConfig {
     fn default() -> Self {
         Self { commit_threshold: 5_000, batch_size: 1000 }
     }
-}
-
-/// Configuration for peer managing.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct PeersConfig {
-    /// Trusted nodes to connect to.
-    pub trusted_nodes: HashSet<NodeRecord>,
-    /// Connect to trusted nodes only?
-    pub connect_trusted_nodes_only: bool,
 }

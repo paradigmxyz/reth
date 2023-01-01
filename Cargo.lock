@@ -3777,6 +3777,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1 0.24.2",
+ "serde",
  "serial_test",
  "tempfile",
  "thiserror",

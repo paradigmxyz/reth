@@ -35,6 +35,9 @@ pin-project = "1.0"
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream = "0.1"
 
+# io
+serde = { version = "1.0", optional = true }
+
 # misc
 auto_impl = "1"
 aquamarine = "0.1" # docs
@@ -68,3 +71,5 @@ hex = "0.4"
 tempfile = "3.3"
 serial_test = "0.10"
 
+[features]
+serde = ["dep:serde"]

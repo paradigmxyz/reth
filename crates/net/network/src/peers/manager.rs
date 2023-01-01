@@ -582,7 +582,9 @@ impl Default for PeersManager {
 }
 
 /// Tracks stats about connected nodes
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
     num_outbound: usize,
@@ -831,15 +833,19 @@ pub enum PeerAction {
 }
 
 /// Config type for initiating a [`PeersManager`] instance
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
+    // #[cfg_attr(feature = "serde", serde(flatten))]
     pub refill_slots_interval: Duration,
     /// Restrictions on connections.
     pub connection_info: ConnectionInfo,
     /// How to weigh reputation changes.
     pub reputation_weights: ReputationChangeWeights,
     /// Restrictions on PeerIds and Ips.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
     /// How long to ban bad peers.
     pub ban_duration: Duration,

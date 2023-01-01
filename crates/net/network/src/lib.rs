@@ -108,6 +108,10 @@
 //!         .split_with_handle();
 //! }
 //! ```
+//!
+//! # Features
+//!
+//! - `serde`: Enable serde support for configuration types.
 
 mod builder;
 mod cache;
