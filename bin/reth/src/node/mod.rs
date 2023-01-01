@@ -8,7 +8,6 @@ use crate::{
     util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
 };
 use clap::{crate_version, Parser};
-use eyre::eyre;
 use fdlimit::raise_fd_limit;
 use reth_consensus::BeaconConsensus;
 use reth_db::{
@@ -87,12 +86,12 @@ impl Command {
     /// Execute `node` command
     // TODO: RPC
     pub async fn execute(&self) -> eyre::Result<()> {
-        let config: Config = confy::load_path(&self.config).unwrap_or_default();
-        info!("reth {} starting", crate_version!());
-
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        raise_fd_limit().ok_or_else(|| eyre!("Failed to raise the fd limit"))?;
+        raise_fd_limit();
+
+        let config: Config = confy::load_path(&self.config).unwrap_or_default();
+        info!("reth {} starting", crate_version!());
 
         info!("Opening database at {}", &self.db);
         let db = Arc::new(init_db(&self.db)?);
