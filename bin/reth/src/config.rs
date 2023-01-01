@@ -47,6 +47,8 @@ impl Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
+    /// Total difficulty stage configuration
+    pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
     /// Sender recovery stage configuration.
@@ -67,6 +69,20 @@ pub struct HeadersConfig {
 impl Default for HeadersConfig {
     fn default() -> Self {
         Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
+    }
+}
+
+/// Total difficulty stage configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TotalDifficultyConfig {
+    /// The maximum number of total difficulty entries to sum up before committing progress to the
+    /// database.
+    pub commit_threshold: u64,
+}
+
+impl Default for TotalDifficultyConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
     }
 }
 

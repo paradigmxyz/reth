@@ -25,7 +25,7 @@ use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
-        sender_recovery::SenderRecoveryStage,
+        sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
 };
 use std::{net::SocketAddr, path::Path, sync::Arc};
@@ -129,6 +129,9 @@ impl Command {
                 network_handle: network.clone(),
                 commit_threshold: config.stages.headers.commit_threshold,
                 metrics: HeaderMetrics::default(),
+            })
+            .push(TotalDifficultyStage {
+                commit_threshold: config.stages.total_difficulty.commit_threshold,
             })
             .push(BodyStage {
                 downloader: Arc::new(
