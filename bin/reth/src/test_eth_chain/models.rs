@@ -21,7 +21,7 @@ pub struct BlockchainTestData {
     /// Blocks.
     pub blocks: Vec<Block>,
     /// Post state.
-    pub post_state: Option<State>,
+    pub post_state: Option<RootOrState>,
     /// Pre state.
     pub pre: State,
     /// Hash of best block.
@@ -112,6 +112,18 @@ pub struct Block {
     pub transactions: Option<Vec<Transaction>>,
     /// Uncle/ommer headers
     pub uncle_headers: Option<Vec<Header>>,
+    /// Transaction Sequence
+    pub transaction_sequence: Option<Vec<TransactionSequence>>,
+}
+
+/// Transaction Sequence in block
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionSequence {
+    exception: String,
+    raw_bytes: Bytes,
+    valid: String,
 }
 
 /// Ethereum blockchain test data State.
@@ -191,6 +203,9 @@ pub enum ForkSpec {
     /// After Merge Init Code test
     #[serde(alias = "Merge+3860")]
     MergeMeterInitCode,
+    /// After Merge plus new PUSH0 opcode
+    #[serde(alias = "Merge+3855")]
+    MergePush0,
 }
 
 impl From<ForkSpec> for reth_executor::SpecUpgrades {
@@ -214,6 +229,7 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
             ForkSpec::Merge => Self::new_paris_activated(),
             ForkSpec::MergeEOF => Self::new_paris_activated(),
             ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
+            ForkSpec::MergePush0 => Self::new_paris_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overriden with PETERSBURG")
             }

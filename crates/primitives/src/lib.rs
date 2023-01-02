@@ -22,6 +22,7 @@ mod hex_bytes;
 mod integer_list;
 mod jsonu256;
 mod log;
+mod net;
 mod peer;
 mod receipt;
 mod storage;
@@ -31,7 +32,7 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
-pub use block::{Block, BlockHashOrNumber, BlockLocked};
+pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use chain::Chain;
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use ethbloom::Bloom;
@@ -42,6 +43,7 @@ pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
+pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
@@ -95,11 +97,13 @@ pub mod utils {
 pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
+#[inline]
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     use tiny_keccak::{Hasher, Keccak};
-    let mut keccak = Keccak::v256();
-    let mut output = [0; 32];
-    keccak.update(data.as_ref());
-    keccak.finalize(&mut output);
-    output.into()
+
+    let mut buf = [0u8; 32];
+    let mut hasher = Keccak::v256();
+    hasher.update(data.as_ref());
+    hasher.finalize(&mut buf);
+    buf.into()
 }

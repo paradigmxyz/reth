@@ -3,13 +3,12 @@
 #![allow(missing_docs, unused)]
 
 use crate::{
-    node::NodeRecord,
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex_literal::hex, ForkHash, ForkId, H256};
+use reth_primitives::{hex_literal::hex, ForkHash, ForkId, NodeRecord, H256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -217,7 +216,7 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
     let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-    let external_addr = public_ip::addr().await.unwrap_or_else(|| socket.ip());
+    let external_addr = reth_net_nat::external_ip().await.unwrap_or_else(|| socket.ip());
     let local_enr =
         NodeRecord { address: external_addr, tcp_port: socket.port(), udp_port: socket.port(), id };
     Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()

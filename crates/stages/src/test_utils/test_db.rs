@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedHeader, U256};
+use reth_primitives::{BlockNumber, SealedHeader};
 use std::{borrow::Borrow, sync::Arc};
 
 use crate::db::Transaction;
@@ -173,18 +173,12 @@ impl TestTransaction {
         self.commit(|tx| {
             let headers = headers.collect::<Vec<_>>();
 
-            let mut td: U256 =
-                tx.cursor::<tables::HeaderTD>()?.last()?.map(|(_, v)| v).unwrap_or_default().into();
-
             for header in headers {
                 let key: BlockNumHash = (header.number, header.hash()).into();
 
                 tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
                 tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
                 tx.put::<tables::Headers>(key, header.clone().unseal())?;
-
-                td += header.difficulty;
-                tx.put::<tables::HeaderTD>(key, td.into())?;
             }
 
             Ok(())

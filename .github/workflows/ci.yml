@@ -23,7 +23,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
@@ -55,8 +55,41 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           flags: unit-tests
+  eth-blockchain:
+    name: Ethereum blockchain Tests (Stable)
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error 
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Checkout ethereum/tests
+        uses: actions/checkout@v2
+        with:
+          repository: ethereum/tests
+          path: ethtests
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Run Ethereum tests
+        run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
 
   fuzz:
+    # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
+    # always recompile the codebase for each test and that takes way too long.
+    if: false
+
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
@@ -71,7 +104,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
@@ -110,8 +143,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2022-12-27
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:

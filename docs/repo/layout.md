@@ -18,17 +18,23 @@ These crates define primitive types or algorithms such as RLP.
 - [`common/rlp`](../../crates/common/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
 - [`common/rlp-derive`](../../crates/common/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
 
-### Database
+### Storage
 
 These crates are related to the database.
 
-- [`codecs`](../../crates/storage/codecs): Different storage codecs.
-- [`libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
-- [`db`](../../crates/storage/db): Strongly typed database bindings to LibMDBX containing read/write access to Ethereum state and historical data (transactions, blocks etc.)
+- [`storage/codecs`](../../crates/storage/codecs): Different storage codecs.
+- [`storage/libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
+- [`storage/db`](../../crates/storage/db): Strongly typed Database abstractions (transactions, cursors, tables) over lower level database backends.
+  - Implemented backends: mdbx
+- [`storage/provider`](../../crates/storage/provider): Traits which provide a higher level api over the database to access the Ethereum state and historical data (transactions, blocks etc.)
 
 ### Networking
 
 These crates are related to networking (p2p and RPC), as well as networking protocols.
+
+- [`net/common`](../../crates/net/common): Shared types used across multiple networking crates.
+  - Contains: Peer banlist.
+
 
 #### P2P
 
@@ -36,6 +42,7 @@ These crates are related to networking (p2p and RPC), as well as networking prot
 - [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the RLPx networking stack.
 - [`net/discv4`](../../crates/net/discv4): An implementation of the [discv4][discv4] protocol
 - [`net/ipc`](../../crates/net/ipc): IPC server and client implementation for [`jsonrpsee`][jsonrpsee].
+- [`net/ecies`](../../crates/net/ecies): Implementation of the Elliptic Curve Integrated Encryption Scheme used in the RLPx handshake.
 
 #### RPC
 
@@ -47,8 +54,7 @@ These crates are related to networking (p2p and RPC), as well as networking prot
 
 #### Downloaders
 
-- [`net/bodies-downloaders`](../../crates/net/bodies-downloaders): Block body downloading strategies.
-- [`net/headers-downloaders`](../../crates/net/headers-downloaders): Header downloading strategies.
+- [`net/downloaders`](../../crates/net/downloaders/): Block body and header downloading strategies.
 
 ### Ethereum
 

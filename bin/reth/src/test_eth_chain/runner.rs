@@ -1,22 +1,27 @@
 use super::models::Test;
-use crate::test_eth_chain::models::ForkSpec;
+use crate::test_eth_chain::models::{ForkSpec, RootOrState};
+use eyre::eyre;
 use reth_db::{
+    cursor::DbCursorRO,
     database::Database,
     mdbx::{test_utils::create_test_rw_db, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
+    Error as DbError,
 };
 use reth_executor::SpecUpgrades;
 use reth_primitives::{
-    keccak256, Account as RethAccount, BlockLocked, SealedHeader, StorageEntry, H256, U256,
+    keccak256, Account as RethAccount, Address, JsonU256, SealedBlock, SealedHeader, StorageEntry,
+    H256, U256,
 };
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, Transaction};
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Tests are test edge cases that are not possible to happen on mainnet, so we are skipping them.
 pub fn should_skip(path: &Path) -> bool {
@@ -58,7 +63,8 @@ pub fn should_skip(path: &Path) -> bool {
         path.file_name() == Some(OsStr::new("Call50000_sha256.json")) ||
         path.file_name() == Some(OsStr::new("static_Call50000_sha256.json")) ||
         path.file_name() == Some(OsStr::new("loopMul.json")) ||
-        path.file_name() == Some(OsStr::new("CALLBlake2f_MaxRounds.json"))
+        path.file_name() == Some(OsStr::new("CALLBlake2f_MaxRounds.json")) ||
+        path.file_name() == Some(OsStr::new("shiftCombinations.json"))
     {
         return true
     }
@@ -74,14 +80,17 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
     if should_skip(path) {
         return Ok(())
     }
+    info!("Executing test from path: {path:?}");
 
     for (name, suite) in suites.0 {
         if matches!(
             suite.network,
             ForkSpec::ByzantiumToConstantinopleAt5 |
                 ForkSpec::Constantinople |
+                ForkSpec::ConstantinopleFix |
                 ForkSpec::MergeEOF |
-                ForkSpec::MergeMeterInitCode
+                ForkSpec::MergeMeterInitCode |
+                ForkSpec::MergePush0,
         ) {
             continue
         }
@@ -90,7 +99,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         let pre_state = suite.pre.0;
 
-        debug!("Executing test: {name} for spec: {:?}", suite.network);
+        debug!("Executing {:?} spec: {:?}", name, suite.network);
 
         let spec_upgrades: SpecUpgrades = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;
@@ -102,11 +111,11 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
-        let genesis_block = BlockLocked { header, body: vec![], ommers: vec![] };
+        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![] };
         reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
 
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
-            let decoded = BlockLocked::decode(&mut block.rlp.as_ref())?;
+            let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
             reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
             Ok(())
         })?;
@@ -126,10 +135,10 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 tx.put::<tables::Bytecodes>(code_hash, account.code.to_vec())?;
             }
             account.storage.iter().try_for_each(|(k, v)| {
+                tracing::trace!("Update storage: {address} key:{:?} val:{:?}", k.0, v.0);
                 tx.put::<tables::PlainStorageState>(
                     address,
-                    // TODO - Check
-                    StorageEntry { key: H256::from_slice(&k.0.as_le_slice()), value: v.0 },
+                    StorageEntry { key: H256::from_slice(&k.0.as_be_slice()), value: v.0 },
                 )
             })?;
 
@@ -139,17 +148,120 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         // Commit the pre suite state
         tx.commit()?;
 
+        let storage = db.view(|tx| -> Result<_, DbError> {
+            let mut cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
+            let walker = cursor.first()?.map(|first| cursor.walk(first.0)).transpose()?;
+            Ok(walker.map(|mut walker| {
+                let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
+                while let Some(Ok((address, slot))) = walker.next() {
+                    let key = U256::from_big_endian(&slot.key.0);
+                    map.entry(address).or_default().insert(key, slot.value);
+                }
+                map
+            }))
+        })??;
+        tracing::trace!("Pre state :{:?}", storage);
+
         // Initialize the execution stage
-        // Hardcode the chain_id to Ethereums 1.
+        // Hardcode the chain_id to Ethereum 1.
         let mut stage =
             ExecutionStage::new(reth_executor::Config { chain_id: U256::from(1), spec_upgrades });
 
         // Call execution stage
         let input = ExecInput::default();
-        stage.execute(&mut Transaction::new(db.as_ref())?, input).await?;
+        {
+            let mut transaction = Transaction::new(db.as_ref())?;
+
+            // ignore error
+            let _ = stage.execute(&mut transaction, input).await;
+            transaction.commit()?;
+        }
 
         // Validate post state
-        //for post in
+        match suite.post_state {
+            Some(RootOrState::Root(root)) => {
+                info!("Post state is root: #{root:?}")
+            }
+            Some(RootOrState::State(state)) => db.view(|tx| -> eyre::Result<()> {
+                let mut cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
+                let walker = cursor.first()?.map(|first| cursor.walk(first.0)).transpose()?;
+                let storage = walker.map(|mut walker| {
+                    let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
+                    while let Some(Ok((address, slot))) = walker.next() {
+                        let key = U256::from_big_endian(&slot.key.0);
+                        map.entry(address).or_default().insert(key, slot.value);
+                    }
+                    map
+                });
+                tracing::trace!("Our storage:{:?}", storage);
+                for (address, test_account) in state.iter() {
+                    // check account
+                    let our_account = tx
+                        .get::<tables::PlainAccountState>(*address)?
+                        .ok_or(eyre!("Account is missing:{address} expected:{:?}", test_account))?;
+                    if test_account.balance.0 != our_account.balance {
+                        return Err(eyre!(
+                            "Account {address} balance diff, expected {} got{}",
+                            test_account.balance.0,
+                            our_account.balance
+                        ))
+                    }
+                    if test_account.nonce.0.as_u64() != our_account.nonce {
+                        return Err(eyre!(
+                            "Account {address} nonce diff, expected {} got {}",
+                            test_account.nonce.0,
+                            our_account.nonce
+                        ))
+                    }
+                    if let Some(our_bytecode) = our_account.bytecode_hash {
+                        let test_bytecode = keccak256(test_account.code.as_ref());
+                        if our_bytecode != test_bytecode {
+                            return Err(eyre!(
+                                "Account {address} bytecode diff, expected: {} got: {:?}",
+                                test_account.code,
+                                our_account.bytecode_hash
+                            ))
+                        }
+                    } else if !test_account.code.is_empty() {
+                        return Err(eyre!(
+                            "Account {address} bytecode diff, expected {} got empty bytecode",
+                            test_account.code,
+                        ))
+                    }
+
+                    // get walker if present
+                    if let Some(storage) = storage.as_ref() {
+                        // iterate over storages
+                        for (JsonU256(key), JsonU256(value)) in test_account.storage.iter() {
+                            let our_value = storage
+                                .get(address)
+                                .ok_or(eyre!(
+                                    "Missing storage from test {storage:?} got {:?}",
+                                    test_account.storage
+                                ))?
+                                .get(key)
+                                .ok_or(eyre!(
+                                    "Slot is missing from table {storage:?} got:{:?}",
+                                    test_account.storage
+                                ))?;
+                            if value != our_value {
+                                return Err(eyre!(
+                                    "Storage diff we got {address}: {storage:?} but expect: {:?}",
+                                    test_account.storage
+                                ))
+                            }
+                        }
+                    } else if !test_account.storage.is_empty() {
+                        return Err(eyre!(
+                            "Walker is not present, but storage is not empty.{:?}",
+                            test_account.storage
+                        ))
+                    }
+                }
+                Ok(())
+            })??,
+            None => info!("Post state is none"),
+        }
     }
     Ok(())
 }

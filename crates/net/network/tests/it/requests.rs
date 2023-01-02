@@ -1,7 +1,7 @@
 //! Tests for eth related requests
 
 use super::testnet::Testnet;
-use crate::{MockEthProvider, NetworkEventStream};
+use crate::NetworkEventStream;
 use rand::Rng;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::p2p::{
@@ -12,6 +12,7 @@ use reth_primitives::{
     Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
     TransactionSigned, TxEip2930, H256, U256,
 };
+use reth_provider::test_utils::MockEthProvider;
 use std::sync::Arc;
 
 /// Returns a new [`TransactionSigned`] with some random parameters

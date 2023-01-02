@@ -1,4 +1,13 @@
 //! Configuration files.
+use std::sync::Arc;
+
+use reth_db::database::Database;
+use reth_network::{
+    config::{mainnet_nodes, rng_secret_key},
+    NetworkConfig, PeersConfig,
+};
+use reth_primitives::H256;
+use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
@@ -7,6 +16,30 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
+    /// Configuration for the discovery service.
+    pub peers: PeersConfig,
+}
+
+impl Config {
+    /// Initializes network config from read data
+    pub fn network_config<DB: Database>(
+        &self,
+        db: Arc<DB>,
+        chain_id: u64,
+        genesis_hash: H256,
+        disable_discovery: bool,
+    ) -> NetworkConfig<ProviderImpl<DB>> {
+        let peer_config = reth_network::PeersConfig::default()
+            .with_trusted_nodes(self.peers.trusted_nodes.clone())
+            .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
+        NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
+            .boot_nodes(mainnet_nodes())
+            .peer_config(peer_config)
+            .genesis_hash(genesis_hash)
+            .chain_id(chain_id)
+            .set_discovery(disable_discovery)
+            .build()
+    }
 }
 
 /// Configuration for each stage in the pipeline.
@@ -14,10 +47,12 @@ pub struct Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
+    /// Total difficulty stage configuration
+    pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
     /// Sender recovery stage configuration.
-    pub senders: SendersConfig,
+    pub sender_recovery: SenderRecoveryConfig,
 }
 
 /// Header stage configuration.
@@ -34,6 +69,20 @@ pub struct HeadersConfig {
 impl Default for HeadersConfig {
     fn default() -> Self {
         Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
+    }
+}
+
+/// Total difficulty stage configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TotalDifficultyConfig {
+    /// The maximum number of total difficulty entries to sum up before committing progress to the
+    /// database.
+    pub commit_threshold: u64,
+}
+
+impl Default for TotalDifficultyConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
     }
 }
 
@@ -66,14 +115,14 @@ impl Default for BodiesConfig {
 
 /// Sender recovery stage configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SendersConfig {
+pub struct SenderRecoveryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
     /// The maximum number of transactions to recover senders for concurrently.
     pub batch_size: usize,
 }
 
-impl Default for SendersConfig {
+impl Default for SenderRecoveryConfig {
     fn default() -> Self {
         Self { commit_threshold: 5_000, batch_size: 1000 }
     }

@@ -58,7 +58,6 @@ pub struct UnwindOutput {
 ///
 /// Stages receive [`Transaction`] which manages the lifecycle of a transaction,
 /// such as when to commit / reopen a new one etc.
-// ANCHOR: trait-Stage
 #[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
@@ -80,4 +79,3 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }
-// ANCHOR_END: trait-Stage

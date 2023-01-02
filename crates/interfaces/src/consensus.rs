@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use reth_primitives::{BlockHash, BlockLocked, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedHeader, H256};
 use tokio::sync::watch::Receiver;
 
 /// Re-export forkchoice state
@@ -24,7 +24,7 @@ pub trait Consensus: Send + Sync {
     /// 11.1 "Ommer Validation".
     ///
     /// **This should not be called for the genesis block**.
-    fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error>;
+    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error>;
 
     /// After the Merge (aka Paris) block rewards became obsolete.
     /// This flag is needed as reth change set is indexed of transaction granularity

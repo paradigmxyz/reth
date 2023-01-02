@@ -7,12 +7,12 @@ use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
-use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config, NodeRecord};
+use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::DisconnectReason;
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
-use reth_primitives::PeerId;
-use reth_provider::test_utils::TestApi;
+use reth_primitives::{NodeRecord, PeerId};
+use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task;
@@ -54,9 +54,10 @@ async fn test_establish_connections() {
         handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
 
         let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
+        let mut expected_peers = expected_connections.clone();
 
         // wait for all initiator connections
-        let mut established = listener0.take(2);
+        let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
                 NetworkEvent::SessionClosed { .. } => {
@@ -65,9 +66,16 @@ async fn test_establish_connections() {
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
                     assert!(expected_connections.remove(&peer_id))
                 }
+                NetworkEvent::PeerAdded(peer_id) => {
+                    assert!(expected_peers.remove(&peer_id))
+                }
+                NetworkEvent::PeerRemoved(_) => {
+                    panic!("unexpected event")
+                }
             }
         }
         assert!(expected_connections.is_empty());
+        assert!(expected_peers.is_empty());
 
         // also await the established session on both target
         futures::future::join(listener1.next(), listener2.next()).await;
@@ -86,7 +94,7 @@ async fn test_already_connected() {
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(TestApi::default());
+    let client = Arc::new(NoopProvider::default());
     let p1 = PeerConfig::default();
 
     // initialize two peers with the same identifier
@@ -125,6 +133,75 @@ async fn test_already_connected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_get_peer() {
+    reth_tracing::init_tracing();
+    let mut net = Testnet::default();
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let client = Arc::new(NoopProvider::default());
+    let p1 = PeerConfig::default();
+    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
+
+    net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+    let handle2 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
+
+    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
+
+    let peers = handle0.get_peers().await.unwrap();
+    assert_eq!(handle0.num_connected_peers(), peers.len());
+    dbg!(peers);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_get_peer_by_id() {
+    reth_tracing::init_tracing();
+    let mut net = Testnet::default();
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let client = Arc::new(NoopProvider::default());
+    let p1 = PeerConfig::default();
+    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
+
+    net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+    let handle2 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let _ = listener0.next_session_established().await.unwrap();
+
+    let peer = handle0.get_peer_by_id(*handle1.peer_id()).await.unwrap();
+    assert!(peer.is_some());
+
+    let peer = handle0.get_peer_by_id(*handle2.peer_id()).await.unwrap();
+    assert!(peer.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_with_boot_nodes() {
     reth_tracing::init_tracing();
@@ -132,8 +209,9 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config =
-        NetworkConfig::builder(Arc::new(TestApi::default()), secret_key).discovery(discv4).build();
+    let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        .discovery(discv4)
+        .build();
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -153,7 +231,7 @@ async fn test_connect_with_builder() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let client = Arc::new(TestApi::default());
+    let client = Arc::new(NoopProvider::default());
     let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
@@ -201,7 +279,7 @@ async fn test_incoming_node_id_blacklist() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30303);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30304);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .peer_config(peer_config)
@@ -251,7 +329,7 @@ async fn test_incoming_connect_with_single_geth() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30306);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .build();
@@ -286,7 +364,7 @@ async fn test_outgoing_connect_with_single_geth() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30307);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30308);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .build();
@@ -333,7 +411,7 @@ async fn test_geth_disconnect() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30309);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30310);
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .build();
@@ -359,8 +437,13 @@ async fn test_geth_disconnect() {
         let geth_peer_id: PeerId =
             provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
-        // add geth as a peer then wait for a `SessionEstablished` event
+        // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);
+
+        match events.next().await {
+            Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
+            _ => panic!("Expected a peer added event"),
+        }
 
         if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
             assert_eq!(peer_id, geth_peer_id);

@@ -7,8 +7,16 @@ use reth_db::{
 use reth_interfaces::{provider::Error as ProviderError, Result};
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, BlockHashOrNumber, BlockLocked, Header, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, Header, SealedBlock, H256, U256,
 };
+
+/// Client trait for fetching block hashes by number.
+#[auto_impl(&)]
+pub trait BlockHashProvider: Send + Sync {
+    /// Get the hash of the block with the given number. Returns `None` if no block with this number
+    /// exists.
+    fn block_hash(&self, number: U256) -> Result<Option<H256>>;
+}
 
 /// Client trait for fetching `Header` related data.
 #[auto_impl(&)]
@@ -31,10 +39,13 @@ pub trait HeaderProvider: Send + Sync {
             BlockHashOrNumber::Number(num) => self.header_by_number(num),
         }
     }
+
+    /// Get total difficulty by block hash.
+    fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
 }
 
 /// Api trait for fetching `Block` related data.
-pub trait BlockProvider: Send + Sync {
+pub trait BlockProvider: BlockHashProvider + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 
@@ -88,10 +99,6 @@ pub trait BlockProvider: Send + Sync {
 
     /// Gets the `Block` for the given hash. Returns `None` if no block with this hash exists.
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>>;
-
-    /// Get the hash of the block with the given number. Returns `None` if no block with this number
-    /// exists.
-    fn block_hash(&self, number: U256) -> Result<Option<H256>>;
 }
 
 /// Current status of the blockchain's head.
@@ -114,7 +121,7 @@ pub struct ChainInfo {
 /// [tables::CumulativeTxCount] and [tables::BlockBodies]
 pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
-    block: &BlockLocked,
+    block: &SealedBlock,
     has_block_reward: bool,
 ) -> Result<()> {
     let block_num_hash = BlockNumHash((block.number, block.hash()));

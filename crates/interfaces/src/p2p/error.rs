@@ -10,7 +10,7 @@ pub type RequestResult<T> = Result<T, RequestError>;
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error, Clone, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum RequestError {
     #[error("Closed channel to the peer.")]
@@ -33,6 +33,11 @@ impl RequestError {
     /// Indicates whether this error is retryable or fatal.
     pub fn is_retryable(&self) -> bool {
         matches!(self, RequestError::Timeout | RequestError::ConnectionDropped)
+    }
+
+    /// Whether the error happened because the channel was closed.
+    pub fn is_channel_closed(&self) -> bool {
+        matches!(self, RequestError::ChannelClosed)
     }
 }
 

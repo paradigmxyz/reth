@@ -13,7 +13,7 @@ use crate::{
 use futures::{Future, FutureExt, Stream};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockLocked, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
+    BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -260,7 +260,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn pre_validate_block(&self, _block: &BlockLocked) -> Result<(), consensus::Error> {
+    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::Error> {
         if self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {

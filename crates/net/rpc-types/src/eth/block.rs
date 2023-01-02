@@ -1,5 +1,5 @@
 use crate::Transaction;
-use reth_primitives::{rpc::H64, Address, Bloom, Bytes, H256, U256};
+use reth_primitives::{Address, Bloom, Bytes, H256, H64, U256};
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
 
