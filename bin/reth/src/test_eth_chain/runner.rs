@@ -164,7 +164,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereum 1.
         let mut stage =
-            ExecutionStage::new(reth_executor::Config { chain_id: 1.into(), spec_upgrades });
+            ExecutionStage::new(reth_executor::Config { chain_id: 1.into(), spec_upgrades }, 1000);
 
         // Call execution stage
         let input = ExecInput::default();

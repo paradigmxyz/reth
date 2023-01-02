@@ -46,6 +46,28 @@ pub struct UnwindOutput {
     pub stage_progress: BlockNumber,
 }
 
+/// Next execute action that the stage should take.
+#[derive(Debug)]
+pub enum ExecAction {
+    /// The stage should continue with execution.
+    Run {
+        /// The start of the execution block range.
+        start_block: BlockNumber,
+        /// The end of the execution block range
+        end_block: BlockNumber,
+        /// The flag indicating whether the range was capped
+        /// by some max blocks parameter
+        capped: bool,
+    },
+    /// The stage should terminate since there are no blocks to execute.
+    Done {
+        /// The current stage progress
+        stage_progress: BlockNumber,
+        /// The execution target provided in [ExecInput].
+        target: BlockNumber,
+    },
+}
+
 /// A stage is a segmented part of the syncing process of the node.
 ///
 /// Each stage takes care of a well-defined task, such as downloading headers or executing
@@ -64,6 +86,29 @@ pub trait Stage<DB: Database>: Send + Sync {
     ///
     /// Stage IDs must be unique.
     fn id(&self) -> StageId;
+
+    /// Return next execution action.
+    ///
+    /// [ExecAction::Done] is returned if there are no blocks to execute in this stage.
+    /// [ExecAction::Run] is returned if the stage should proceed with execution.
+    fn next_exec_action(&self, input: &ExecInput, max_threshold: Option<u64>) -> ExecAction {
+        // Extract information about the stage progress
+        let stage_progress = input.stage_progress.unwrap_or_default();
+        let previous_stage_progress = input.previous_stage_progress();
+
+        let start_block = stage_progress + 1;
+        let end_block = match max_threshold {
+            Some(threshold) => previous_stage_progress.min(stage_progress + threshold),
+            None => previous_stage_progress,
+        };
+        let capped = end_block < previous_stage_progress;
+
+        if start_block <= end_block {
+            ExecAction::Run { start_block, end_block, capped }
+        } else {
+            ExecAction::Done { stage_progress, target: end_block }
+        }
+    }
 
     /// Execute the stage.
     async fn execute(
