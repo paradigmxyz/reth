@@ -55,10 +55,7 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
     }
 
     fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
-        let mut h_index = H256::zero();
-        index.to_big_endian(h_index.as_bytes_mut());
-
-        Ok(self.0.storage(address, h_index)?.unwrap_or_default())
+        Ok(self.0.storage(address, H256(index.to_be_bytes()))?.unwrap_or_default())
     }
 
     fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
@@ -68,12 +65,12 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
 
 /// Fill block environment from Block.
 pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header) {
-    block_env.number = header.number.into();
+    block_env.number = U256::from(header.number);
     block_env.coinbase = header.beneficiary;
-    block_env.timestamp = header.timestamp.into();
+    block_env.timestamp = U256::from(header.timestamp);
     block_env.difficulty = header.difficulty;
-    block_env.basefee = header.base_fee_per_gas.unwrap_or_default().into();
-    block_env.gas_limit = header.gas_limit.into();
+    block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
+    block_env.gas_limit = U256::from(header.gas_limit);
 }
 
 /// Fill transaction environment from Transaction.
@@ -90,13 +87,13 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             input,
         }) => {
             tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = (*gas_price).into();
+            tx_env.gas_price = U256::from(*gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match to {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
+            tx_env.value = U256::from(*value);
             tx_env.data = input.0.clone();
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
@@ -112,13 +109,13 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             access_list,
         }) => {
             tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = (*gas_price).into();
+            tx_env.gas_price = U256::from(*gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match to {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
+            tx_env.value = U256::from(*value);
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -126,10 +123,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
                 .0
                 .iter()
                 .map(|l| {
-                    (
-                        l.address,
-                        l.storage_keys.iter().map(|k| U256::from_big_endian(k.as_ref())).collect(),
-                    )
+                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(**k)).collect())
                 })
                 .collect();
         }
@@ -145,13 +139,13 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             access_list,
         }) => {
             tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = (*max_fee_per_gas).into();
-            tx_env.gas_priority_fee = Some((*max_priority_fee_per_gas).into());
+            tx_env.gas_price = U256::from(*max_fee_per_gas);
+            tx_env.gas_priority_fee = Some(U256::from(*max_priority_fee_per_gas));
             tx_env.transact_to = match to {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
+            tx_env.value = U256::from(*value);
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -159,10 +153,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
                 .0
                 .iter()
                 .map(|l| {
-                    (
-                        l.address,
-                        l.storage_keys.iter().map(|k| U256::from_big_endian(k.as_ref())).collect(),
-                    )
+                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(**k)).collect())
                 })
                 .collect();
         }

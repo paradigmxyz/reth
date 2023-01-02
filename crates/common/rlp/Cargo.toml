@@ -17,6 +17,7 @@ rlp = { version = "0.5.2", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
 tracing = "0.1.37"
+revm-primitives = { path = "../../../../revm/crates/primitives", features = ["with-serde"] }
 
 [dev-dependencies]
 reth-rlp = { path = ".", package = "reth-rlp", features = [

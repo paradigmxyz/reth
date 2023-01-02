@@ -61,7 +61,7 @@ impl From<u64> for Chain {
 
 impl From<U256> for Chain {
     fn from(id: U256) -> Self {
-        id.as_u64().into()
+        id.to::<u64>().into()
     }
 }
 
@@ -82,7 +82,7 @@ impl From<Chain> for U64 {
 
 impl From<Chain> for U256 {
     fn from(c: Chain) -> Self {
-        u64::from(c).into()
+        U256::from(u64::from(c))
     }
 }
 

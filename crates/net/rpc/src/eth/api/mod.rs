@@ -68,7 +68,7 @@ where
 
     /// Returns the best block number
     fn block_number(&self) -> Result<U256> {
-        Ok(self.client().chain_info()?.best_number.into())
+        Ok(U256::from(self.client().chain_info()?.best_number))
     }
 
     /// Returns the chain id

@@ -45,6 +45,7 @@ impl_compression_for_compact!(
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
 impl_compression_for_compact!(CompactU256);
+impl_compression_for_compact!(H256, H160);
 
 /// Adds wrapper structs for some primitive types so they can use StructFlags from Compact, when
 /// used as pure table values.

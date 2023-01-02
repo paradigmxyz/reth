@@ -277,6 +277,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bit-set"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+dependencies = [
+ "bit-vec",
+]
+
+[[package]]
+name = "bit-vec"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1166,7 +1181,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "sha3",
  "zeroize",
@@ -3022,6 +3037,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e0d9cc07f18492d879586c92b485def06bc850da3118075cd45d50e9c95b0e5"
+dependencies = [
+ "bit-set",
+ "bitflags",
+ "byteorder",
+ "lazy_static",
+ "num-traits",
+ "quick-error 2.0.1",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_xorshift",
+ "regex-syntax",
+ "rusty-fork",
+ "tempfile",
+]
+
+[[package]]
 name = "public-ip"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3057,6 +3092,18 @@ dependencies = [
  "web-sys",
  "winapi",
 ]
+
+[[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quote"
@@ -3325,6 +3372,7 @@ dependencies = [
  "codecs-derive",
  "ethers-core",
  "modular-bitfield",
+ "revm-primitives",
  "serde",
  "test-fuzz",
 ]
@@ -3371,7 +3419,7 @@ dependencies = [
  "reth-interfaces",
  "reth-libmdbx",
  "reth-primitives",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "tempfile",
  "test-fuzz",
@@ -3396,7 +3444,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "reth-tracing",
- "secp256k1",
+ "secp256k1 0.24.2",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3442,7 +3490,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-primitives",
  "reth-rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "sha2 0.10.6",
  "sha3",
  "thiserror",
@@ -3469,7 +3517,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "smol_str",
  "snap",
@@ -3526,7 +3574,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-primitives",
  "reth-rpc-types",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "thiserror",
  "tokio",
@@ -3617,7 +3665,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serial_test",
  "tempfile",
  "thiserror",
@@ -3645,7 +3693,8 @@ dependencies = [
  "plain_hasher",
  "reth-codecs",
  "reth-rlp",
- "secp256k1",
+ "revm-primitives",
+ "secp256k1 0.24.2",
  "serde",
  "serde_json",
  "sucds",
@@ -3675,7 +3724,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-rpc-types",
- "secp256k1",
+ "secp256k1 0.24.2",
  "serde",
  "test-fuzz",
  "thiserror",
@@ -3698,8 +3747,9 @@ dependencies = [
  "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
+ "revm-primitives",
  "rlp",
- "secp256k1",
+ "secp256k1 0.24.2",
  "smol_str",
  "tracing",
 ]
@@ -3823,33 +3873,44 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "2.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73d84c8f9836efb0f5f5f8de4700a953c4e1f3119e5cfcb0aad8e5be73daf991"
 dependencies = [
  "arrayref",
  "auto_impl",
  "bytes",
  "hashbrown 0.13.1",
+ "hex",
+ "hex-literal",
  "num_enum",
- "primitive-types",
+ "revm-primitives",
  "revm_precompiles",
  "rlp",
  "sha3",
 ]
 
 [[package]]
+name = "revm-primitives"
+version = "0.2.0"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "derive_more",
+ "fixed-hash",
+ "ruint",
+ "serde",
+]
+
+[[package]]
 name = "revm_precompiles"
 version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0353d456ef3e989dc9190f42c6020f09bc2025930c37895826029304413204b5"
 dependencies = [
  "bytes",
  "hashbrown 0.13.1",
+ "k256",
  "num",
  "once_cell",
- "primitive-types",
  "ripemd",
- "secp256k1",
+ "ruint",
+ "secp256k1 0.25.0",
  "sha2 0.10.6",
  "sha3",
  "substrate-bn",
@@ -3910,6 +3971,29 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "ruint"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ad3a104dc8c3867f653b0fec89c65e00b0ceb752718ad282177a7e0f33257ac"
+dependencies = [
+ "arbitrary",
+ "derive_more",
+ "primitive-types",
+ "proptest",
+ "rlp",
+ "ruint-macro",
+ "rustc_version",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "ruint-macro"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62cc5760263ea229d367e7dff3c0cbf09e4797a125bd87059a6c095804f3b2d1"
 
 [[package]]
 name = "rustc-hash"
@@ -3984,6 +4068,18 @@ name = "rustversion"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4378ea89513870b6e2303ec50618e97da0fa43cdd9ded83ad3b6bad2693c08c6"
+
+[[package]]
+name = "rusty-fork"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3dcc6e454c328bb824492db107ab7c0ae8fcffe4ad210136ef014458c1bc4f"
+dependencies = [
+ "fnv",
+ "quick-error 1.2.3",
+ "tempfile",
+ "wait-timeout",
+]
 
 [[package]]
 name = "ryu"
@@ -4071,7 +4167,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "rand 0.8.5",
- "secp256k1-sys",
+ "secp256k1-sys 0.6.1",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "550fc3b723a478be77bf74718947cdcdd75144d508aaa70f0a320036905df2a8"
+dependencies = [
+ "secp256k1-sys 0.7.0",
 ]
 
 [[package]]
@@ -4079,6 +4184,15 @@ name = "secp256k1-sys"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83080e2c2fc1006e625be82e5d1eb6a43b7fd9578b617fcc55814daf286bba4b"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8058e28ae464daf5ac14c5c0f78110b58616e796c4e4e28cfcca38fdb13d8f22"
 dependencies = [
  "cc",
 ]
@@ -5067,6 +5181,15 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f200f5b12eb75f8c1ed65abd4b2db8a6e1b138a20de009dacee265a2498f3f6"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "waker-fn"

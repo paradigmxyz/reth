@@ -8,7 +8,7 @@ use reth_db::{
 };
 use reth_executor::SpecUpgrades;
 use reth_primitives::{
-    keccak256, Account as RethAccount, BigEndianHash, BlockLocked, SealedHeader, StorageEntry, H256,
+    keccak256, Account as RethAccount, BlockLocked, SealedHeader, StorageEntry, H256, U256,
 };
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, Transaction};
@@ -118,7 +118,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 address,
                 RethAccount {
                     balance: account.balance.0,
-                    nonce: account.nonce.0.as_u64(),
+                    nonce: account.nonce.0.to::<u64>(),
                     bytecode_hash: code_hash,
                 },
             )?;
@@ -128,7 +128,8 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             account.storage.iter().try_for_each(|(k, v)| {
                 tx.put::<tables::PlainStorageState>(
                     address,
-                    StorageEntry { key: H256::from_uint(&k.0), value: v.0 },
+                    // TODO - Check
+                    StorageEntry { key: H256::from_slice(&k.0.as_le_slice()), value: v.0 },
                 )
             })?;
 
@@ -141,7 +142,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereums 1.
         let mut stage =
-            ExecutionStage::new(reth_executor::Config { chain_id: 1.into(), spec_upgrades });
+            ExecutionStage::new(reth_executor::Config { chain_id: U256::from(1), spec_upgrades });
 
         // Call execution stage
         let input = ExecInput::default();

@@ -60,13 +60,14 @@ pub trait BlockProvider: Send + Sync {
     /// Get the hash of the block by matching the given id.
     fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
         match block_id {
-            BlockId::Hash(hash) => Ok(Some(hash)),
+            // TODO - Ruint
+            BlockId::Hash(hash) => Ok(Some(H256(hash.0))),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumber::Latest) {
                     return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
-                    .map(|num| self.block_hash(num.into()))
+                    .map(|num| self.block_hash(U256::from(num)))
                     .transpose()
                     .map(|maybe_hash| maybe_hash.flatten())
             }
@@ -79,7 +80,8 @@ pub trait BlockProvider: Send + Sync {
         block_id: BlockId,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         match block_id {
-            BlockId::Hash(hash) => self.block_number(hash),
+            // TODO - Ruint
+            BlockId::Hash(hash) => self.block_number(H256(hash.0)),
             BlockId::Number(num) => self.convert_block_number(num),
         }
     }
