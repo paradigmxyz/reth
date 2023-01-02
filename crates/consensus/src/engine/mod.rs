@@ -290,7 +290,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         }
 
         // Attempt to look up terminal block hash
-        let local_hash = self.client.block_hash(terminal_block_number.into())?;
+        let local_hash = self.client.block_hash(terminal_block_number.as_u64().into())?;
 
         // Transition configuration exchange is successful if block hashes match
         match local_hash {
@@ -665,7 +665,7 @@ mod tests {
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: config.merge_terminal_total_difficulty.into(),
                 terminal_block_hash: consensus_terminal_block.hash(),
-                terminal_block_number,
+                terminal_block_number: terminal_block_number.into(),
             };
 
             // Unknown block number
@@ -724,7 +724,7 @@ mod tests {
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: config.merge_terminal_total_difficulty.into(),
                 terminal_block_hash: terminal_block.hash(),
-                terminal_block_number,
+                terminal_block_number: terminal_block_number.into(),
             };
 
             client.add_block(terminal_block.hash(), terminal_block.clone().unseal());
