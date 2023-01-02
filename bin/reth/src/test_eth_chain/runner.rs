@@ -138,7 +138,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 tracing::trace!("Update storage: {address} key:{:?} val:{:?}", k.0, v.0);
                 tx.put::<tables::PlainStorageState>(
                     address,
-                    StorageEntry { key: H256::from_slice(&k.0.as_be_slice()), value: v.0 },
+                    StorageEntry { key: H256::from_slice(&k.0.to_be_bytes::<32>()), value: v.0 },
                 )
             })?;
 
@@ -154,7 +154,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
             Ok(walker.map(|mut walker| {
                 let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
                 while let Some(Ok((address, slot))) = walker.next() {
-                    let key = U256::from_big_endian(&slot.key.0);
+                    let key = U256::from_be_bytes(slot.key.0);
                     map.entry(address).or_default().insert(key, slot.value);
                 }
                 map
@@ -188,7 +188,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 let storage = walker.map(|mut walker| {
                     let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
                     while let Some(Ok((address, slot))) = walker.next() {
-                        let key = U256::from_big_endian(&slot.key.0);
+                        let key = U256::from_be_bytes(slot.key.0);
                         map.entry(address).or_default().insert(key, slot.value);
                     }
                     map
@@ -206,7 +206,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                             our_account.balance
                         ))
                     }
-                    if test_account.nonce.0.as_u64() != our_account.nonce {
+                    if test_account.nonce.0.to::<u64>() != our_account.nonce {
                         return Err(eyre!(
                             "Account {address} nonce diff, expected {} got {}",
                             test_account.nonce.0,
