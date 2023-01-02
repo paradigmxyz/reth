@@ -431,7 +431,7 @@ mod tests {
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =
-            Account { balance: U256::from(0x00), nonce: 0x00, bytecode_hash: Some(code_hash) };
+            Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
             balance: U256::from(0x1bc16d674ece94bau128),

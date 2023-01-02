@@ -491,7 +491,7 @@ mod tests {
         // pre staet
         db.insert_account(
             H160(hex!("1000000000000000000000000000000000000000")),
-            Account { balance: U256::from(0x00), nonce: 0x00, bytecode_hash: None },
+            Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None },
             Some(hex!("5a465a905090036002900360015500").into()),
             HashMap::new(),
         );
@@ -530,8 +530,7 @@ mod tests {
         assert_eq!(changeset.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let _account1_info =
-            Account { balance: U256::from(0x00), nonce: 0x00, bytecode_hash: None };
+        let _account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
             balance: U256::from(0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128), /* decrease for
