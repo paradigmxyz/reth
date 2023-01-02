@@ -155,7 +155,7 @@ impl Encodable for Header {
         self.mix_hash.encode(out);
         H64::from_low_u64_be(self.nonce).encode(out);
         if let Some(ref base_fee) = self.base_fee_per_gas {
-            dbg!(U256::from(*base_fee)).encode(out);
+            U256::from(*base_fee).encode(out);
             out.remaining_mut();
         }
     }
@@ -195,7 +195,7 @@ impl Decodable for Header {
         };
         let consumed = started_len - buf.len();
         if consumed < rlp_head.payload_length {
-            this.base_fee_per_gas = Some(dbg!(U256::decode(buf)?).to::<u64>());
+            this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
         }
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {

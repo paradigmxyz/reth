@@ -1117,7 +1117,6 @@ mod tests {
                 .unwrap(),
             odd_y_parity: false,
         };
-        dbg!(&sig.r);
 
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
         assert_eq!(signed_tx.hash(), hash, "Expected same hash");

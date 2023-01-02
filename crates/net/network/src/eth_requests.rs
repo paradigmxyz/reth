@@ -162,7 +162,6 @@ where
 
         for hash in request.0 {
             if let Some(block) =
-                // TODO Ruint
                 self.client.block(rpc::BlockId::Hash(rpc::H256(hash.0))).unwrap_or_default()
             {
                 let body = BlockBody { transactions: block.body, ommers: block.ommers };

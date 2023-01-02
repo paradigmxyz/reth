@@ -71,7 +71,6 @@ pub trait BlockProvider: BlockHashProvider + Send + Sync {
     /// Get the hash of the block by matching the given id.
     fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
         match block_id {
-            // TODO - Ruint
             BlockId::Hash(hash) => Ok(Some(H256(hash.0))),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumber::Latest) {
@@ -91,7 +90,6 @@ pub trait BlockProvider: BlockHashProvider + Send + Sync {
         block_id: BlockId,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         match block_id {
-            // TODO - Ruint
             BlockId::Hash(hash) => self.block_number(H256(hash.0)),
             BlockId::Number(num) => self.convert_block_number(num),
         }
