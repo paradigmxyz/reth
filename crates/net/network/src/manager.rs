@@ -460,7 +460,7 @@ where
                 .sessions_mut()
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
-                self.swarm.state_mut().add_peer_address(peer, kind, addr);
+                self.swarm.state_mut().add_peer_kind(peer, kind, addr);
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
