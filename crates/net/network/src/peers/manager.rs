@@ -1514,7 +1514,7 @@ mod test {
 
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
-        peers.add_discovered_node(basic_peer, basic_sock);
+        peers.add_discovered_node(basic_peer, PeerKind::Basic, basic_sock);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1554,7 +1554,7 @@ mod test {
 
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
-        peers.add_discovered_node(basic_peer, basic_sock);
+        peers.add_discovered_node(basic_peer, PeerKind::Basic, basic_sock);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
