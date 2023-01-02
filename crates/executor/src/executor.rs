@@ -627,7 +627,7 @@ mod tests {
         // check block rewards changeset.
         let mut block_rewarded_acc_info = account2_info;
         // add Blocks 2 eth reward and 2>>5 for one ommer
-        block_rewarded_acc_info.balance += U256::from(WEI_2ETH + (WEI_2ETH >> 5) * 1);
+        block_rewarded_acc_info.balance += U256::from(WEI_2ETH + (WEI_2ETH >> 5));
 
         assert_eq!(
             out.block_reward,

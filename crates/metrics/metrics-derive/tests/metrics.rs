@@ -23,7 +23,7 @@ struct CustomMetrics {
     histo: Histogram,
 }
 
-static RECORDER: Lazy<TestRecorder> = Lazy::new(|| TestRecorder::new());
+static RECORDER: Lazy<TestRecorder> = Lazy::new(TestRecorder::new);
 
 #[test]
 #[serial]

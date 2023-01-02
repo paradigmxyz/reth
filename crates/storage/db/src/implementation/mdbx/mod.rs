@@ -442,7 +442,7 @@ mod tests {
 
             // NOTE: Both values are present
             assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
-            assert_eq!(Some(Ok((key1, value01.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value01))), walker.next());
             assert_eq!(None, walker.next());
         }
 

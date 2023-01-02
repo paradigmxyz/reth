@@ -372,13 +372,13 @@ mod tests {
 
             // Valid extra data
             let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
-                b.header.extra_data = BytesMut::zeroed(32).freeze().into();
+                b.header.extra_data = BytesMut::zeroed(32).freeze();
                 b
             });
             assert_matches!(engine.try_construct_block(block_with_valid_extra_data.into()), Ok(_));
 
             // Invalid extra data
-            let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze().into();
+            let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
             let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
                 b.header.extra_data = block_with_invalid_extra_data.clone();
                 b
@@ -442,7 +442,7 @@ mod tests {
             );
 
             // Valid block
-            let valid_block = block.clone();
+            let valid_block = block;
             assert_matches!(engine.try_construct_block(valid_block.into()), Ok(_));
         }
 

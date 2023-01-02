@@ -50,7 +50,7 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
         let value = match value.len() {
             0 => U256::ZERO,
             2 if value.starts_with("0x") => U256::ZERO,
-            _ if value.starts_with("0x") => U256::from_str(&value).map_err(|e| {
+            _ if value.starts_with("0x") => U256::from_str(value).map_err(|e| {
                 Error::custom(format!("Parsing JsonU256 as hex failed {value}: {e}"))
             })?,
             _ => U256::from_str_radix(value, 10).map_err(|e| {

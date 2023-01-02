@@ -191,7 +191,7 @@ where
 impl Compact for U256 {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         let inner: [u8; 32] = self.to_be_bytes();
-        let size = 32 - (self.leading_zeros() / 8) as usize;
+        let size = 32 - (self.leading_zeros() / 8);
         buf.put_slice(&inner[32 - size..]);
         size
     }
