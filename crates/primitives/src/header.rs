@@ -156,7 +156,6 @@ impl Encodable for Header {
         H64::from_low_u64_be(self.nonce).encode(out);
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
-            out.remaining_mut();
         }
     }
 
