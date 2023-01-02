@@ -270,7 +270,7 @@ mod tests {
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Mainnet.into(),
-            total_difficulty: U256::from(0),
+            total_difficulty: U256::ZERO,
             blockhash: H256::random(),
             genesis,
             // Pass the current fork id.
@@ -404,7 +404,7 @@ mod tests {
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Mainnet.into(),
-            total_difficulty: U256::from(0),
+            total_difficulty: U256::ZERO,
             blockhash: H256::random(),
             genesis,
             // Pass the current fork id.

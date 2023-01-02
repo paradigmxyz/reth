@@ -409,7 +409,7 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: U256::from(0), bytecode_hash: Some(code_hash) },
+                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         db_tx
@@ -497,8 +497,7 @@ mod tests {
         // pre state
         let db_tx = tx.deref_mut();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let acc1_info =
-            Account { nonce: 0, balance: U256::from(0), bytecode_hash: Some(code_hash) };
+        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 

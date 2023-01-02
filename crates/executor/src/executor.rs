@@ -581,7 +581,7 @@ mod tests {
         assert_eq!(storage.len(), 1, "Only one storage change");
         assert_eq!(
             storage.get(&U256::from(1)),
-            Some(&(U256::from(0), U256::from(2))),
+            Some(&(U256::ZERO, U256::from(2))),
             "Storage change from 0 to 2 on slot 1"
         );
     }
