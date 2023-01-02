@@ -2,7 +2,7 @@ use crate::{
     config::NetworkMode,
     manager::NetworkEvent,
     message::PeerRequest,
-    peers::{PeersHandle, ReputationChangeKind},
+    peers::{PeerKind, PeersHandle, ReputationChangeKind},
     session::PeerInfo,
     FetchClient,
 };
@@ -135,10 +135,10 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
-    /// set
-    pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
-        let _ = self.inner.to_manager_tx.send(NetworkHandleMessage::AddPeerAddress(peer, addr));
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add or update
+    /// a peer to the known set
+    pub fn add_or_update_peer(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
+        self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
     }
 
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
@@ -207,7 +207,7 @@ struct NetworkInner {
 #[allow(missing_docs)]
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
-    AddPeerAddress(PeerId, SocketAddr),
+    AddPeerAddress(PeerId, PeerKind, SocketAddr),
     /// Disconnect a connection to a peer if it exists.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Add a new listener for [`NetworkEvent`].

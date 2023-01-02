@@ -10,7 +10,7 @@ use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::DisconnectReason;
 use reth_net_common::ban_list::BanList;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
+use reth_network::{peers::PeerKind, NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
 use reth_primitives::{NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
@@ -50,8 +50,8 @@ async fn test_establish_connections() {
         let mut listener1 = handle1.event_listener();
         let mut listener2 = handle2.event_listener();
 
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+        handle0.add_or_update_peer(*handle1.peer_id(), PeerKind::Basic, handle1.local_addr());
+        handle0.add_or_update_peer(*handle2.peer_id(), PeerKind::Basic, handle2.local_addr());
 
         let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
         let mut expected_peers = expected_connections.clone();
@@ -114,12 +114,12 @@ async fn test_already_connected() {
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
     let mut listener2 = NetworkEventStream::new(handle2.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_or_update_peer(*handle1.peer_id(), PeerKind::Basic, handle1.local_addr());
 
     let peer = listener0.next_session_established().await.unwrap();
     assert_eq!(peer, *handle1.peer_id());
 
-    handle2.add_peer(*handle0.peer_id(), handle0.local_addr());
+    handle2.add_or_update_peer(*handle0.peer_id(), PeerKind::Basic, handle0.local_addr());
     let peer = listener2.next_session_established().await.unwrap();
     assert_eq!(peer, *handle0.peer_id());
 
@@ -156,10 +156,10 @@ async fn test_get_peer() {
 
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_or_update_peer(*handle1.peer_id(), PeerKind::Basic, handle1.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
-    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+    handle0.add_or_update_peer(*handle2.peer_id(), PeerKind::Basic, handle2.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
     let peers = handle0.get_peers().await.unwrap();
@@ -191,7 +191,7 @@ async fn test_get_peer_by_id() {
 
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_or_update_peer(*handle1.peer_id(), PeerKind::Basic, handle1.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
     let peer = handle0.get_peer_by_id(*handle1.peer_id()).await.unwrap();
@@ -392,7 +392,7 @@ async fn test_outgoing_connect_with_single_geth() {
             provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
         // add geth as a peer then wait for a `SessionEstablished` event
-        handle.add_peer(geth_peer_id, geth_socket);
+        handle.add_or_update_peer(geth_peer_id, PeerKind::Basic, geth_socket);
 
         // check for a sessionestablished event
         let incoming_peer_id = event_stream.next_session_established().await.unwrap();
@@ -438,7 +438,7 @@ async fn test_geth_disconnect() {
             provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
-        handle.add_peer(geth_peer_id, geth_socket);
+        handle.add_or_update_peer(geth_peer_id, PeerKind::Basic, geth_socket);
 
         match events.next().await {
             Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),

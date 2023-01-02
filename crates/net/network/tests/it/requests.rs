@@ -8,6 +8,7 @@ use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
+use reth_network::peers::PeerKind;
 use reth_primitives::{
     Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
     TransactionSigned, TxEip2930, H256, U256,
@@ -52,7 +53,7 @@ async fn test_get_body() {
 
     let fetch0 = handle0.fetch_client().await.unwrap();
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_or_update_peer(*handle1.peer_id(), PeerKind::Basic, handle1.local_addr());
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 
@@ -95,7 +96,7 @@ async fn test_get_header() {
 
     let fetch0 = handle0.fetch_client().await.unwrap();
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_or_update_peer(*handle1.peer_id(), PeerKind::Basic, handle1.local_addr());
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 
