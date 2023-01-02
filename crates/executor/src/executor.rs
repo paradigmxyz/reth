@@ -441,7 +441,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
             .into_iter()
             .map(|(beneficiary, reward)| -> Result<_, _> {
                 let changeset = db
-                    .basic(H160(beneficiary.0))
+                    .basic(beneficiary)
                     .map_err(|_| Error::ProviderError)?
                     // if account is present append `Changed` changeset for block reward
                     .map(|acc| {
