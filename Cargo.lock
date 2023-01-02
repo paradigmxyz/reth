@@ -4057,7 +4057,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "2.3.1"
-source = "git+https://github.com/joshieDo/revm?rev=1495332a48b2f8e56620269229f6110ec8787c03#1495332a48b2f8e56620269229f6110ec8787c03"
+source = "git+https://github.com/bluealloy/revm?rev=3a13c9c8a0cda728941f1b26db0beb1025744ea9#3a13c9c8a0cda728941f1b26db0beb1025744ea9"
 dependencies = [
  "arrayref",
  "auto_impl",
@@ -4078,7 +4078,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "0.1.0"
-source = "git+https://github.com/joshieDo/revm?rev=1495332a48b2f8e56620269229f6110ec8787c03#1495332a48b2f8e56620269229f6110ec8787c03"
+source = "git+https://github.com/bluealloy/revm?rev=3a13c9c8a0cda728941f1b26db0beb1025744ea9#3a13c9c8a0cda728941f1b26db0beb1025744ea9"
 dependencies = [
  "arbitrary",
  "arrayref",
@@ -4099,7 +4099,7 @@ dependencies = [
 [[package]]
 name = "revm_precompiles"
 version = "1.1.2"
-source = "git+https://github.com/joshieDo/revm?rev=1495332a48b2f8e56620269229f6110ec8787c03#1495332a48b2f8e56620269229f6110ec8787c03"
+source = "git+https://github.com/bluealloy/revm?rev=3a13c9c8a0cda728941f1b26db0beb1025744ea9#3a13c9c8a0cda728941f1b26db0beb1025744ea9"
 dependencies = [
  "bytes",
  "hashbrown 0.13.1",
