@@ -1528,4 +1528,42 @@ mod test {
             _ => unreachable!(),
         }
     }
+
+    #[tokio::test]
+    async fn test_connect_trusted_nodes_only() {
+        let trusted_peer = PeerId::random();
+        let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let config = PeersConfig::default()
+            .with_trusted_nodes(HashSet::from([NodeRecord {
+                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+                tcp_port: 8008,
+                udp_port: 8008,
+                id: trusted_peer,
+            }]))
+            .with_connect_trusted_nodes_only(true);
+        let mut peers = PeersManager::new(config);
+
+        let basic_peer = PeerId::random();
+        let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        peers.add_discovered_node(basic_peer, basic_sock);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, basic_peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, trusted_peer);
+                assert_eq!(remote_addr, trusted_sock);
+            }
+            _ => unreachable!(),
+        }
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+    }
 }
