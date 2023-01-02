@@ -15,7 +15,7 @@ reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 reth-consensus = { path = "../consensus" }
 
-revm = { path = "../../../revm/crates/revm" }
+revm = { git = "https://github.com/joshieDo/revm", rev = "1495332a48b2f8e56620269229f6110ec8787c03" }
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 

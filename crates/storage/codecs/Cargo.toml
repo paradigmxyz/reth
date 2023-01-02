@@ -17,7 +17,7 @@ no_codec = ["codecs-derive/no_codec"]
 bytes = "1.2.1"
 codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
-revm-primitives = { path = "../../../../revm/crates/primitives", features = ["with-serde"] }
+revm-interpreter = { git = "https://github.com/joshieDo/revm", rev = "1495332a48b2f8e56620269229f6110ec8787c03", features = ["with-serde"] }
 
 [dev-dependencies]
 serde = "1.0"

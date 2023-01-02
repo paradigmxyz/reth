@@ -1723,6 +1723,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 dependencies = [
  "ahash 0.8.2",
+ "serde",
 ]
 
 [[package]]
@@ -1786,6 +1787,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hex-literal"
@@ -3372,7 +3376,7 @@ dependencies = [
  "codecs-derive",
  "ethers-core",
  "modular-bitfield",
- "revm-primitives",
+ "revm-interpreter",
  "serde",
  "test-fuzz",
 ]
@@ -3693,7 +3697,7 @@ dependencies = [
  "plain_hasher",
  "reth-codecs",
  "reth-rlp",
- "revm-primitives",
+ "revm-interpreter",
  "secp256k1 0.24.2",
  "serde",
  "serde_json",
@@ -3747,7 +3751,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
- "revm-primitives",
+ "revm-interpreter",
  "rlp",
  "secp256k1 0.24.2",
  "smol_str",
@@ -3864,6 +3868,7 @@ dependencies = [
  "paste",
  "rand 0.8.5",
  "reth-primitives",
+ "ruint",
  "serde",
  "thiserror",
  "tokio",
@@ -3873,39 +3878,52 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "2.3.1"
+source = "git+https://github.com/joshieDo/revm?rev=1495332a48b2f8e56620269229f6110ec8787c03#1495332a48b2f8e56620269229f6110ec8787c03"
 dependencies = [
  "arrayref",
  "auto_impl",
  "bytes",
+ "derive_more",
+ "fixed-hash",
  "hashbrown 0.13.1",
  "hex",
  "hex-literal",
  "num_enum",
- "revm-primitives",
+ "revm-interpreter",
  "revm_precompiles",
  "rlp",
+ "ruint",
  "sha3",
 ]
 
 [[package]]
-name = "revm-primitives"
-version = "0.2.0"
+name = "revm-interpreter"
+version = "0.1.0"
+source = "git+https://github.com/joshieDo/revm?rev=1495332a48b2f8e56620269229f6110ec8787c03#1495332a48b2f8e56620269229f6110ec8787c03"
 dependencies = [
  "arbitrary",
+ "arrayref",
+ "auto_impl",
  "bytes",
  "derive_more",
  "fixed-hash",
+ "hashbrown 0.13.1",
+ "hex",
+ "hex-literal",
+ "num_enum",
+ "rlp",
  "ruint",
  "serde",
+ "sha3",
 ]
 
 [[package]]
 name = "revm_precompiles"
 version = "1.1.2"
+source = "git+https://github.com/joshieDo/revm?rev=1495332a48b2f8e56620269229f6110ec8787c03#1495332a48b2f8e56620269229f6110ec8787c03"
 dependencies = [
  "bytes",
  "hashbrown 0.13.1",
- "k256",
  "num",
  "once_cell",
  "ripemd",

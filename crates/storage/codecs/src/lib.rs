@@ -1,7 +1,7 @@
 use bytes::{Buf, Bytes};
 pub use codecs_derive::*;
 use ethers_core::types::Bloom;
-use revm_primitives::{B160 as H160, B256 as H256, U256};
+use revm_interpreter::{B160 as H160, B256 as H256, U256};
 // use ethers_core::types::{Bloom, H160, H256, U256};
 
 /// Trait that implements the `Compact` codec.
@@ -282,7 +282,7 @@ impl Compact for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_primitives::B160;
+    use revm_interpreter::B160;
 
     pub type Address = B160;
 

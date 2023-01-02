@@ -16,7 +16,8 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::{ruint, uint, TxHash, H256};
+use reth_primitives::{TxHash, H256};
+use ruint::uint;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},

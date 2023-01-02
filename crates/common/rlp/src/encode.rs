@@ -230,7 +230,7 @@ mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
 
-    use revm_primitives::{B160, B256, U256 as RU256};
+    use revm_interpreter::{B160, B256, U256 as RU256};
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
