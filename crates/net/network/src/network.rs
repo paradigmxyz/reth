@@ -135,9 +135,21 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add or update
-    /// a peer to the known set
-    pub fn add_or_update_peer(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
+    /// set
+    pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Basic, addr);
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a trusted peer
+    /// to the known set
+    pub fn add_trusted_peer(&self, peer: PeerId, addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Trusted, addr);
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
+    /// set, with the given kind.
+    pub fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
         self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
     }
 
