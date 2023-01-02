@@ -1,4 +1,4 @@
-# Use latest rust image as the builder base
+# Use rust image as the builder base
 FROM rust:1.66.0-bullseye AS builder
 
 # Set the build profile to be release
