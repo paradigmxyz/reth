@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput, Stage, StageError,
-    StageId, UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -86,15 +86,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (start_block, end_block, capped) = match (self as &dyn Stage<DB>)
-            .next_exec_action(&input, Some(self.commit_threshold))
-        {
-            ExecAction::Run { start_block, end_block, capped } => (start_block, end_block, capped),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: "sync::stages::execution", stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        };
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
         // Get next canonical block hashes to execute.

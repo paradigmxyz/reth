@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput, Stage, StageError,
-    StageId, UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -78,15 +78,8 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (start_block, end_block, capped) = match (self as &dyn Stage<DB>)
-            .next_exec_action(&input, Some(self.commit_threshold))
-        {
-            ExecAction::Run { start_block, end_block, capped } => (start_block, end_block, capped),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        };
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::bodies");
 
         let bodies_to_download = self.bodies_to_download::<DB>(tx, start_block, end_block)?;
 

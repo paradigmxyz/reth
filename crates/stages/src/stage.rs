@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use crate::{db::Transaction, error::StageError, id::StageId};
 use async_trait::async_trait;
 use reth_db::database::Database;
@@ -16,6 +18,29 @@ impl ExecInput {
     /// Return the progress of the previous stage or default.
     pub fn previous_stage_progress(&self) -> BlockNumber {
         self.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default()
+    }
+
+    /// Return next execution action.
+    ///
+    /// [ExecAction::Done] is returned if there are no blocks to execute in this stage.
+    /// [ExecAction::Run] is returned if the stage should proceed with execution.
+    pub fn next_action(&self, max_threshold: Option<u64>) -> ExecAction {
+        // Extract information about the stage progress
+        let stage_progress = self.stage_progress.unwrap_or_default();
+        let previous_stage_progress = self.previous_stage_progress();
+
+        let start_block = stage_progress + 1;
+        let end_block = match max_threshold {
+            Some(threshold) => previous_stage_progress.min(stage_progress + threshold),
+            None => previous_stage_progress,
+        };
+        let capped = end_block < previous_stage_progress;
+
+        if start_block <= end_block {
+            ExecAction::Run { rng: start_block..=end_block, capped }
+        } else {
+            ExecAction::Done { stage_progress, target: end_block }
+        }
     }
 }
 
@@ -51,10 +76,8 @@ pub struct UnwindOutput {
 pub enum ExecAction {
     /// The stage should continue with execution.
     Run {
-        /// The start of the execution block range.
-        start_block: BlockNumber,
-        /// The end of the execution block range
-        end_block: BlockNumber,
+        /// The execution block range
+        rng: RangeInclusive<BlockNumber>,
         /// The flag indicating whether the range was capped
         /// by some max blocks parameter
         capped: bool,
@@ -87,29 +110,6 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Stage IDs must be unique.
     fn id(&self) -> StageId;
 
-    /// Return next execution action.
-    ///
-    /// [ExecAction::Done] is returned if there are no blocks to execute in this stage.
-    /// [ExecAction::Run] is returned if the stage should proceed with execution.
-    fn next_exec_action(&self, input: &ExecInput, max_threshold: Option<u64>) -> ExecAction {
-        // Extract information about the stage progress
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
-
-        let start_block = stage_progress + 1;
-        let end_block = match max_threshold {
-            Some(threshold) => previous_stage_progress.min(stage_progress + threshold),
-            None => previous_stage_progress,
-        };
-        let capped = end_block < previous_stage_progress;
-
-        if start_block <= end_block {
-            ExecAction::Run { start_block, end_block, capped }
-        } else {
-            ExecAction::Done { stage_progress, target: end_block }
-        }
-    }
-
     /// Execute the stage.
     async fn execute(
         &mut self,
@@ -124,3 +124,19 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
 }
+
+/// Get the next execute action for the stage. Return if the stage has no
+/// blocks to process.
+macro_rules! exec_or_return {
+    ($input: expr, $threshold: expr, $target: expr) => {
+        match $input.next_action(Some($threshold)) {
+            ExecAction::Run { rng, capped } => (rng.into_inner(), capped),
+            ExecAction::Done { stage_progress, target } => {
+                info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
+                return Ok(ExecOutput { stage_progress, done: true })
+            }
+        }
+    };
+}
+
+pub(crate) use exec_or_return;
