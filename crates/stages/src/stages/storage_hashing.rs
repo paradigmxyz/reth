@@ -2,13 +2,12 @@ use crate::{
     db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
-    models::TransitionIdAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, HashedStorageEntry, StorageEntry, TransitionId};
+use reth_primitives::{keccak256, Address, HashedStorageEntry, TransitionId};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -74,7 +73,16 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             info!(target: "sync::stages::storage_hashing", start_transition, end_transition, "Target transition already reached");
             return Ok(ExecOutput { stage_progress: max_block_num, done: true })
         } else if end_transition - start_transition > self.clean_threshold {
-            unimplemented!();
+            // There are too many transitions, so we hash all storage entries
+            let mut storage_cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
+            let mut hashed_storage_cursor = tx.cursor_dup_mut::<tables::HashedStorage>()?;
+
+            let mut walker = storage_cursor.walk(Address::zero())?;
+
+            while let Some((address, entry)) = walker.next().transpose()? {
+                let hashed_entry = HashedStorageEntry { key: keccak256(address), ..entry };
+                hashed_storage_cursor.append_dup(keccak256(address), hashed_entry)?;
+            }
         }
 
         // Acquire the Storage cursor
@@ -85,24 +93,24 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let mut hashed_storage_cursor = tx.cursor_dup_mut::<tables::HashedStorage>()?;
 
         // Walk the transactions from start to end index (inclusive)
-        let entries = storage_changeset_cursor.walk(start_transition.into())?.take_while(|res| {
-            res.as_ref().map(|(k, _)| (*k).transition_id() <= end_transition).unwrap_or_default()
-        });
+        let mut walker =
+            storage_changeset_cursor.walk(start_transition.into())?.take_while(|res| {
+                res.as_ref()
+                    .map(|(k, _)| (*k).transition_id() <= end_transition)
+                    .unwrap_or_default()
+            });
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::storage_hashing", start_transition, end_transition, "Hashing storage");
-        for entry in entries {
-            let (tid_address, storage_entry): (TransitionIdAddress, StorageEntry) = entry?;
-
+        while let Some((tid_address, entry)) = walker.next().transpose()? {
             if let Some(current_se) =
-                storage_cursor.seek_by_key_subkey(tid_address.address(), storage_entry.key)?
+                storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?
             {
                 // Create a new entry with a hashed key
-                let hashed_se: HashedStorageEntry =
-                    HashedStorageEntry { key: keccak256(current_se.key), ..current_se };
+                let hashed_se = HashedStorageEntry { key: keccak256(current_se.key), ..current_se };
 
                 // upsert entry to the table
-                hashed_storage_cursor.upsert(keccak256(tid_address.address()), hashed_se)?;
+                hashed_storage_cursor.append_dup(keccak256(tid_address.address()), hashed_se)?;
             } else {
                 hashed_storage_cursor.seek_exact(keccak256(tid_address.address()))?;
                 hashed_storage_cursor.delete_current()?;
