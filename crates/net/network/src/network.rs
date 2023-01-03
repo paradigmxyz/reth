@@ -153,6 +153,12 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
     }
 
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to remove a peer from the
+    /// set corresponding to given kind.
+    pub fn remove_peer(&self, peer: PeerId, kind: PeerKind) {
+        self.send_message(NetworkHandleMessage::RemovePeer(peer, kind))
+    }
+
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
     /// connection to the given peer.
     pub fn disconnect_peer(&self, peer: PeerId) {
@@ -220,6 +226,8 @@ struct NetworkInner {
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
+    /// Removes a peer from the peerset correponding to the given kind.
+    RemovePeer(PeerId, PeerKind),
     /// Disconnect a connection to a peer if it exists.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Add a new listener for [`NetworkEvent`].

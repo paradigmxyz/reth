@@ -258,6 +258,13 @@ where
         self.peers_manager.add_peer_kind(peer_id, kind, addr)
     }
 
+    pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
+        match kind {
+            PeerKind::Basic => self.peers_manager.remove_peer(peer_id),
+            PeerKind::Trusted => self.peers_manager.remove_peer_from_trusted_set(peer_id),
+        }
+    }
+
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {

@@ -442,7 +442,7 @@ impl PeersManager {
     }
 
     /// Removes the tracked node from the set.
-    pub(crate) fn remove_discovered_node(&mut self, peer_id: PeerId) {
+    pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
         let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
         if entry.get().is_trusted() {
             return
@@ -466,6 +466,18 @@ impl PeersManager {
                 reason: Some(DisconnectReason::DisconnectRequested),
             })
         }
+    }
+
+    /// Removes the tracked node from the trusted set.
+    pub(crate) fn remove_peer_from_trusted_set(&mut self, peer_id: PeerId) {
+        let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
+        if !entry.get().is_trusted() {
+            return
+        }
+
+        let peer = entry.get_mut();
+
+        peer.kind = PeerKind::Basic;
     }
 
     /// Returns the idle peer with the highest reputation.
@@ -556,7 +568,7 @@ impl PeersManager {
                     PeerCommand::Add(peer_id, addr) => {
                         self.add_peer(peer_id, addr);
                     }
-                    PeerCommand::Remove(peer) => self.remove_discovered_node(peer),
+                    PeerCommand::Remove(peer) => self.remove_peer(peer),
                     PeerCommand::ReputationChange(peer_id, rep) => {
                         self.apply_reputation_change(&peer_id, rep)
                     }
@@ -1399,7 +1411,7 @@ mod test {
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::Out);
 
-        peers.remove_discovered_node(peer);
+        peers.remove_peer(peer);
 
         match event!(peers) {
             PeerAction::PeerRemoved(peer_id) => {

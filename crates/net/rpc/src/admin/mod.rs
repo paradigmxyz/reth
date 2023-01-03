@@ -1,5 +1,5 @@
 use jsonrpsee::core::RpcResult;
-use reth_network::{peers::PeerKind, DisconnectReason, NetworkHandle};
+use reth_network::{peers::PeerKind, NetworkHandle};
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 
@@ -15,7 +15,7 @@ impl AdminApiServer for AdminApi {
     }
 
     fn remove_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.disconnect_peer_with_reason(record.id, DisconnectReason::DisconnectRequested);
+        self.network.remove_peer(record.id, PeerKind::Basic);
         Ok(true)
     }
 
@@ -25,7 +25,7 @@ impl AdminApiServer for AdminApi {
     }
 
     fn remove_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.add_peer_kind(record.id, PeerKind::Basic, record.tcp_addr());
+        self.network.remove_peer(record.id, PeerKind::Trusted);
         Ok(true)
     }
 
