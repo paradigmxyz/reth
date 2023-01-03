@@ -4,7 +4,7 @@ use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, TransactionRequest},
+    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest},
     utils::{ChainConfig, Genesis, GenesisAccount, Geth},
 };
 use ethers_middleware::SignerMiddleware;
@@ -25,11 +25,12 @@ use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{
     collections::{HashMap, HashSet},
+    io::{BufRead, BufReader, Read},
     net::SocketAddr,
     sync::Arc,
     time::Duration,
 };
-use tokio::task;
+use tokio::{task, time::sleep};
 
 // The timeout for tests that create a GethInstance
 const GETH_TIMEOUT: Duration = Duration::from_secs(60);
@@ -86,8 +87,25 @@ fn unused_tcp_udp() -> (SocketAddr, SocketAddr) {
 
 /// Creates a chain config using the given chain id.
 /// Funds the given address with max coins.
+///
+/// Enables all hard forks up to London at genesis.
 fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
-    let config = ChainConfig { chain_id, ..Default::default() };
+    let config = ChainConfig {
+        chain_id,
+        eip155_block: Some(0),
+        eip150_block: Some(0),
+        eip158_block: Some(0),
+
+        homestead_block: Some(0),
+        byzantium_block: Some(0),
+        constantinople_block: Some(0),
+        petersburg_block: Some(0),
+        istanbul_block: Some(0),
+        muir_glacier_block: Some(0),
+        berlin_block: Some(0),
+        london_block: Some(0),
+        ..Default::default()
+    };
 
     let mut alloc = HashMap::new();
     alloc.insert(
@@ -601,7 +619,7 @@ async fn sync_from_clique_geth() {
     reth_tracing::init_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         // first create a signer that we will fund so we can make transactions
-        let chain_id = 1337u64;
+        let chain_id = 13337u64;
         let wallet = LocalWallet::new(&mut rand::thread_rng()).with_chain_id(chain_id);
         let our_address = wallet.address();
 
@@ -614,11 +632,14 @@ async fn sync_from_clique_geth() {
 
         // create a pre-funded geth
         let genesis = genesis_funded(chain_id, wallet.address());
-        let geth = geth.genesis(genesis).chain_id(chain_id);
+        let geth = geth
+            .genesis(genesis)
+            .chain_id(chain_id)
+            .block_time(4u64);
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
         // we need to clone it because we will be reusing the geth config when we restart p2p
-        let instance = geth.clone().spawn();
+        let mut instance = geth.clone().spawn();
 
         // set up ethers provider
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), instance.port()).to_string();
@@ -631,39 +652,58 @@ async fn sync_from_clique_geth() {
         // first get the balance and make sure its not zero
         let balance = provider.get_balance(our_address, None).await.unwrap();
         assert_ne!(balance, 0u64.into());
-
-        // check the chain id (for debugging)
-        let other_chain_id = provider.get_chainid().await.unwrap();
-
-        println!("chain id: {:?}", other_chain_id);
         println!("balance: {:?}", balance);
 
-        // TODO: this doesn't work due to invalid sender - why?
-        // when this works change the max nonce to something higher
-        for nonce in 0u64..1 {
+        // take the stderr of the geth instance and print it to see more about what geth is doing
+        // is it mining blocks? if so can we
+        let stderr = instance.stderr().unwrap();
+
+        // print logs in a new task
+        task::spawn(async move {
+            let mut err_reader = BufReader::new(stderr);
+
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+
+                let mut buf = String::new();
+                if let Ok(line) = err_reader.read_line(&mut buf) {
+                    if line == 0 {
+                        continue
+                    }
+                    dbg!(buf);
+                }
+            }
+        });
+
+        // send transactions, hoping they are amined
+        for nonce in 0u64..100 {
             // create transactions to send to geth
-            let _tx: TypedTransaction = TransactionRequest::new()
+            let tx: TypedTransaction = Eip1559TransactionRequest::new()
                 .to(ethers_core::types::H160::zero())
                 .value(ethers_core::types::U256::from(1u64))
                 .nonce(nonce)
                 .chain_id(chain_id)
                 .into();
 
-            // let's use the signer middleware
-            // TODO: re-add
-            // let pending_tx = provider.send_transaction(tx, None).await.unwrap();
-            // println!("pending tx: {:?}", pending_tx);
+            println!("signing and sending transaction");
+            let pending_tx = provider.send_transaction(tx, None).await.unwrap();
+            println!("pending tx: {:?}", pending_tx);
         }
 
-        // get block
+        // check block num post txs
         let block = provider.get_block_number().await.unwrap();
-        println!("block: {}", block);
-        // assert!(block > 0.into());
+        println!("first block num after tx creation: {}", block);
 
+        // wait for stuff to happen
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        drop(instance);
+
+        // TODO: remove when the above works (blocks are produced)
+        panic!("done");
         // === restart geth with p2p ===
 
         // drop geth and restart with p2p
-        drop(instance);
+        // drop(instance);
         let geth = geth.disable_discovery();
         let instance = geth.spawn();
 
@@ -677,7 +717,7 @@ async fn sync_from_clique_geth() {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let (reth_p2p, reth_disc) = unused_tcp_udp();
-        let config = NetworkConfig::builder(Arc::new(TestApi::default()), secret_key)
+        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
             .build();
