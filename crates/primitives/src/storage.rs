@@ -10,6 +10,9 @@ pub struct StorageEntry {
     pub value: U256,
 }
 
+/// StorageEntry with hashed key
+pub type HashedStorageEntry = StorageEntry;
+
 // NOTE: Removing main_codec and manually encode subkey
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey

@@ -17,8 +17,8 @@ use crate::{
     },
 };
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, HashedStorageEntry, Header, IntegerList, Receipt,
+    StorageEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
 use self::models::StoredBlockBody;
@@ -33,7 +33,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 23] = [
+pub const TABLES: [(TableType, &str); 24] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -47,6 +47,7 @@ pub const TABLES: [(TableType, &str); 23] = [
     (TableType::Table, Logs::const_name()),
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
+    (TableType::DupSort, HashedStorage::const_name()),
     (TableType::Table, Bytecodes::const_name()),
     (TableType::Table, BlockTransitionIndex::const_name()),
     (TableType::Table, TxTransitionIndex::const_name()),
@@ -187,6 +188,12 @@ table!(
 dupsort!(
     /// Stores the current value of a storage key.
     ( PlainStorageState ) Address | [H256] StorageEntry
+);
+
+dupsort!(
+    /// Stores the mapping of hashed account address to account storage.
+    /// The keys of each storage entry have their keys hashed.
+    ( HashedStorage ) H256 | [H256] HashedStorageEntry
 );
 
 table!(
