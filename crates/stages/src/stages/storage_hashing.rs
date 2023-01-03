@@ -18,8 +18,6 @@ const STORAGE_HASHING: StageId = StageId("StorageHashing");
 /// [`HashedStorage`][reth_interfaces::db::tables::HashedStorage] table.
 #[derive(Debug)]
 pub struct StorageHashingStage {
-    /// The size of the chunk for parallel storage hashing
-    pub batch_size: usize,
     /// The size of inserted items after which the control
     /// flow will be returned to the pipeline for commit
     pub commit_threshold: u64,
@@ -35,11 +33,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         STORAGE_HASHING
     }
 
-    /// Retrieve the range of transactions to iterate over by querying
-    /// [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount],
-    /// collect transactions within that range,
-    /// recover signer for each transaction and store entries in
-    /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+    /// Turn each StorageEntry into a
+    /// [`HashedStorageEntry`][reth_primitives::storage::HashedStorageEntry],
+    /// by hashing it's key, and save them into the
+    /// [`HashedStorage`][reth_interfaces::db::tables::HashedStorage] table,
+    /// under a hashed account address.
+    /// If the range of transitions is lower than clean_threshold, updates only
+    /// changed entries.
     async fn execute(
         &mut self,
         tx: &mut Transaction<'_, DB>,
@@ -129,9 +129,5 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         _input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
         unimplemented!();
-        // Lookup latest tx id that we should unwind to
-        // let latest_tx_id = tx.get_block_body_by_num(input.unwind_to)?.last_tx_index();
-        // tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
-        // Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
