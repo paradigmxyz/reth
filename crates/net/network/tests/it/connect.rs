@@ -111,7 +111,7 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
     alloc.insert(
         signer_addr,
         GenesisAccount {
-            balance: ethers_core::types::U256::MAX,
+            balance: ethers_core::types::U256::MAX / 2,
             nonce: None,
             code: None,
             storage: None,
@@ -122,7 +122,7 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
         config,
         alloc,
         difficulty: ethers_core::types::U256::one(),
-        gas_limit: ethers_core::types::U64::MAX,
+        gas_limit: U64::from(50000),
         ..Default::default()
     }
 }
@@ -632,10 +632,7 @@ async fn sync_from_clique_geth() {
 
         // create a pre-funded geth
         let genesis = genesis_funded(chain_id, wallet.address());
-        let geth = geth
-            .genesis(genesis)
-            .chain_id(chain_id)
-            .block_time(1u64);
+        let geth = geth.genesis(genesis).chain_id(chain_id).block_time(1u64);
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
         // we need to clone it because we will be reusing the geth config when we restart p2p
@@ -753,6 +750,120 @@ async fn sync_from_clique_geth() {
         } else {
             panic!("Expected a session established event");
         }
+    })
+    .await
+    .unwrap();
+}
+
+// TODO: this is a test to isolate an issue with how we setup geth
+// command for testing:
+// cargo t -p reth-network geth_mining_blocks -- --nocapture
+//
+// What we expected to see (typical output for geth --dev --dev.period 1):
+// INFO [01-03|15:24:01.003] Commit new sealing work                  number=7 sealhash=243e54..1b7897 uncles=0 txs=0 gas=0 fees=0 elapsed="183.75µs"
+// INFO [01-03|15:24:01.003] Commit new sealing work                  number=7 sealhash=243e54..1b7897 uncles=0 txs=0 gas=0 fees=0 elapsed="276.708µs"
+// INFO [01-03|15:24:02.001] Successfully sealed new block number=7 sealhash=243e54..1b7897 hash=2760ac..f77d4b elapsed=998.327ms 
+// INFO [01-03|15:24:02.002] 🔨 mined potential block                  number=7 hash=2760ac..f77d4b
+// INFO [01-03|15:24:02.003] Commit new sealing work                  number=8 sealhash=be8cec..e0d4bf uncles=0 txs=0 gas=0 fees=0 elapsed="763.25µs"
+// INFO [01-03|15:24:02.003] Commit new sealing work number=8 sealhash=be8cec..e0d4bf uncles=0 txs=0 gas=0 fees=0 elapsed=1.436ms
+// INFO [01-03|15:24:03.002] Successfully sealed new block            number=8 sealhash=be8cec..e0d4bf hash=889fbc..72a4fd elapsed=999.278ms
+// INFO [01-03|15:24:03.002] 🔗 block reached canonical chain number=1 hash=82630c..cbac86
+// INFO [01-03|15:24:03.002] 🔨 mined potential block number=8 hash=889fbc..72a4fd
+//
+// what we see:
+// [crates/net/network/tests/it/connect.rs:762] buf = "INFO [01-03|15:23:07.667] Commit new sealing work                  number=1 sealhash=896f7a..d2fa88 uncles=0 txs=0 gas=0 fees=0 elapsed=\"131.75µs\"\n"
+// [crates/net/network/tests/it/connect.rs:762] buf = "INFO [01-03|15:23:07.668] Commit new sealing work                  number=1 sealhash=896f7a..d2fa88 uncles=0 txs=0 gas=0 fees=0 elapsed=\"198.792µs\"\n"
+// ... (no more output)
+//
+// the issue is that we are not seeing the `Successfully sealed new block` and `mined potential
+// block` messages We are seeing only the genesis block mined and then nothing else.
+//
+// We are also spawning geth with --dev --dev.period 1, so this might be due to how we are setting
+// fields in the genesis block
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn geth_mining_blocks() {
+    reth_tracing::init_tracing();
+    tokio::time::timeout(GETH_TIMEOUT, async move {
+        // first create a signer that we will fund so we can make transactions
+        let chain_id = 13337u64;
+        let wallet = LocalWallet::new(&mut rand::thread_rng()).with_chain_id(chain_id);
+        let our_address = wallet.address();
+
+        let (geth, data_dir) = create_new_geth();
+
+        // print datadir for debugging
+        println!("geth datadir: {data_dir:?}");
+
+        // === fund wallet ===
+
+        // create a pre-funded geth
+        let genesis = genesis_funded(chain_id, wallet.address());
+        let geth = geth.genesis(genesis).chain_id(chain_id).block_time(1u64);
+
+        // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
+        // we need to clone it because we will be reusing the geth config when we restart p2p
+        let mut instance = geth.clone().spawn();
+
+        // set up ethers provider
+        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), instance.port()).to_string();
+        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider =
+            SignerMiddleware::new_with_provider_chain(provider, wallet.clone()).await.unwrap();
+
+        // === produce blocks ===
+
+        // first get the balance and make sure its not zero
+        let balance = provider.get_balance(our_address, None).await.unwrap();
+        assert_ne!(balance, 0u64.into());
+        println!("balance: {balance:?}");
+
+        // take the stderr of the geth instance and print it to see more about what geth is doing
+        // is it mining blocks? if so can we
+        let stderr = instance.stderr().unwrap();
+
+        // print logs in a new task
+        task::spawn(async move {
+            let mut err_reader = BufReader::new(stderr);
+
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+
+                let mut buf = String::new();
+                if let Ok(line) = err_reader.read_line(&mut buf) {
+                    if line == 0 {
+                        continue
+                    }
+                    dbg!(buf);
+                }
+            }
+        });
+
+        // send transactions, hoping they are mined
+        // for nonce in 0u64..5 {
+        //     // create transactions to send to geth
+        //     let tx: TypedTransaction = Eip1559TransactionRequest::new()
+        //         .to(ethers_core::types::H160::zero())
+        //         .value(ethers_core::types::U256::from(1u64))
+        //         .nonce(nonce)
+        //         .chain_id(chain_id)
+        //         .into();
+
+        //     println!("signing and sending transaction");
+        //     let pending_tx = provider.send_transaction(tx, None).await.unwrap();
+        //     println!("pending tx {nonce}: {pending_tx:?}");
+        // }
+
+        // check block num post txs
+        let block = provider.get_block_number().await.unwrap();
+        println!("first block num after sending txs: {block}");
+
+        // wait for stuff to happen (and logs to be printed)
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        drop(instance);
+
+        // TODO: remove when the above works (blocks are produced)
+        assert!(block > U64::zero());
     })
     .await
     .unwrap();
