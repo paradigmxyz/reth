@@ -9,41 +9,24 @@ struct AdminApi {
 }
 
 impl AdminApiServer for AdminApi {
-    fn add_peer(&self, record: String) -> RpcResult<bool> {
-        if let Ok(record) = record.parse::<NodeRecord>() {
-            self.network.add_peer(record.id, record.tcp_addr());
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
+        self.network.add_peer(record.id, record.tcp_addr());
+        Ok(true)
     }
 
-    fn remove_peer(&self, record: String) -> RpcResult<bool> {
-        if let Ok(record) = record.parse::<NodeRecord>() {
-            self.network
-                .disconnect_peer_with_reason(record.id, DisconnectReason::DisconnectRequested);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    fn remove_peer(&self, record: NodeRecord) -> RpcResult<bool> {
+        self.network.disconnect_peer_with_reason(record.id, DisconnectReason::DisconnectRequested);
+        Ok(true)
     }
 
-    fn add_trusted_peer(&self, record: String) -> RpcResult<bool> {
-        if let Ok(record) = record.parse::<NodeRecord>() {
-            self.network.add_trusted_peer(record.id, record.tcp_addr());
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    fn add_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool> {
+        self.network.add_trusted_peer(record.id, record.tcp_addr());
+        Ok(true)
     }
 
-    fn remove_trusted_peer(&self, record: String) -> RpcResult<bool> {
-        if let Ok(record) = record.parse::<NodeRecord>() {
-            self.network.add_peer_kind(record.id, PeerKind::Basic, record.tcp_addr());
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    fn remove_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool> {
+        self.network.add_peer_kind(record.id, PeerKind::Basic, record.tcp_addr());
+        Ok(true)
     }
 
     fn subscribe(
