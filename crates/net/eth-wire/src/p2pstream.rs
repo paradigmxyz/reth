@@ -78,6 +78,10 @@ where
     ) -> Result<(), P2PStreamError> {
         let mut buf = BytesMut::new();
         P2PMessage::Disconnect(reason).encode(&mut buf);
+        tracing::trace!(
+            %reason,
+            "Sending disconnect message during the handshake",
+        );
         self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
     }
 }
