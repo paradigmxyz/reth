@@ -118,7 +118,7 @@ impl Command {
         // cloneable on its own
         // TODO: Remove magic numbers
         let fetch_client = Arc::new(network.fetch_client().await?);
-        let mut pipeline = reth_stages::Pipeline::new()
+        let mut pipeline = reth_stages::Pipeline::default()
             .push(HeaderStage {
                 downloader: headers::linear::LinearDownloadBuilder::default()
                     .batch_size(config.stages.headers.downloader_batch_size)

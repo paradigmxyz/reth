@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use bytes::BytesMut;
-use reth_primitives::{Address, BlockNumber, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
+use reth_primitives::{Address, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
@@ -147,7 +147,7 @@ pub struct TransitionConfiguration {
     /// Maps on TERMINAL_BLOCK_HASH parameter of EIP-3675
     pub terminal_block_hash: H256,
     /// Maps on TERMINAL_BLOCK_NUMBER parameter of EIP-3675
-    pub terminal_block_number: BlockNumber,
+    pub terminal_block_number: U64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

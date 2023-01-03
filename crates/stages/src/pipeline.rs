@@ -88,14 +88,9 @@ impl<DB: Database> Debug for Pipeline<DB> {
 }
 
 impl<DB: Database> Pipeline<DB> {
-    /// Create a new pipeline.
-    pub fn new() -> Self {
-        Default::default()
-    }
-
     /// Create a new pipeline with a channel for receiving events (see [PipelineEvent]).
-    pub fn new_with_channel(sender: Sender<PipelineEvent>) -> Self {
-        Self::new().set_channel(sender)
+    pub fn with_channel(sender: Sender<PipelineEvent>) -> Self {
+        Self::default().set_channel(sender)
     }
 
     /// Add a stage to the pipeline.
@@ -371,7 +366,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<Env<WriteMap>>::new_with_channel(tx)
+            Pipeline::<Env<WriteMap>>::with_channel(tx)
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
@@ -411,7 +406,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>>::new()
+            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>>::default()
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
@@ -487,7 +482,7 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<Env<mdbx::WriteMap>>::new()
+            Pipeline::<Env<mdbx::WriteMap>>::default()
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
@@ -548,7 +543,7 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let db = test_utils::create_test_db(EnvKind::RW);
-        let result = Pipeline::<Env<WriteMap>>::new()
+        let result = Pipeline::<Env<WriteMap>>::default()
             .push(
                 TestStage::new(StageId("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
@@ -561,7 +556,7 @@ mod tests {
 
         // Fatal
         let db = test_utils::create_test_db(EnvKind::RW);
-        let result = Pipeline::<Env<WriteMap>>::new()
+        let result = Pipeline::<Env<WriteMap>>::default()
             .push(TestStage::new(StageId("Fatal")).add_exec(Err(StageError::DatabaseIntegrity(
                 DatabaseIntegrityError::BlockBody { number: 5 },
             ))))
