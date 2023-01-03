@@ -57,6 +57,7 @@ pub const TABLES: [(TableType, &str); 23] = [
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, Config::const_name()),
     (TableType::Table, SyncStage::const_name()),
+    (TableType::Table, HashedAccounts::const_name()),
 ];
 
 #[macro_export]
@@ -269,6 +270,11 @@ table!(
 table!(
     /// Stores the highest synced block number of each stage.
     ( SyncStage ) StageId | BlockNumber
+);
+
+table!(
+    /// Stores the current value of a storage key.
+    ( HashedAccounts ) H256 | Account
 );
 
 ///
