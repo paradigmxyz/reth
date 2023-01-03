@@ -90,7 +90,8 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 ForkSpec::ConstantinopleFix |
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
-                ForkSpec::MergePush0,
+                ForkSpec::MergePush0 |
+                ForkSpec::Shanghai,
         ) {
             continue
         }

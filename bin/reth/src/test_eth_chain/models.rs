@@ -197,6 +197,8 @@ pub enum ForkSpec {
     London,
     /// Paris aka The Merge
     Merge,
+    /// Shanghai
+    Shanghai,
     /// Merge EOF test
     #[serde(alias = "Merge+3540+3670")]
     MergeEOF,
@@ -230,6 +232,9 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
             ForkSpec::MergeEOF => Self::new_paris_activated(),
             ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
             ForkSpec::MergePush0 => Self::new_paris_activated(),
+            ForkSpec::Shanghai => {
+                panic!("Not supported")
+            }
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overriden with PETERSBURG")
             }
