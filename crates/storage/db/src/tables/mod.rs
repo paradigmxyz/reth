@@ -191,6 +191,7 @@ dupsort!(
 );
 
 dupsort!(
+    // TODO update docs
     /// Stores the mapping of hashed account address to account storage.
     /// The keys of each storage entry have their keys hashed.
     ( HashedStorage ) H256 | [H256] HashedStorageEntry

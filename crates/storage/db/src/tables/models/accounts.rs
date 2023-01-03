@@ -68,6 +68,12 @@ impl From<(u64, Address)> for TransitionIdAddress {
     }
 }
 
+impl From<u64> for TransitionIdAddress {
+    fn from(v: u64) -> Self {
+        TransitionIdAddress((v, Address::zero()))
+    }
+}
+
 impl Encode for TransitionIdAddress {
     type Encoded = [u8; 28];
 
