@@ -4,7 +4,7 @@ use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest},
+    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, U64},
     utils::{ChainConfig, Genesis, GenesisAccount, Geth},
 };
 use ethers_middleware::SignerMiddleware;
@@ -25,12 +25,12 @@ use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{
     collections::{HashMap, HashSet},
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader},
     net::SocketAddr,
     sync::Arc,
     time::Duration,
 };
-use tokio::{task, time::sleep};
+use tokio::task;
 
 // The timeout for tests that create a GethInstance
 const GETH_TIMEOUT: Duration = Duration::from_secs(60);
@@ -635,7 +635,7 @@ async fn sync_from_clique_geth() {
         let geth = geth
             .genesis(genesis)
             .chain_id(chain_id)
-            .block_time(4u64);
+            .block_time(1u64);
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
         // we need to clone it because we will be reusing the geth config when we restart p2p
@@ -699,7 +699,7 @@ async fn sync_from_clique_geth() {
         drop(instance);
 
         // TODO: remove when the above works (blocks are produced)
-        panic!("done");
+        assert!(block > U64::zero());
         // === restart geth with p2p ===
 
         // drop geth and restart with p2p
