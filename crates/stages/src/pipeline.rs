@@ -96,16 +96,6 @@ impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
 }
 
 impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
-    /// Create a new pipeline with [SyncStateUpdater].
-    pub fn with_sync_state_updater(updater: U) -> Self {
-        Self::default().set_sync_state_updater(updater)
-    }
-
-    /// Create a new pipeline with a channel for receiving events (see [PipelineEvent]).
-    pub fn with_channel(sender: Sender<PipelineEvent>) -> Self {
-        Self::default().set_channel(sender)
-    }
-
     /// Add a stage to the pipeline.
     pub fn push<S>(mut self, stage: S) -> Self
     where
@@ -118,19 +108,19 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     /// Set the target block.
     ///
     /// Once this block is reached, syncing will stop.
-    pub fn set_max_block(mut self, block: Option<BlockNumber>) -> Self {
+    pub fn with_max_block(mut self, block: Option<BlockNumber>) -> Self {
         self.max_block = block;
         self
     }
 
     /// Set a channel the pipeline will transmit events over (see [PipelineEvent]).
-    pub fn set_channel(mut self, sender: Sender<PipelineEvent>) -> Self {
+    pub fn with_channel(mut self, sender: Sender<PipelineEvent>) -> Self {
         self.events_sender.set(Some(sender));
         self
     }
 
     /// Set a [SyncStateUpdater].
-    pub fn set_sync_state_updater(mut self, updater: U) -> Self {
+    pub fn with_sync_state_updater(mut self, updater: U) -> Self {
         self.sync_state_updater = Some(updater);
         self
     }
@@ -171,15 +161,14 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         state: &mut PipelineState,
         db: &DB,
     ) -> Result<ControlFlow, PipelineError> {
-        let mut pipeline_progress = None;
+        let mut pipeline_progress = PipelineProgress::default();
         let mut previous_stage = None;
         for queued_stage in self.stages.iter_mut() {
             let stage_id = queued_stage.stage.id();
 
             // Update sync state
             if let Some(ref updater) = self.sync_state_updater {
-                let state =
-                    SyncState::from_progress(pipeline_progress, stage_id.is_downloading_stage());
+                let state = pipeline_progress.current_sync_state(stage_id.is_downloading_stage());
                 updater.update_sync_state(state);
             }
 
@@ -195,9 +184,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
             match next {
                 ControlFlow::NoProgress => {} // noop
-                ControlFlow::Continue { progress } => {
-                    pipeline_progress = Some(progress);
-                }
+                ControlFlow::Continue { progress } => pipeline_progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
                     // reset the sync state
                     if let Some(ref updater) = self.sync_state_updater {
@@ -212,10 +199,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 Some((stage_id, db.view(|tx| stage_id.get_progress(tx))??.unwrap_or_default()));
         }
 
-        Ok(match pipeline_progress {
-            Some(progress) => ControlFlow::Continue { progress },
-            None => ControlFlow::NoProgress,
-        })
+        Ok(pipeline_progress.next_ctrl())
     }
 
     /// Unwind the stages to the target block.
@@ -269,6 +253,34 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
         tx.commit()?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct PipelineProgress {
+    progress: Option<u64>,
+}
+
+impl PipelineProgress {
+    fn update(&mut self, progress: u64) {
+        self.progress = Some(progress);
+    }
+
+    /// Create a sync state from pipeline progress.
+    fn current_sync_state(&self, downloading: bool) -> SyncState {
+        match self.progress {
+            Some(progress) if downloading => SyncState::Downloading { target_block: progress },
+            Some(progress) => SyncState::Executing { target_block: progress },
+            None => SyncState::Idle,
+        }
+    }
+
+    /// Get next control flow step
+    fn next_ctrl(&self) -> ControlFlow {
+        match self.progress {
+            Some(progress) => ControlFlow::Continue { progress },
+            None => ControlFlow::NoProgress,
+        }
     }
 }
 
@@ -407,7 +419,8 @@ mod tests {
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<Env<WriteMap>, NoopSyncStateUpdate>::with_channel(tx)
+            Pipeline::<Env<WriteMap>, NoopSyncStateUpdate>::default()
+                .with_channel(tx)
                 .push(
                     TestStage::new(StageId("A"))
                         .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
@@ -416,7 +429,7 @@ mod tests {
                     TestStage::new(StageId("B"))
                         .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
                 )
-                .set_max_block(Some(10))
+                .with_max_block(Some(10))
                 .run(db)
                 .await
         });
@@ -463,13 +476,17 @@ mod tests {
                         .add_exec(Ok(ExecOutput { stage_progress: 20, done: true }))
                         .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
                 )
-                .set_max_block(Some(10));
+                .with_max_block(Some(10));
 
             // Sync first
             pipeline.run(db.clone()).await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.set_channel(tx).unwind(&db, 1, None).await.expect("Could not unwind pipeline");
+            pipeline
+                .with_channel(tx)
+                .unwind(&db, 1, None)
+                .await
+                .expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -539,8 +556,8 @@ mod tests {
                         .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
                         .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
                 )
-                .set_max_block(Some(10))
-                .set_channel(tx)
+                .with_max_block(Some(10))
+                .with_channel(tx)
                 .run(db)
                 .await
                 .expect("Could not run pipeline");
@@ -590,7 +607,7 @@ mod tests {
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
-            .set_max_block(Some(10))
+            .with_max_block(Some(10))
             .run(db)
             .await;
         assert_matches!(result, Ok(()));
