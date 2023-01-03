@@ -207,6 +207,11 @@ impl Discv4 {
         self.local_addr
     }
 
+    /// Sets the [Interval] used for periodically looking up targets over the network
+    pub fn set_lookup_interval(&self, duration: Duration) {
+        self.safe_send_to_service(Discv4Command::SetLookupInterval(duration))
+    }
+
     /// Starts a `FindNode` recursive lookup that locates the closest nodes to the given node id. See also: <https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup>
     ///
     /// The lookup initiator starts by picking α closest nodes to the target it knows of. The
@@ -480,6 +485,11 @@ impl Discv4Service {
         } else {
             None
         }
+    }
+
+    /// Sets the [Interval] used for periodically looking up targets over the network
+    pub fn set_lookup_interval(&mut self, duration: Duration) {
+        self.lookup_interval = tokio::time::interval(duration);
     }
 
     /// Sets the given ip address as the node's external IP in the node record announced in
@@ -1296,6 +1306,9 @@ impl Discv4Service {
                             let node_id = node_id.unwrap_or(self.local_node_record.id);
                             self.lookup_with(node_id, tx);
                         }
+                        Discv4Command::SetLookupInterval(duration) => {
+                            self.set_lookup_interval(duration);
+                        }
                         Discv4Command::Updates(tx) => {
                             let rx = self.update_stream();
                             let _ = tx.send(rx);
@@ -1476,6 +1489,7 @@ enum Discv4Command {
     BanIp(IpAddr),
     Remove(PeerId),
     Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
+    SetLookupInterval(Duration),
     Updates(OneshotSender<ReceiverStream<DiscoveryUpdate>>),
 }
 
