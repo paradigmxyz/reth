@@ -762,7 +762,7 @@ async fn sync_from_clique_geth() {
 // What we expected to see (typical output for geth --dev --dev.period 1):
 // INFO [01-03|15:24:01.003] Commit new sealing work                  number=7 sealhash=243e54..1b7897 uncles=0 txs=0 gas=0 fees=0 elapsed="183.75µs"
 // INFO [01-03|15:24:01.003] Commit new sealing work                  number=7 sealhash=243e54..1b7897 uncles=0 txs=0 gas=0 fees=0 elapsed="276.708µs"
-// INFO [01-03|15:24:02.001] Successfully sealed new block number=7 sealhash=243e54..1b7897 hash=2760ac..f77d4b elapsed=998.327ms 
+// INFO [01-03|15:24:02.001] Successfully sealed new block number=7 sealhash=243e54..1b7897 hash=2760ac..f77d4b elapsed=998.327ms
 // INFO [01-03|15:24:02.002] 🔨 mined potential block                  number=7 hash=2760ac..f77d4b
 // INFO [01-03|15:24:02.003] Commit new sealing work                  number=8 sealhash=be8cec..e0d4bf uncles=0 txs=0 gas=0 fees=0 elapsed="763.25µs"
 // INFO [01-03|15:24:02.003] Commit new sealing work number=8 sealhash=be8cec..e0d4bf uncles=0 txs=0 gas=0 fees=0 elapsed=1.436ms
@@ -859,7 +859,7 @@ async fn geth_mining_blocks() {
         println!("first block num after sending txs: {block}");
 
         // wait for stuff to happen (and logs to be printed)
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
         drop(instance);
 
         // TODO: remove when the above works (blocks are produced)
