@@ -53,6 +53,15 @@ pub enum SyncState {
 }
 
 impl SyncState {
+    /// Create a sync state from progress.
+    pub fn from_progress(progress: Option<u64>, downloading: bool) -> Self {
+        match progress {
+            Some(progress) if downloading => Self::Downloading { target_block: progress },
+            Some(progress) => SyncState::Executing { target_block: progress },
+            None => SyncState::Idle,
+        }
+    }
+
     /// Whether the node is currently syncing.
     ///
     /// Note: this does not include keep-up sync when the state is idle.

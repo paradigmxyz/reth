@@ -24,7 +24,7 @@ use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
-const HEADERS: StageId = StageId("Headers");
+pub(crate) const HEADERS: StageId = StageId("Headers");
 
 /// The headers stage.
 ///
@@ -76,6 +76,13 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
         // Lookup the head and tip of the sync range
         let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
+
+        // Nothing to sync
+        if head.hash() == tip {
+            info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
+            return Ok(ExecOutput { stage_progress: current_progress, done: true })
+        }
+
         debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
         // The downloader returns the headers in descending order starting from the tip
@@ -214,19 +221,19 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let tip = match next_header {
             Some(header) if stage_progress + 1 != header.number => header.parent_hash,
-            None => self.next_fork_choice_state(&head.hash()).await.head_block_hash,
+            None => self.next_fork_choice_state().await.head_block_hash,
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
 
         Ok((head, tip))
     }
 
-    async fn next_fork_choice_state(&self, head: &H256) -> ForkchoiceState {
+    async fn next_fork_choice_state(&self) -> ForkchoiceState {
         let mut state_rcv = self.consensus.fork_choice_state();
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
-            if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
+            if !forkchoice.head_block_hash.is_zero() {
                 return forkchoice.clone()
             }
         }
