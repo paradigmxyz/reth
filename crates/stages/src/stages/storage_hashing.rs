@@ -72,8 +72,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         if start_transition > end_transition {
             info!(target: "sync::stages::storage_hashing", start_transition, end_transition, "Target transition already reached");
             return Ok(ExecOutput { stage_progress: max_block_num, done: true })
-        } else if end_transition - start_transition > self.clean_threshold {
-            // There are too many transitions, so we hash all storage entries
+        } else if end_transition - start_transition > self.clean_threshold || stage_progress == 0 {
+            // There are too many transitions, so we rehash all storage entries
+            tx.clear::<tables::HashedStorage>()?;
+
             let mut storage_cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
             let mut hashed_storage_cursor = tx.cursor_dup_mut::<tables::HashedStorage>()?;
 
