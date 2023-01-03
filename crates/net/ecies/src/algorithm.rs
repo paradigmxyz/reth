@@ -575,6 +575,8 @@ mod tests {
         server_ecies.read_auth(&mut auth).unwrap();
         let mut ack = server_ecies.create_ack();
         client_ecies.read_ack(&mut ack).unwrap();
+        let mut ack = client_ecies.create_ack();
+        server_ecies.read_ack(&mut ack).unwrap();
 
         let server_to_client_data = [0u8, 1u8, 2u8, 3u8, 4u8];
         let client_to_server_data = [5u8, 6u8, 7u8];
