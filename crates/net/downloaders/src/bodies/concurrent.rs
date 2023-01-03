@@ -131,10 +131,13 @@ where
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
-        tracing::trace!(target: "downloaders::bodies", len = headers_with_txs_and_ommers.len(), "Requesting bodies");
+        let request_len = headers_with_txs_and_ommers.len();
+        tracing::trace!(target: "downloaders::bodies", request_len, "Requesting bodies");
         let (peer_id, bodies) =
             self.client.get_block_bodies(headers_with_txs_and_ommers).await?.split();
-        tracing::trace!(target: "downloaders::bodies", len = bodies.len(), ?peer_id, "Received bodies");
+        tracing::trace!(
+            target: "downloaders::bodies", request_len, response_len = bodies.len(), ?peer_id, "Received bodies"
+        );
 
         let mut bodies = bodies.into_iter();
 
