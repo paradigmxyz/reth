@@ -20,7 +20,7 @@ mod trace;
 mod web3;
 
 pub use self::{
-    debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
+    admin::AdminApiServer, debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
     eth_filter::EthFilterApiServer, eth_pubsub::EthPubSubApiServer, net::NetApiServer,
     web3::Web3ApiServer,
 };
