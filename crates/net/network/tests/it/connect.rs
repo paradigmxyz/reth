@@ -111,7 +111,7 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
     alloc.insert(
         signer_addr,
         GenesisAccount {
-            balance: ethers_core::types::U256::MAX / 2,
+            balance: ethers_core::types::U256::MAX,
             nonce: None,
             code: None,
             storage: None,
@@ -120,7 +120,7 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
 
     Genesis {
         config,
-        alloc,
+        // alloc,
         difficulty: ethers_core::types::U256::one(),
         gas_limit: U64::from(50000),
         ..Default::default()
@@ -630,9 +630,8 @@ async fn sync_from_clique_geth() {
 
         // === fund wallet ===
 
-        // create a pre-funded geth
-        let genesis = genesis_funded(chain_id, wallet.address());
-        let geth = geth.genesis(genesis).chain_id(chain_id).block_time(1u64);
+        //
+        let geth = geth.chain_id(chain_id).block_time(1u64);
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
         // we need to clone it because we will be reusing the geth config when we restart p2p
@@ -648,8 +647,9 @@ async fn sync_from_clique_geth() {
 
         // first get the balance and make sure its not zero
         let balance = provider.get_balance(our_address, None).await.unwrap();
-        assert_ne!(balance, 0u64.into());
-        println!("balance: {:?}", balance);
+        // TODO: bring back if we end up setting up an account in genesis
+        // assert_ne!(balance, 0u64.into());
+        println!("balance at genesis: {:?}", balance);
 
         // take the stderr of the geth instance and print it to see more about what geth is doing
         // is it mining blocks? if so can we
@@ -672,41 +672,25 @@ async fn sync_from_clique_geth() {
             }
         });
 
-        // send transactions, hoping they are amined
-        for nonce in 0u64..100 {
-            // create transactions to send to geth
-            let tx: TypedTransaction = Eip1559TransactionRequest::new()
-                .to(ethers_core::types::H160::zero())
-                .value(ethers_core::types::U256::from(1u64))
-                .nonce(nonce)
-                .chain_id(chain_id)
-                .into();
-
-            println!("signing and sending transaction");
-            let pending_tx = provider.send_transaction(tx, None).await.unwrap();
-            println!("pending tx: {:?}", pending_tx);
-        }
-
-        // check block num post txs
-        let block = provider.get_block_number().await.unwrap();
-        println!("first block num after tx creation: {}", block);
-
-        // wait for stuff to happen
+        // wait for stuff to happen (we are using period 1, so we expect about 10 blocks)
         tokio::time::sleep(Duration::from_secs(10)).await;
-        drop(instance);
 
-        // TODO: remove when the above works (blocks are produced)
+        // wait for a certain number of blocks to be mined
+        let block = provider.get_block_number().await.unwrap();
+        println!("block num before restarting geth: {}", block);
         assert!(block > U64::zero());
+
         // === restart geth with p2p ===
 
         // drop geth and restart with p2p
-        // drop(instance);
+        drop(instance);
         let geth = geth.disable_discovery();
         let instance = geth.spawn();
 
         // TODO: start rest of reth - so we can test syncing
         // can we make better test utils to simplify some of the initialization code?
         // and reduce some of the reuse?
+
         // TODO: gather genesis information for the test chain to populate a status
 
         // === network ===
@@ -790,10 +774,7 @@ async fn geth_mining_blocks() {
         let wallet = LocalWallet::new(&mut rand::thread_rng()).with_chain_id(chain_id);
         let our_address = wallet.address();
 
-        let (geth, data_dir) = create_new_geth();
-
-        // print datadir for debugging
-        println!("geth datadir: {data_dir:?}");
+        let (geth, _data_dir) = create_new_geth();
 
         // === fund wallet ===
 
@@ -840,26 +821,26 @@ async fn geth_mining_blocks() {
         });
 
         // send transactions, hoping they are mined
-        // for nonce in 0u64..5 {
-        //     // create transactions to send to geth
-        //     let tx: TypedTransaction = Eip1559TransactionRequest::new()
-        //         .to(ethers_core::types::H160::zero())
-        //         .value(ethers_core::types::U256::from(1u64))
-        //         .nonce(nonce)
-        //         .chain_id(chain_id)
-        //         .into();
+        for nonce in 0u64..5 {
+            // create transactions to send to geth
+            let tx: TypedTransaction = Eip1559TransactionRequest::new()
+                .to(ethers_core::types::H160::zero())
+                .value(ethers_core::types::U256::from(1u64))
+                .nonce(nonce)
+                .chain_id(chain_id)
+                .into();
 
-        //     println!("signing and sending transaction");
-        //     let pending_tx = provider.send_transaction(tx, None).await.unwrap();
-        //     println!("pending tx {nonce}: {pending_tx:?}");
-        // }
+            println!("signing and sending transaction");
+            let pending_tx = provider.send_transaction(tx, None).await.unwrap();
+            println!("pending tx {nonce}: {pending_tx:?}");
+        }
 
         // check block num post txs
         let block = provider.get_block_number().await.unwrap();
         println!("first block num after sending txs: {block}");
 
         // wait for stuff to happen (and logs to be printed)
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_secs(30)).await;
         drop(instance);
 
         // TODO: remove when the above works (blocks are produced)
