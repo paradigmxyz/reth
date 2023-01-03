@@ -69,6 +69,21 @@ impl<S> UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S>
 where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Send a disconnect message during the handshake. This is sent without snappy compression.
+    pub async fn send_disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Result<(), P2PStreamError> {
+        let mut buf = BytesMut::new();
+        P2PMessage::Disconnect(reason).encode(&mut buf);
+        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
+    }
+}
+
+impl<S> UnauthedP2PStream<S>
+where
     S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
 {
     /// Consumes the `UnauthedP2PStream` and returns a `P2PStream` after the `Hello` handshake is
@@ -130,7 +145,8 @@ where
 
         // TODO: explicitly document that we only support v5.
         if their_hello.protocol_version != ProtocolVersion::V5 {
-            // TODO: do we want to send a `Disconnect` message here?
+            // send a disconnect message notifying the peer of the protocol version mismatch
+            self.send_disconnect(DisconnectReason::IncompatibleP2PProtocolVersion).await?;
             return Err(P2PStreamError::MismatchedProtocolVersion {
                 expected: ProtocolVersion::V5 as u8,
                 got: their_hello.protocol_version as u8,
@@ -138,10 +154,20 @@ where
         }
 
         // determine shared capabilities (currently returns only one capability)
-        let capability =
-            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone())?;
+        let capability_res =
+            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone());
 
-        let stream = P2PStream::new(self.inner, capability);
+        let shared_capability = match capability_res {
+            Err(err) => {
+                // TODO: if the disconnect fails, which error do we return?
+                // we don't share any capabilities, send a disconnect message
+                self.send_disconnect(DisconnectReason::UselessPeer).await?;
+                Err(err)
+            }
+            Ok(cap) => Ok(cap),
+        }?;
+
+        let stream = P2PStream::new(self.inner, shared_capability);
 
         Ok((stream, their_hello))
     }
