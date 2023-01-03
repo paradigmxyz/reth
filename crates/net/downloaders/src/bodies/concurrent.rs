@@ -13,7 +13,6 @@ use reth_interfaces::{
 };
 use reth_primitives::{SealedBlock, SealedHeader};
 use std::{borrow::Borrow, sync::Arc};
-use tracing::*;
 
 /// Downloads bodies in batches.
 ///
