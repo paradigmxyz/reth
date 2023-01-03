@@ -3,8 +3,10 @@
 use crate::session::{Direction, ExceedsSessionLimit};
 use std::time::Duration;
 
-/// Default request timeout.
-pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(500u64);
+/// Default request timeout for a single request.
+///
+/// This represents the time we wait for a response until we consider it timed out.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 pub struct SessionsConfig {
