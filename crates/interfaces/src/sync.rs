@@ -45,7 +45,7 @@ pub enum SyncState {
     /// All headers and bodies up to the `target_block` have been downloaded and are now being
     /// executed.
     ///
-    /// This represents the execution stage.
+    /// This represents stages that execute/recover the downloaded data.
     Executing {
         /// The block to which the node executes downloaded state.
         target_block: BlockNumber,
