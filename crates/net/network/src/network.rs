@@ -8,12 +8,15 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_interfaces::p2p::headers::client::StatusUpdater;
+use reth_interfaces::{
+    p2p::headers::client::StatusUpdater,
+    sync::{SyncState, SyncStateProvider, SyncStateUpdater},
+};
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -48,6 +51,7 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
+            is_syncing: Arc::new(Default::default()),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -187,6 +191,19 @@ impl StatusUpdater for NetworkHandle {
     }
 }
 
+impl SyncStateProvider for NetworkHandle {
+    fn is_syncing(&self) -> bool {
+        self.inner.is_syncing.load(Ordering::Relaxed)
+    }
+}
+
+impl SyncStateUpdater for NetworkHandle {
+    fn update_sync_state(&self, state: SyncState) {
+        let is_syncing = state.is_syncing();
+        self.inner.is_syncing.store(is_syncing, Ordering::Relaxed)
+    }
+}
+
 #[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
@@ -201,6 +218,8 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
+    /// Represents if the network is currently syncing.
+    is_syncing: Arc<AtomicBool>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
