@@ -4,7 +4,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{
-    db, node, test_eth_chain,
+    db, node, p2p, test_eth_chain,
     util::reth_tracing::{self, TracingMode},
 };
 
@@ -22,6 +22,7 @@ pub async fn run() -> eyre::Result<()> {
         Commands::Node(command) => command.execute().await,
         Commands::TestEthChain(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
+        Commands::P2P(command) => command.execute().await,
     }
 }
 
@@ -37,6 +38,9 @@ pub enum Commands {
     /// DB Debugging utilities
     #[command(name = "db")]
     Db(db::Command),
+    /// P2P Debugging utilities
+    #[command(name = "p2p")]
+    P2P(p2p::Command),
 }
 
 #[derive(Parser)]

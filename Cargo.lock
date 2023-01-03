@@ -3443,6 +3443,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
