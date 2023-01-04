@@ -48,12 +48,12 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
         E: Error,
     {
         let value = match value.len() {
-            0 => U256::from(0),
-            2 if value.starts_with("0x") => U256::zero(),
-            _ if value.starts_with("0x") => U256::from_str(&value[2..]).map_err(|e| {
+            0 => U256::ZERO,
+            2 if value.starts_with("0x") => U256::ZERO,
+            _ if value.starts_with("0x") => U256::from_str(value).map_err(|e| {
                 Error::custom(format!("Parsing JsonU256 as hex failed {value}: {e}"))
             })?,
-            _ => U256::from_dec_str(value).map_err(|e| {
+            _ => U256::from_str_radix(value, 10).map_err(|e| {
                 Error::custom(format!("Parsing JsonU256 as decimal failed {value}: {e:?}"))
             })?,
         };
@@ -81,9 +81,9 @@ mod test {
         assert_eq!(
             deserialized,
             vec![
-                JsonU256(U256::from(0)),
-                JsonU256(U256::from(0)),
-                JsonU256(U256::from(0)),
+                JsonU256(U256::ZERO),
+                JsonU256(U256::ZERO),
+                JsonU256(U256::ZERO),
                 JsonU256(U256::from(10)),
                 JsonU256(U256::from(10)),
                 JsonU256(U256::from(16)),

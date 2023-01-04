@@ -115,7 +115,7 @@ impl MockTransaction {
             hash: H256::random(),
             sender: Address::random(),
             nonce: 0,
-            gas_price: U256::zero(),
+            gas_price: U256::ZERO,
             gas_limit: 0,
             value: Default::default(),
         }
@@ -247,14 +247,14 @@ impl MockTransaction {
     /// Returns a new transaction with a higher gas price +1
     pub fn inc_price(&self) -> Self {
         let mut next = self.clone();
-        let gas = self.get_gas_price() + 1;
+        let gas = self.get_gas_price().checked_add(U256::from(1)).unwrap();
         next.with_gas_price(gas)
     }
 
     /// Returns a new transaction with a higher value
     pub fn inc_value(&self) -> Self {
         let mut next = self.clone();
-        let val = self.get_value() + 1;
+        let val = self.get_value().checked_add(U256::from(1)).unwrap();
         next.with_value(val)
     }
 
@@ -354,9 +354,9 @@ impl FromRecoveredTransaction for MockTransaction {
                 hash,
                 sender,
                 nonce,
-                gas_price: gas_price.into(),
+                gas_price: U256::from(gas_price),
                 gas_limit,
-                value: value.into(),
+                value: U256::from(value),
             },
             Transaction::Eip1559(TxEip1559 {
                 chain_id,
@@ -372,10 +372,10 @@ impl FromRecoveredTransaction for MockTransaction {
                 hash,
                 sender,
                 nonce,
-                max_fee_per_gas: max_fee_per_gas.into(),
-                max_priority_fee_per_gas: max_priority_fee_per_gas.into(),
+                max_fee_per_gas: U256::from(max_fee_per_gas),
+                max_priority_fee_per_gas: U256::from(max_priority_fee_per_gas),
                 gas_limit,
-                value: value.into(),
+                value: U256::from(value),
             },
             Transaction::Eip2930 { .. } => {
                 unimplemented!()
