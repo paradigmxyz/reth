@@ -71,7 +71,7 @@ pub struct UnwindOutput {
     pub stage_progress: BlockNumber,
 }
 
-/// Next execute action that the stage should take.
+/// Controls whether a stage should continue execution or not.
 #[derive(Debug)]
 pub enum ExecAction {
     /// The stage should continue with execution.
