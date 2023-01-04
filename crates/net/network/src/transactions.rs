@@ -12,7 +12,7 @@ use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use reth_eth_wire::{
     GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
 };
-use reth_interfaces::p2p::error::RequestResult;
+use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
@@ -181,6 +181,11 @@ where
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
     fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+        // Nothing to propagate while syncing
+        if self.network.is_syncing() {
+            return
+        }
+
         trace!(target: "net::tx", "Start propagating transactions");
 
         let propagated = self.propagate_transactions(
@@ -235,6 +240,11 @@ where
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
     fn on_new_pooled_transactions(&mut self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
+        // If the node is currently syncing, ignore transactions
+        if self.network.is_syncing() {
+            return
+        }
+
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let mut transactions = msg.0;
 
@@ -306,11 +316,13 @@ where
 
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
-                let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
-                self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-                    peer_id,
-                    msg,
-                })
+                if !self.network.is_syncing() {
+                    let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
+                    self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
+                        peer_id,
+                        msg,
+                    })
+                }
             }
             // TODO Add remaining events
             _ => {}
@@ -319,6 +331,11 @@ where
 
     /// Starts the import process for the given transactions.
     fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<TransactionSigned>) {
+        // If the node is currently syncing, ignore transactions
+        if self.network.is_syncing() {
+            return
+        }
+
         let mut has_bad_transactions = false;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             for tx in transactions {
