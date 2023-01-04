@@ -124,19 +124,21 @@ where
         &self,
         headers: Vec<&SealedHeader>,
     ) -> DownloadResult<Vec<BlockResponse>> {
-        let headers_with_txs_and_ommers =
+        // Filter headers with transaction or ommers. These are the only ones
+        // we will request
+        let headers_to_download =
             headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).collect::<Vec<_>>();
-        if headers_with_txs_and_ommers.is_empty() {
+        if headers_to_download.is_empty() {
             tracing::trace!(target: "downloaders::bodies", len = headers.len(), "Nothing to download");
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
         // The bodies size might exceed a max response size limit set by peer. We need to keep
         // retrying until we finish downloading all of the requested bodies
-        let mut responses = Vec::with_capacity(headers_with_txs_and_ommers.len());
-        while responses.len() != headers_with_txs_and_ommers.len() {
+        let mut responses = Vec::with_capacity(headers_to_download.len());
+        while responses.len() != headers_to_download.len() {
             let request: Vec<_> =
-                headers_with_txs_and_ommers.iter().skip(responses.len()).cloned().collect();
+                headers_to_download.iter().skip(responses.len()).cloned().collect();
             let request_len = request.len();
             tracing::trace!(target: "downloaders::bodies", request_len, "Requesting bodies");
             let (peer_id, bodies) = self.client.get_block_bodies(request.clone()).await?.split();
@@ -177,7 +179,7 @@ where
                 // ones calculated manually from the block body.
                 self.consensus.pre_validate_block(&block).map_err(|error| {
                     tracing::trace!(
-                        target: "downloaders::bodies", ?peer_id, header = ?header.hash(), ?error, "Penalizing peer"
+                        target: "downloaders::bodies", ?peer_id, header = ?header.hash(), ?error, request = ?headers_to_download, "Penalizing peer"
                     );
                     self.client.report_bad_message(peer_id);
                     DownloadError::BlockValidation { hash: header.hash(), error }
