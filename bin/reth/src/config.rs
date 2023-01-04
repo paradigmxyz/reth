@@ -106,7 +106,7 @@ impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
             commit_threshold: 5_000,
-            downloader_batch_size: 200,
+            downloader_batch_size: 100,
             downloader_retries: 5,
             downloader_concurrency: 10,
         }
