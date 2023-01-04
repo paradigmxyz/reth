@@ -71,7 +71,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             let mut walker = storage_cursor.walk(Address::zero())?;
 
             while let Some((address, entry)) = walker.next().transpose()? {
-                let hashed_entry = HashedStorageEntry { key: keccak256(address), ..entry };
+                let hashed_entry = HashedStorageEntry { key: keccak256(entry.key), ..entry };
                 hashed_storage_cursor.append_dup(keccak256(address), hashed_entry)?;
             }
             return Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
