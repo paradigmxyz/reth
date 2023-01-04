@@ -7,17 +7,21 @@ use crate::{
     prometheus_exporter,
     util::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::init_db,
+        init::{init_db, init_genesis},
     },
 };
+use reth_consensus::BeaconConsensus;
+use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
+use reth_primitives::NodeRecord;
 use reth_stages::{
-    metrics::HeaderMetrics, stages::sender_recovery::SenderRecoveryStage, ExecInput, Stage,
-    StageId, Transaction, UnwindInput,
+    metrics::HeaderMetrics,
+    stages::{bodies::BodyStage, sender_recovery::SenderRecoveryStage},
+    ExecInput, Stage, StageId, Transaction, UnwindInput,
 };
 
 use clap::Parser;
 use serde::Deserialize;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 use strum::{AsRefStr, EnumString, EnumVariantNames};
 use tracing::*;
 
@@ -76,6 +80,9 @@ pub struct Command {
     /// Whether to unwind or run the stage forward
     #[arg(long, short)]
     unwind: bool,
+
+    #[clap(flatten)]
+    network: NetworkOpts,
 }
 
 #[derive(
@@ -88,6 +95,22 @@ enum StageEnum {
     Bodies,
     Senders,
     Execution,
+}
+
+#[derive(Debug, Parser)]
+struct NetworkOpts {
+    /// Disable the discovery service.
+    #[arg(short, long)]
+    disable_discovery: bool,
+
+    /// Target trusted peer enodes
+    /// --trusted-peers enode://abcd@192.168.0.1:30303
+    #[arg(long)]
+    trusted_peers: Vec<NodeRecord>,
+
+    /// Connect only to trusted peers
+    #[arg(long)]
+    trusted_only: bool,
 }
 
 impl Command {
@@ -106,19 +129,58 @@ impl Command {
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!("reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
+        let input = ExecInput {
+            previous_stage: Some((StageId("No Previous Stage"), self.to)),
+            stage_progress: Some(self.from),
+        };
+
+        let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
+
+        let db = Arc::new(init_db(&self.db)?);
+        let mut tx = Transaction::new(db.as_ref())?;
+
         match self.stage {
-            StageEnum::Senders => {
-                let input = ExecInput {
-                    previous_stage: Some((StageId("No Previous Stage"), self.to)),
-                    stage_progress: Some(self.from),
+            StageEnum::Bodies => {
+                let chain_id = self.chain.consensus.chain_id;
+                let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
+                let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
+
+                let mut config = config;
+                config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+                if !self.network.trusted_peers.is_empty() {
+                    self.network.trusted_peers.iter().for_each(|peer| {
+                        config.peers.trusted_nodes.insert(*peer);
+                    });
+                }
+
+                let network = config
+                    .network_config(
+                        db.clone(),
+                        chain_id,
+                        genesis_hash,
+                        self.network.disable_discovery,
+                    )
+                    .start_network()
+                    .await?;
+                let fetch_client = Arc::new(network.fetch_client().await?);
+
+                dbg!(&config.stages.bodies);
+                let mut stage = BodyStage {
+                    downloader: Arc::new(
+                        ConcurrentDownloader::new(fetch_client.clone(), consensus.clone())
+                            .with_batch_size(config.stages.bodies.downloader_batch_size)
+                            .with_retries(config.stages.bodies.downloader_retries)
+                            .with_concurrency(config.stages.bodies.downloader_concurrency),
+                    ),
+                    consensus: consensus.clone(),
+                    commit_threshold: config.stages.bodies.commit_threshold,
                 };
 
-                let unwind =
-                    UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
-
-                let db = init_db(&self.db)?;
-                let mut tx = Transaction::new(&db)?;
-
+                // Unwind first
+                stage.unwind(&mut tx, unwind).await?;
+                stage.execute(&mut tx, input).await?;
+            }
+            StageEnum::Senders => {
                 let mut stage = SenderRecoveryStage {
                     batch_size: config.stages.sender_recovery.batch_size,
                     commit_threshold: self.to - self.from + 1,
