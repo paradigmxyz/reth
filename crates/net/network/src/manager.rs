@@ -531,7 +531,8 @@ where
                     this.on_peer_message(peer_id, message)
                 }
                 SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                    this.on_invalid_message(peer_id, capabilities, message)
+                    this.on_invalid_message(peer_id, capabilities, message);
+                    this.metrics.invalid_messages_received.increment(1);
                 }
                 SwarmEvent::TcpListenerClosed { remote_addr } => {
                     trace!(target : "net", ?remote_addr, "TCP listener closed.");
@@ -541,10 +542,11 @@ where
                 }
                 SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                     trace!(target : "net", ?session_id, ?remote_addr, "Incoming connection");
-                    this.metrics.num_incoming_connections.increment(1);
+                    this.metrics.incoming_connections.increment(1);
                 }
                 SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
                     trace!(target : "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
+                    this.metrics.outgoing_connections.increment(1);
                 }
                 SwarmEvent::SessionEstablished {
                     peer_id,
@@ -555,7 +557,7 @@ where
                     direction,
                 } => {
                     let total_active = this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
-                    this.metrics.num_connected_peers.increment(1f64);
+                    this.metrics.connected_peers.set(total_active as f64);
                     info!(
                         target : "net",
                         ?remote_addr,
@@ -581,14 +583,16 @@ where
                 SwarmEvent::PeerAdded(peer_id) => {
                     trace!(target: "net", ?peer_id, "Peer added");
                     this.event_listeners.send(NetworkEvent::PeerAdded(peer_id));
+                    this.metrics.tracked_peers.increment(1f64);
                 }
                 SwarmEvent::PeerRemoved(peer_id) => {
                     trace!(target: "net", ?peer_id, "Peer dropped");
                     this.event_listeners.send(NetworkEvent::PeerRemoved(peer_id));
+                    this.metrics.tracked_peers.decrement(1f64);
                 }
                 SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                     let total_active = this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
-                    this.metrics.num_connected_peers.decrement(1f64);
+                    this.metrics.connected_peers.set(total_active as f64);
                     trace!(
                         target : "net",
                         ?remote_addr,
@@ -614,7 +618,7 @@ where
                             .peers_mut()
                             .on_active_session_gracefully_closed(peer_id);
                     }
-                    this.metrics.total_closed_sessions.increment(1);
+                    this.metrics.closed_sessions.increment(1);
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id, reason });
                 }
                 SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
@@ -637,7 +641,7 @@ where
                             .peers_mut()
                             .on_incoming_pending_session_gracefully_closed();
                     }
-                    this.metrics.total_closed_sessions.increment(1);
+                    this.metrics.closed_sessions.increment(1);
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                     warn!(
@@ -661,7 +665,7 @@ where
                             .peers_mut()
                             .on_pending_session_gracefully_closed(&peer_id);
                     }
-                    this.metrics.total_closed_sessions.increment(1);
+                    this.metrics.closed_sessions.increment(1);
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                     warn!(
@@ -681,6 +685,7 @@ where
                         .state_mut()
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                    this.metrics.invalid_messages_received.increment(1);
                 }
             }
         }
