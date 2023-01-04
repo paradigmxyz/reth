@@ -18,7 +18,7 @@ use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
-const BODIES: StageId = StageId("Bodies");
+pub(crate) const BODIES: StageId = StageId("Bodies");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
