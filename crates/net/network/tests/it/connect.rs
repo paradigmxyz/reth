@@ -146,7 +146,7 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
         config,
         alloc,
         difficulty: ethers_core::types::U256::one(),
-        gas_limit: U64::from(50000),
+        gas_limit: U64::from(5000000),
         extra_data,
         ..Default::default()
     }
@@ -645,7 +645,8 @@ async fn sync_from_clique_geth() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         // first create a signer that we will fund so we can make transactions
         let chain_id = 13337u64;
-        let wallet = LocalWallet::new(&mut rand::thread_rng()).with_chain_id(chain_id);
+        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        let wallet: LocalWallet = signing_key.clone().into();
         let our_address = wallet.address();
 
         let (geth, data_dir) = create_new_geth();
@@ -659,6 +660,7 @@ async fn sync_from_clique_geth() {
 
         // create a pre-funded geth and turn on p2p
         let genesis = genesis_funded(chain_id, wallet.address());
+        println!("genesis: {:#?}", genesis);
         let geth = geth.genesis(genesis).chain_id(chain_id).disable_discovery();
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
@@ -676,7 +678,24 @@ async fn sync_from_clique_geth() {
         // first get the balance and make sure its not zero
         let balance = provider.get_balance(our_address, None).await.unwrap();
         assert_ne!(balance, 0u64.into());
+        println!("address: {our_address:?}");
         println!("balance at genesis: {balance:?}");
+
+        // send the private key to geth and unlock it
+        let private_key = signing_key.to_bytes().to_vec().into();
+        println!("private key: {}", hex::encode(&private_key));
+        let unlocked_addr = provider.import_raw_key(private_key, "".to_string()).await.unwrap();
+        assert_eq!(unlocked_addr, our_address);
+
+        let unlock_success = provider.unlock_account(our_address, "".to_string(), None).await.unwrap();
+        assert!(unlock_success);
+
+        // start mining?
+        provider.start_mining(None).await.unwrap();
+
+        // check that we are mining
+        let mining = provider.is_mining().await.unwrap();
+        assert!(mining);
 
         // take the stderr of the geth instance and print it to see more about what geth is doing
         // is it mining blocks? if so can we
