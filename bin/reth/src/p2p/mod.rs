@@ -6,7 +6,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
-use reth_primitives::{BlockHashOrNumber, Header, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, Header, NodeRecord, SealedHeader};
 use std::sync::Arc;
 
 use crate::{
@@ -46,6 +46,14 @@ pub struct Command {
     #[arg(short, long)]
     disable_discovery: bool,
 
+    /// Target trusted peer
+    #[arg(long)]
+    trusted_peer: Option<NodeRecord>,
+
+    /// Connect only to trusted peers
+    #[arg(long)]
+    trusted_only: bool,
+
     #[clap(subcommand)]
     command: Subcommands,
 }
@@ -72,11 +80,21 @@ impl Command {
         let tempdir = tempfile::TempDir::new()?;
         let noop_db = Arc::new(Env::<WriteMap>::open(&tempdir.into_path(), EnvKind::RW)?);
 
-        let config: Config = confy::load_path(&self.config).unwrap_or_default();
+        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
 
         let chain_id = self.chain.consensus.chain_id;
         let genesis: Header = self.chain.genesis.clone().into();
         let genesis_hash = genesis.hash_slow();
+
+        if let Some(peer) = self.trusted_peer {
+            config.peers.trusted_nodes.insert(peer);
+        }
+
+        if config.peers.trusted_nodes.is_empty() && self.trusted_only {
+            eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
+        }
+
+        config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         let network = config
             .network_config(noop_db, chain_id, genesis_hash, self.disable_discovery)
