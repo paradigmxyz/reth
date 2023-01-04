@@ -11,6 +11,6 @@
 - [Logs](./fundamentals/logs.md)
 
 ## Monitoring
-- [Matrics](./monitoring/matrics.md)
+- [Metrics](./monitoring/metrics.md)
 
 ## [FAQ](./faq/README.md)
