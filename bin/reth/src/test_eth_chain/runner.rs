@@ -15,7 +15,7 @@ use reth_primitives::{
     H256, U256,
 };
 use reth_rlp::Decodable;
-use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, Transaction};
+use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageId, Transaction};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -115,8 +115,10 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         let genesis_block = SealedBlock { header, body: vec![], ommers: vec![] };
         reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
 
+        let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
+            last_block = Some(decoded.number);
             reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
             Ok(())
         })?;
@@ -165,11 +167,16 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereum 1.
-        let mut stage =
-            ExecutionStage::new(reth_executor::Config { chain_id: U256::from(1), spec_upgrades });
+        let mut stage = ExecutionStage::new(
+            reth_executor::Config { chain_id: U256::from(1), spec_upgrades },
+            1000,
+        );
 
         // Call execution stage
-        let input = ExecInput::default();
+        let input = ExecInput {
+            previous_stage: last_block.map(|b| (StageId(""), b)),
+            stage_progress: None,
+        };
         {
             let mut transaction = Transaction::new(db.as_ref())?;
 
@@ -197,12 +204,12 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 tracing::trace!("Our storage:{:?}", storage);
                 for (address, test_account) in state.iter() {
                     // check account
-                    let our_account = tx
-                        .get::<tables::PlainAccountState>(*address)?
-                        .ok_or(eyre!("Account is missing:{address} expected:{:?}", test_account))?;
+                    let our_account = tx.get::<tables::PlainAccountState>(*address)?.ok_or(
+                        eyre!("Account is missing: {address} expected: {:?}", test_account),
+                    )?;
                     if test_account.balance.0 != our_account.balance {
                         return Err(eyre!(
-                            "Account {address} balance diff, expected {} got{}",
+                            "Account {address} balance diff, expected {} got {}",
                             test_account.balance.0,
                             our_account.balance
                         ))

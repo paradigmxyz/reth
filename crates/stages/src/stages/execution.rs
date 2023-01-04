@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -53,26 +53,25 @@ const EXECUTION: StageId = StageId("Execution");
 pub struct ExecutionStage {
     /// Executor configuration.
     pub config: Config,
+    /// Commit threshold
+    pub commit_threshold: u64,
 }
 
 impl Default for ExecutionStage {
     fn default() -> Self {
         Self {
             config: Config { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() },
+            commit_threshold: 1000,
         }
     }
 }
 
 impl ExecutionStage {
     /// Create new execution stage with specified config.
-    pub fn new(config: Config) -> Self {
-        Self { config }
+    pub fn new(config: Config, commit_threshold: u64) -> Self {
+        Self { config, commit_threshold }
     }
 }
-
-/// Specify batch sizes of block in execution
-/// TODO make this as config
-const BATCH_SIZE: u64 = 1000;
 
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for ExecutionStage {
@@ -87,10 +86,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // none and zero are same as for genesis block (zeroed block) we are making assumption to
-        // not have transaction.
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
-        let start_block = last_block + 1;
 
         // Get next canonical block hashes to execute.
         let mut canonicals = tx.cursor::<tables::CanonicalHeaders>()?;
@@ -108,15 +106,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
             .walk(start_block)?
-            .take(BATCH_SIZE as usize) // TODO: commit_threshold
+            .take_while(|entry| entry.as_ref().map(|e| e.0 <= end_block).unwrap_or_default())
             .map(|i| i.map(BlockNumHash))
             .collect::<Result<Vec<_>, _>>()?;
-
-        // no more canonical blocks, we are done with execution.
-        if canonical_batch.is_empty() {
-            info!(target: "sync::stages::execution", stage_progress = last_block, "Target block already reached");
-            return Ok(ExecOutput { stage_progress: last_block, done: true })
-        }
 
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
@@ -288,10 +280,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
         }
 
-        let stage_progress = last_block + canonical_batch.len() as u64;
-        let done = canonical_batch.len() < BATCH_SIZE as usize;
-        info!(target: "sync::stages::execution", done, stage_progress, "Sync iteration finished");
-        Ok(ExecOutput { done, stage_progress })
+        let done = !capped;
+        info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: end_block, done })
     }
 
     /// Unwind the stage.
@@ -391,6 +382,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 mod tests {
     use std::ops::{Deref, DerefMut};
 
+    use crate::test_utils::PREV_STAGE_ID;
+
     use super::*;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{hex_literal::hex, keccak256, Account, SealedBlock, H160, U256};
@@ -404,7 +397,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: None,
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             /// The progress of this stage the last time it was executed.
             stage_progress: None,
         };

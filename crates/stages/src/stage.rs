@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use crate::{db::Transaction, error::StageError, id::StageId};
 use async_trait::async_trait;
 use reth_db::database::Database;
@@ -16,6 +18,29 @@ impl ExecInput {
     /// Return the progress of the previous stage or default.
     pub fn previous_stage_progress(&self) -> BlockNumber {
         self.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default()
+    }
+
+    /// Return next execution action.
+    ///
+    /// [ExecAction::Done] is returned if there are no blocks to execute in this stage.
+    /// [ExecAction::Run] is returned if the stage should proceed with execution.
+    pub fn next_action(&self, max_threshold: Option<u64>) -> ExecAction {
+        // Extract information about the stage progress
+        let stage_progress = self.stage_progress.unwrap_or_default();
+        let previous_stage_progress = self.previous_stage_progress();
+
+        let start_block = stage_progress + 1;
+        let end_block = match max_threshold {
+            Some(threshold) => previous_stage_progress.min(stage_progress + threshold),
+            None => previous_stage_progress,
+        };
+        let capped = end_block < previous_stage_progress;
+
+        if start_block <= end_block {
+            ExecAction::Run { range: start_block..=end_block, capped }
+        } else {
+            ExecAction::Done { stage_progress, target: end_block }
+        }
     }
 }
 
@@ -44,6 +69,26 @@ pub struct ExecOutput {
 pub struct UnwindOutput {
     /// The block at which the stage has unwound to.
     pub stage_progress: BlockNumber,
+}
+
+/// Controls whether a stage should continue execution or not.
+#[derive(Debug)]
+pub enum ExecAction {
+    /// The stage should continue with execution.
+    Run {
+        /// The execution block range
+        range: RangeInclusive<BlockNumber>,
+        /// The flag indicating whether the range was capped
+        /// by some max blocks parameter
+        capped: bool,
+    },
+    /// The stage should terminate since there are no blocks to execute.
+    Done {
+        /// The current stage progress
+        stage_progress: BlockNumber,
+        /// The execution target provided in [ExecInput].
+        target: BlockNumber,
+    },
 }
 
 /// A stage is a segmented part of the syncing process of the node.
@@ -79,3 +124,19 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }
+
+/// Get the next execute action for the stage. Return if the stage has no
+/// blocks to process.
+macro_rules! exec_or_return {
+    ($input: expr, $threshold: expr, $log_target: expr) => {
+        match $input.next_action(Some($threshold)) {
+            ExecAction::Run { range, capped } => (range.into_inner(), capped),
+            ExecAction::Done { stage_progress, target } => {
+                info!(target: $log_target, stage_progress, target, "Target block already reached");
+                return Ok(ExecOutput { stage_progress, done: true })
+            }
+        }
+    };
+}
+
+pub(crate) use exec_or_return;

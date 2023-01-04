@@ -151,7 +151,10 @@ impl Command {
                 batch_size: config.stages.sender_recovery.batch_size,
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
-            .push(ExecutionStage { config: ExecutorConfig::new_ethereum() });
+            .push(ExecutionStage {
+                config: ExecutorConfig::new_ethereum(),
+                commit_threshold: config.stages.execution.commit_threshold,
+            });
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);
