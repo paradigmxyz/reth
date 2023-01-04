@@ -4,8 +4,8 @@ use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, U64},
-    utils::{ChainConfig, Genesis, GenesisAccount, Geth},
+    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, U64, Bytes},
+    utils::{ChainConfig, Genesis, GenesisAccount, Geth, CliqueConfig},
 };
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Http, Middleware, Provider};
@@ -90,6 +90,12 @@ fn unused_tcp_udp() -> (SocketAddr, SocketAddr) {
 ///
 /// Enables all hard forks up to London at genesis.
 fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
+    // set up a clique config with a short (1s) period and short (8 block) epoch
+    let clique_config = CliqueConfig {
+        period: 1,
+        epoch: 8,
+    };
+
     let config = ChainConfig {
         chain_id,
         eip155_block: Some(0),
@@ -104,9 +110,11 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
         muir_glacier_block: Some(0),
         berlin_block: Some(0),
         london_block: Some(0),
+        clique: Some(clique_config),
         ..Default::default()
     };
 
+    // fund account
     let mut alloc = HashMap::new();
     alloc.insert(
         signer_addr,
@@ -118,11 +126,28 @@ fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
         },
     );
 
+    // put signer address in the extra data, padded by the required amount of zeros
+    // Clique issue: https://github.com/ethereum/EIPs/issues/225
+    // Clique EIP: https://eips.ethereum.org/EIPS/eip-225
+    //
+    // The first 32 bytes are vanity data, so we will populate it with zeros
+    // This is followed by the signer address, which is 20 bytes
+    // There are 65 bytes of zeros after the signer address, which is usually populated with the
+    // proposer signature. Because the genesis does not have a proposer signature, it will be
+    // populated with zeros.
+    let extra_data_bytes = [
+        &[0u8; 32][..],
+        signer_addr.as_bytes(),
+        &[0u8; 65][..],
+    ].concat();
+    let extra_data = Bytes::from(extra_data_bytes);
+
     Genesis {
         config,
-        // alloc,
+        alloc,
         difficulty: ethers_core::types::U256::one(),
         gas_limit: U64::from(50000),
+        extra_data,
         ..Default::default()
     }
 }
@@ -625,17 +650,20 @@ async fn sync_from_clique_geth() {
 
         let (geth, data_dir) = create_new_geth();
 
-        // print datadir for debugging
-        println!("geth datadir: {:?}", data_dir);
+        // TODO: remove - this is just so we can see the genesis file created
+        // print datadir for debugging and make sure to persist the dir
+        let dir_path = data_dir.into_path();
+        println!("geth datadir: {dir_path:?}");
 
         // === fund wallet ===
 
-        //
-        let geth = geth.chain_id(chain_id).block_time(1u64);
+        // create a pre-funded geth and turn on p2p
+        let genesis = genesis_funded(chain_id, wallet.address());
+        let geth = geth.genesis(genesis).chain_id(chain_id).disable_discovery();
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
         // we need to clone it because we will be reusing the geth config when we restart p2p
-        let mut instance = geth.clone().spawn();
+        let mut instance = geth.spawn();
 
         // set up ethers provider
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), instance.port()).to_string();
@@ -647,9 +675,8 @@ async fn sync_from_clique_geth() {
 
         // first get the balance and make sure its not zero
         let balance = provider.get_balance(our_address, None).await.unwrap();
-        // TODO: bring back if we end up setting up an account in genesis
-        // assert_ne!(balance, 0u64.into());
-        println!("balance at genesis: {:?}", balance);
+        assert_ne!(balance, 0u64.into());
+        println!("balance at genesis: {balance:?}");
 
         // take the stderr of the geth instance and print it to see more about what geth is doing
         // is it mining blocks? if so can we
@@ -677,15 +704,8 @@ async fn sync_from_clique_geth() {
 
         // wait for a certain number of blocks to be mined
         let block = provider.get_block_number().await.unwrap();
-        println!("block num before restarting geth: {}", block);
+        println!("block num before restarting geth: {block}");
         assert!(block > U64::zero());
-
-        // === restart geth with p2p ===
-
-        // drop geth and restart with p2p
-        drop(instance);
-        let geth = geth.disable_discovery();
-        let instance = geth.spawn();
 
         // TODO: start rest of reth - so we can test syncing
         // can we make better test utils to simplify some of the initialization code?
@@ -711,10 +731,6 @@ async fn sync_from_clique_geth() {
         let mut events = handle.event_listener();
         let geth_p2p_port = instance.p2p_port().unwrap();
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
-
-        // we need to reinitialize the provider because the rpc port may have changed
-        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), instance.port()).to_string();
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // === ensure p2p is active ===
 
