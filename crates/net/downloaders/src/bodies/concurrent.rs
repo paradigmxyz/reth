@@ -131,6 +131,8 @@ where
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
+        // The bodies size might exceed a max response size limit set by peer. We need to keep
+        // retrying until we finish downloading all of the requested bodies
         let mut responses = Vec::with_capacity(headers_with_txs_and_ommers.len());
         while responses.len() != headers_with_txs_and_ommers.len() {
             let request: Vec<_> =
