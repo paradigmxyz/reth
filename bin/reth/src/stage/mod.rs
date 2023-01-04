@@ -127,7 +127,7 @@ impl Command {
 
                 let mut stage = SenderRecoveryStage {
                     batch_size: config.stages.sender_recovery.batch_size,
-                    commit_threshold: config.stages.sender_recovery.commit_threshold,
+                    commit_threshold: self.to - self.from + 1,
                 };
 
                 // Unwind first
