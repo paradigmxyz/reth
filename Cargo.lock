@@ -3420,6 +3420,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0"
 dependencies = [
+ "backon",
  "clap 4.0.32",
  "confy",
  "dirs-next",

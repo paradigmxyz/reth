@@ -1,4 +1,5 @@
 //! P2P Debugging tool
+use backon::{ConstantBackoff, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
 use reth_interfaces::p2p::{
@@ -54,6 +55,10 @@ pub struct Command {
     #[arg(long)]
     trusted_only: bool,
 
+    /// The number of retries per request
+    #[arg(long, default_value = "5")]
+    retries: usize,
+
     #[clap(subcommand)]
     command: Subcommands,
 }
@@ -101,11 +106,15 @@ impl Command {
             .start_network()
             .await?;
 
-        let fetch_client = network.fetch_client().await?;
+        let fetch_client = Arc::new(network.fetch_client().await?);
+        let retries = self.retries.max(1);
+        let backoff = ConstantBackoff::default().with_max_times(retries);
 
         match self.command {
             Subcommands::Header { id } => {
-                let header = self.get_single_header(&fetch_client, id).await?;
+                let header = (move || self.get_single_header(fetch_client.clone(), id))
+                    .retry(backoff)
+                    .await?;
                 println!("Successfully downloaded header: {header:?}");
             }
             Subcommands::Body { id } => {
@@ -113,13 +122,25 @@ impl Command {
                     BlockHashOrNumber::Hash(hash) => hash,
                     BlockHashOrNumber::Number(number) => {
                         println!("Block number provided. Downloading header first...");
-                        let header = self
-                            .get_single_header(&fetch_client, BlockHashOrNumber::Number(number))
-                            .await?;
+                        let client = fetch_client.clone();
+                        let header = (move || {
+                            self.get_single_header(
+                                client.clone(),
+                                BlockHashOrNumber::Number(number),
+                            )
+                        })
+                        .retry(backoff.clone())
+                        .await?;
                         header.hash()
                     }
                 };
-                let (_, result) = fetch_client.get_block_bodies(vec![hash]).await?.split();
+                let (_, result) = (move || {
+                    let client = fetch_client.clone();
+                    async move { client.get_block_bodies(vec![hash]).await }
+                })
+                .retry(backoff)
+                .await?
+                .split();
                 if result.len() != 1 {
                     eyre::bail!(
                         "Invalid number of headers received. Expected: 1. Received: {}",
@@ -137,7 +158,7 @@ impl Command {
     /// Get a single header from network
     pub async fn get_single_header(
         &self,
-        client: &FetchClient,
+        client: Arc<FetchClient>,
         id: BlockHashOrNumber,
     ) -> eyre::Result<SealedHeader> {
         let request = HeadersRequest {
