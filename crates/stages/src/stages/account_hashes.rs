@@ -2,12 +2,13 @@ use crate::{
     db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO},
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
+    models::AccountBeforeTx,
     tables,
-    transaction::{DbTx},
+    transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::TransitionId;
+use reth_primitives::{keccak256, Address};
 use tracing::*;
 
 const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
@@ -38,27 +39,66 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let stage_progress = input.stage_progress.unwrap_or_default();
         let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
 
+        // TODO: use macro here
         if max_block_num <= stage_progress {
             info!(target: "sync::stages::account_hashing", target = max_block_num, stage_progress, "Target block already reached");
             return Ok(ExecOutput { stage_progress, done: true })
         }
 
-                // Look up the start index for the transaction range
-                let start_tx_index = tx.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
+        // We get the last transition from block `stage_progress` and add one to get the transition
+        // from the next block.
+        let start_transition = tx.get_block_transition_by_num(stage_progress)? + 1;
+        let end_transition = tx.get_block_transition_by_num(max_block_num)?;
 
-                // Look up the end index for transaction range (inclusive)
-                let end_tx_index = tx.get_block_body_by_num(max_block_num)?.last_tx_index();
-        
-                // Acquire the cursor for transaction-transition mapping
-                let mut tx_transition_cursor = tx.cursor::<tables::TxTransitionIndex>()?;
-        
-                let start_transition: TransitionId =
-                    tx_transition_cursor.seek_exact(start_tx_index)?.unwrap_or_default().1;
-                let end_transition: TransitionId =
-                    tx_transition_cursor.seek_exact(end_tx_index)?.unwrap_or_default().1;
+        if start_transition > end_transition {
+            // No transitions to walk over
+            info!(target: "sync::stages::account_hashing", start_transition, end_transition, "Target transition already reached");
+            return Ok(ExecOutput { stage_progress: max_block_num, done: true })
+        } else if end_transition - start_transition > self.clean_threshold || stage_progress == 0 {
+            // There are too many transitions, so we rehash all accounts
+            tx.clear::<tables::HashedAccount>()?;
 
+            let mut account_cursor = tx.cursor::<tables::PlainAccountState>()?;
+            let mut hashed_account_cursor = tx.cursor_mut::<tables::HashedAccount>()?;
 
-        todo!();
+            let mut walker = account_cursor.walk(Address::zero())?;
+
+            while let Some((address, account)) = walker.next().transpose()? {
+                let hashed_address = keccak256(address);
+                hashed_account_cursor.insert(hashed_address, account)?;
+            }
+
+            return Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
+        }
+
+        // Acquire the PlainAccount cursor
+        let mut acc_cursor = tx.cursor::<tables::PlainAccountState>()?;
+        // Acquire the AccountChangeSet cursor
+        let mut acc_changeset_cursor = tx.cursor::<tables::AccountChangeSet>()?;
+        // Acquire the cursor for inserting elements
+        let mut hashed_acc_cursor = tx.cursor_mut::<tables::HashedAccount>()?;
+
+        let mut walker = acc_changeset_cursor.walk(start_transition)?.take_while(|ch_entry| {
+            ch_entry.as_ref().map(|(tid, _)| tid <= &end_transition).unwrap_or_default()
+        });
+
+        // Iterate over transactions in chunks
+        info!(target: "sync::stages::account_hashing", start_transition, end_transition, "Hashing accounts");
+        while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
+            // Query updated account
+            // If it was not deleted, upsert hashed account table
+            if let Some((_, acc)) = acc_cursor.seek_exact(address)? {
+                hashed_acc_cursor.upsert(keccak256(address), acc)?;
+            // If account was deleted, delete entry from the hashed accounts table
+            } else if hashed_acc_cursor.seek_exact(keccak256(address))?.is_some() {
+                hashed_acc_cursor.delete_current()?;
+            }
+        }
+
+        let done = max_block_num >= previous_stage_progress;
+        info!(target: "sync::stages::account_hashing", stage_progress = max_block_num, done, "Sync iteration finished");
+
+        Ok(ExecOutput { stage_progress: max_block_num, done })
     }
 
     /// Unwind the stage.

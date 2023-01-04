@@ -57,7 +57,7 @@ pub const TABLES: [(TableType, &str); 24] = [
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, Config::const_name()),
     (TableType::Table, SyncStage::const_name()),
-    (TableType::Table, HashedAccounts::const_name()),
+    (TableType::Table, HashedAccount::const_name()),
 ];
 
 #[macro_export]
@@ -274,7 +274,7 @@ table!(
 
 table!(
     /// Stores the current value of a storage key.
-    ( HashedAccounts ) H256 | Account
+    ( HashedAccount ) H256 | Account
 );
 
 ///
