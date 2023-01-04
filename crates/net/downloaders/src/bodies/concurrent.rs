@@ -131,41 +131,39 @@ where
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
-        let request_len = headers_with_txs_and_ommers.len();
-        tracing::trace!(target: "downloaders::bodies", request_len, "Requesting bodies");
-        let (peer_id, bodies) =
-            self.client.get_block_bodies(headers_with_txs_and_ommers).await?.split();
-        tracing::trace!(
-            target: "downloaders::bodies", request_len, response_len = bodies.len(), ?peer_id, "Received bodies"
-        );
+        let mut responses = Vec::with_capacity(headers_with_txs_and_ommers.len());
+        while responses.len() != headers_with_txs_and_ommers.len() {
+            let request: Vec<_> =
+                headers_with_txs_and_ommers.iter().skip(responses.len()).cloned().collect();
+            let request_len = request.len();
+            tracing::trace!(target: "downloaders::bodies", request_len, "Requesting bodies");
+            let (peer_id, bodies) = self.client.get_block_bodies(request.clone()).await?.split();
 
-        let mut bodies = bodies.into_iter();
+            if bodies.is_empty() {
+                tracing::error!(
+                    target: "downloaders::bodies", ?peer_id, ?request, "Received empty response. Penalizing peer"
+                );
+                self.client.report_bad_message(peer_id);
+                // return error and trigger new retry
+                return Err(DownloadError::RequestError(RequestError::BadResponse))
+            }
 
-        let mut responses = Vec::with_capacity(headers.len());
+            tracing::trace!(
+                target: "downloaders::bodies", request_len, response_len = bodies.len(), ?peer_id, "Received bodies"
+            );
+            bodies.into_iter().for_each(|b| responses.push((peer_id, b)));
+        }
+
+        let mut bodies = responses.into_iter();
+        let mut results = Vec::with_capacity(headers.len());
         for header in headers.into_iter().cloned() {
             // If the header has no txs / ommers, just push it and continue
             if header.is_empty() {
-                responses.push(BlockResponse::Empty(header));
+                results.push(BlockResponse::Empty(header));
             } else {
-                // If the header was not empty, and there is no body, then
-                // the peer gave us a bad resopnse and we should return
-                // error.
-                let body = match bodies.next() {
-                    Some(body) => body,
-                    None => {
-                        tracing::trace!(
-                            target: "downloaders::bodies", ?peer_id, header = ?header.hash(), "Penalizing peer"
-                        );
-                        self.client.report_bad_message(peer_id);
-                        // TODO: We error always, this means that if we got no body from a peer
-                        // and the header was not empty we will discard a bunch of progress.
-                        // This will cause redundant bandwdith usage (due to how our retriable
-                        // stream works via std::iter), but we will address this
-                        // with a custom retriable stream that maintains state and is able to
-                        // "resume" progress from the current state of `responses`.
-                        return Err(DownloadError::RequestError(RequestError::BadResponse))
-                    }
-                };
+                // The body must be preset since we requested headers for all non-empty
+                // bodies at this point
+                let (peer_id, body) = bodies.next().expect("download logic failed");
 
                 let block = SealedBlock {
                     header: header.clone(),
@@ -183,11 +181,11 @@ where
                     DownloadError::BlockValidation { hash: header.hash(), error }
                 })?;
 
-                responses.push(BlockResponse::Full(block));
+                results.push(BlockResponse::Full(block));
             }
         }
 
-        Ok(responses)
+        Ok(results)
     }
 }
 
