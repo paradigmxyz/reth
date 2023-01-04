@@ -245,7 +245,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                     }
                     Err(err) => {
                         self.events_sender.send(PipelineEvent::Error { stage_id }).await?;
-                        return Err(PipelineError::Stage(StageError::Fatal(err)))
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
             }
