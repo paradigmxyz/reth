@@ -57,7 +57,9 @@ pub struct ExecutionStage {
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self { config: Config { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() } }
+        Self {
+            config: Config { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() },
+        }
     }
 }
 
@@ -234,8 +236,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // insert storage changeset
                     let storage_id = TransitionIdAddress((current_transition_id, address));
                     for (key, (old_value, new_value)) in storage {
-                        let mut hkey = H256::zero();
-                        key.to_big_endian(&mut hkey.0);
+                        let hkey = H256(key.to_be_bytes());
 
                         trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
 
@@ -254,7 +255,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             address,
                             Some(StorageEntry { key: hkey, value: old_value }),
                         )?;
-                        if !new_value.is_zero() {
+                        if new_value != U256::ZERO {
                             tx.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
@@ -357,7 +358,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (key, storage) in storage_chageset_batch.into_iter().rev() {
             let address = key.address();
             tx.put::<tables::PlainStorageState>(address, storage.clone())?;
-            if storage.value == U256::zero() {
+            if storage.value == U256::ZERO {
                 // delete value that is zero
                 tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
             }
@@ -425,7 +426,7 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) },
+                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         db_tx
@@ -447,13 +448,19 @@ mod tests {
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =
-            Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: Some(code_hash) };
+            Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        let account2_info =
-            Account { balance: (0x1bc16d674ece94bau128).into(), nonce: 0x00, bytecode_hash: None };
+        let account2_info = Account {
+            balance: U256::from(0x1bc16d674ece94bau128),
+            nonce: 0x00,
+            bytecode_hash: None,
+        };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let account3_info =
-            Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
+        let account3_info = Account {
+            balance: U256::from(0x3635c9adc5de996b46u128),
+            nonce: 0x01,
+            bytecode_hash: None,
+        };
 
         // assert accounts
         assert_eq!(
@@ -475,7 +482,7 @@ mod tests {
         // Get on dupsort would return only first value. This is good enought for this test.
         assert_eq!(
             tx.get::<tables::PlainStorageState>(account1),
-            Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: 2.into() })),
+            Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) })),
             "Post changed of a account"
         );
     }
@@ -507,7 +514,7 @@ mod tests {
         // pre state
         let db_tx = tx.deref_mut();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let acc1_info = Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) };
+        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 

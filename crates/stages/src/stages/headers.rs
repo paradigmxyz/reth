@@ -506,7 +506,7 @@ mod tests {
                 self.tx.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
                 self.tx.commit(|tx| {
-                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::zero().into())
+                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::ZERO.into())
                 })?;
 
                 // use previous progress as seed size

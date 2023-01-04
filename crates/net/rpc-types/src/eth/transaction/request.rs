@@ -63,10 +63,10 @@ impl TransactionRequest {
             // legacy transaction
             (Some(_), None, None) => {
                 Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                    nonce: nonce.unwrap_or(U256::zero()),
+                    nonce: nonce.unwrap_or(U256::ZERO),
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
-                    value: value.unwrap_or(U256::zero()),
+                    value: value.unwrap_or(U256::ZERO),
                     input: data.unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
@@ -78,10 +78,10 @@ impl TransactionRequest {
             // EIP2930
             (_, None, Some(access_list)) => {
                 Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                    nonce: nonce.unwrap_or(U256::zero()),
+                    nonce: nonce.unwrap_or(U256::ZERO),
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
-                    value: value.unwrap_or(U256::zero()),
+                    value: value.unwrap_or(U256::ZERO),
                     input: data.unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
@@ -95,11 +95,11 @@ impl TransactionRequest {
             (None, Some(_), access_list) | (None, None, access_list @ None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                    nonce: nonce.unwrap_or(U256::zero()),
+                    nonce: nonce.unwrap_or(U256::ZERO),
                     max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(U256::zero()),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(U256::ZERO),
                     gas_limit: gas.unwrap_or_default(),
-                    value: value.unwrap_or(U256::zero()),
+                    value: value.unwrap_or(U256::ZERO),
                     input: data.unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),

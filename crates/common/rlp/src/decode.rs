@@ -252,6 +252,7 @@ decode_integer!(ethnum::U256);
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
+    use revm_interpreter::{B160, B256, U256 as RU256};
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -262,6 +263,9 @@ mod ethereum_types_support {
             }
         };
     }
+
+    fixed_hash_impl!(B160);
+    fixed_hash_impl!(B256);
 
     fixed_hash_impl!(H64);
     fixed_hash_impl!(H128);
@@ -301,6 +305,39 @@ mod ethereum_types_support {
             }
         };
     }
+
+    macro_rules! fixed_revm_uint_impl {
+        ($t:ty, $n_bytes:tt) => {
+            impl Decodable for $t {
+                fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+                    let h = Header::decode(buf)?;
+                    if h.list {
+                        return Err(DecodeError::UnexpectedList)
+                    }
+                    if h.payload_length > $n_bytes {
+                        return Err(DecodeError::Overflow)
+                    }
+                    if buf.remaining() < h.payload_length {
+                        return Err(DecodeError::InputTooShort)
+                    }
+                    // In the case of 0x80, the Header will be decoded, leaving h.payload_length to
+                    // be zero.
+                    // 0x80 is the canonical encoding of 0, so we return 0 here.
+                    if h.payload_length == 0 {
+                        return Ok(<$t>::from(0u8))
+                    }
+                    let n = <$t>::from_be_bytes(
+                        static_left_pad::<$n_bytes>(&buf[..h.payload_length])
+                            .ok_or(DecodeError::LeadingZero)?,
+                    );
+                    buf.advance(h.payload_length);
+                    Ok(n)
+                }
+            }
+        };
+    }
+
+    fixed_revm_uint_impl!(RU256, 32);
 
     fixed_uint_impl!(U64, 8);
     fixed_uint_impl!(U128, 16);

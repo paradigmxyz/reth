@@ -18,6 +18,7 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use reth_primitives::{TxHash, H256};
+use ruint::uint;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -29,7 +30,7 @@ use std::{
 /// The minimal value the basefee can decrease to
 ///
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` (https://eips.ethereum.org/EIPS/eip-1559) is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
-pub(crate) const MIN_PROTOCOL_BASE_FEE: U256 = U256([7, 0, 0, 0]);
+pub(crate) const MIN_PROTOCOL_BASE_FEE: U256 = uint!(0x7_U256);
 
 /// A pool that manages transactions.
 ///
@@ -806,7 +807,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let transaction = Arc::new(self.ensure_valid(transaction)?);
         let tx_id = *transaction.id();
         let mut state = TxState::default();
-        let mut cumulative_cost = U256::zero();
+        let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
         let predecessor =
@@ -1126,7 +1127,7 @@ mod tests {
 
     #[test]
     fn test_simple_insert() {
-        let on_chain_balance = U256::zero();
+        let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1169,7 +1170,7 @@ mod tests {
 
     #[test]
     fn insert_replace() {
-        let on_chain_balance = U256::zero();
+        let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1191,7 +1192,7 @@ mod tests {
     // insert nonce then nonce - 1
     #[test]
     fn insert_previous() {
-        let on_chain_balance = U256::zero();
+        let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1226,7 +1227,8 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        let tx = MockTransaction::eip1559().inc_nonce().set_gas_price(100u64.into()).inc_limit();
+        let tx =
+            MockTransaction::eip1559().inc_nonce().set_gas_price(U256::from(100u64)).inc_limit();
         let first = f.validated(tx.clone());
         let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
 
@@ -1257,7 +1259,7 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        pool.pending_basefee = pool.minimal_protocol_basefee + 1;
+        pool.pending_basefee = pool.minimal_protocol_basefee.checked_add(U256::from(1)).unwrap();
         let tx = MockTransaction::eip1559().inc_nonce().inc_limit();
         let first = f.validated(tx.clone());
 
