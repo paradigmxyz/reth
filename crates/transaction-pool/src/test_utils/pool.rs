@@ -3,7 +3,7 @@
 use crate::{
     error::PoolResult,
     pool::{txpool::TxPool, AddedTransaction},
-    test_util::{
+    test_utils::{
         MockOrdering, MockTransaction, MockTransactionDistribution, MockTransactionFactory,
     },
     TransactionOrdering,

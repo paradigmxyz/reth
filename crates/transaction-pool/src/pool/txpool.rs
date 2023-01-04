@@ -448,7 +448,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 }
 
 // Additional test impls
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 #[allow(missing_docs)]
 impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn pending(&self) -> &PendingPool<T> {
@@ -1121,7 +1121,7 @@ impl SenderInfo {
 mod tests {
     use super::*;
     use crate::{
-        test_util::{MockTransaction, MockTransactionFactory},
+        test_utils::{MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
 
