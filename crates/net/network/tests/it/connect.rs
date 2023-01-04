@@ -732,6 +732,7 @@ async fn sync_from_clique_geth() {
         let genesis_block =
             provider.get_block(0).await.unwrap().expect("a genesis block should exist");
         let genesis_hash = genesis_block.hash.unwrap();
+        println!("genesis hash: {genesis_hash}");
 
         // build the forkhash
 
