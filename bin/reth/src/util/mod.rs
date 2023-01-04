@@ -10,6 +10,9 @@ use walkdir::{DirEntry, WalkDir};
 /// Utilities for parsing chainspecs
 pub mod chainspec;
 
+/// Utilities for initializing parts of the chain
+pub mod init;
+
 /// Finds all files in a directory with a given postfix.
 pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<PathBuf> {
     WalkDir::new(path)
