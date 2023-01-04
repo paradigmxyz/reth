@@ -54,19 +54,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             return Ok(ExecOutput { stage_progress, done: true })
         }
 
-        // Look up the start index for the transaction range
-        let start_tx_index = tx.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
-
-        // Look up the end index for transaction range (inclusive)
-        let end_tx_index = tx.get_block_body_by_num(max_block_num)?.last_tx_index();
-
-        // Acquire the cursor for transaction-transition mapping
-        let mut tx_transition_cursor = tx.cursor::<tables::TxTransitionIndex>()?;
-
-        let start_transition: TransitionId =
-            tx_transition_cursor.seek_exact(start_tx_index)?.unwrap_or_default().1;
-        let end_transition: TransitionId =
-            tx_transition_cursor.seek_exact(end_tx_index)?.unwrap_or_default().1;
+        let start_transition: TransitionId = tx.get_block_transition_by_num(stage_progress)? + 1;
+        let end_transition: TransitionId = tx.get_block_transition_by_num(max_block_num)?;
 
         // No transitions to walk over
         if start_transition > end_transition {
