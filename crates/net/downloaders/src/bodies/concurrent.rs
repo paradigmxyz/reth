@@ -252,8 +252,8 @@ mod tests {
                     responses,
                     headers
                         .into_iter()
-                        .map(| header | {
-                            let body = bodies .remove(&header.hash()).unwrap();
+                        .map(|header| {
+                            let body = bodies.remove(&header.hash()).unwrap();
                             if header.is_empty() {
                                 BlockResponse::Empty(header)
                             } else {
@@ -357,5 +357,110 @@ mod tests {
             Some(Err(DownloadError::RequestError(RequestError::Timeout)))
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 2);
+    }
+
+    /// Checks that the downloader keeps retrying the request in case
+    /// it receives too few bodies
+    #[tokio::test]
+    async fn received_few_bodies() {
+        // Generate some random blocks
+        let response_len = 5;
+        let (headers, mut bodies) = generate_bodies(0..20);
+
+        let download_attempt = Arc::new(AtomicUsize::new(0));
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|hashes: Vec<H256>| {
+                let mut bodies = bodies.clone();
+                let download_attempt = download_attempt.clone();
+                async move {
+                    // Simulate that the request for this (random) block takes 0-100ms
+                    tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100))
+                        .await;
+
+                    let attempt = download_attempt.load(Ordering::SeqCst);
+                    let results = hashes
+                        .into_iter()
+                        .take(response_len)
+                        .map(|hash| {
+                            bodies
+                                .remove(&hash)
+                                .expect("Downloader asked for a block it should not ask for")
+                        })
+                        .collect();
+                    download_attempt.store(attempt + 1, Ordering::SeqCst);
+                    Ok((PeerId::default(), results).into())
+                }
+            })),
+            Arc::new(TestConsensus::default()),
+        );
+        assert_matches!(
+            downloader
+                .bodies_stream(headers.iter())
+                .try_collect::<Vec<BlockResponse>>()
+                .await,
+            Ok(responses) => {
+                assert_eq!(
+                    responses,
+                    headers
+                        .into_iter()
+                        .map(|header| {
+                            let body = bodies.remove(&header.hash()).unwrap();
+                            if header.is_empty() {
+                                BlockResponse::Empty(header)
+                            } else {
+                                BlockResponse::Full(SealedBlock {
+                                    header,
+                                    body: body.transactions,
+                                    ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
+                                })
+                            }
+                        })
+                        .collect::<Vec<BlockResponse>>()
+                );
+            }
+        );
+    }
+
+    /// Checks that the downloader bubbles up the error after attempting to re-request bodies
+    #[tokio::test]
+    async fn received_few_bodies_and_empty() {
+        // Generate some random blocks
+        let response_len = 5;
+        let (headers, bodies) = generate_bodies(0..20);
+
+        let download_attempt = Arc::new(AtomicUsize::new(0));
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|hashes: Vec<H256>| {
+                let mut bodies = bodies.clone();
+                let download_attempt = download_attempt.clone();
+                async move {
+                    // Simulate that the request for this (random) block takes 0-100ms
+                    tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100))
+                        .await;
+
+                    if hashes.len() <= response_len {
+                        return Ok((PeerId::default(), vec![]).into())
+                    }
+
+                    let attempt = download_attempt.load(Ordering::SeqCst);
+                    let results = hashes
+                        .into_iter()
+                        .take(response_len)
+                        .map(|hash| {
+                            bodies
+                                .remove(&hash)
+                                .expect("Downloader asked for a block it should not ask for")
+                        })
+                        .collect();
+                    download_attempt.store(attempt + 1, Ordering::SeqCst);
+                    Ok((PeerId::default(), results).into())
+                }
+            })),
+            Arc::new(TestConsensus::default()),
+        );
+        assert_matches!(
+            downloader.bodies_stream(headers.iter()).try_collect::<Vec<BlockResponse>>().await,
+            Err(DownloadError::RequestError(RequestError::BadResponse))
+        );
     }
 }
