@@ -1,3 +1,5 @@
+/// The accounts hashing stage.
+pub mod account_hashes;
 /// The bodies stage.
 pub mod bodies;
 /// The execution stage that generates state diff.
