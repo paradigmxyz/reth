@@ -1,5 +1,6 @@
 use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use itertools::Itertools;
 use rayon::prelude::*;
@@ -59,25 +60,19 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
-        let max_block_num = previous_stage_progress.min(stage_progress + self.commit_threshold);
-
-        if max_block_num <= stage_progress {
-            info!(target: "sync::stages::sender_recovery", target = max_block_num, stage_progress, "Target block already reached");
-            return Ok(ExecOutput { stage_progress, done: true })
-        }
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::sender_recovery");
 
         // Look up the start index for the transaction range
-        let start_tx_index = tx.get_block_body_by_num(stage_progress + 1)?.start_tx_id;
+        let start_tx_index = tx.get_block_body_by_num(start_block)?.start_tx_id;
 
         // Look up the end index for transaction range (inclusive)
-        let end_tx_index = tx.get_block_body_by_num(max_block_num)?.last_tx_index();
+        let end_tx_index = tx.get_block_body_by_num(end_block)?.last_tx_index();
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
             info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: max_block_num, done: true })
+            return Ok(ExecOutput { stage_progress: end_block, done: true })
         }
 
         // Acquire the cursor for inserting elements
@@ -110,9 +105,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id, sender))?;
         }
 
-        let done = max_block_num >= previous_stage_progress;
-        info!(target: "sync::stages::sender_recovery", stage_progress = max_block_num, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: max_block_num, done })
+        let done = !capped;
+        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: end_block, done })
     }
 
     /// Unwind the stage.

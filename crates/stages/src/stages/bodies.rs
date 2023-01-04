@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -78,26 +78,10 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let previous_stage_progress = input.previous_stage_progress();
-        if previous_stage_progress == 0 {
-            error!(target: "sync::stages::bodies", "The body stage is running first, no work can be done");
-            return Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody {
-                number: 0,
-            }))
-        }
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::bodies");
 
-        // The block we ended at last sync, and the one we are starting on now
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let starting_block = stage_progress + 1;
-
-        // Short circuit in case we already reached the target block
-        let target = previous_stage_progress.min(starting_block + self.commit_threshold);
-        if target <= stage_progress {
-            info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
-            return Ok(ExecOutput { stage_progress, done: true })
-        }
-
-        let bodies_to_download = self.bodies_to_download::<DB>(tx, starting_block, target)?;
+        let bodies_to_download = self.bodies_to_download::<DB>(tx, start_block, end_block)?;
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
@@ -109,13 +93,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
 
         // Get id for the first transaction and first transition in the block
-        let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(starting_block)?;
+        let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(start_block)?;
 
         // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
         // on every iteration of the while loop -_-
         let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
-        let mut highest_block = stage_progress;
-        trace!(target: "sync::stages::bodies", stage_progress, target, start_tx_id = current_tx_id, transition_id, "Commencing sync");
+        let mut highest_block = input.stage_progress.unwrap_or_default();
+        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
         while let Some(result) = bodies_stream.next().await {
             let Ok(response) = result else {
                 error!(target: "sync::stages::bodies", block = highest_block + 1, error = ?result.unwrap_err(), "Error downloading block");
@@ -188,10 +172,8 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let capped = target < previous_stage_progress;
-        let done = highest_block < target || !capped;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, target, done, "Sync iteration finished");
-
+        let done = !capped && highest_block == end_block;
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: highest_block, done })
     }
 
@@ -210,7 +192,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut block_transition_cursor = tx.cursor_mut::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
 
-        // let mut entry = tx_count_cursor.last()?;
         let mut entry = body_cursor.last()?;
         while let Some((key, body)) = entry {
             if key.number() <= input.unwind_to {

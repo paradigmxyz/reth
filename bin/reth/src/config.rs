@@ -53,6 +53,8 @@ pub struct StageConfig {
     pub bodies: BodiesConfig,
     /// Sender recovery stage configuration.
     pub sender_recovery: SenderRecoveryConfig,
+    /// Execution stage configuration.
+    pub execution: ExecutionConfig,
 }
 
 /// Header stage configuration.
@@ -125,5 +127,18 @@ pub struct SenderRecoveryConfig {
 impl Default for SenderRecoveryConfig {
     fn default() -> Self {
         Self { commit_threshold: 5_000, batch_size: 1000 }
+    }
+}
+
+/// Execution stage configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExecutionConfig {
+    /// The maximum number of blocks to execution before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 5_000 }
     }
 }

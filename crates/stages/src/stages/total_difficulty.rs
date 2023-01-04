@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -37,16 +37,8 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
-
-        let start_block = stage_progress + 1;
-        let end_block = previous_stage_progress.min(start_block + self.commit_threshold);
-
-        if start_block > end_block {
-            info!(target: "sync::stages::total_difficulty", stage_progress, "Target block already reached");
-            return Ok(ExecOutput { stage_progress, done: true })
-        }
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::total_difficulty");
 
         debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
 
@@ -55,7 +47,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut cursor_headers = tx.cursor_mut::<tables::Headers>()?;
 
         // Get latest total difficulty
-        let last_header_key = tx.get_block_numhash(stage_progress)?;
+        let last_header_key = tx.get_block_numhash(input.stage_progress.unwrap_or_default())?;
         let last_entry = cursor_td
             .seek_exact(last_header_key)?
             .ok_or(DatabaseIntegrityError::TotalDifficulty { number: last_header_key.number() })?;
@@ -74,7 +66,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             cursor_td.append(key, td.into())?;
         }
 
-        let done = end_block >= previous_stage_progress;
+        let done = !capped;
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { done, stage_progress: end_block })
     }
