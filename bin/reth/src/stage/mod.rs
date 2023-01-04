@@ -18,7 +18,7 @@ use reth_db::{
 use reth_executor::Config as ExecutorConfig;
 use reth_stages::{
     metrics::HeaderMetrics, stages::sender_recovery::SenderRecoveryStage, ExecInput, Stage,
-    Transaction,
+    StageId, Transaction,
 };
 
 use clap::Parser;
@@ -114,18 +114,18 @@ impl Command {
 
         match self.stage {
             StageEnum::Senders => {
+                let input = ExecInput {
+                    previous_stage: Some((StageId("No Previous Stage"), self.to)),
+                    stage_progress: Some(self.from),
+                };
+
+                let db = init_db(&self.db)?;
+                let mut tx = Transaction::new(&db)?;
+
                 let mut stage = SenderRecoveryStage {
                     batch_size: config.stages.sender_recovery.batch_size,
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 };
-                let db = init_db(&self.db)?;
-                let id = Stage::<Env<WriteMap>>::id(&stage);
-                let progress = db.view(|tx| id.get_progress(tx))??.unwrap_or_default();
-
-                // TODO: Figure out how to set start/end block range to run
-                let input = ExecInput { previous_stage: None, stage_progress: None };
-
-                let mut tx = Transaction::new(&db)?;
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
