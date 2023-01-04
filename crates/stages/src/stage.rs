@@ -37,7 +37,7 @@ impl ExecInput {
         let capped = end_block < previous_stage_progress;
 
         if start_block <= end_block {
-            ExecAction::Run { rng: start_block..=end_block, capped }
+            ExecAction::Run { range: start_block..=end_block, capped }
         } else {
             ExecAction::Done { stage_progress, target: end_block }
         }
@@ -77,7 +77,7 @@ pub enum ExecAction {
     /// The stage should continue with execution.
     Run {
         /// The execution block range
-        rng: RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
         /// The flag indicating whether the range was capped
         /// by some max blocks parameter
         capped: bool,
@@ -128,11 +128,11 @@ pub trait Stage<DB: Database>: Send + Sync {
 /// Get the next execute action for the stage. Return if the stage has no
 /// blocks to process.
 macro_rules! exec_or_return {
-    ($input: expr, $threshold: expr, $target: expr) => {
+    ($input: expr, $threshold: expr, $log_target: expr) => {
         match $input.next_action(Some($threshold)) {
-            ExecAction::Run { rng, capped } => (rng.into_inner(), capped),
+            ExecAction::Run { range, capped } => (range.into_inner(), capped),
             ExecAction::Done { stage_progress, target } => {
-                info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
+                info!(target: $log_target, stage_progress, target, "Target block already reached");
                 return Ok(ExecOutput { stage_progress, done: true })
             }
         }
