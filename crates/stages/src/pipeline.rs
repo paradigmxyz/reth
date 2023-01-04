@@ -139,13 +139,13 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
-            if next_action.should_continue() &&
-                state
+            if next_action.should_continue()
+                && state
                     .minimum_progress
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)
             {
-                return Ok(())
+                return Ok(());
             }
         }
     }
@@ -191,7 +191,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                         updater.update_sync_state(SyncState::Downloading { target_block: target });
                     }
                     self.unwind(db, target, bad_block).await?;
-                    return Ok(ControlFlow::Unwind { target, bad_block })
+                    return Ok(ControlFlow::Unwind { target, bad_block });
                 }
             }
 
@@ -225,7 +225,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
             if stage_progress < to {
                 debug!(from = %stage_progress, %to, "Unwind point too far for stage");
                 self.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
-                return Ok(())
+                return Ok(());
             }
 
             debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
@@ -245,7 +245,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                     }
                     Err(err) => {
                         self.events_sender.send(PipelineEvent::Error { stage_id }).await?;
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))));
                     }
                 }
             }
@@ -317,7 +317,7 @@ impl<DB: Database> QueuedStage<DB> {
                 state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
 
                 // We reached the maximum block, so we skip the stage
-                return Ok(ControlFlow::NoProgress)
+                return Ok(ControlFlow::NoProgress);
             }
 
             state
@@ -356,7 +356,7 @@ impl<DB: Database> QueuedStage<DB> {
                             ControlFlow::Continue { progress: stage_progress }
                         } else {
                             ControlFlow::NoProgress
-                        })
+                        });
                     }
                 }
                 Err(err) => {
@@ -392,8 +392,8 @@ impl<DB: Database> QueuedStage<DB> {
                             stage = %stage_id,
                             "Stage encountered a non-fatal error: {err}. Retrying"
                         );
-                        continue
-                    }
+                        continue;
+                    };
                 }
             }
         }
@@ -631,12 +631,12 @@ mod tests {
     mod utils {
         use super::*;
         use async_trait::async_trait;
-        use std::{collections::VecDeque, error::Error};
+        use std::collections::VecDeque;
 
         pub(crate) struct TestStage {
             id: StageId,
             exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-            unwind_outputs: VecDeque<Result<UnwindOutput, Box<dyn Error + Send + Sync>>>,
+            unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
         }
 
         impl TestStage {
@@ -649,10 +649,7 @@ mod tests {
                 self
             }
 
-            pub(crate) fn add_unwind(
-                mut self,
-                output: Result<UnwindOutput, Box<dyn Error + Send + Sync>>,
-            ) -> Self {
+            pub(crate) fn add_unwind(mut self, output: Result<UnwindOutput, StageError>) -> Self {
                 self.unwind_outputs.push_back(output);
                 self
             }
@@ -678,7 +675,7 @@ mod tests {
                 &mut self,
                 _: &mut Transaction<'_, DB>,
                 _input: UnwindInput,
-            ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+            ) -> Result<UnwindOutput, StageError> {
                 self.unwind_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
