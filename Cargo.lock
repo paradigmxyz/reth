@@ -3495,6 +3495,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
+ "strum",
  "tempfile",
  "thiserror",
  "tokio",
