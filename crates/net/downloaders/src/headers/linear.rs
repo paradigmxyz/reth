@@ -200,7 +200,7 @@ where
                 let req = self.headers_request();
                 tracing::trace!(
                     target: "downloaders::headers",
-                    "requesting headers {req:?}"
+                    "Requesting headers {req:?}"
                 );
                 HeadersRequestFuture {
                     request: req.clone(),
@@ -222,7 +222,7 @@ where
         }
         tracing::trace!(
             target : "downloaders::headers",
-            "retrying future attempt: {}/{}",
+            "Retrying future attempt: {}/{}",
             fut.retries,
             fut.max_retries
         );
@@ -338,25 +338,22 @@ where
                                 this.request = Some(this.get_or_init_fut());
                             }
                         }
-                        Err(err) => {
+                        Err(error) => {
                             // Penalize the peer for bad response
                             if let Some(peer_id) = peer_id {
-                                tracing::trace!(
-                                    target: "downloaders::headers",
-                                    "penalizing peer {peer_id} for {err:?}"
-                                );
+                                tracing::trace!(target: "downloaders::headers", ?peer_id, ?error, "Penalizing peer");
                                 this.client.report_bad_message(peer_id);
                             }
                             // Response is invalid, attempt to retry
                             if this.try_fuse_request_fut(&mut fut).is_err() {
                                 tracing::trace!(
                                     target: "downloaders::headers",
-                                    "ran out of retries terminating stream"
+                                    "Ran out of retries, terminating stream"
                                 );
                                 // We exhausted all of the retries. Stream must terminate
                                 this.buffered.clear();
                                 this.encountered_error = true;
-                                return Poll::Ready(Some(Err(err)))
+                                return Poll::Ready(Some(Err(error)))
                             }
                             // Reset the future
                             this.request = Some(fut);

@@ -295,7 +295,7 @@ mod tests {
         let value = Account {
             nonce: 18446744073709551615,
             bytecode_hash: Some(H256::random()),
-            balance: U256::max_value(),
+            balance: U256::MAX,
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
@@ -442,7 +442,7 @@ mod tests {
 
             // NOTE: Both values are present
             assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
-            assert_eq!(Some(Ok((key1, value01.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value01))), walker.next());
             assert_eq!(None, walker.next());
         }
 

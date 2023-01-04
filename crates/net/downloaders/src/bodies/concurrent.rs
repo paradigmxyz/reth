@@ -127,11 +127,17 @@ where
         let headers_with_txs_and_ommers =
             headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).collect::<Vec<_>>();
         if headers_with_txs_and_ommers.is_empty() {
+            tracing::trace!(target: "downloaders::bodies", len = headers.len(), "Nothing to download");
             return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
         }
 
+        let request_len = headers_with_txs_and_ommers.len();
+        tracing::trace!(target: "downloaders::bodies", request_len, "Requesting bodies");
         let (peer_id, bodies) =
             self.client.get_block_bodies(headers_with_txs_and_ommers).await?.split();
+        tracing::trace!(
+            target: "downloaders::bodies", request_len, response_len = bodies.len(), ?peer_id, "Received bodies"
+        );
 
         let mut bodies = bodies.into_iter();
 
@@ -147,6 +153,9 @@ where
                 let body = match bodies.next() {
                     Some(body) => body,
                     None => {
+                        tracing::trace!(
+                            target: "downloaders::bodies", ?peer_id, header = ?header.hash(), "Penalizing peer"
+                        );
                         self.client.report_bad_message(peer_id);
                         // TODO: We error always, this means that if we got no body from a peer
                         // and the header was not empty we will discard a bunch of progress.
@@ -167,6 +176,9 @@ where
                 // This ensures that the TxRoot and OmmersRoot from the header match the
                 // ones calculated manually from the block body.
                 self.consensus.pre_validate_block(&block).map_err(|error| {
+                    tracing::trace!(
+                        target: "downloaders::bodies", ?peer_id, header = ?header.hash(), ?error, "Penalizing peer"
+                    );
                     self.client.report_bad_message(peer_id);
                     DownloadError::BlockValidation { hash: header.hash(), error }
                 })?;

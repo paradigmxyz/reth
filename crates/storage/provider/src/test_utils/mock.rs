@@ -117,7 +117,7 @@ impl BlockHashProvider for MockEthProvider {
         let hash =
             lock.iter().find_map(
                 |(hash, b)| {
-                    if b.number == number.as_u64() {
+                    if b.number == number.to::<u64>() {
                         Some(*hash)
                     } else {
                         None
@@ -136,7 +136,7 @@ impl BlockProvider for MockEthProvider {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
-            BlockId::Hash(hash) => Ok(lock.get(&hash).cloned()),
+            BlockId::Hash(hash) => Ok(lock.get(&H256(hash.0)).cloned()),
             BlockId::Number(BlockNumber::Number(num)) => {
                 Ok(lock.values().find(|b| b.number == num.as_u64()).cloned())
             }

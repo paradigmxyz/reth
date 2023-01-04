@@ -16,6 +16,8 @@ enr = { version = "0.7", default-features = false, optional = true }
 rlp = { version = "0.5.2", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 reth-rlp-derive = { version = "0.1", path = "../rlp-derive", optional = true }
+tracing = "0.1.37"
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde"] }
 
 [dev-dependencies]
 reth-rlp = { path = ".", package = "reth-rlp", features = [

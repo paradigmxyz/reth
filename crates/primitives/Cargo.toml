@@ -17,6 +17,8 @@ reth-rlp = { path = "../common/rlp", features = [
 reth-rlp-derive = { path = "../common/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde"] }
+
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
@@ -58,6 +60,8 @@ serde_json = "1.0"
 hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde", "arbitrary"] }
+
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
