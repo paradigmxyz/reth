@@ -5,7 +5,7 @@ use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
     types::{
-        transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest, U64,
+        Address, Bytes, U64,
     },
     utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
 };
@@ -675,6 +675,8 @@ async fn sync_from_clique_geth() {
         assert_ne!(balance, 0u64.into());
         println!("address: {our_address:?}");
         println!("balance at genesis: {balance:?}");
+
+        // TODO: create transactions
 
         // send the private key to geth and unlock it
         let private_key = signing_key.to_bytes().to_vec().into();
