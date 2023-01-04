@@ -4,9 +4,7 @@ use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::{
-        Address, Bytes, U64,
-    },
+    types::{Address, Bytes, U64},
     utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
 };
 use ethers_middleware::SignerMiddleware;
