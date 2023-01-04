@@ -413,26 +413,26 @@ impl ECIES {
         let iv = H128::default();
         let shared_secret: H256 = {
             let mut hasher = Keccak256::new();
-            hasher.update(self.ephemeral_shared_secret.unwrap().as_ref());
-            hasher.update(h_nonce.as_ref());
+            hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
+            hasher.update(h_nonce.0.as_ref());
             H256::from(hasher.finalize().as_ref())
         };
 
         let aes_secret: H256 = {
             let mut hasher = Keccak256::new();
-            hasher.update(self.ephemeral_shared_secret.unwrap().as_ref());
-            hasher.update(shared_secret.as_ref());
+            hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
+            hasher.update(shared_secret.0.as_ref());
             H256::from(hasher.finalize().as_ref())
         };
         self.ingress_aes =
-            Some(Ctr64BE::<Aes256>::new(aes_secret.as_ref().into(), iv.as_ref().into()));
+            Some(Ctr64BE::<Aes256>::new(aes_secret.0.as_ref().into(), iv.as_ref().into()));
         self.egress_aes =
-            Some(Ctr64BE::<Aes256>::new(aes_secret.as_ref().into(), iv.as_ref().into()));
+            Some(Ctr64BE::<Aes256>::new(aes_secret.0.as_ref().into(), iv.as_ref().into()));
 
         let mac_secret: H256 = {
             let mut hasher = Keccak256::new();
-            hasher.update(self.ephemeral_shared_secret.unwrap().as_ref());
-            hasher.update(aes_secret.as_ref());
+            hasher.update(self.ephemeral_shared_secret.unwrap().0.as_ref());
+            hasher.update(aes_secret.0.as_ref());
             H256::from(hasher.finalize().as_ref())
         };
         self.ingress_mac = Some(MAC::new(mac_secret));

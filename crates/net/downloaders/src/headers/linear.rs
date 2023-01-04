@@ -339,6 +339,9 @@ where
                             }
                         }
                         Err(error) => {
+                            tracing::error!(
+                                target: "downloaders::headers", request = ?fut.request, ?error, "Error processing header response",
+                            );
                             // Penalize the peer for bad response
                             if let Some(peer_id) = peer_id {
                                 tracing::trace!(target: "downloaders::headers", ?peer_id, ?error, "Penalizing peer");

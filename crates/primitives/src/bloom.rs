@@ -8,7 +8,7 @@ pub const BLOOM_BYTE_LENGTH: usize = 256;
 // See Section 4.3.1 "Transaction Receipt" of the Yellow Paper
 fn m3_2048(bloom: &mut Bloom, x: &[u8]) {
     let hash = keccak256(x);
-    let h = hash.as_ref();
+    let h: &[u8; 32] = hash.as_ref();
     for i in [0, 2, 4] {
         let bit = (h[i + 1] as usize + ((h[i] as usize) << 8)) & 0x7FF;
         bloom.0[BLOOM_BYTE_LENGTH - 1 - bit / 8] |= 1 << (bit % 8);

@@ -1,6 +1,7 @@
 use bytes::{Buf, Bytes};
 pub use codecs_derive::*;
-use ethers_core::types::{Bloom, H160, H256, U256};
+use ethers_core::types::Bloom;
+use revm_interpreter::{B160 as H160, B256 as H256, U256};
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -188,9 +189,8 @@ where
 
 impl Compact for U256 {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        let mut inner = vec![0; 32];
-        self.to_big_endian(&mut inner);
-        let size = 32 - (self.leading_zeros() / 8) as usize;
+        let inner: [u8; 32] = self.to_be_bytes();
+        let size = 32 - (self.leading_zeros() / 8);
         buf.put_slice(&inner[32 - size..]);
         size
     }
@@ -200,10 +200,10 @@ impl Compact for U256 {
             let mut arr = [0; 32];
             arr[(32 - len)..].copy_from_slice(&buf[..len]);
             buf.advance(len);
-            return (U256::from_big_endian(&arr), buf)
+            return (U256::from_be_bytes(arr), buf)
         }
 
-        (U256::zero(), buf)
+        (U256::ZERO, buf)
     }
 }
 
@@ -281,7 +281,9 @@ impl Compact for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers_core::types::Address;
+    use revm_interpreter::B160;
+
+    pub type Address = B160;
 
     #[test]
     fn compact_bytes() {
@@ -397,9 +399,9 @@ mod tests {
     fn compact_u256() {
         let mut buf = vec![];
 
-        assert_eq!(U256::zero().to_compact(&mut buf), 0);
+        assert_eq!(U256::ZERO.to_compact(&mut buf), 0);
         assert!(buf.is_empty());
-        assert_eq!(U256::from_compact(&buf, 0), (U256::zero(), vec![].as_slice()));
+        assert_eq!(U256::from_compact(&buf, 0), (U256::ZERO, vec![].as_slice()));
 
         assert_eq!(U256::from(2).to_compact(&mut buf), 1);
         assert_eq!(buf, vec![2u8]);
@@ -443,7 +445,7 @@ mod tests {
         fn default() -> Self {
             TestStruct {
                 f_u64: 1u64,                                  // 4 bits | 1 byte
-                f_u256: 1u64.into(),                          // 6 bits | 1 byte
+                f_u256: U256::from(1u64),                     // 6 bits | 1 byte
                 f_bool_f: false,                              // 1 bit  | 0 bytes
                 f_bool_t: true,                               // 1 bit  | 0 bytes
                 f_option_none: None,                          // 1 bit  | 0 bytes

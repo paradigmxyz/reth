@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -53,24 +53,25 @@ const EXECUTION: StageId = StageId("Execution");
 pub struct ExecutionStage {
     /// Executor configuration.
     pub config: Config,
+    /// Commit threshold
+    pub commit_threshold: u64,
 }
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self { config: Config { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() } }
+        Self {
+            config: Config { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() },
+            commit_threshold: 1000,
+        }
     }
 }
 
 impl ExecutionStage {
     /// Create new execution stage with specified config.
-    pub fn new(config: Config) -> Self {
-        Self { config }
+    pub fn new(config: Config, commit_threshold: u64) -> Self {
+        Self { config, commit_threshold }
     }
 }
-
-/// Specify batch sizes of block in execution
-/// TODO make this as config
-const BATCH_SIZE: u64 = 1000;
 
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for ExecutionStage {
@@ -85,10 +86,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // none and zero are same as for genesis block (zeroed block) we are making assumption to
-        // not have transaction.
+        let ((start_block, end_block), capped) =
+            exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
-        let start_block = last_block + 1;
 
         // Get next canonical block hashes to execute.
         let mut canonicals = tx.cursor::<tables::CanonicalHeaders>()?;
@@ -106,15 +106,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
             .walk(start_block)?
-            .take(BATCH_SIZE as usize) // TODO: commit_threshold
+            .take_while(|entry| entry.as_ref().map(|e| e.0 <= end_block).unwrap_or_default())
             .map(|i| i.map(BlockNumHash))
             .collect::<Result<Vec<_>, _>>()?;
-
-        // no more canonical blocks, we are done with execution.
-        if canonical_batch.is_empty() {
-            info!(target: "sync::stages::execution", stage_progress = last_block, "Target block already reached");
-            return Ok(ExecOutput { stage_progress: last_block, done: true })
-        }
 
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
@@ -234,8 +228,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // insert storage changeset
                     let storage_id = TransitionIdAddress((current_transition_id, address));
                     for (key, (old_value, new_value)) in storage {
-                        let mut hkey = H256::zero();
-                        key.to_big_endian(&mut hkey.0);
+                        let hkey = H256(key.to_be_bytes());
 
                         trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
 
@@ -254,7 +247,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             address,
                             Some(StorageEntry { key: hkey, value: old_value }),
                         )?;
-                        if !new_value.is_zero() {
+                        if new_value != U256::ZERO {
                             tx.put::<tables::PlainStorageState>(
                                 address,
                                 StorageEntry { key: hkey, value: new_value },
@@ -287,10 +280,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
         }
 
-        let stage_progress = last_block + canonical_batch.len() as u64;
-        let done = canonical_batch.len() < BATCH_SIZE as usize;
-        info!(target: "sync::stages::execution", done, stage_progress, "Sync iteration finished");
-        Ok(ExecOutput { done, stage_progress })
+        let done = !capped;
+        info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: end_block, done })
     }
 
     /// Unwind the stage.
@@ -298,7 +290,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         &mut self,
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, StageError> {
         // Acquire changeset cursors
         let mut account_changeset = tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
@@ -357,7 +349,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for (key, storage) in storage_chageset_batch.into_iter().rev() {
             let address = key.address();
             tx.put::<tables::PlainStorageState>(address, storage.clone())?;
-            if storage.value == U256::zero() {
+            if storage.value == U256::ZERO {
                 // delete value that is zero
                 tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
             }
@@ -390,6 +382,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 mod tests {
     use std::ops::{Deref, DerefMut};
 
+    use crate::test_utils::PREV_STAGE_ID;
+
     use super::*;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{hex_literal::hex, keccak256, Account, SealedBlock, H160, U256};
@@ -403,7 +397,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: None,
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             /// The progress of this stage the last time it was executed.
             stage_progress: None,
         };
@@ -425,7 +419,7 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) },
+                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         db_tx
@@ -447,13 +441,19 @@ mod tests {
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =
-            Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: Some(code_hash) };
+            Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        let account2_info =
-            Account { balance: (0x1bc16d674ece94bau128).into(), nonce: 0x00, bytecode_hash: None };
+        let account2_info = Account {
+            balance: U256::from(0x1bc16d674ece94bau128),
+            nonce: 0x00,
+            bytecode_hash: None,
+        };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let account3_info =
-            Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
+        let account3_info = Account {
+            balance: U256::from(0x3635c9adc5de996b46u128),
+            nonce: 0x01,
+            bytecode_hash: None,
+        };
 
         // assert accounts
         assert_eq!(
@@ -475,7 +475,7 @@ mod tests {
         // Get on dupsort would return only first value. This is good enought for this test.
         assert_eq!(
             tx.get::<tables::PlainStorageState>(account1),
-            Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: 2.into() })),
+            Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) })),
             "Post changed of a account"
         );
     }
@@ -507,7 +507,7 @@ mod tests {
         // pre state
         let db_tx = tx.deref_mut();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let acc1_info = Account { nonce: 0, balance: 0.into(), bytecode_hash: Some(code_hash) };
+        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 

@@ -119,7 +119,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         &mut self,
         _tx: &mut Transaction<'_, DB>,
         _input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, StageError> {
         unimplemented!();
     }
 }
