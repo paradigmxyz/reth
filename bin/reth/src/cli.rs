@@ -1,7 +1,7 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    db, node, stage, test_eth_chain,
+    db, node, p2p, stage, test_eth_chain,
     util::reth_tracing::{self, TracingMode},
 };
 use clap::{ArgAction, Parser, Subcommand};
@@ -22,6 +22,7 @@ pub async fn run() -> eyre::Result<()> {
         Commands::TestEthChain(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
         Commands::Stage(command) => command.execute().await,
+        Commands::P2P(command) => command.execute().await,
     }
 }
 
@@ -40,6 +41,9 @@ pub enum Commands {
     /// Run a single stage
     #[command(name = "stage")]
     Stage(stage::Command),
+    /// P2P Debugging utilities
+    #[command(name = "p2p")]
+    P2P(p2p::Command),
 }
 
 #[derive(Parser)]

@@ -3471,6 +3471,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0"
 dependencies = [
+ "backon",
  "clap 4.0.32",
  "confy",
  "dirs-next",
@@ -3495,6 +3496,7 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "strum",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
