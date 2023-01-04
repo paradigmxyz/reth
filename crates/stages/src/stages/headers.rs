@@ -142,7 +142,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         &mut self,
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
         tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,

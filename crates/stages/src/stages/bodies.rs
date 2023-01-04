@@ -200,7 +200,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         &mut self,
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, StageError> {
         // Cursors to unwind bodies, ommers, transactions and tx hash to number
         let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
         let mut ommers_cursor = tx.cursor_mut::<tables::BlockOmmers>()?;

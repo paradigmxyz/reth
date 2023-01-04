@@ -245,7 +245,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                     }
                     Err(err) => {
                         self.events_sender.send(PipelineEvent::Error { stage_id }).await?;
-                        return Err(PipelineError::Stage(StageError::Fatal(err)))
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
             }
@@ -631,12 +631,12 @@ mod tests {
     mod utils {
         use super::*;
         use async_trait::async_trait;
-        use std::{collections::VecDeque, error::Error};
+        use std::collections::VecDeque;
 
         pub(crate) struct TestStage {
             id: StageId,
             exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-            unwind_outputs: VecDeque<Result<UnwindOutput, Box<dyn Error + Send + Sync>>>,
+            unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
         }
 
         impl TestStage {
@@ -649,10 +649,7 @@ mod tests {
                 self
             }
 
-            pub(crate) fn add_unwind(
-                mut self,
-                output: Result<UnwindOutput, Box<dyn Error + Send + Sync>>,
-            ) -> Self {
+            pub(crate) fn add_unwind(mut self, output: Result<UnwindOutput, StageError>) -> Self {
                 self.unwind_outputs.push_back(output);
                 self
             }
@@ -678,7 +675,7 @@ mod tests {
                 &mut self,
                 _: &mut Transaction<'_, DB>,
                 _input: UnwindInput,
-            ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+            ) -> Result<UnwindOutput, StageError> {
                 self.unwind_outputs
                     .pop_front()
                     .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))

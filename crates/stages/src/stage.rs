@@ -77,5 +77,5 @@ pub trait Stage<DB: Database>: Send + Sync {
         &mut self,
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<UnwindOutput, StageError>;
 }

@@ -84,7 +84,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         &mut self,
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, StageError> {
         tx.unwind_table_by_num_hash::<tables::HeaderTD>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
