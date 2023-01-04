@@ -77,9 +77,13 @@ pub struct Command {
     #[arg(long, short)]
     to: u64,
 
-    /// Whether to unwind or run the stage forward
+    /// Normally, running the stage requires unwinding for stages that already
+    /// have been run, in order to not rewrite to the same database slots.
+    ///
+    /// You can optionally skip the unwinding phase if you're syncing a block
+    /// range that has not been synced before.
     #[arg(long, short)]
-    unwind: bool,
+    skip_unwind: bool,
 
     #[clap(flatten)]
     network: NetworkOpts,
@@ -166,7 +170,6 @@ impl Command {
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);
 
-                dbg!(&config.stages.bodies);
                 let mut stage = BodyStage {
                     downloader: Arc::new(
                         ConcurrentDownloader::new(fetch_client.clone(), consensus.clone())
@@ -178,8 +181,9 @@ impl Command {
                     commit_threshold: num_blocks,
                 };
 
-                // Unwind first
-                stage.unwind(&mut tx, unwind).await?;
+                if !self.skip_unwind {
+                    stage.unwind(&mut tx, unwind).await?;
+                }
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Senders => {
@@ -189,7 +193,9 @@ impl Command {
                 };
 
                 // Unwind first
-                stage.unwind(&mut tx, unwind).await?;
+                if !self.skip_unwind {
+                    stage.unwind(&mut tx, unwind).await?;
+                }
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
@@ -197,6 +203,9 @@ impl Command {
                     config: ExecutorConfig::new_ethereum(),
                     commit_threshold: num_blocks,
                 };
+                if !self.skip_unwind {
+                    stage.unwind(&mut tx, unwind).await?;
+                }
                 stage.execute(&mut tx, input).await?;
             }
             _ => {}
