@@ -8,10 +8,15 @@ use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::DisconnectReason;
+use reth_interfaces::{
+    p2p::headers::client::{HeadersClient, HeadersRequest},
+    sync::{SyncState, SyncStateUpdater},
+};
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
-use reth_primitives::{NodeRecord, PeerId};
+use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
+use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task;
@@ -252,6 +257,61 @@ async fn test_connect_with_builder() {
             dbg!(h.num_connected_peers());
         }
     });
+
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
+    }
+}
+
+// expects a `ENODE="enode://"` env var that holds the record
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_connect_to_trusted_peer() {
+    reth_tracing::init_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let discv4 = Discv4Config::builder();
+
+    let client = Arc::new(NoopProvider::default());
+    let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
+    let (handle, network, transactions, requests) = NetworkManager::new(config)
+        .await
+        .unwrap()
+        .into_builder()
+        .request_handler(client)
+        .transactions(testing_pool())
+        .split_with_handle();
+
+    let mut events = handle.event_listener();
+
+    tokio::task::spawn(async move {
+        tokio::join!(network, requests, transactions);
+    });
+
+    let node: NodeRecord = std::env::var("ENODE").unwrap().parse().unwrap();
+
+    handle.add_trusted_peer(node.id, node.tcp_addr());
+
+    let h = handle.clone();
+    h.update_sync_state(SyncState::Downloading { target_block: 100 });
+
+    task::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            dbg!(h.num_connected_peers());
+        }
+    });
+
+    let fetcher = handle.fetch_client().await.unwrap();
+
+    let headers = fetcher
+        .get_headers(HeadersRequest {
+            start: 73174u64.into(),
+            limit: 10,
+            direction: HeadersDirection::Rising,
+        })
+        .await;
+
+    dbg!(&headers);
 
     while let Some(ev) = events.next().await {
         dbg!(ev);
