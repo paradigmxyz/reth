@@ -114,7 +114,7 @@ impl Command {
             Subcommands::Header { id } => {
                 let header = (move || self.get_single_header(fetch_client.clone(), id))
                     .retry(backoff)
-                    .notify(|err, _| println!("Error requesting header: {err:?}. Retrying..."))
+                    .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                     .await?;
                 println!("Successfully downloaded header: {header:?}");
             }
@@ -131,7 +131,7 @@ impl Command {
                             )
                         })
                         .retry(backoff.clone())
-                        .notify(|err, _| println!("Error requesting header: {err:?}. Retrying..."))
+                        .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                         .await?;
                         header.hash()
                     }
@@ -141,7 +141,7 @@ impl Command {
                     async move { client.get_block_bodies(vec![hash]).await }
                 })
                 .retry(backoff)
-                .notify(|err, _| println!("Error requesting block: {err:?}. Retrying..."))
+                .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
                 .await?
                 .split();
                 if result.len() != 1 {
