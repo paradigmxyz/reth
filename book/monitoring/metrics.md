@@ -1,4 +1,4 @@
-# Matrics
+# Metrics
 Reth integrated with Prometheus allows users to measure various metrics to gain insight into the status and performance of a Reth node. For example, users can track the network status, transaction pool status, and other metrics to understand how the node is functioning.
 
 ## Stage Header
