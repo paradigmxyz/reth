@@ -12,7 +12,7 @@ pub(crate) enum ControlFlow {
     },
     /// The pipeline is allowed to continue executing stages.
     Continue {
-        /// TODO:
+        /// The progress of the last stage
         progress: u64,
     },
     NoProgress,
