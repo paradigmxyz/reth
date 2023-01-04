@@ -6,16 +6,10 @@ use crate::{
     dirs::{ConfigPath, DbPath},
     prometheus_exporter,
     util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
+        chainspec::{chain_spec_value_parser, ChainSpecification},
         init::init_db,
     },
 };
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-    transaction::{DbTx, DbTxMut},
-};
-use reth_executor::Config as ExecutorConfig;
 use reth_stages::{
     metrics::HeaderMetrics, stages::sender_recovery::SenderRecoveryStage, ExecInput, Stage,
     StageId, Transaction, UnwindInput,
