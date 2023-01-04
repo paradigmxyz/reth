@@ -1,17 +1,20 @@
 //! P2P Debugging tool
 use clap::{Parser, Subcommand};
-use futures::TryStreamExt;
-use reth_consensus::BeaconConsensus;
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
-use reth_downloaders::headers;
-use reth_interfaces::p2p::headers::downloader::HeaderDownloader;
-use reth_primitives::{Header, SealedHeader, H256};
-use std::sync::Arc;
+use reth_interfaces::p2p::{
+    bodies::client::BodiesClient,
+    headers::client::{HeadersClient, HeadersRequest},
+};
+use reth_primitives::{BlockHashOrNumber, Header, H256};
+use std::{ops::Range, sync::Arc};
 
 use crate::{
     config::Config,
     dirs::ConfigPath,
-    util::chainspec::{chain_spec_value_parser, ChainSpecification},
+    util::{
+        chainspec::{chain_spec_value_parser, ChainSpecification},
+        hash_or_num_value_parser,
+    },
 };
 
 /// `reth p2p` command
@@ -51,7 +54,13 @@ pub struct Command {
 pub enum Subcommands {
     /// Download block header
     Header {
-        /// The header hash
+        /// The header number or hash
+        #[arg(value_parser = hash_or_num_value_parser)]
+        id: BlockHashOrNumber,
+    },
+    /// Download block body
+    Body {
+        /// The block hash to download
         hash: H256,
     },
 }
@@ -66,35 +75,34 @@ impl Command {
         let chain_id = self.chain.consensus.chain_id;
         let genesis: Header = self.chain.genesis.clone().into();
         let genesis_hash = genesis.hash_slow();
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
 
         let network = config
             .network_config(noop_db, chain_id, genesis_hash, self.disable_discovery)
             .start_network()
             .await?;
 
-        let fetch_client = Arc::new(network.fetch_client().await?);
+        let fetch_client = network.fetch_client().await?;
 
         match self.command {
-            Subcommands::Header { hash } => {
-                let downloader = headers::linear::LinearDownloadBuilder::default()
-                    .batch_size(config.stages.headers.downloader_batch_size)
-                    .retries(config.stages.headers.downloader_retries)
-                    .build(consensus.clone(), fetch_client.clone());
-
-                // NOTE: head doesn't matter since we poll the stream only once
-                let head = SealedHeader::default();
-                match downloader.stream(head, hash).try_next().await {
-                    Ok(Some(header)) => {
-                        println!("Succesfully downloaded header: {header:?}");
-                    }
-                    Ok(None) => {
-                        println!("No header response.")
-                    }
-                    Err(error) => {
-                        println!("Encountered error: {error:?}");
-                    }
+            Subcommands::Header { id } => {
+                let request = HeadersRequest {
+                    direction: reth_primitives::HeadersDirection::Rising,
+                    limit: 1,
+                    start: id,
                 };
+
+                // TODO: check if the response is correct
+                match fetch_client.get_headers(request).await {
+                    Ok(result) => println!("Successfully downloaded header: {result:?}"),
+                    Err(error) => println!("Encountered error: {error:?}"),
+                };
+            }
+            Subcommands::Body { hash } => {
+                // TODO: check if the response is correct
+                match fetch_client.get_block_bodies(vec![hash]).await {
+                    Ok(result) => println!("Successfully downloaded body: {result:?}"),
+                    Err(error) => println!("Encountered error: {error:?}"),
+                }
             }
         }
 
