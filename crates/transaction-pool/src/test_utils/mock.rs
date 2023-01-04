@@ -12,17 +12,17 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    Address, FromRecoveredTransaction, Transaction, TransactionSignedEcRecovered, TxEip1559,
-    TxHash, TxLegacy, H256, U256,
+    Address, FromRecoveredTransaction, IntoRecoveredTransaction, Transaction,
+    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, H256, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
-pub type MockTxPool = TxPool<MockOrdering>;
+pub(crate) type MockTxPool = TxPool<MockOrdering>;
 
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 /// Create an empty `TxPool`
-pub fn mock_tx_pool() -> MockTxPool {
+pub(crate) fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Arc::new(Default::default()), Default::default())
 }
 
@@ -381,6 +381,12 @@ impl FromRecoveredTransaction for MockTransaction {
                 unimplemented!()
             }
         }
+    }
+}
+
+impl IntoRecoveredTransaction for MockTransaction {
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        todo!()
     }
 }
 

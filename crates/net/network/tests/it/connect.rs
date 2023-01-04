@@ -1,8 +1,7 @@
 //! Connection tests
 
-use crate::{NetworkEventStream, PeerConfig};
-
 use super::testnet::Testnet;
+use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::utils::Geth;
 use ethers_providers::{Http, Middleware, Provider};

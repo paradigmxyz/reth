@@ -503,3 +503,44 @@ pub enum NetworkTransactionEvent {
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{NetworkConfig, NetworkManager};
+    use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+    use reth_provider::test_utils::NoopProvider;
+    use reth_transaction_pool::test_utils::testing_pool;
+    use secp256k1::SecretKey;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ignored_tx_broadcasts_while_syncing() {
+        reth_tracing::init_tracing();
+
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = Arc::new(NoopProvider::default());
+        let pool = testing_pool();
+        let config = NetworkConfig::builder(Arc::clone(&client), secret_key).build();
+        let (handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+
+        tokio::task::spawn(network);
+
+        handle.update_sync_state(SyncState::Downloading { target_block: 100 });
+        assert!(handle.is_syncing());
+
+        let peer_id = PeerId::random();
+
+        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+            peer_id,
+            msg: Transactions(vec![TransactionSigned::default()]),
+        });
+
+        assert!(pool.is_empty());
+    }
+}
