@@ -38,7 +38,12 @@ pub enum Commands {
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
-    /// Run a single stage
+    /// Run a single stage.
+    ///
+    /// Note that this won't use the Pipeline and as a result runs stages
+    /// assuming that all the data can be held in memory. It is not recommended
+    /// to run a stage for really large block ranges if your computer does not have
+    /// a lot of memory to store all the data.
     #[command(name = "stage")]
     Stage(stage::Command),
     /// P2P Debugging utilities
