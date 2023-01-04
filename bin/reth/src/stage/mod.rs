@@ -12,10 +12,11 @@ use crate::{
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
+use reth_executor::Config as ExecutorConfig;
 use reth_primitives::NodeRecord;
 use reth_stages::{
     metrics::HeaderMetrics,
-    stages::{bodies::BodyStage, sender_recovery::SenderRecoveryStage},
+    stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
     ExecInput, Stage, StageId, Transaction, UnwindInput,
 };
 
@@ -66,7 +67,6 @@ pub struct Command {
     metrics: Option<SocketAddr>,
 
     /// The name of the stage to run
-    #[arg(long, short)]
     stage: StageEnum,
 
     /// The height to start at
@@ -191,7 +191,11 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                // let stage = ExecutionStage { config: ExecutorConfig::new_ethereum() };
+                let mut stage = ExecutionStage {
+                    config: ExecutorConfig::new_ethereum(),
+                    commit_threshold: config.stages.execution.commit_threshold,
+                };
+                stage.execute(&mut tx, input).await?;
             }
             _ => {}
         }
