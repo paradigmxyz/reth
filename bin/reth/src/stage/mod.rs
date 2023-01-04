@@ -139,6 +139,8 @@ impl Command {
         let db = Arc::new(init_db(&self.db)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
+        let num_blocks = self.to - self.from + 1;
+
         match self.stage {
             StageEnum::Bodies => {
                 let chain_id = self.chain.consensus.chain_id;
@@ -173,7 +175,7 @@ impl Command {
                             .with_concurrency(config.stages.bodies.downloader_concurrency),
                     ),
                     consensus: consensus.clone(),
-                    commit_threshold: config.stages.bodies.commit_threshold,
+                    commit_threshold: num_blocks,
                 };
 
                 // Unwind first
@@ -183,7 +185,7 @@ impl Command {
             StageEnum::Senders => {
                 let mut stage = SenderRecoveryStage {
                     batch_size: config.stages.sender_recovery.batch_size,
-                    commit_threshold: self.to - self.from + 1,
+                    commit_threshold: num_blocks,
                 };
 
                 // Unwind first
@@ -193,7 +195,7 @@ impl Command {
             StageEnum::Execution => {
                 let mut stage = ExecutionStage {
                     config: ExecutorConfig::new_ethereum(),
-                    commit_threshold: config.stages.execution.commit_threshold,
+                    commit_threshold: num_blocks,
                 };
                 stage.execute(&mut tx, input).await?;
             }
