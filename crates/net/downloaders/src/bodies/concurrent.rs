@@ -161,7 +161,7 @@ where
             if header.is_empty() {
                 results.push(BlockResponse::Empty(header));
             } else {
-                // The body must be preset since we requested headers for all non-empty
+                // The body must be present since we requested headers for all non-empty
                 // bodies at this point
                 let (peer_id, body) = bodies.next().expect("download logic failed");
 
