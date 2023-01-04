@@ -5,8 +5,9 @@ use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
-use reth_primitives::{BlockHashOrNumber, Header, H256};
-use std::{ops::Range, sync::Arc};
+use reth_network::FetchClient;
+use reth_primitives::{BlockHashOrNumber, Header, SealedHeader};
+use std::sync::Arc;
 
 use crate::{
     config::Config,
@@ -60,8 +61,9 @@ pub enum Subcommands {
     },
     /// Download block body
     Body {
-        /// The block hash to download
-        hash: H256,
+        /// The block number or hash
+        #[arg(value_parser = hash_or_num_value_parser)]
+        id: BlockHashOrNumber,
     },
 }
 impl Command {
@@ -85,27 +87,71 @@ impl Command {
 
         match self.command {
             Subcommands::Header { id } => {
-                let request = HeadersRequest {
-                    direction: reth_primitives::HeadersDirection::Rising,
-                    limit: 1,
-                    start: id,
-                };
-
-                // TODO: check if the response is correct
-                match fetch_client.get_headers(request).await {
-                    Ok(result) => println!("Successfully downloaded header: {result:?}"),
-                    Err(error) => println!("Encountered error: {error:?}"),
-                };
+                let header = self.get_single_header(&fetch_client, id).await?;
+                println!("Successfully downloaded header: {header:?}");
             }
-            Subcommands::Body { hash } => {
-                // TODO: check if the response is correct
-                match fetch_client.get_block_bodies(vec![hash]).await {
-                    Ok(result) => println!("Successfully downloaded body: {result:?}"),
-                    Err(error) => println!("Encountered error: {error:?}"),
+            Subcommands::Body { id } => {
+                let hash = match id {
+                    BlockHashOrNumber::Hash(hash) => hash,
+                    BlockHashOrNumber::Number(number) => {
+                        println!("Block number provided. Downloading header first...");
+                        let header = self
+                            .get_single_header(&fetch_client, BlockHashOrNumber::Number(number))
+                            .await?;
+                        header.hash()
+                    }
+                };
+                let (_, result) = fetch_client.get_block_bodies(vec![hash]).await?.split();
+                if result.len() != 1 {
+                    eyre::bail!(
+                        "Invalid number of headers received. Expected: 1. Received: {}",
+                        result.len()
+                    )
                 }
+                let body = result.into_iter().next().unwrap();
+                println!("Successfully downloaded body: {body:?}")
             }
         }
 
         Ok(())
+    }
+
+    /// Get a single header from network
+    pub async fn get_single_header(
+        &self,
+        client: &FetchClient,
+        id: BlockHashOrNumber,
+    ) -> eyre::Result<SealedHeader> {
+        let request = HeadersRequest {
+            direction: reth_primitives::HeadersDirection::Rising,
+            limit: 1,
+            start: id,
+        };
+
+        let (_, response) = client.get_headers(request).await?.split();
+
+        if response.0.len() != 1 {
+            eyre::bail!(
+                "Invalid number of headers received. Expected: 1. Received: {}",
+                response.0.len()
+            )
+        }
+
+        let header = response.0.into_iter().next().unwrap().seal();
+
+        let valid = match id {
+            BlockHashOrNumber::Hash(hash) => header.hash() == hash,
+            BlockHashOrNumber::Number(number) => header.number == number,
+        };
+
+        if !valid {
+            eyre::bail!(
+                "Received invalid header. Received: {:?}. Expected: {:?}",
+                header.num_hash(),
+                id
+            );
+        }
+
+        Ok(header)
     }
 }
