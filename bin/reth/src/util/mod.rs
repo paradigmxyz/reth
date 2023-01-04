@@ -1,7 +1,9 @@
 //! Utility functions.
+use reth_primitives::{BlockHashOrNumber, H256};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use walkdir::{DirEntry, WalkDir};
 
@@ -22,6 +24,14 @@ pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<Pat
 /// ~ for the user's home directory).
 pub(crate) fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
     shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
+}
+
+/// Parse [BlockHashOrNumber]
+pub(crate) fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber, eyre::Error> {
+    match H256::from_str(value) {
+        Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
+        Err(_) => Ok(BlockHashOrNumber::Number(value.parse()?)),
+    }
 }
 
 /// Tracing utility
