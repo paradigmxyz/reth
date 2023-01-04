@@ -38,6 +38,10 @@ tokio-stream = "0.1"
 # io
 serde = { version = "1.0", optional = true }
 
+# metrics
+metrics = "0.20.1"
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
+
 # misc
 auto_impl = "1"
 aquamarine = "0.1" # docs
