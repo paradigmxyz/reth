@@ -661,7 +661,7 @@ async fn sync_from_clique_geth() {
         // create a pre-funded geth and turn on p2p
         let genesis = genesis_funded(chain_id, wallet.address());
         println!("genesis: {:#?}", genesis);
-        let geth = geth.genesis(genesis).chain_id(chain_id).disable_discovery();
+        let geth = geth.genesis(genesis).chain_id(chain_id).disable_discovery().insecure_unlock();
 
         // geth starts in dev mode, we can spawn it, mine blocks, and shut it down
         // we need to clone it because we will be reusing the geth config when we restart p2p
