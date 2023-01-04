@@ -694,7 +694,7 @@ async fn sync_from_clique_geth() {
         provider.start_mining(None).await.unwrap();
 
         // check that we are mining
-        let mining = provider.is_mining().await.unwrap();
+        let mining = provider.mining().await.unwrap();
         assert!(mining);
 
         // take the stderr of the geth instance and print it to see more about what geth is doing
