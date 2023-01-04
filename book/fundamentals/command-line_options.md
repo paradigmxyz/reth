@@ -2,8 +2,8 @@
 
 ## Command
 - **node:** Start Reth node
-- **test-chain:** Runs Ethereum blockchain tests
-- **db:** database Debugging utilities for troubleshoot and fix issues with database systems.
+- **test-chain:** Run Ethereum blockchain tests
+- **db:** Debugging utilities to troubleshoot and fix issues with database systems.
 
 ## Options
 - **-v, --verbose:** Use verbose output
