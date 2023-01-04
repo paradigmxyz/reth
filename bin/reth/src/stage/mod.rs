@@ -18,7 +18,7 @@ use reth_db::{
 use reth_executor::Config as ExecutorConfig;
 use reth_stages::{
     metrics::HeaderMetrics, stages::sender_recovery::SenderRecoveryStage, ExecInput, Stage,
-    StageId, Transaction,
+    StageId, Transaction, UnwindInput,
 };
 
 use clap::Parser;
@@ -119,6 +119,9 @@ impl Command {
                     stage_progress: Some(self.from),
                 };
 
+                let unwind =
+                    UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
+
                 let db = init_db(&self.db)?;
                 let mut tx = Transaction::new(&db)?;
 
@@ -126,6 +129,9 @@ impl Command {
                     batch_size: config.stages.sender_recovery.batch_size,
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 };
+
+                // Unwind first
+                stage.unwind(&mut tx, unwind).await?;
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
