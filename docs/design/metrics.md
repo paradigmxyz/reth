@@ -69,6 +69,12 @@ How the metrics are exposed to the end-user is determined by the CLI.
 - `transaction_pool.invalid_transactions`: Number of invalid transactions 
 - `transaction_pool.removed_transactions`: Number of removed transactions from the pool
 
+#### Network Manager
+- `network_manager.num_connected_peers`: Number of peers currently connected to
+- `network_manager.pending_session_failures`: Cumulative number of failures of pending sessions
+- `network_manager.total_closed_sessions`: Total number of sessions closed
+- `network_manager.num_incoming_connections`: Total number of incoming connections handled
+
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html
 [metrics.KeyName]: https://docs.rs/metrics/latest/metrics/struct.KeyName.html
