@@ -730,7 +730,14 @@ async fn sync_from_clique_geth() {
         // can we make better test utils to simplify some of the initialization code?
         // and reduce some of the reuse?
 
-        // TODO: gather genesis information for the test chain to populate a status
+        // === create a status ===
+
+        // get genesis hash
+        let genesis_block = provider.get_block(0).await.unwrap().expect("a genesis block should exist");
+        let genesis_hash = genesis_block.hash.unwrap();
+
+        // build the forkhash
+
 
         // === network ===
 
