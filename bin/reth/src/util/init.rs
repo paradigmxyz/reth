@@ -25,12 +25,14 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 /// Write the genesis block if it has not already been written
 #[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, reth_db::Error> {
-    let tx = db.tx_mut()?;
+    let tx = db.tx()?;
     if let Some((_, hash)) = tx.cursor::<tables::CanonicalHeaders>()?.first()? {
         debug!("Genesis already written, skipping.");
         return Ok(hash)
     }
+    drop(tx);
     debug!("Writing genesis block.");
+    let tx = db.tx_mut()?;
 
     // Insert account state
     for (address, account) in &genesis.alloc {
