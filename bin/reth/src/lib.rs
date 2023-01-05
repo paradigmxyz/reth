@@ -16,3 +16,23 @@ pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
 pub mod util;
+
+use clap::Parser;
+use reth_primitives::NodeRecord;
+
+#[derive(Debug, Parser)]
+/// Parameters for configuring the network more granularly via CLI
+struct NetworkOpts {
+    /// Disable the discovery service.
+    #[arg(short, long)]
+    disable_discovery: bool,
+
+    /// Target trusted peer enodes
+    /// --trusted-peers enode://abcd@192.168.0.1:30303
+    #[arg(long)]
+    trusted_peers: Vec<NodeRecord>,
+
+    /// Connect only to trusted peers
+    #[arg(long)]
+    trusted_only: bool,
+}
