@@ -703,7 +703,7 @@ where
                     this.swarm
                         .state_mut()
                         .peers_mut()
-                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+                        .apply_reputation_change(&peer_id, ReputationChangeKind::BadMessage);
                     this.metrics.invalid_messages_received.increment(1);
                 }
             }
