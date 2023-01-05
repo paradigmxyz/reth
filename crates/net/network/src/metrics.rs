@@ -1,6 +1,7 @@
 use metrics::{Counter, Gauge};
 use reth_metrics_derive::Metrics;
 
+/// Metrics for the entire network, handled by NetworkManager
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct NetworkMetrics {
@@ -16,11 +17,17 @@ pub struct NetworkMetrics {
     /// Total number of sessions closed
     pub(crate) closed_sessions: Counter,
 
-    /// Total Number of incoming connections
-    pub(crate) incoming_connections: Counter,
+    /// Number of active incoming connections
+    pub(crate) incoming_connections: Gauge,
 
-    /// Total Number of outgoing connections
-    pub(crate) outgoing_connections: Counter,
+    /// Number of active outgoing connections
+    pub(crate) outgoing_connections: Gauge,
+
+    /// Total Number of incoming connections handled
+    pub(crate) total_incoming_connections: Counter,
+
+    /// Total Number of outgoing connections established
+    pub(crate) total_outgoing_connections: Counter,
 
     /// Number of invalid/malformed messages received from peers
     pub(crate) invalid_messages_received: Counter,

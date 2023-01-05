@@ -542,11 +542,17 @@ where
                 }
                 SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                     trace!(target : "net", ?session_id, ?remote_addr, "Incoming connection");
-                    this.metrics.incoming_connections.increment(1);
+                    this.metrics.total_incoming_connections.increment(1);
+                    this.metrics
+                        .incoming_connections
+                        .set(this.swarm.state().peers().num_inbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
                     trace!(target : "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
-                    this.metrics.outgoing_connections.increment(1);
+                    this.metrics.total_outgoing_connections.increment(1);
+                    this.metrics
+                        .outgoing_connections
+                        .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::SessionEstablished {
                     peer_id,
@@ -572,7 +578,6 @@ where
                             .peers_mut()
                             .on_active_inbound_session(peer_id, remote_addr);
                     }
-
                     this.event_listeners.send(NetworkEvent::SessionEstablished {
                         peer_id,
                         capabilities,
@@ -619,6 +624,14 @@ where
                             .on_active_session_gracefully_closed(peer_id);
                     }
                     this.metrics.closed_sessions.increment(1);
+                    // This can either be an incoming or outgoing connection which was closed.
+                    // So we update both metrics
+                    this.metrics
+                        .incoming_connections
+                        .set(this.swarm.state().peers().num_inbound_connections() as f64);
+                    this.metrics
+                        .outgoing_connections
+                        .set(this.swarm.state().peers().num_outbound_connections() as f64);
                     this.event_listeners.send(NetworkEvent::SessionClosed { peer_id, reason });
                 }
                 SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
@@ -642,6 +655,9 @@ where
                             .on_incoming_pending_session_gracefully_closed();
                     }
                     this.metrics.closed_sessions.increment(1);
+                    this.metrics
+                        .incoming_connections
+                        .set(this.swarm.state().peers().num_inbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                     warn!(
@@ -666,6 +682,9 @@ where
                             .on_pending_session_gracefully_closed(&peer_id);
                     }
                     this.metrics.closed_sessions.increment(1);
+                    this.metrics
+                        .outgoing_connections
+                        .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                     warn!(
