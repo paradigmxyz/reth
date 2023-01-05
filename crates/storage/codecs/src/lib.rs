@@ -104,7 +104,9 @@ where
             let mut element = T::default();
 
             let len = buf.get_u16();
-            (element, buf) = T::from_compact(buf, len as usize);
+
+            (element, _) = T::from_compact(&buf[..(len as usize)], len as usize);
+            buf.advance(len as usize);
 
             list.push(element);
         }
@@ -161,7 +163,9 @@ where
         }
 
         let len = buf.get_u16();
-        let (element, buf) = T::from_compact(buf, len as usize);
+
+        let (element, _) = T::from_compact(&buf[..(len as usize)], len as usize);
+        buf.advance(len as usize);
 
         (Some(element), buf)
     }
