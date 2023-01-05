@@ -134,3 +134,213 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner, PREV_STAGE_ID,
+    };
+    use assert_matches::assert_matches;
+    use reth_db::models::StoredBlockBody;
+    use reth_interfaces::test_utils::generators::random_block_range;
+    use reth_primitives::{
+        SealedBlock, StorageEntry, Transaction, TransactionKind, TxLegacy, H256, U256,
+    };
+    use test_utils::*;
+
+    /// Execute a block range with a single account and storage
+    #[tokio::test]
+    async fn execute_single_account() {
+        let (previous_stage, stage_progress) = (500, 100);
+
+        // Set up the runner
+        let mut runner = AccountHashingTestRunner::default();
+        // set low threshold so we hash the whole storage
+        runner.set_clean_threshold(1);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, stage_progress })
+                if done && stage_progress == previous_stage
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    mod test_utils {
+        use crate::{
+            test_utils::{
+                TestTransaction, StageTestRunner,
+            },
+            ExecInput, ExecOutput, UnwindInput, stages::account_hashes::AccountHashingStage,
+        };
+        use assert_matches::assert_matches;
+        use reth_db::{
+            cursor::DbCursorRO,
+            models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
+
+        pub(crate) struct AccountHashingTestRunner {
+            pub(crate) tx: TestTransaction,
+            commit_threshold: u64,
+            clean_threshold: u64,
+        }
+
+        impl Default for AccountHashingTestRunner {
+            fn default() -> Self {
+                Self { tx: TestTransaction::default(), commit_threshold: 1000, clean_threshold: 1000 }
+            }
+        }
+
+        impl AccountHashingTestRunner {
+            fn set_clean_threshold(&mut self, threshold: u64) {
+                self.clean_threshold = threshold;
+            } 
+        }
+
+        impl StageTestRunner for AccountHashingTestRunner {
+            type S = AccountHashingStage;
+    
+            fn tx(&self) -> &TestTransaction {
+                &self.tx
+            }
+    
+            fn stage(&self) -> Self::S {
+                Self::S {
+                    commit_threshold: self.commit_threshold,
+                    clean_threshold: self.clean_threshold,
+                }
+            }
+        }
+        
+    }
+
+    #[async_trait::async_trait]
+    impl ExecuteStageTestRunner for AccountHashingTestRunner {
+        type Seed = Vec<SealedBlock>;
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let stage_progress = input.stage_progress.unwrap_or_default();
+            let end = input.previous_stage_progress() + 1;
+
+            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
+
+            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+
+            let mut iter = blocks.iter();
+            let (mut transition_id, mut tx_id) = (0, 0);
+
+            while let Some(progress) = iter.next() {
+                // Insert last progress data
+                self.tx.commit(|tx| {
+                    let key = (progress.number, progress.hash()).into();
+
+                    let body = StoredBlockBody {
+                        start_tx_id: tx_id,
+                        tx_count: progress.body.len() as u64,
+                    };
+
+                    progress.body.iter().try_for_each(|transaction| {
+                        tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
+                        tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
+                        tx.put::<tables::TxTransitionIndex>(tx_id, tx_id)?;
+                        tx_id += 1;
+                        let (to, value) = match transaction.transaction {
+                            Transaction::Legacy(TxLegacy {
+                                to: TransactionKind::Call(to),
+                                value,
+                                ..
+                            }) => (to, value),
+                            _ => unreachable!(),
+                        };
+                        let entry =
+                            StorageEntry { key: keccak256("transfers"), value: U256::from(value) };
+                        tx.cursor_dup_mut::<tables::PlainStorageState>()?.upsert(to, entry)
+                    })?;
+
+                    // Randomize rewards
+                    let has_reward: bool = rand::random();
+                    transition_id += progress.body.len().saturating_sub(1) as u64 +
+                        if has_reward { 1 } else { 0 };
+
+                    tx.put::<tables::BlockTransitionIndex>(key, transition_id)?;
+                    tx.put::<tables::BlockBodies>(key, body)?;
+                    Ok(())
+                })?;
+            }
+
+            Ok(blocks)
+        }
+
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            if let Some(output) = output {
+                let start_block = input.stage_progress.unwrap_or_default() + 1;
+                let end_block = output.stage_progress;
+                if start_block > end_block {
+                    return Ok(())
+                }
+            }
+            self.check_hashed_storage()
+        }
+    }
+
+    impl UnwindStageTestRunner for StorageHashingTestRunner {
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            self.check_hashed_storage()
+        }
+    }
+
+    impl StorageHashingTestRunner {
+        // fn set_commit_threshold(&mut self, threshold: u64) {
+        //     self.commit_threshold = threshold;
+        // }
+
+        fn set_clean_threshold(&mut self, threshold: u64) {
+            self.clean_threshold = threshold;
+        }
+
+        fn check_hashed_storage(&self) -> Result<(), TestRunnerError> {
+            self.tx
+                .query(|tx| {
+                    let mut storage_cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
+                    let mut hashed_storage_cursor = tx.cursor_dup::<tables::HashedStorage>()?;
+
+                    let mut expected = 0;
+
+                    while let Some((address, entry)) = storage_cursor.next()? {
+                        let key = keccak256(entry.key);
+                        assert_eq!(
+                            hashed_storage_cursor.seek_by_key_subkey(keccak256(address), key)?,
+                            Some(HashedStorageEntry { key, ..entry })
+                        );
+                        expected += 1;
+                    }
+                    let count =
+                        tx.cursor_dup::<tables::HashedStorage>()?.walk([0; 32].into())?.count();
+
+                    assert_eq!(count, expected);
+                    Ok(())
+                })
+                .map_err(|e| e.into())
+        }
+    }
+}
