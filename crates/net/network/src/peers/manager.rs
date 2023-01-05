@@ -178,6 +178,16 @@ impl PeersManager {
         self.connection_info.decr_in()
     }
 
+    /// Returns the number of currently active inbound connections.
+    pub(crate) fn num_inbound_connections(&self) -> usize {
+        self.connection_info.num_inbound
+    }
+
+    /// Returns the number of currently active outbound connections.
+    pub(crate) fn num_outbound_connections(&self) -> usize {
+        self.connection_info.num_outbound
+    }
+
     /// Invoked when a pending session was closed.
     pub(crate) fn on_incoming_pending_session_dropped(
         &mut self,
