@@ -72,6 +72,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
             while let Some((address, entry)) = walker.next().transpose()? {
                 let hashed_entry = HashedStorageEntry { key: keccak256(entry.key), ..entry };
+                // TODO: we should order this data before insertion
                 hashed_storage_cursor.append_dup(keccak256(address), hashed_entry)?;
             }
             return Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
@@ -95,17 +96,20 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // Iterate over transactions in chunks
         info!(target: "sync::stages::storage_hashing", start_transition, end_transition, "Hashing storage");
         while let Some((tid_address, entry)) = walker.next().transpose()? {
+            let new_address = keccak256(tid_address.address());
+            let new_key = keccak256(entry.key);
+
+            // Delete current hashed entry
+            let _ = hashed_storage_cursor.seek_by_key_subkey(new_address, new_key);
+            let _ = hashed_storage_cursor.delete_current();
+
             if let Some(current_se) =
                 storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?
             {
-                // Create a new entry with a hashed key
-                let hashed_se = HashedStorageEntry { key: keccak256(current_se.key), ..current_se };
-
-                // upsert entry to the table
-                hashed_storage_cursor.append_dup(keccak256(tid_address.address()), hashed_se)?;
-            } else {
-                hashed_storage_cursor.seek_exact(keccak256(tid_address.address()))?;
-                hashed_storage_cursor.delete_current()?;
+                // Create and append new entry with a hashed key
+                let hashed_se = HashedStorageEntry { key: new_key, ..current_se };
+                // TODO: we should order this data before insertion
+                hashed_storage_cursor.append_dup(new_address, hashed_se)?;
             }
         }
 
