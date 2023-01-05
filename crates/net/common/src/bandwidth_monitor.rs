@@ -34,14 +34,14 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 
 /// Monitors bandwidth usage of TCP streams
-pub struct BandwidthMonitor {
+pub struct BandwidthMeterInner {
     /// Measures the number of inbound packets
     inbound: AtomicU64,
     /// Measures the number of outbound packets
     outbound: AtomicU64,
 }
 
-impl BandwidthMonitor {
+impl BandwidthMeterInner {
     /// Returns a new [`BandwidthMonitor`].
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -67,26 +67,28 @@ impl BandwidthMonitor {
     }
 }
 
+type BandwidthMeter = Arc<BandwidthMeterInner>;
+
 /// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and monitors the bandwidth through it
 #[pin_project::pin_project]
-pub(crate) struct MonitoredStream<S> {
+pub(crate) struct MeteredStream<S> {
     /// The stream this instruments
     #[pin]
     inner: S,
-    /// The [`BandwidthMonitor`] struct this uses to monitor bandwidth
-    monitor: Arc<BandwidthMonitor>,
+    /// The [`BandwidthMeter`] struct this uses to monitor bandwidth
+    monitor: BandwidthMeter,
 }
 
-impl<S> MonitoredStream<S> {
+impl<S> MeteredStream<S> {
     fn new(inner: S) -> Self {
         Self {
             inner,
-            monitor: BandwidthMonitor::new()
+            monitor: BandwidthMeterInner::new()
         }
     }
 }
 
-impl<Stream: AsyncRead> AsyncRead for MonitoredStream<Stream> {
+impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -106,7 +108,7 @@ impl<Stream: AsyncRead> AsyncRead for MonitoredStream<Stream> {
     }
 }
 
-impl<Stream: AsyncWrite> AsyncWrite for MonitoredStream<Stream> {
+impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -132,24 +134,21 @@ impl<Stream: AsyncWrite> AsyncWrite for MonitoredStream<Stream> {
     }
 }
 
-// TODO: Something similar to rust-libp2p's `StreamMuxer` to monitor bandwidth across _all_ streams?
-
-// TODO: Tests
-// - Test reading + writing to/from a basic stream
-// - Test reeading + writing to/from a TCP stream
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+    use tokio::{
+        io::{duplex, AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream}
+    };
     
     #[tokio::test]
     async fn test_count_read_write() {
         // Taken in large part from https://docs.rs/tokio/latest/tokio/io/struct.DuplexStream.html#example
 
         let (client, server) = duplex(64);
-        let mut monitored_client = MonitoredStream::new(client);
-        let mut monitored_server = MonitoredStream::new(server);
+        let mut monitored_client = MeteredStream::new(client);
+        let mut monitored_server = MeteredStream::new(server);
 
         monitored_client.write_all(b"ping").await.unwrap();
         // Assert that the client stream wrote 4 bytes
@@ -171,6 +170,32 @@ mod tests {
         // Assert that the client stream read 4 bytes
         let client_inbound = monitored_client.monitor.total_inbound();
         assert_eq!(client_inbound, 4, "Expected client to read 4 bytes, but it read {}", client_inbound);
+    }
+
+    #[tokio::test]
+    async fn test_read_equals_write_tcp() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        let client_stream = TcpStream::connect(server_addr).await.unwrap();
+        let mut metered_client_stream = MeteredStream::new(client_stream);
+
+        let client_meter = metered_client_stream.monitor.clone();
+
+        let handle = tokio::spawn(async move {
+            let (server_stream, _) = listener.accept().await.unwrap();
+            let mut metered_server_stream = MeteredStream::new(server_stream);
+
+            let mut buf = [0u8; 4];
+
+            metered_server_stream.read(&mut buf).await.unwrap();
+
+            assert_eq!(metered_server_stream.monitor.total_inbound(), client_meter.total_outbound());
+        });
+
+        metered_client_stream.write_all(b"ping").await.unwrap();
+
+        handle.await.unwrap();
     }
 
 }
