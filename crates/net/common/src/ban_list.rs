@@ -39,7 +39,7 @@ impl BanList {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
-                    return false;
+                    return false
                 }
             }
             true
@@ -54,7 +54,7 @@ impl BanList {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
-                    return false;
+                    return false
                 }
             }
             true

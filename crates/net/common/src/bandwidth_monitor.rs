@@ -49,7 +49,7 @@ impl BandwidthMeterInner {
     /// Returns the total number of bytes that have been downloaded on all the streams.
     ///
     /// > **Note**: This method is by design subject to race conditions. The returned value should
-    /// >           only ever be used for statistics purposes.
+    /// > only ever be used for statistics purposes.
     pub fn total_inbound(&self) -> u64 {
         self.inbound.load(Ordering::Relaxed)
     }
@@ -57,7 +57,7 @@ impl BandwidthMeterInner {
     /// Returns the total number of bytes that have been uploaded on all the streams.
     ///
     /// > **Note**: This method is by design subject to race conditions. The returned value should
-    /// >           only ever be used for statistics purposes.
+    /// > only ever be used for statistics purposes.
     pub fn total_outbound(&self) -> u64 {
         self.outbound.load(Ordering::Relaxed)
     }
@@ -65,7 +65,8 @@ impl BandwidthMeterInner {
 
 type BandwidthMeter = Arc<BandwidthMeterInner>;
 
-/// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and monitors the bandwidth through it
+/// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and monitors the
+/// bandwidth through it
 #[pin_project::pin_project]
 pub(crate) struct MeteredStream<S> {
     /// The stream this instruments
