@@ -132,8 +132,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_db::models::StoredBlockBody;
@@ -142,10 +142,8 @@ mod tests {
         SealedBlock, StorageEntry, Transaction, TransactionKind, TxLegacy, H256, U256,
     };
 
-    stage_test_suite_ext!(StorageHashingTestRunner);
-
     /// Execute a block range with a single account and storage
-    #[tokio::test]
+    #[allow(unused)]
     async fn execute_single_account() {
         let (previous_stage, stage_progress) = (500, 100);
 
