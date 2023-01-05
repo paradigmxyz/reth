@@ -13,6 +13,9 @@ use tracing::*;
 
 const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
 
+/// The account hashing stage iterates over account states,
+/// hashes their addresses and inserts entries to the
+/// [`HashedAccount`][reth_interfaces::db::tables::HashedAccount] table.
 #[derive(Debug)]
 pub struct AccountHashingStage {
     /// The size of inserted items after which the control
@@ -107,7 +110,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-
         // Get the last transition of the `unwind_to` block to know when unwinding should stop
         let end_transition = tx.get_block_transition_by_num(input.unwind_to)?;
 
