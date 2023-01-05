@@ -1,5 +1,5 @@
 use crate::{
-    error::SessionError,
+    error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
         ReputationChangeKind, ReputationChangeWeights,
@@ -92,7 +92,7 @@ pub(crate) struct PeersManager {
     ban_duration: Duration,
     /// How long peers to which we could not connect for non-fatal reasons, e.g.
     /// [`DisconnectReason::TooManyPeers`], are put in time out.
-    backoff_duration: Duration,
+    backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
     connect_trusted_nodes_only: bool,
 }
@@ -106,7 +106,7 @@ impl PeersManager {
             reputation_weights,
             ban_list,
             ban_duration,
-            backoff_duration,
+            backoff_durations,
             trusted_nodes,
             connect_trusted_nodes_only,
             ..
@@ -115,7 +115,7 @@ impl PeersManager {
         let now = Instant::now();
 
         // We use half of the interval to decrease the max duration to `150%` in worst case
-        let unban_interval = ban_duration.min(backoff_duration) / 2;
+        let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
         let mut peers = HashMap::with_capacity(trusted_nodes.len());
 
@@ -137,7 +137,7 @@ impl PeersManager {
             connection_info,
             ban_list,
             ban_duration,
-            backoff_duration,
+            backoff_durations,
             connect_trusted_nodes_only,
         }
     }
@@ -248,9 +248,9 @@ impl PeersManager {
     }
 
     /// Temporarily puts the peer in timeout
-    fn backoff_peer(&mut self, peer_id: PeerId) {
+    fn backoff_peer(&mut self, peer_id: PeerId, kind: BackoffKind) {
         trace!(target: "net::peers", ?peer_id, "backing off");
-        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + self.backoff_duration);
+        self.ban_list.ban_peer_until(peer_id, self.backoff_durations.backoff_until(kind));
     }
 
     /// Unbans the peer
@@ -367,10 +367,10 @@ impl PeersManager {
                 })
             }
         } else {
-            let reputation_change = if err.should_backoff() {
+            let reputation_change = if let Some(kind) = err.should_backoff() {
                 // The peer has signaled that it is currently unable to process any more
                 // connections, so we will hold off on attempting any new connections for a while
-                self.backoff_peer(*peer_id);
+                self.backoff_peer(*peer_id, kind);
                 BACKOFF_REPUTATION_CHANGE.into()
             } else {
                 self.reputation_weights.change(reputation_change)
@@ -892,7 +892,7 @@ pub struct PeersConfig {
     pub ban_duration: Duration,
     /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
     /// [`DisconnectReason::TooManyPeers`].
-    pub backoff_duration: Duration,
+    pub backoff_durations: PeerBackoffDurations,
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to trusted nodes only?
@@ -908,8 +908,7 @@ impl Default for PeersConfig {
             ban_list: Default::default(),
             // Ban peers for 12h
             ban_duration: Duration::from_secs(60 * 60 * 12),
-            // backoff peers for 1h
-            backoff_duration: Duration::from_secs(60 * 60),
+            backoff_durations: Default::default(),
             trusted_nodes: Default::default(),
             connect_trusted_nodes_only: false,
         }
@@ -958,6 +957,52 @@ impl PeersConfig {
     }
 }
 
+/// The durations to use when a backoff should be applied to a peer.
+///
+/// See also [`BackoffKind`](BackoffKind).
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct PeerBackoffDurations {
+    /// Applies to connection problems where there is a chance that they will be resolved after the
+    /// short duration.
+    pub low: Duration,
+    /// Applies to more severe connection problems where there is a lower chance that they will be
+    /// resolved.
+    pub medium: Duration,
+    /// Intended for spammers, or bad peers in general.
+    pub high: Duration,
+}
+
+impl PeerBackoffDurations {
+    /// Returns the corresponding [`Duration`]
+    pub fn backoff(&self, kind: BackoffKind) -> Duration {
+        match kind {
+            BackoffKind::Low => self.low,
+            BackoffKind::Medium => self.medium,
+            BackoffKind::High => self.high,
+        }
+    }
+
+    /// Returns the timestamp until which we should backoff
+    pub fn backoff_until(&self, kind: BackoffKind) -> std::time::Instant {
+        let now = std::time::Instant::now();
+        now + self.backoff(kind)
+    }
+}
+
+impl Default for PeerBackoffDurations {
+    fn default() -> Self {
+        Self {
+            low: Duration::from_secs(30),
+            // 3min
+            medium: Duration::from_secs(60 * 3),
+            // 15min
+            high: Duration::from_secs(60 * 15),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum InboundConnectionError {
     ExceedsLimit(usize),
@@ -975,7 +1020,7 @@ mod test {
     use super::PeersManager;
     use crate::{
         peers::{
-            manager::{ConnectionInfo, PeerConnectionState},
+            manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
             PeerAction, ReputationChangeKind,
         },
         session::PendingSessionHandshakeError,
@@ -1064,8 +1109,9 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_duration = Duration::from_secs(3);
-        let config = PeersConfig { backoff_duration, ..Default::default() };
+        let backoff_durations =
+            PeerBackoffDurations { low: Duration::from_secs(3), ..Default::default() };
+        let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr);
 
@@ -1105,7 +1151,7 @@ mod test {
         assert!(peers.ban_list.is_banned_peer(&peer));
         assert!(peers.peers.get(&peer).is_some());
 
-        tokio::time::sleep(backoff_duration).await;
+        tokio::time::sleep(backoff_durations.low).await;
 
         match event!(peers) {
             PeerAction::UnBanPeer { peer_id, .. } => {
@@ -1127,8 +1173,9 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_duration = Duration::from_secs(3);
-        let config = PeersConfig { backoff_duration, ..Default::default() };
+        let backoff_durations =
+            PeerBackoffDurations { high: Duration::from_secs(3), ..Default::default() };
+        let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr);
 
@@ -1168,7 +1215,7 @@ mod test {
         assert!(peers.ban_list.is_banned_peer(&peer));
         assert!(peers.peers.get(&peer).is_some());
 
-        tokio::time::sleep(backoff_duration).await;
+        tokio::time::sleep(backoff_durations.high).await;
 
         match event!(peers) {
             PeerAction::UnBanPeer { peer_id, .. } => {
