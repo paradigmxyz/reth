@@ -7,7 +7,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, HashedStorageEntry, TransitionId};
+use reth_primitives::{keccak256, Address, HashedStorageEntry, TransitionId, U256};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -123,10 +123,35 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
-        _input: UnwindInput,
+        tx: &mut Transaction<'_, DB>,
+        input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        unimplemented!();
+        // Get the last transition of the `unwind_to` block to know when unwinding should stop
+        let end_transition = tx.get_block_transition_by_num(input.unwind_to)?;
+
+        let mut hashed_storage_cursor = tx.cursor_dup_mut::<tables::HashedStorage>()?;
+        let mut storage_changeset_cursor = tx.cursor_dup::<tables::StorageChangeSet>()?;
+
+        let mut row = storage_changeset_cursor.last()?;
+        while let Some((tid_address, entry)) = row {
+            if tid_address.transition_id() <= end_transition {
+                break
+            }
+            let hashed_addr = keccak256(tid_address.address());
+            let hashed_key = keccak256(entry.key);
+
+            hashed_storage_cursor.seek_by_key_subkey(hashed_addr, hashed_key)?;
+            hashed_storage_cursor.delete_current()?;
+
+            if entry.value != U256::ZERO {
+                let new_entry = HashedStorageEntry { key: hashed_key, ..entry };
+                hashed_storage_cursor.append_dup(hashed_addr, new_entry)?;
+            }
+
+            row = storage_changeset_cursor.prev()?;
+        }
+
+        Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
 
