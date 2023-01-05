@@ -995,10 +995,10 @@ impl Default for PeerBackoffDurations {
     fn default() -> Self {
         Self {
             low: Duration::from_secs(30),
-            // 10min
-            medium: Duration::from_secs(10 * 30),
-            // 1hr
-            high: Duration::from_secs(60 * 60),
+            // 3min
+            medium: Duration::from_secs(60 * 3),
+            // 15min
+            high: Duration::from_secs(60 * 15),
         }
     }
 }
