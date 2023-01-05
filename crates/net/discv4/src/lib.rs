@@ -617,7 +617,7 @@ impl Discv4Service {
             tx,
         );
 
-        // From those 16, pick the 3 closest to start the lookup.
+        // From those 16, pick the 3 closest to start the concurrent lookup.
         let closest = ctx.closest(ALPHA);
 
         trace!(target : "net::discv4", ?target, num = closest.len(), "Start lookup closest nodes");
@@ -1070,6 +1070,7 @@ impl Discv4Service {
                     // Mark the request as answered
                     request.answered = true;
                     let total = request.response_count + msg.nodes.len();
+
                     // Neighbours response is exactly 1 bucket (16 entries).
                     if total <= MAX_NODES_PER_BUCKET {
                         request.response_count = total;
@@ -1080,6 +1081,7 @@ impl Discv4Service {
                 };
 
                 if entry.get().response_count == MAX_NODES_PER_BUCKET {
+                    // node responding with a full bucket of records
                     let ctx = entry.remove().lookup_context;
                     ctx.mark_responded(node_id);
                     ctx
@@ -1088,6 +1090,7 @@ impl Discv4Service {
                 }
             }
             Entry::Vacant(_) => {
+                // received neighbours response without requesting it
                 debug!( target : "discv4", from=?remote_addr, "Received unsolicited Neighbours");
                 return
             }
@@ -1124,6 +1127,11 @@ impl Discv4Service {
                             state: ConnectionState::Disconnected,
                         },
                     );
+                    // the node's endpoint is not proven yet, so we need to ping it first, on
+                    // success, it will initiate a `FindNode` request.
+                    // In order to prevent that this node is selected again on subsequent responses,
+                    // while the ping is still active, we already mark it as queried.
+                    ctx.mark_queried(closest.id);
                     self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
                 }
                 BucketEntry::SelfEntry => {
@@ -1590,7 +1598,7 @@ impl LookupContext {
         self.inner.target
     }
 
-    /// Returns an iterator over the closest nodes.
+    /// Returns an iterator over the closest nodes that are not queried yet.
     fn closest(&self, num: usize) -> Vec<NodeRecord> {
         self.inner
             .closest_nodes
