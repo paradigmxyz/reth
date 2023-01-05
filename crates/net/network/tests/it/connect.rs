@@ -868,6 +868,7 @@ async fn sync_from_clique_geth() {
         println!("genesis hash from geth: {genesis_hash}");
 
         // make sure it's the same thing we are calculating
+        // TODO: test is currently failing - the genesis hash calculation is probably incorrect
         let sealed_genesis = genesis_header(&genesis.clone()).seal();
         println!("locally computed genesis: {}", sealed_genesis.hash());
 
@@ -882,9 +883,13 @@ async fn sync_from_clique_geth() {
 
         // may not need to set up a hello as we should be advertising compatible capabilities and
         // protocol versions anyways
+        // TODO: it's sort of redundant setting BOTH the status and the genesis hash, since they
+        // both contain the genesis hash. a discrepancy is probably an error. could we enforce this
+        // somethow?
         let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
+            .genesis_hash(sealed_genesis.hash())
             .status(status)
             .build();
         let network = NetworkManager::new(config).await.unwrap();
