@@ -65,7 +65,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
             while let Some((address, account)) = walker.next().transpose()? {
                 let hashed_address = keccak256(address);
-                hashed_account_cursor.insert(hashed_address, account)?;
+                hashed_account_cursor.append(hashed_address, account)?;
             }
 
             return Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
@@ -104,9 +104,31 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
-        _input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        unimplemented!();
+        tx: &mut Transaction<'_, DB>,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+
+        // Get the last transition of the `unwind_to` block to know when unwinding should stop
+        let end_transition = tx.get_block_transition_by_num(input.unwind_to)?;
+
+        let mut hashed_acc_cursor = tx.cursor_mut::<tables::HashedAccount>()?;
+        let mut acc_changeset_cursor = tx.cursor::<tables::AccountChangeSet>()?;
+
+        let mut entry = acc_changeset_cursor.last()?;
+        while let Some((tid, ref acc_before_tx)) = entry {
+            if tid <= end_transition {
+                break
+            }
+            let hashed_addr = keccak256(acc_before_tx.address);
+            if let Some(acc) = acc_before_tx.info {
+                hashed_acc_cursor.upsert(hashed_addr, acc)?;
+            } else if hashed_acc_cursor.seek_exact(hashed_addr)?.is_some() {
+                hashed_acc_cursor.delete_current()?;
+            }
+
+            entry = acc_changeset_cursor.prev()?;
+        }
+
+        Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
