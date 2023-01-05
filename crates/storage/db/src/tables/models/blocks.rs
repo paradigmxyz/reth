@@ -128,6 +128,8 @@ impl_fixed_arbitrary!(BlockNumHash, 40);
 
 #[cfg(test)]
 mod test {
+    use crate::table::{Compress, Decompress};
+
     use super::*;
     use rand::{thread_rng, Rng};
 
@@ -154,5 +156,16 @@ mod test {
         thread_rng().fill(bytes.as_mut_slice());
         let key = BlockNumHash::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
+    }
+
+    #[test]
+    fn test_ommer() {
+        let mut ommer = StoredBlockOmmers::default();
+        ommer.ommers.push(Header::default());
+        ommer.ommers.push(Header::default());
+        assert!(
+            ommer.clone() ==
+                StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress().into()).unwrap()
+        );
     }
 }
