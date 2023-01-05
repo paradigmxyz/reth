@@ -4,7 +4,7 @@ use super::testnet::Testnet;
 use crate::{NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::{Address, Bytes, U64},
+    types::{Address, Block, Bytes, U64},
     utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
 };
 use ethers_middleware::SignerMiddleware;
@@ -19,7 +19,9 @@ use reth_interfaces::{
 };
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
-use reth_primitives::{Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord, PeerId};
+use reth_primitives::{
+    Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord, PeerId, H256,
+};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
@@ -64,6 +66,23 @@ fn genesis_header(genesis: &Genesis) -> Header {
         timestamp: genesis.timestamp.as_u64(),
         mix_hash: genesis.mix_hash.0.into(),
         beneficiary: genesis.coinbase.0.into(),
+        ..Default::default()
+    }
+}
+
+/// Obtains a [`Header`](reth_primitives::Header) from an ethers
+/// [`Block`](ethers_core::types::Block).
+fn block_to_header(block: Block<ethers_core::types::H256>) -> Header {
+    Header {
+        number: block.number.unwrap().as_u64(),
+        gas_limit: block.gas_limit.as_u64(),
+        difficulty: block.difficulty.into(),
+        nonce: block.nonce.unwrap().to_low_u64_be(),
+        extra_data: block.extra_data.0,
+        state_root: block.state_root.0.into(),
+        timestamp: block.timestamp.as_u64(),
+        mix_hash: block.mix_hash.unwrap().0.into(),
+        beneficiary: block.author.unwrap().0.into(),
         ..Default::default()
     }
 }
@@ -864,13 +883,18 @@ async fn sync_from_clique_geth() {
         // get genesis hash
         let genesis_block =
             provider.get_block(0).await.unwrap().expect("a genesis block should exist");
-        let genesis_hash = genesis_block.hash.unwrap();
-        println!("genesis hash from geth: {genesis_hash}");
 
-        // make sure it's the same thing we are calculating
-        // TODO: test is currently failing - the genesis hash calculation is probably incorrect
+        // get our hash
         let sealed_genesis = genesis_header(&genesis.clone()).seal();
-        println!("locally computed genesis: {}", sealed_genesis.hash());
+
+        // let's just convert into a reth header and compare
+        let geth_genesis_header = block_to_header(genesis_block.clone()).seal();
+        assert_eq!(geth_genesis_header, sealed_genesis, "genesis headers should match, we computed {sealed_genesis:#?} but geth computed {geth_genesis_header:#?}");
+
+        // make sure we have the same hash
+        let genesis_hash: H256 = genesis_block.hash.unwrap().0.into();
+        let sealed_hash = sealed_genesis.hash();
+        assert_eq!(sealed_hash, genesis_hash, "genesis hashes should match, we computed {sealed_hash:?} but geth computed {genesis_hash:?}");
 
         // === initialize reth networking stack ===
 
