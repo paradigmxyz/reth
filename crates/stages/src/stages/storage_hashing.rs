@@ -93,15 +93,17 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     .unwrap_or_default()
             });
 
-        // Iterate over transactions in chunks
+        // Update changed storage entries
         info!(target: "sync::stages::storage_hashing", start_transition, end_transition, "Hashing storage");
         while let Some((tid_address, entry)) = walker.next().transpose()? {
+            // hash account address and entry key
             let new_address = keccak256(tid_address.address());
             let new_key = keccak256(entry.key);
 
-            // Delete current hashed entry
-            let _ = hashed_storage_cursor.seek_by_key_subkey(new_address, new_key);
-            let _ = hashed_storage_cursor.delete_current();
+            // Delete current hashed entry if it exists
+            if hashed_storage_cursor.seek_by_key_subkey(new_address, new_key)?.is_some() {
+                hashed_storage_cursor.delete_current()?;
+            }
 
             if let Some(current_se) =
                 storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?
@@ -136,7 +138,11 @@ mod tests {
         UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_db::models::StoredBlockBody;
+    use reth_db::{
+        cursor::DbCursorRW,
+        mdbx::{tx::Tx, WriteMap, RW},
+        models::{StoredBlockBody, TransitionIdAddress},
+    };
     use reth_interfaces::test_utils::generators::random_block_range;
     use reth_primitives::{
         SealedBlock, StorageEntry, Transaction, TransactionKind, TxLegacy, H256, U256,
@@ -207,7 +213,7 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
+            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -227,8 +233,9 @@ mod tests {
                     progress.body.iter().try_for_each(|transaction| {
                         tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
-                        tx.put::<tables::TxTransitionIndex>(tx_id, tx_id)?;
+                        tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
                         tx_id += 1;
+                        transition_id += 1;
                         let (to, value) = match transaction.transaction {
                             Transaction::Legacy(TxLegacy {
                                 to: TransactionKind::Call(to),
@@ -237,19 +244,33 @@ mod tests {
                             }) => (to, value),
                             _ => unreachable!(),
                         };
-                        let entry =
+                        let new_entry =
                             StorageEntry { key: keccak256("transfers"), value: U256::from(value) };
-                        tx.cursor_dup_mut::<tables::PlainStorageState>()?.upsert(to, entry)
+                        self.insert_storage_entry(
+                            tx,
+                            (transition_id, to).into(),
+                            new_entry,
+                            progress.header.number == stage_progress,
+                        )
                     })?;
 
                     // Randomize rewards
                     let has_reward: bool = rand::random();
-                    transition_id += progress.body.len().saturating_sub(1) as u64 +
-                        if has_reward { 1 } else { 0 };
+                    if has_reward {
+                        transition_id += 1;
+                        self.insert_storage_entry(
+                            tx,
+                            (transition_id, Address::random()).into(),
+                            StorageEntry {
+                                key: keccak256("mining"),
+                                value: U256::from(rand::random::<u32>()),
+                            },
+                            progress.header.number == stage_progress,
+                        )?;
+                    }
 
                     tx.put::<tables::BlockTransitionIndex>(key, transition_id)?;
-                    tx.put::<tables::BlockBodies>(key, body)?;
-                    Ok(())
+                    tx.put::<tables::BlockBodies>(key, body)
                 })?;
             }
 
@@ -297,9 +318,12 @@ mod tests {
 
                     while let Some((address, entry)) = storage_cursor.next()? {
                         let key = keccak256(entry.key);
+                        let got =
+                            hashed_storage_cursor.seek_by_key_subkey(keccak256(address), key)?;
                         assert_eq!(
-                            hashed_storage_cursor.seek_by_key_subkey(keccak256(address), key)?,
-                            Some(HashedStorageEntry { key, ..entry })
+                            got,
+                            Some(HashedStorageEntry { key, ..entry }),
+                            "{expected}: {address:?}"
                         );
                         expected += 1;
                     }
@@ -310,6 +334,33 @@ mod tests {
                     Ok(())
                 })
                 .map_err(|e| e.into())
+        }
+
+        fn insert_storage_entry(
+            &self,
+            tx: &Tx<'_, RW, WriteMap>,
+            tid_address: TransitionIdAddress,
+            entry: StorageEntry,
+            hash: bool,
+        ) -> Result<(), reth_db::Error> {
+            let mut storage_cursor = tx.cursor_dup_mut::<tables::PlainStorageState>()?;
+            let prev_entry = storage_cursor
+                .seek_by_key_subkey(tid_address.address(), entry.key)?
+                .and_then(|e| {
+                    storage_cursor.delete_current().expect("failed to delete entry");
+                    Some(e)
+                })
+                .unwrap_or(StorageEntry { key: entry.key, value: U256::from(0) });
+            if hash {
+                tx.cursor_dup_mut::<tables::HashedStorage>()?.append_dup(
+                    keccak256(tid_address.address()),
+                    HashedStorageEntry { key: keccak256(entry.key), value: entry.value },
+                )?;
+            }
+            storage_cursor.append_dup(tid_address.address(), entry)?;
+
+            tx.cursor_dup_mut::<tables::StorageChangeSet>()?.append_dup(tid_address, prev_entry)?;
+            Ok(())
         }
     }
 }
