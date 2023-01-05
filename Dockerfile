@@ -14,21 +14,10 @@ COPY . reth
 # Build reth
 RUN cd reth && cargo build --all --profile release
 
-# Use ubuntu as the release image
-FROM ubuntu:22.04
+# Use alpine as the release image
+FROM frolvlad/alpine-glibc
 
-# Update dependencies and add ethereum ppa
-RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
-  libssl-dev \
-  ca-certificates \
-  gnupg2 \
-  software-properties-common && apt-key update \
-  && add-apt-repository -y ppa:ethereum/ethereum
-
-# Install Geth as it's a dependency for reth
-RUN apt-get update && apt-get install -y ethereum \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache linux-headers
 
 # Copy the built reth binary from the previous stage
 COPY --from=builder /reth/target/release/reth /usr/local/bin/reth
