@@ -104,7 +104,7 @@ impl StateFetcher {
 
     /// Returns the _next_ idle peer that's ready to accept a request.
     fn next_peer(&self) -> Option<&PeerId> {
-        self.peers.iter().find(|(_, peer)| peer.state.is_idle()).map(|(key, _)| key)
+        self.peers.iter().find_map(|(peer_id, peer)| peer.state.is_idle().then_some(peer_id))
     }
 
     /// Returns the next action to return
