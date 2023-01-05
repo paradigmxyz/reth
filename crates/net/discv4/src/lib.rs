@@ -382,6 +382,8 @@ pub struct Discv4Service {
     resolve_external_ip_interval: Option<ResolveNatInterval>,
     /// How this services is configured
     config: Discv4Config,
+    /// Buffered events populated during poll.
+    queued_events: VecDeque<Discv4Event>,
 }
 
 impl Discv4Service {
@@ -475,6 +477,7 @@ impl Discv4Service {
             lookup_rotator,
             resolve_external_ip_interval: config.resolve_external_ip_interval(),
             config,
+            queued_events: Default::default(),
         }
     }
 
@@ -1288,129 +1291,142 @@ impl Discv4Service {
     /// query participates in the discovery protocol. The sender of a packet is considered verified
     /// if it has sent a valid Pong response with matching ping hash within the last 12 hours.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
-        // trigger lookup, but only if no more lookups in progress
-        if self.config.enable_lookup &&
-            !self.is_lookup_in_progress() &&
-            self.lookup_interval.poll_tick(cx).is_ready()
-        {
-            let target = self.lookup_rotator.next(&self.local_node_record.id);
+        loop {
+            // drain buffered events first
+            if let Some(event) = self.queued_events.pop_front() {
+                return Poll::Ready(event)
+            }
 
-            self.lookup_with(target, None);
-        }
+            // trigger self lookup
+            if self.config.enable_lookup &&
+                !self.is_lookup_in_progress() &&
+                self.lookup_interval.poll_tick(cx).is_ready()
+            {
+                let target = self.lookup_rotator.next(&self.local_node_record.id);
+                self.lookup_with(target, None);
+            }
 
-        // evict expired nodes
-        if self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
-            self.evict_expired_requests(Instant::now())
-        }
+            // evict expired nodes
+            if self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
+                self.evict_expired_requests(Instant::now())
+            }
 
-        // re-ping some peers
-        if self.ping_interval.poll_tick(cx).is_ready() {
-            self.re_ping_oldest();
-        }
+            // re-ping some peers
+            if self.ping_interval.poll_tick(cx).is_ready() {
+                self.re_ping_oldest();
+            }
 
-        if let Some(Poll::Ready(Some(ip))) =
-            self.resolve_external_ip_interval.as_mut().map(|r| r.poll_tick(cx))
-        {
-            self.set_external_ip_addr(ip);
-        }
+            if let Some(Poll::Ready(Some(ip))) =
+                self.resolve_external_ip_interval.as_mut().map(|r| r.poll_tick(cx))
+            {
+                self.set_external_ip_addr(ip);
+            }
 
-        // process all incoming commands
-        if let Some(mut rx) = self.commands_rx.take() {
-            let mut is_done = false;
-            while let Poll::Ready(cmd) = rx.poll_recv(cx) {
-                if let Some(cmd) = cmd {
-                    match cmd {
-                        Discv4Command::Lookup { node_id, tx } => {
-                            let node_id = node_id.unwrap_or(self.local_node_record.id);
-                            self.lookup_with(node_id, tx);
-                        }
-                        Discv4Command::SetLookupInterval(duration) => {
-                            self.set_lookup_interval(duration);
-                        }
-                        Discv4Command::Updates(tx) => {
-                            let rx = self.update_stream();
-                            let _ = tx.send(rx);
-                        }
-                        Discv4Command::BanPeer(node_id) => self.ban_node(node_id),
-                        Discv4Command::Remove(node_id) => {
-                            self.remove_node(node_id);
-                        }
-                        Discv4Command::Ban(node_id, ip) => {
-                            self.ban_node(node_id);
-                            self.ban_ip(ip);
-                        }
-                        Discv4Command::BanIp(ip) => {
-                            self.ban_ip(ip);
-                        }
-                        Discv4Command::SetEIP868RLPPair { key, rlp } => {
-                            debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
+            // process all incoming commands
+            if let Some(mut rx) = self.commands_rx.take() {
+                let mut is_done = false;
+                while let Poll::Ready(cmd) = rx.poll_recv(cx) {
+                    if let Some(cmd) = cmd {
+                        match cmd {
+                            Discv4Command::Lookup { node_id, tx } => {
+                                let node_id = node_id.unwrap_or(self.local_node_record.id);
+                                self.lookup_with(node_id, tx);
+                            }
+                            Discv4Command::SetLookupInterval(duration) => {
+                                self.set_lookup_interval(duration);
+                            }
+                            Discv4Command::Updates(tx) => {
+                                let rx = self.update_stream();
+                                let _ = tx.send(rx);
+                            }
+                            Discv4Command::BanPeer(node_id) => self.ban_node(node_id),
+                            Discv4Command::Remove(node_id) => {
+                                self.remove_node(node_id);
+                            }
+                            Discv4Command::Ban(node_id, ip) => {
+                                self.ban_node(node_id);
+                                self.ban_ip(ip);
+                            }
+                            Discv4Command::BanIp(ip) => {
+                                self.ban_ip(ip);
+                            }
+                            Discv4Command::SetEIP868RLPPair { key, rlp } => {
+                                debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
 
-                            let _ =
-                                self.local_eip_868_enr.insert_raw_rlp(key, rlp, &self.secret_key);
-                        }
-                        Discv4Command::SetTcpPort(port) => {
-                            debug!(target: "discv4", %port, "Update tcp port");
-                            self.local_node_record.tcp_port = port;
-                            if self.local_node_record.address.is_ipv4() {
-                                let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
-                            } else {
-                                let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                                let _ = self.local_eip_868_enr.insert_raw_rlp(
+                                    key,
+                                    rlp,
+                                    &self.secret_key,
+                                );
+                            }
+                            Discv4Command::SetTcpPort(port) => {
+                                debug!(target: "discv4", %port, "Update tcp port");
+                                self.local_node_record.tcp_port = port;
+                                if self.local_node_record.address.is_ipv4() {
+                                    let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
+                                } else {
+                                    let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                                }
                             }
                         }
-                    }
-                } else {
-                    is_done = true;
-                    break
-                }
-            }
-            if !is_done {
-                self.commands_rx = Some(rx);
-            }
-        }
-
-        // process all incoming datagrams
-        while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
-            match event {
-                IngressEvent::RecvError(_) => {}
-                IngressEvent::BadPacket(from, err, data) => {
-                    warn!(target : "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
-                }
-                IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
-                    trace!( target : "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
-                    return match msg {
-                        Message::Ping(ping) => {
-                            self.on_ping(ping, remote_addr, node_id, hash);
-                            Poll::Ready(Discv4Event::Ping)
-                        }
-                        Message::Pong(pong) => {
-                            self.on_pong(pong, remote_addr, node_id);
-                            Poll::Ready(Discv4Event::Pong)
-                        }
-                        Message::FindNode(msg) => {
-                            self.on_find_node(msg, remote_addr, node_id);
-                            Poll::Ready(Discv4Event::FindNode)
-                        }
-                        Message::Neighbours(msg) => {
-                            self.on_neighbours(msg, remote_addr, node_id);
-                            Poll::Ready(Discv4Event::Neighbours)
-                        }
-                        Message::EnrRequest(msg) => {
-                            self.on_enr_request(msg, remote_addr, node_id, hash);
-                            Poll::Ready(Discv4Event::EnrRequest)
-                        }
-                        Message::EnrResponse(msg) => {
-                            self.on_enr_response(msg, remote_addr, node_id);
-                            Poll::Ready(Discv4Event::EnrResponse)
-                        }
+                    } else {
+                        is_done = true;
+                        break
                     }
                 }
+                if !is_done {
+                    self.commands_rx = Some(rx);
+                }
+            }
+
+            // process all incoming datagrams
+            while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
+                match event {
+                    IngressEvent::RecvError(_) => {}
+                    IngressEvent::BadPacket(from, err, data) => {
+                        warn!(target : "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
+                    }
+                    IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
+                        trace!( target : "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
+                        let event = match msg {
+                            Message::Ping(ping) => {
+                                self.on_ping(ping, remote_addr, node_id, hash);
+                                Discv4Event::Ping
+                            }
+                            Message::Pong(pong) => {
+                                self.on_pong(pong, remote_addr, node_id);
+                                Discv4Event::Pong
+                            }
+                            Message::FindNode(msg) => {
+                                self.on_find_node(msg, remote_addr, node_id);
+                                Discv4Event::FindNode
+                            }
+                            Message::Neighbours(msg) => {
+                                self.on_neighbours(msg, remote_addr, node_id);
+                                Discv4Event::Neighbours
+                            }
+                            Message::EnrRequest(msg) => {
+                                self.on_enr_request(msg, remote_addr, node_id, hash);
+                                Discv4Event::EnrRequest
+                            }
+                            Message::EnrResponse(msg) => {
+                                self.on_enr_response(msg, remote_addr, node_id);
+                                Discv4Event::EnrResponse
+                            }
+                        };
+
+                        self.queued_events.push_back(event);
+                    }
+                }
+            }
+
+            // try resending buffered pings
+            self.ping_buffered();
+
+            if self.queued_events.is_empty() {
+                return Poll::Pending
             }
         }
-
-        // try resending buffered pings
-        self.ping_buffered();
-
-        Poll::Pending
     }
 }
 
