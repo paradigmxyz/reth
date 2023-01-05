@@ -3786,6 +3786,7 @@ dependencies = [
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
+ "reth-metrics-derive",
  "reth-primitives",
 ]
 
