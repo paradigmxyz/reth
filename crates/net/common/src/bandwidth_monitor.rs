@@ -32,7 +32,6 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-
 /// Monitors bandwidth usage of TCP streams
 pub struct BandwidthMeterInner {
     /// Measures the number of inbound packets
@@ -44,10 +43,7 @@ pub struct BandwidthMeterInner {
 impl BandwidthMeterInner {
     /// Returns a new [`BandwidthMonitor`].
     pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self {
-            inbound: AtomicU64::new(0),
-            outbound: AtomicU64::new(0),
-        })
+        Arc::new(Self { inbound: AtomicU64::new(0), outbound: AtomicU64::new(0) })
     }
 
     /// Returns the total number of bytes that have been downloaded on all the streams.
@@ -81,10 +77,7 @@ pub(crate) struct MeteredStream<S> {
 
 impl<S> MeteredStream<S> {
     fn new(inner: S) -> Self {
-        Self {
-            inner,
-            monitor: BandwidthMeterInner::new()
-        }
+        Self { inner, monitor: BandwidthMeterInner::new() }
     }
 }
 
@@ -100,10 +93,9 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
             ready!(this.inner.poll_read(cx, buf))?;
             buf.filled().len() - init_num_bytes
         };
-        this.monitor.inbound.fetch_add(
-            u64::try_from(num_bytes).unwrap_or(u64::max_value()),
-            Ordering::Relaxed,
-        );
+        this.monitor
+            .inbound
+            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
         Poll::Ready(Ok(()))
     }
 }
@@ -116,10 +108,9 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
     ) -> Poll<io::Result<usize>> {
         let this = self.project();
         let num_bytes = ready!(this.inner.poll_write(cx, buf))?;
-        this.monitor.outbound.fetch_add(
-            u64::try_from(num_bytes).unwrap_or(u64::max_value()),
-            Ordering::Relaxed,
-        );
+        this.monitor
+            .outbound
+            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
         Poll::Ready(Ok(num_bytes))
     }
 
@@ -139,9 +130,9 @@ mod tests {
     use super::*;
     use tokio::{
         io::{duplex, AsyncReadExt, AsyncWriteExt},
-        net::{TcpListener, TcpStream}
+        net::{TcpListener, TcpStream},
     };
-    
+
     #[tokio::test]
     async fn test_count_read_write() {
         // Taken in large part from https://docs.rs/tokio/latest/tokio/io/struct.DuplexStream.html#example
@@ -153,23 +144,39 @@ mod tests {
         monitored_client.write_all(b"ping").await.unwrap();
         // Assert that the client stream wrote 4 bytes
         let client_outbound = monitored_client.monitor.total_outbound();
-        assert_eq!(client_outbound, 4, "Expected client to write 4 bytes, but it wrote {}", client_outbound);
+        assert_eq!(
+            client_outbound, 4,
+            "Expected client to write 4 bytes, but it wrote {}",
+            client_outbound
+        );
 
         let mut buf = [0u8; 4];
         monitored_server.read(&mut buf).await.unwrap();
         // Assert that the server stream read 4 bytes
         let server_inbound = monitored_server.monitor.total_inbound();
-        assert_eq!(server_inbound, 4, "Expected server to read 4 bytes, but it read {}", server_inbound);
+        assert_eq!(
+            server_inbound, 4,
+            "Expected server to read 4 bytes, but it read {}",
+            server_inbound
+        );
 
         monitored_server.write_all(b"pong").await.unwrap();
         // Assert that the server stream wrote 4 bytes
         let server_outbound = monitored_server.monitor.total_outbound();
-        assert_eq!(server_outbound, 4, "Expected server to write 4 bytes, but it wrote {}", server_outbound);
+        assert_eq!(
+            server_outbound, 4,
+            "Expected server to write 4 bytes, but it wrote {}",
+            server_outbound
+        );
 
         monitored_client.read(&mut buf).await.unwrap();
         // Assert that the client stream read 4 bytes
         let client_inbound = monitored_client.monitor.total_inbound();
-        assert_eq!(client_inbound, 4, "Expected client to read 4 bytes, but it read {}", client_inbound);
+        assert_eq!(
+            client_inbound, 4,
+            "Expected client to read 4 bytes, but it read {}",
+            client_inbound
+        );
     }
 
     #[tokio::test]
@@ -190,12 +197,14 @@ mod tests {
 
             metered_server_stream.read(&mut buf).await.unwrap();
 
-            assert_eq!(metered_server_stream.monitor.total_inbound(), client_meter.total_outbound());
+            assert_eq!(
+                metered_server_stream.monitor.total_inbound(),
+                client_meter.total_outbound()
+            );
         });
 
         metered_client_stream.write_all(b"ping").await.unwrap();
 
         handle.await.unwrap();
     }
-
 }
