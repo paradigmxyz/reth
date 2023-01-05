@@ -478,6 +478,12 @@ impl Discv4Service {
         }
     }
 
+    /// Returns true if there's a lookup in progress
+    fn is_lookup_in_progress(&self) -> bool {
+        !self.pending_find_nodes.is_empty() ||
+            self.pending_pings.values().any(|ping| ping.reason.is_find_node())
+    }
+
     /// Returns the current enr sequence
     fn enr_seq(&self) -> Option<u64> {
         if self.config.enable_eip868 {
@@ -1282,9 +1288,13 @@ impl Discv4Service {
     /// query participates in the discovery protocol. The sender of a packet is considered verified
     /// if it has sent a valid Pong response with matching ping hash within the last 12 hours.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
-        // trigger self lookup
-        if self.config.enable_lookup && self.lookup_interval.poll_tick(cx).is_ready() {
+        // trigger lookup, but only if no more lookups in progress
+        if self.config.enable_lookup &&
+            !self.is_lookup_in_progress() &&
+            self.lookup_interval.poll_tick(cx).is_ready()
+        {
             let target = self.lookup_rotator.next(&self.local_node_record.id);
+
             self.lookup_with(target, None);
         }
 
@@ -1782,6 +1792,15 @@ enum PingReason {
     Lookup(NodeRecord, LookupContext),
 }
 
+// === impl PingReason ===
+
+impl PingReason {
+    /// Whether this ping was created in order to issue a find node
+    fn is_find_node(&self) -> bool {
+        matches!(self, PingReason::FindNode(_))
+    }
+}
+
 /// Represents node related updates state changes in the underlying node table
 #[derive(Debug, Clone)]
 pub enum DiscoveryUpdate {
@@ -1803,6 +1822,7 @@ mod tests {
         test_utils::{create_discv4, create_discv4_with_config, rng_record},
     };
     use reth_primitives::{hex_literal::hex, ForkHash};
+    use std::future::poll_fn;
 
     #[test]
     fn test_local_rotator() {
@@ -1871,6 +1891,40 @@ mod tests {
             }
             println!("total peers {}", table.len());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_single_lookups() {
+        reth_tracing::init_tracing();
+
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup_self();
+        assert!(service.is_lookup_in_progress());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            assert!(service.is_lookup_in_progress());
+            assert_eq!(service.pending_find_nodes.len(), 1);
+
+            Poll::Ready(())
+        })
+        .await
     }
 
     #[tokio::test(flavor = "multi_thread")]
