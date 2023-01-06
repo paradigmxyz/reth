@@ -53,16 +53,6 @@ pub struct BandwidthMeter {
 }
 
 impl BandwidthMeter {
-    /// Returns a new [`BandwidthMeter`].
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(BandwidthMeterInner {
-                inbound: AtomicU64::new(0),
-                outbound: AtomicU64::new(0),
-            }),
-        }
-    }
-
     /// Returns the total number of bytes that have been downloaded on all the streams.
     ///
     /// > **Note**: This method is by design subject to race conditions. The returned value should
@@ -82,7 +72,12 @@ impl BandwidthMeter {
 
 impl Default for BandwidthMeter {
     fn default() -> Self {
-        Self::new()
+        Self {
+            inner: Arc::new(BandwidthMeterInner {
+                inbound: AtomicU64::new(0),
+                outbound: AtomicU64::new(0),
+            }),
+        }
     }
 }
 
@@ -102,7 +97,7 @@ impl<S> MeteredStream<S> {
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// along with a new [`BandwidthMeter`]
     pub fn new(inner: S) -> Self {
-        Self { inner, meter: BandwidthMeter::new() }
+        Self { inner, meter: BandwidthMeter::default() }
     }
 
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
@@ -255,8 +250,8 @@ mod tests {
         let (client_1, server_1) = duplex(64);
         let (client_2, server_2) = duplex(64);
 
-        let shared_client_bandwidth_meter = BandwidthMeter::new();
-        let shared_server_bandwidth_meter = BandwidthMeter::new();
+        let shared_client_bandwidth_meter = BandwidthMeter::default();
+        let shared_server_bandwidth_meter = BandwidthMeter::default();
 
         let mut monitored_client_1 =
             MeteredStream::new_with_meter(client_1, shared_client_bandwidth_meter.clone());
