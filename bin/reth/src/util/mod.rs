@@ -40,12 +40,20 @@ pub(crate) fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber,
 
 /// Parse [SocketAddr]
 pub(crate) fn socketaddr_value_parser(value: &str) -> Result<SocketAddr, eyre::Error> {
-    let value = if value.starts_with(':') {
-        format!("localhost{value}")
+    const DEFAULT_DOMAIN: &str = "localhost";
+    const DEFAULT_PORT: u16 = 9000;
+    let value = if value.is_empty() || value == ":" {
+        format!("{DEFAULT_DOMAIN}:{DEFAULT_PORT}")
+    } else if value.starts_with(':') {
+        format!("{DEFAULT_DOMAIN}{value}")
+    } else if value.ends_with(':') {
+        format!("{value}{DEFAULT_PORT}")
     } else if value.parse::<u16>().is_ok() {
-        format!("localhost:{value}")
-    } else {
+        format!("{DEFAULT_DOMAIN}:{value}")
+    } else if value.contains(':') {
         value.to_string()
+    } else {
+        format!("{value}:{DEFAULT_PORT}")
     };
     match value.to_socket_addrs() {
         Ok(mut iter) => iter.next().ok_or(eyre::Error::msg(format!("\"{value}\""))),
@@ -116,5 +124,21 @@ pub mod reth_tracing {
         tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer().with_ansi(!no_color).with_target(with_target))
             .with(filter)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::ToSocketAddrs;
+
+    use super::socketaddr_value_parser;
+
+    #[test]
+    fn parse_socketaddr_with_default() {
+        let expected = "localhost:9000".to_socket_addrs().unwrap().next().unwrap();
+        let test_values = ["localhost:9000", ":9000", "9000", "localhost:", "localhost", ":", ""];
+        for value in test_values {
+            assert_eq!(socketaddr_value_parser(value).expect("value_parser failed"), expected);
+        }
     }
 }
