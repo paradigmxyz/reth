@@ -2,6 +2,7 @@
 use reth_primitives::{BlockHashOrNumber, H256};
 use std::{
     env::VarError,
+    net::{SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -34,6 +35,21 @@ pub(crate) fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber,
     match H256::from_str(value) {
         Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
         Err(_) => Ok(BlockHashOrNumber::Number(value.parse()?)),
+    }
+}
+
+/// Parse [SocketAddr]
+pub(crate) fn socketaddr_value_parser(value: &str) -> Result<SocketAddr, eyre::Error> {
+    let value = if value.starts_with(':') {
+        format!("localhost{value}")
+    } else if value.parse::<u16>().is_ok() {
+        format!("localhost:{value}")
+    } else {
+        value.to_string()
+    };
+    match value.to_socket_addrs() {
+        Ok(mut iter) => iter.next().ok_or(eyre::Error::msg(format!("\"{value}\""))),
+        Err(e) => Err(eyre::Error::from(e).wrap_err(format!("\"{value}\""))),
     }
 }
 
