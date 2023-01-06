@@ -102,7 +102,7 @@ impl Default for Status {
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: chain.genesis_hash(),
             genesis: chain.genesis_hash(),
-            forkid: MainnetSpec::Frontier.fork_id(),
+            forkid: chain.fork_id(&Hardfork::Frontier),
         }
     }
 }

@@ -654,7 +654,7 @@ mod tests {
                 secret_key,
                 local_peer_id,
                 status: StatusBuilder::default().build(),
-                fork_filter: MainnetSpec::default().fork_filter(MainnetSpec::Frontier),
+                fork_filter: MainnetSpec::default().fork_filter(Hardfork::Frontier),
             }
         }
     }

@@ -319,7 +319,7 @@ impl<C> NetworkConfigBuilder<C> {
         let fork_filter = fork_filter.unwrap_or_else(|| {
             let head = head.unwrap_or_default();
             // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
-            ForkFilter::new(head, chain_spec.genesis_hash(), chain_spec.all_forks())
+            ForkFilter::new(head, chain_spec.genesis_hash(), Hardfork::all_concrete_forks(&chain_spec))
         });
 
         NetworkConfig {
