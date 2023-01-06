@@ -1,6 +1,5 @@
 use bytes::{Buf, Bytes};
 pub use codecs_derive::*;
-use ethers_core::types::Bloom;
 use revm_interpreter::{B160 as H160, B256 as H256, U256};
 
 /// Trait that implements the `Compact` codec.
@@ -222,6 +221,8 @@ impl Compact for Bytes {
     }
 }
 
+/// Implements the [`Compact`] trait for fixed size hash types like [`H256`].
+#[macro_export]
 macro_rules! impl_hash_compact {
     ($($name:tt),+) => {
         $(
@@ -257,19 +258,6 @@ macro_rules! impl_hash_compact {
 
 impl_hash_compact!(H256, H160);
 
-impl Compact for Bloom {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        buf.put_slice(&self.0);
-        256
-    }
-
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let result = Bloom::from_slice(&buf[..256]);
-        buf.advance(256);
-        (result, buf)
-    }
-}
-
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
     fn to_compact(self, _: &mut impl bytes::BufMut) -> usize {
@@ -301,19 +289,6 @@ mod tests {
 
         assert_eq!(&buf[..arr.len()], &arr);
         assert_eq!(bytes::Bytes::from_compact(&buf, list.len()), (list, vec![1].as_slice()));
-    }
-
-    #[test]
-    fn compact_bloom() {
-        let mut buf = vec![];
-        assert_eq!(Bloom::default().to_compact(&mut buf), 256);
-        assert_eq!(buf, vec![0; 256]);
-
-        // Add some noise data.
-        buf.push(1);
-
-        // Bloom shouldn't care about the len passed, since it's not actually compacted.
-        assert_eq!(Bloom::from_compact(&buf, 1000), (Bloom::default(), vec![1u8].as_slice()));
     }
 
     #[test]
