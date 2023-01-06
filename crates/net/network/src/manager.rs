@@ -37,6 +37,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
 };
+use reth_net_common::bandwidth_monitor::BandwidthMeter;
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
@@ -168,6 +169,8 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
+        let bandwidth_meter: BandwidthMeter = BandwidthMeter::new();
+
         let sessions = SessionManager::new(
             secret_key,
             sessions_config,
@@ -175,6 +178,7 @@ where
             status,
             hello_message,
             fork_filter,
+            bandwidth_meter.clone(),
         );
         let state = NetworkState::new(client, discovery, peers_manager, genesis_hash);
 
@@ -190,6 +194,7 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
+            bandwidth_meter.clone(),
         );
 
         Ok(Self {

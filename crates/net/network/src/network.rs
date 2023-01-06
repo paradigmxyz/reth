@@ -9,6 +9,7 @@ use crate::{
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::p2p::headers::client::StatusUpdater;
+use reth_net_common::bandwidth_monitor::BandwidthMeter;
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -40,6 +41,7 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
+        bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -48,6 +50,7 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
+            bandwidth_meter,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -201,6 +204,8 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
+    /// Used to measure inbound & outbound bandwidth across network streams
+    bandwidth_meter: BandwidthMeter,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
