@@ -38,7 +38,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
 };
-use reth_net_common::bandwidth_monitor::BandwidthMeter;
+use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
@@ -128,6 +128,12 @@ impl<C> NetworkManager<C> {
     pub fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
+
+    /// Returns a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// inside of the [`NetworkHandle`]
+    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
+        self.handle.bandwidth_meter()
+    }
 }
 
 impl<C> NetworkManager<C>
@@ -175,7 +181,7 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
-        let bandwidth_meter: BandwidthMeter = BandwidthMeter::new();
+        let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
 
         let sessions = SessionManager::new(
             secret_key,

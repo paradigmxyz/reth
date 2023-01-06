@@ -17,7 +17,7 @@ use reth_eth_wire::{
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
-use reth_net_common::bandwidth_monitor::MeteredStream;
+use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
@@ -514,7 +514,7 @@ mod tests {
         EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_net_common::bandwidth_monitor::BandwidthMeter;
+    use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
@@ -660,7 +660,7 @@ mod tests {
                 local_peer_id,
                 status: StatusBuilder::default().build(),
                 fork_filter: Hardfork::Frontier.fork_filter(),
-                bandwidth_meter: BandwidthMeter::new(),
+                bandwidth_meter: BandwidthMeter::default(),
             }
         }
     }

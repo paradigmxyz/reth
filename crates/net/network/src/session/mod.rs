@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::bandwidth_monitor::{BandwidthMeter, MeteredStream};
+use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
