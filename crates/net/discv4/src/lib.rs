@@ -614,15 +614,15 @@ impl Discv4Service {
     /// the request has finished.
     fn lookup_with(&mut self, target: PeerId, tx: Option<NodeRecordSender>) {
         trace!(target : "net::discv4", ?target, "Starting lookup");
-        let key = kad_key(target);
+        let target_key = kad_key(target);
 
         // Start a lookup context with the 16 (MAX_NODES_PER_BUCKET) closest nodes
         let ctx = LookupContext::new(
-            target,
+            target_key.clone(),
             self.kbuckets
-                .closest_values(&key)
+                .closest_values(&target_key)
                 .take(MAX_NODES_PER_BUCKET)
-                .map(|n| (key.distance(&n.key), n.value.record)),
+                .map(|n| (target_key.distance(&n.key), n.value.record)),
             tx,
         );
 
@@ -1105,8 +1105,6 @@ impl Discv4Service {
             }
         };
 
-        let our_key = kad_key(self.local_node_record.id);
-
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that where discovered.
         for node in msg.nodes {
@@ -1116,9 +1114,7 @@ impl Discv4Service {
                 continue
             }
 
-            let key = kad_key(node.id);
-            let distance = our_key.distance(&key);
-            ctx.add_node(distance, node);
+            ctx.add_node(node);
         }
 
         // get the next closest nodes, not yet queried nodes and start over.
@@ -1600,7 +1596,7 @@ struct LookupContext {
 impl LookupContext {
     /// Create new context for a recursive lookup
     fn new(
-        target: PeerId,
+        target: discv5::Key<NodeKey>,
         nearest_nodes: impl IntoIterator<Item = (Distance, NodeRecord)>,
         listener: Option<NodeRecordSender>,
     ) -> Self {
@@ -1621,7 +1617,7 @@ impl LookupContext {
 
     /// Returns the target of this lookup
     fn target(&self) -> PeerId {
-        self.inner.target
+        self.inner.target.preimage().0
     }
 
     /// Returns an iterator over the closest nodes that are not queried yet.
@@ -1637,7 +1633,8 @@ impl LookupContext {
     }
 
     /// Inserts the node if it's missing
-    fn add_node(&self, distance: Distance, record: NodeRecord) {
+    fn add_node(&self, record: NodeRecord) {
+        let distance = self.inner.target.distance(&kad_key(record.id));
         let mut closest = self.inner.closest_nodes.borrow_mut();
         if let btree_map::Entry::Vacant(entry) = closest.entry(distance) {
             entry.insert(QueryNode { record, queried: false, responded: false });
@@ -1672,7 +1669,8 @@ impl LookupContext {
 unsafe impl Send for LookupContext {}
 
 struct LookupContextInner {
-    target: PeerId,
+    /// The target to lookup.
+    target: discv5::Key<NodeKey>,
     /// The closest nodes
     closest_nodes: RefCell<BTreeMap<Distance, QueryNode>>,
     /// A listener for all the nodes retrieved in this lookup
@@ -1941,6 +1939,40 @@ mod tests {
             Poll::Ready(())
         })
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_random_lookup() {
+        reth_tracing::init_tracing();
+
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let target = PeerId::random();
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup(target);
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        let ctx = service.pending_find_nodes.values().next().unwrap().lookup_context.clone();
+
+        assert_eq!(ctx.target(), target);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), 1);
+
+        ctx.add_node(record);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
