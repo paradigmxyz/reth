@@ -5,6 +5,7 @@ use derive_more::{AsRef, Deref};
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(test)]
 use proptest::{
@@ -21,7 +22,7 @@ pub const BLOOM_BYTE_LENGTH: usize = 256;
 construct_fixed_hash! {
     /// 2048 bits type.
     #[cfg_attr(any(test, feature = "arbitrary"), derive(Arbitrary))]
-    #[derive(AsRef, Deref)]
+    #[derive(AsRef, Deref, RlpEncodableWrapper, RlpDecodableWrapper)]
     pub struct Bloom(BLOOM_BYTE_LENGTH);
 }
 
@@ -37,22 +38,6 @@ impl PropTestArbitrary for Bloom {
         proptest::collection::vec(any_with::<u8>(args), BLOOM_BYTE_LENGTH)
             .prop_map(move |vec| Bloom::from_slice(&vec))
             .boxed()
-    }
-}
-
-impl reth_rlp::Decodable for Bloom {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        reth_rlp::Decodable::decode(buf).map(Self)
-    }
-}
-
-impl reth_rlp::Encodable for Bloom {
-    fn length(&self) -> usize {
-        self.0.length()
-    }
-
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.0.encode(out)
     }
 }
 
