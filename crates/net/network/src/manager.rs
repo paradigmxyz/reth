@@ -200,7 +200,7 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
-            bandwidth_meter.clone(),
+            bandwidth_meter,
         );
 
         Ok(Self {
