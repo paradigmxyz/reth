@@ -4,8 +4,7 @@ use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;
-use reth_codecs::Compact;
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use reth_codecs::{impl_hash_compact, Compact};
 
 #[cfg(test)]
 use proptest::{
@@ -20,11 +19,14 @@ use arbitrary::Arbitrary;
 pub const BLOOM_BYTE_LENGTH: usize = 256;
 
 construct_fixed_hash! {
-    /// revm 2048 bits type.
+    /// 2048 bits type.
     #[cfg_attr(any(test, feature = "arbitrary"), derive(Arbitrary))]
-    #[derive(AsRef,Deref)]
-    pub struct Bloom(256);
+    #[derive(AsRef, Deref)]
+    pub struct Bloom(BLOOM_BYTE_LENGTH);
 }
+
+impl_hash_compact!(Bloom);
+impl_fixed_hash_serde!(Bloom, BLOOM_BYTE_LENGTH);
 
 #[cfg(test)]
 impl PropTestArbitrary for Bloom {
@@ -38,47 +40,19 @@ impl PropTestArbitrary for Bloom {
     }
 }
 
-impl_fixed_hash_serde!(Bloom, BLOOM_BYTE_LENGTH);
-
-impl Decodable for Bloom {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        Decodable::decode(buf).map(Self)
+impl reth_rlp::Decodable for Bloom {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+        reth_rlp::Decodable::decode(buf).map(Self)
     }
 }
 
-impl Encodable for Bloom {
+impl reth_rlp::Encodable for Bloom {
     fn length(&self) -> usize {
-        self.0.length()
+        BLOOM_BYTE_LENGTH
     }
 
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.0.encode(out)
-    }
-}
-
-impl Compact for Bloom {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        buf.put_slice(&self.0);
-        std::mem::size_of::<Bloom>()
-    }
-
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        if len == 0 {
-            return (Bloom::default(), buf)
-        }
-
-        let v =
-            Bloom::from_slice(buf.get(..std::mem::size_of::<Bloom>()).expect("size not matching"));
-        buf.advance(std::mem::size_of::<Bloom>());
-        (v, buf)
-    }
-
-    fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        self.to_compact(buf)
-    }
-
-    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        Self::from_compact(buf, len)
     }
 }
 

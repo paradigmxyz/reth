@@ -221,6 +221,7 @@ impl Compact for Bytes {
     }
 }
 
+#[macro_export]
 macro_rules! impl_hash_compact {
     ($($name:tt),+) => {
         $(
