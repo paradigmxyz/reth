@@ -316,10 +316,27 @@ mod tests {
             }
             self.check_hashed_storage()
         }
+
+        async fn after_execution(&self, _seed: Self::Seed) -> Result<(), TestRunnerError> {
+            println!(" printing state...");
+            self.tx
+                .query(|tx| {
+                    let mut storage_cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
+
+                    while let Some((address, entry)) = storage_cursor.next()? {
+                        println!("{:?} -> {:?}", address, entry);
+                    }
+
+                    Ok(())
+                })
+                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
+            Ok(())
+        }
     }
 
     impl UnwindStageTestRunner for StorageHashingTestRunner {
-        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            self.unwind_storage(input)?;
             self.check_hashed_storage()
         }
     }
@@ -385,6 +402,37 @@ mod tests {
             storage_cursor.append_dup(tid_address.address(), entry)?;
 
             tx.cursor_dup_mut::<tables::StorageChangeSet>()?.append_dup(tid_address, prev_entry)?;
+            Ok(())
+        }
+
+        fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            println!("\n unwinding storage...");
+            let target_transition = self
+                .tx
+                .inner()
+                .get_block_transition_by_num(input.unwind_to)
+                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
+            self.tx.commit(|tx| {
+                let mut storage_cursor = tx.cursor_dup_mut::<tables::PlainStorageState>()?;
+                let mut changeset_cursor = tx.cursor_dup::<tables::StorageChangeSet>()?;
+                let mut row = changeset_cursor.last()?;
+
+                while let Some((tid_address, entry)) = row {
+                    if tid_address.transition_id() <= target_transition {
+                        break
+                    }
+
+                    storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?;
+                    storage_cursor.delete_current()?;
+
+                    if entry.value != U256::ZERO {
+                        storage_cursor.append_dup(tid_address.address(), entry)?;
+                    }
+
+                    row = changeset_cursor.prev()?;
+                }
+                Ok(())
+            })?;
             Ok(())
         }
     }
