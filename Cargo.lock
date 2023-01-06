@@ -3815,6 +3815,7 @@ dependencies = [
  "fnv",
  "futures",
  "hex",
+ "linked-hash-map",
  "linked_hash_set",
  "metrics",
  "parking_lot 0.12.1",
