@@ -513,7 +513,7 @@ mod tests {
         EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_primitives::{ForkFilter, Hardfork};
+    use reth_primitives::{ForkFilter, Hardfork, MainnetSpec, ChainSpec};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::TcpListener;
@@ -654,7 +654,7 @@ mod tests {
                 secret_key,
                 local_peer_id,
                 status: StatusBuilder::default().build(),
-                fork_filter: Hardfork::Frontier.fork_filter(),
+                fork_filter: MainnetSpec::default().fork_filter(MainnetSpec::Frontier),
             }
         }
     }

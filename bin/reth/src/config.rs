@@ -6,7 +6,7 @@ use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
 };
-use reth_primitives::H256;
+use reth_primitives::ChainSpecUnified;
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -25,8 +25,7 @@ impl Config {
     pub fn network_config<DB: Database>(
         &self,
         db: Arc<DB>,
-        chain_id: u64,
-        genesis_hash: H256,
+        chain_spec: ChainSpecUnified,
         disable_discovery: bool,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
@@ -35,8 +34,7 @@ impl Config {
         NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
             .boot_nodes(mainnet_nodes())
             .peer_config(peer_config)
-            .genesis_hash(genesis_hash)
-            .chain_id(chain_id)
+            .chain_spec(chain_spec)
             .set_discovery(disable_discovery)
             .build()
     }

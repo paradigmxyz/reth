@@ -5,7 +5,7 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
     prometheus_exporter,
-    util::chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
+    util::chainspec::{chain_spec_value_parser, Genesis},
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
@@ -20,7 +20,7 @@ use reth_db::{
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{Account, Header, H256};
+use reth_primitives::{Account, ChainSpecUnified, Header, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -63,7 +63,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecification,
+    chain: ChainSpecUnified,
 
     /// Enable Prometheus metrics.
     ///
@@ -103,12 +103,10 @@ impl Command {
             HeaderMetrics::describe();
         }
 
-        let chain_id = self.chain.consensus.chain_id;
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
-        let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
+        let consensus: Arc<BeaconConsensus> = todo!(); // Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
 
         let network = config
-            .network_config(db.clone(), chain_id, genesis_hash, self.disable_discovery)
+            .network_config(db.clone(), self.chain, self.disable_discovery)
             .start_network()
             .await?;
 

@@ -1,6 +1,6 @@
 use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{Chain, ForkId, Hardfork, H256, MAINNET_GENESIS, U256};
+use reth_primitives::{Chain, ChainSpec, ForkId, Hardfork, MainnetSpec, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -94,13 +94,15 @@ impl Debug for Status {
 // <https://etherscan.io/block/0>
 impl Default for Status {
     fn default() -> Self {
+        let chain = MainnetSpec::default();
+
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
             total_difficulty: 17_179_869_184u64.into(),
-            blockhash: MAINNET_GENESIS,
-            genesis: MAINNET_GENESIS,
-            forkid: Hardfork::Frontier.fork_id(),
+            blockhash: chain.genesis_hash(),
+            genesis: chain.genesis_hash(),
+            forkid: MainnetSpec::Frontier.fork_id(),
         }
     }
 }

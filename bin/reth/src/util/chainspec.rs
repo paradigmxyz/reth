@@ -1,6 +1,6 @@
 use reth_primitives::{
     utils::serde_helpers::{deserialize_number, deserialize_stringified_u64},
-    Address, Bytes, Header, H256, U256,
+    Address, Bytes, ChainSpecUnified, Header, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
@@ -72,14 +72,17 @@ pub struct GenesisAccount {
 
 /// Clap value parser for [ChainSpecification]s that takes either a built-in chainspec or the path
 /// to a custom one.
-pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpecification, eyre::Error> {
+pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpecUnified, eyre::Error> {
     Ok(match s {
-        "mainnet" => serde_json::from_str(include_str!("../../res/chainspec/mainnet.json"))?,
-        "goerli" => serde_json::from_str(include_str!("../../res/chainspec/goerli.json"))?,
-        "sepolia" => serde_json::from_str(include_str!("../../res/chainspec/mainnet.json"))?,
+        "mainnet" => ChainSpecUnified::Mainnet,
+        "goerli" => ChainSpecUnified::Goerli,
+        "sepolia" => ChainSpecUnified::Sepolia,
         _ => {
+            /*
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
+             */
+            todo!()
         }
     })
 }
