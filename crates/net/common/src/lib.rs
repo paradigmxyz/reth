@@ -8,5 +8,5 @@
 //! Shared types across reth-net
 
 pub mod ban_list;
-pub mod metered_channel;
 pub mod bandwidth_meter;
+pub mod metered_channel;

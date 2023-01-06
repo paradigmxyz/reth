@@ -1,10 +1,9 @@
-use metrics::{Counter};
+use metrics::Counter;
 use reth_metrics_derive::Metrics;
 use tokio::sync::mpsc::{
+    error::{SendError, TrySendError},
     Sender,
-    error::{TrySendError, SendError}
 };
-
 
 /// Network throughput metrics
 #[derive(Metrics)]
@@ -27,10 +26,7 @@ pub struct MeteredSender<T> {
 impl<T> MeteredSender<T> {
     /// Creates a new [`MeteredSender`] wrapping around the provided [`Sender`]
     pub fn new(sender: Sender<T>) -> Self {
-        Self {
-            sender,
-            metrics: MeteredSenderMetrics::default(),
-        }
+        Self { sender, metrics: MeteredSenderMetrics::default() }
     }
 
     /// Calls the underlying [`Sender`]'s `try_send`, incrementing the appropriate
@@ -40,7 +36,7 @@ impl<T> MeteredSender<T> {
             Ok(()) => {
                 self.metrics.messages_sent.increment(1);
                 Ok(())
-            },
+            }
             Err(error) => {
                 self.metrics.send_errors.increment(1);
                 Err(error)
@@ -55,7 +51,7 @@ impl<T> MeteredSender<T> {
             Ok(()) => {
                 self.metrics.messages_sent.increment(1);
                 Ok(())
-            },
+            }
             Err(error) => {
                 self.metrics.send_errors.increment(1);
                 Err(error)
