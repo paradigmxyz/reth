@@ -6,8 +6,8 @@ mod storage;
 use std::sync::Arc;
 
 pub use storage::{
-    StateProviderImplHistory, StateProviderImplLatest, StateProviderImplRefHistory,
-    StateProviderImplRefLatest,
+    HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
+    LatestStateProviderRef,
 };
 
 use reth_db::database::Database;

@@ -1,6 +1,5 @@
 use reth_primitives::{
-    utils::serde_helpers::{deserialize_number, deserialize_stringified_u64},
-    Address, Bytes, Header, H256, U256,
+    utils::serde_helpers::deserialize_stringified_u64, Address, Bytes, Header, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
@@ -32,7 +31,6 @@ pub struct Genesis {
     #[serde(deserialize_with = "deserialize_stringified_u64")]
     pub gas_limit: u64,
     /// The genesis header difficulty.
-    #[serde(deserialize_with = "deserialize_number")]
     pub difficulty: U256,
     /// The genesis header mix hash.
     pub mix_hash: H256,

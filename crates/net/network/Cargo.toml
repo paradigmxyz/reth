@@ -35,6 +35,13 @@ pin-project = "1.0"
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream = "0.1"
 
+# io
+serde = { version = "1.0", optional = true }
+
+# metrics
+metrics = "0.20.1"
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
+
 # misc
 auto_impl = "1"
 aquamarine = "0.1" # docs
@@ -58,6 +65,8 @@ reth-discv4 = { path = "../discv4", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
+reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
+
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 
@@ -68,3 +77,5 @@ hex = "0.4"
 tempfile = "3.3"
 serial_test = "0.10"
 
+[features]
+serde = ["dep:serde"]

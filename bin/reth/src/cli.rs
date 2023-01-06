@@ -1,12 +1,11 @@
 //! CLI definition and entrypoint to executable
 
-use clap::{ArgAction, Parser, Subcommand};
-use tracing_subscriber::util::SubscriberInitExt;
-
 use crate::{
-    db, node, test_eth_chain,
+    db, node, p2p, stage, test_eth_chain,
     util::reth_tracing::{self, TracingMode},
 };
+use clap::{ArgAction, Parser, Subcommand};
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
@@ -22,6 +21,8 @@ pub async fn run() -> eyre::Result<()> {
         Commands::Node(command) => command.execute().await,
         Commands::TestEthChain(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
+        Commands::Stage(command) => command.execute().await,
+        Commands::P2P(command) => command.execute().await,
     }
 }
 
@@ -31,12 +32,23 @@ pub enum Commands {
     /// Start the node
     #[command(name = "node")]
     Node(node::Command),
-    /// Runs Ethereum blockchain tests
+    /// Run Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
-    /// DB Debugging utilities
+    /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
+    /// Run a single stage.
+    ///
+    /// Note that this won't use the Pipeline and as a result runs stages
+    /// assuming that all the data can be held in memory. It is not recommended
+    /// to run a stage for really large block ranges if your computer does not have
+    /// a lot of memory to store all the data.
+    #[command(name = "stage")]
+    Stage(stage::Command),
+    /// P2P Debugging utilities
+    #[command(name = "p2p")]
+    P2P(p2p::Command),
 }
 
 #[derive(Parser)]

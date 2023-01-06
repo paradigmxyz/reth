@@ -3,7 +3,7 @@
 use crate::{error::DecodePacketError, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enr::Enr;
-use reth_primitives::{keccak256, ForkId, NodeRecord, Octets, H256};
+use reth_primitives::{keccak256, ForkId, NodeRecord, H256};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
@@ -180,57 +180,11 @@ pub struct Packet {
 }
 
 /// Represents the `from`, `to` fields in the packets
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct NodeEndpoint {
     pub address: IpAddr,
     pub udp_port: u16,
     pub tcp_port: u16,
-}
-impl Decodable for NodeEndpoint {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let b = &mut &**buf;
-        let rlp_head = Header::decode(b)?;
-        if !rlp_head.list {
-            return Err(DecodeError::UnexpectedString)
-        }
-        let started_len = b.len();
-        let octets = Octets::decode(b)?;
-        let this = Self {
-            address: octets.into(),
-            udp_port: Decodable::decode(b)?,
-            tcp_port: Decodable::decode(b)?,
-        };
-        // the ENR record can contain additional entries that we skip
-        let consumed = started_len - b.len();
-        if consumed > rlp_head.payload_length {
-            return Err(DecodeError::ListLengthMismatch {
-                expected: rlp_head.payload_length,
-                got: consumed,
-            })
-        }
-        let rem = rlp_head.payload_length - consumed;
-        b.advance(rem);
-        *buf = *b;
-        Ok(this)
-    }
-}
-
-impl Encodable for NodeEndpoint {
-    fn encode(&self, out: &mut dyn BufMut) {
-        #[derive(RlpEncodable)]
-        struct RlpEndpoint {
-            octets: Octets,
-            udp_port: u16,
-            tcp_port: u16,
-        }
-
-        let octets = match self.address {
-            IpAddr::V4(addr) => Octets::V4(addr.octets()),
-            IpAddr::V6(addr) => Octets::V6(addr.octets()),
-        };
-        let p = RlpEndpoint { octets, udp_port: self.udp_port, tcp_port: self.tcp_port };
-        p.encode(out)
-    }
 }
 
 impl From<NodeRecord> for NodeEndpoint {

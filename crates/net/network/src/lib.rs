@@ -108,6 +108,10 @@
 //!         .split_with_handle();
 //! }
 //! ```
+//!
+//! # Features
+//!
+//! - `serde`: Enable serde support for configuration types.
 
 mod builder;
 mod cache;
@@ -120,6 +124,7 @@ mod import;
 mod listener;
 mod manager;
 mod message;
+mod metrics;
 mod network;
 pub mod peers;
 mod session;
@@ -134,3 +139,5 @@ pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::NetworkHandle;
 pub use peers::PeersConfig;
+
+pub use reth_eth_wire::DisconnectReason;

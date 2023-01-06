@@ -52,12 +52,14 @@ impl ExtendedAccount {
 impl MockEthProvider {
     /// Add block to local block store
     pub fn add_block(&self, hash: H256, block: Block) {
+        self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
 
     /// Add multiple blocks to local block store
     pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (H256, Block)>) {
         for (hash, block) in iter.into_iter() {
+            self.add_header(hash, block.header.clone());
             self.add_block(hash, block)
         }
     }
@@ -115,7 +117,7 @@ impl BlockHashProvider for MockEthProvider {
         let hash =
             lock.iter().find_map(
                 |(hash, b)| {
-                    if b.number == number.as_u64() {
+                    if b.number == number.to::<u64>() {
                         Some(*hash)
                     } else {
                         None
@@ -134,7 +136,7 @@ impl BlockProvider for MockEthProvider {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
-            BlockId::Hash(hash) => Ok(lock.get(&hash).cloned()),
+            BlockId::Hash(hash) => Ok(lock.get(&H256(hash.0)).cloned()),
             BlockId::Number(BlockNumber::Number(num)) => {
                 Ok(lock.values().find(|b| b.number == num.as_u64()).cloned())
             }

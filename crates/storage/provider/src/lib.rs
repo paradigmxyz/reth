@@ -20,8 +20,8 @@ pub use block::{
     insert_canonical_block, BlockHashProvider, BlockProvider, ChainInfo, HeaderProvider,
 };
 pub use db_provider::{
-    self as db, ProviderImpl, StateProviderImplHistory, StateProviderImplLatest,
-    StateProviderImplRefHistory, StateProviderImplRefLatest,
+    self as db, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
+    LatestStateProviderRef, ProviderImpl,
 };
 pub use reth_interfaces::provider::Error;
 pub use state::{AccountProvider, StateProvider, StateProviderFactory};

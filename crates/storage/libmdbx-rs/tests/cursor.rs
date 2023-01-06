@@ -237,17 +237,17 @@ fn test_iter_dup() {
     assert_eq!(items, cursor.iter_dup_start().flatten().collect::<Result<Vec<_>>>().unwrap());
 
     assert_eq!(
-        items.iter().copied().into_iter().skip(3).collect::<Vec<_>>(),
+        items.iter().copied().skip(3).collect::<Vec<_>>(),
         cursor.iter_dup_from(b"b").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
-        items.iter().copied().into_iter().skip(3).collect::<Vec<_>>(),
+        items.iter().copied().skip(3).collect::<Vec<_>>(),
         cursor.iter_dup_from(b"ab").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 
     assert_eq!(
-        items.iter().copied().into_iter().skip(9).collect::<Vec<_>>(),
+        items.iter().copied().skip(9).collect::<Vec<_>>(),
         cursor.iter_dup_from(b"d").flatten().collect::<Result<Vec<_>>>().unwrap()
     );
 

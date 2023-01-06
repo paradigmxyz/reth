@@ -8,7 +8,7 @@ use crate::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
     },
-    peers::{PeerAction, PeersManager},
+    peers::{PeerAction, PeerKind, PeersManager},
     FetchClient,
 };
 use reth_eth_wire::{
@@ -253,16 +253,23 @@ where
         self.discovery.ban(peer_id, ip)
     }
 
-    /// Adds a peer and its address to the peerset.
-    pub(crate) fn add_peer_address(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        self.peers_manager.add_discovered_node(peer_id, addr)
+    /// Adds a peer and its address with the given kind to the peerset.
+    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+        self.peers_manager.add_peer_kind(peer_id, kind, addr)
+    }
+
+    pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
+        match kind {
+            PeerKind::Basic => self.peers_manager.remove_peer(peer_id),
+            PeerKind::Trusted => self.peers_manager.remove_peer_from_trusted_set(peer_id),
+        }
     }
 
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::Discovered(peer, addr) => {
-                self.peers_manager.add_discovered_node(peer, addr);
+                self.peers_manager.add_peer(peer, addr);
             }
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
                 self.queued_messages

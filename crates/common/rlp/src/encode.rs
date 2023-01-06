@@ -217,6 +217,16 @@ where
     }
 }
 
+#[cfg(feature = "std")]
+impl Encodable for std::net::IpAddr {
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self {
+            std::net::IpAddr::V4(ref o) => (&o.octets()[..]).encode(out),
+            std::net::IpAddr::V6(ref o) => (&o.octets()[..]).encode(out),
+        }
+    }
+}
+
 #[cfg(feature = "ethnum")]
 mod ethnum_support {
     use super::*;
@@ -229,6 +239,8 @@ mod ethnum_support {
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
+
+    use revm_interpreter::{B160, B256, U256 as RU256};
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -245,6 +257,8 @@ mod ethereum_types_support {
         };
     }
 
+    fixed_hash_impl!(B160);
+    fixed_hash_impl!(B256);
     fixed_hash_impl!(H64);
     fixed_hash_impl!(H128);
     fixed_hash_impl!(H160);
@@ -279,6 +293,26 @@ mod ethereum_types_support {
     fixed_uint_impl!(U128, 16);
     fixed_uint_impl!(U256, 32);
     fixed_uint_impl!(U512, 64);
+
+    macro_rules! fixed_revm_uint_impl {
+        ($t:ty, $n_bytes:tt) => {
+            impl Encodable for $t {
+                fn length(&self) -> usize {
+                    if *self < <$t>::from(EMPTY_STRING_CODE) {
+                        1
+                    } else {
+                        1 + self.byte_len()
+                    }
+                }
+
+                fn encode(&self, out: &mut dyn bytes::BufMut) {
+                    self.to_be_bytes_trimmed_vec().as_slice().encode(out)
+                }
+            }
+        };
+    }
+
+    fixed_revm_uint_impl!(RU256, 32);
 }
 
 macro_rules! slice_impl {

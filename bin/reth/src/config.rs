@@ -1,12 +1,12 @@
 //! Configuration files.
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use reth_db::database::Database;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig,
+    NetworkConfig, PeersConfig,
 };
-use reth_primitives::{NodeRecord, H256};
+use reth_primitives::H256;
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,7 @@ impl Config {
         db: Arc<DB>,
         chain_id: u64,
         genesis_hash: H256,
+        disable_discovery: bool,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
@@ -36,6 +37,7 @@ impl Config {
             .peer_config(peer_config)
             .genesis_hash(genesis_hash)
             .chain_id(chain_id)
+            .set_discovery(disable_discovery)
             .build()
     }
 }
@@ -45,10 +47,14 @@ impl Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
+    /// Total difficulty stage configuration
+    pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
     /// Sender recovery stage configuration.
     pub sender_recovery: SenderRecoveryConfig,
+    /// Execution stage configuration.
+    pub execution: ExecutionConfig,
 }
 
 /// Header stage configuration.
@@ -65,6 +71,20 @@ pub struct HeadersConfig {
 impl Default for HeadersConfig {
     fn default() -> Self {
         Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
+    }
+}
+
+/// Total difficulty stage configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TotalDifficultyConfig {
+    /// The maximum number of total difficulty entries to sum up before committing progress to the
+    /// database.
+    pub commit_threshold: u64,
+}
+
+impl Default for TotalDifficultyConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
     }
 }
 
@@ -88,7 +108,7 @@ impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
             commit_threshold: 5_000,
-            downloader_batch_size: 200,
+            downloader_batch_size: 100,
             downloader_retries: 5,
             downloader_concurrency: 10,
         }
@@ -110,11 +130,15 @@ impl Default for SenderRecoveryConfig {
     }
 }
 
-/// Configuration for peer managing.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct PeersConfig {
-    /// Trusted nodes to connect to.
-    pub trusted_nodes: HashSet<NodeRecord>,
-    /// Connect to trusted nodes only?
-    pub connect_trusted_nodes_only: bool,
+/// Execution stage configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExecutionConfig {
+    /// The maximum number of blocks to execution before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 5_000 }
+    }
 }
