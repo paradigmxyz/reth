@@ -1,4 +1,6 @@
-use crate::{keccak256, Header, Log, Receipt, TransactionSigned, H256};
+use std::collections::HashMap;
+
+use crate::{keccak256, Address, GenesisAccount, Header, Log, Receipt, TransactionSigned, H256};
 use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;
@@ -64,6 +66,12 @@ pub fn calculate_ommers_root<'a>(ommers: impl Iterator<Item = &'a Header> + Clon
     let mut ommers_rlp = Vec::new();
     reth_rlp::encode_iter(ommers, &mut ommers_rlp);
     keccak256(ommers_rlp)
+}
+
+/// Calculates the root hash for the state, this corresponds to [geth's
+/// `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
+pub fn genesis_state_root(_genesis_alloc: HashMap<Address, GenesisAccount>) -> H256 {
+    todo!()
 }
 
 #[cfg(test)]

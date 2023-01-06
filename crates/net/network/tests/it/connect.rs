@@ -20,7 +20,8 @@ use reth_interfaces::{
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
 use reth_primitives::{
-    Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord, PeerId, H256,
+    proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord,
+    PeerId, H160, H256,
 };
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
@@ -57,16 +58,36 @@ fn create_new_geth() -> (Geth, tempfile::TempDir) {
 
 /// Extracts the genesis block header from an ethers [`Genesis`](ethers_core::utils::Genesis).
 fn genesis_header(genesis: &Genesis) -> Header {
+    let genesis_alloc = genesis.alloc.clone();
+    // convert to reth genesis alloc map
+    let reth_alloc = genesis_alloc
+        .into_iter()
+        .map(|(address, account)| (address.0.into(), convert_genesis_account(&account)))
+        .collect::<HashMap<H160, _>>();
+
     Header {
         gas_limit: genesis.gas_limit.as_u64(),
         difficulty: genesis.difficulty.into(),
         nonce: genesis.nonce.as_u64(),
         extra_data: genesis.extra_data.0.clone(),
-        // state_root: genesis.state_root, TODO field not in Genesis, might need to add
+        state_root: genesis_state_root(reth_alloc),
         timestamp: genesis.timestamp.as_u64(),
         mix_hash: genesis.mix_hash.0.into(),
         beneficiary: genesis.coinbase.0.into(),
         ..Default::default()
+    }
+}
+
+/// Converts an ethers [`GenesisAccount`](ethers_core::utils::GenesisAccount) to a reth
+/// [`GenesisAccount`](reth_primitives::GenesisAccount).
+fn convert_genesis_account(genesis_account: &GenesisAccount) -> reth_primitives::GenesisAccount {
+    reth_primitives::GenesisAccount {
+        balance: genesis_account.balance.into(),
+        nonce: genesis_account.nonce,
+        code: genesis_account.code.as_ref().map(|code| code.0.clone().into()),
+        storage: genesis_account.storage.as_ref().map(|storage| {
+            storage.clone().into_iter().map(|(k, v)| (k.0.into(), v.0.into())).collect()
+        }),
     }
 }
 
@@ -126,7 +147,6 @@ fn extract_status(genesis: &Genesis) -> Status {
 fn extract_fork_blocks(genesis: &Genesis) -> Vec<u64> {
     // will just put each consecutive fork in a vec
     let mut fork_blocks_opt = vec![
-        // genesis.config.frontier,
         genesis.config.homestead_block,
         genesis.config.dao_fork_block,
         genesis.config.eip150_block,
@@ -151,11 +171,9 @@ fn extract_fork_blocks(genesis: &Genesis) -> Vec<u64> {
     fork_blocks_opt.iter().map(|block| block.unwrap()).collect()
 }
 
-/// Creates a
-
 /// Starts the reth pipeline with the given config, consensus, db, and fetch client.
 /// .... TODO: doc
-/// TODO: need to figure out where to put this test as it imports every part of the node.
+/// TODO: need to figure out where to put this test as it will import every part of the node.
 async fn start_reth(network: NetworkHandle) {
     let _fetch_client = Arc::new(network.fetch_client().await.unwrap());
     // let mut pipeline = reth_stages::Pipeline::default()
