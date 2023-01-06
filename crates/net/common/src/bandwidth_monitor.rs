@@ -80,6 +80,12 @@ impl BandwidthMeter {
     }
 }
 
+impl Default for BandwidthMeter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and meters the
 /// bandwidth through it
 #[derive(Debug)]
