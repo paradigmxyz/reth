@@ -124,6 +124,7 @@ mod import;
 mod listener;
 mod manager;
 mod message;
+mod metrics;
 mod network;
 pub mod peers;
 mod session;

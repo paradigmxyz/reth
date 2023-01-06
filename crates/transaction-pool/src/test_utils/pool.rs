@@ -3,7 +3,7 @@
 use crate::{
     error::PoolResult,
     pool::{txpool::TxPool, AddedTransaction},
-    test_util::{
+    test_utils::{
         MockOrdering, MockTransaction, MockTransactionDistribution, MockTransactionFactory,
     },
     TransactionOrdering,
@@ -218,9 +218,9 @@ pub struct ExecutedScenarios {
 fn test_on_chain_nonce_scenario() {
     let config = MockSimulatorConfig {
         num_senders: 10,
-        balance: 200_000u64.into(),
+        balance: U256::from(200_000u64),
         scenarios: vec![ScenarioType::OnchainNonce],
-        base_fee: 10u64.into(),
+        base_fee: U256::from(10u64),
         tx_generator: MockTransactionDistribution::new(30, 10..100),
     };
     let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);

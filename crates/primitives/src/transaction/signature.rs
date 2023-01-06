@@ -72,8 +72,8 @@ impl Signature {
     pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
-        self.r.to_big_endian(&mut sig[0..32]);
-        self.s.to_big_endian(&mut sig[32..64]);
+        sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&self.s.to_be_bytes::<32>());
         sig[64] = self.odd_y_parity as u8;
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive

@@ -34,10 +34,10 @@ pub mod proofs;
 
 pub use account::Account;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
+pub use bloom::Bloom;
 pub use chain::Chain;
 pub use chain_spec::{ChainSpec, ChainSpecUnified, MainnetSpec};
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
-pub use ethbloom::Bloom;
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, HeadersDirection, SealedHeader};
@@ -79,8 +79,9 @@ pub type TransitionId = u64;
 
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, H128, H512, H64, U128, U64},
 };
+pub use revm_interpreter::{B160 as H160, B256 as H256, U256};
 
 #[doc(hidden)]
 mod __reexport {

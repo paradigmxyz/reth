@@ -1,8 +1,8 @@
-use ethers_core::types::{Chain, H256};
+use ethers_core::types::Chain;
 use hex_literal::hex;
 use std::fmt::Debug;
 
-use crate::{hardfork::Hardfork, BlockNumber, ForkFilter};
+use crate::{hardfork::Hardfork, BlockNumber, ForkFilter, H256};
 
 pub trait ChainSpec: 'static + Debug + Sync + Send + Unpin {
     fn id(&self) -> u64;

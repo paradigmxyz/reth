@@ -5,22 +5,19 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
     prometheus_exporter,
-    util::chainspec::{chain_spec_value_parser, Genesis},
+    util::{
+        chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
+        init::{init_db, init_genesis},
+    },
+    NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
 use reth_consensus::BeaconConsensus;
-use reth_db::{
-    cursor::DbCursorRO,
-    database::Database,
-    mdbx::{Env, WriteMap},
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{Account, ChainSpecUnified, Header, H256};
+use reth_primitives::{ChainSpecUnified, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -28,7 +25,7 @@ use reth_stages::{
         sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
 };
-use std::{net::SocketAddr, path::Path, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tracing::{debug, info};
 
 /// Start the client
@@ -77,9 +74,8 @@ pub struct Command {
     #[arg(long = "debug.tip")]
     tip: Option<H256>,
 
-    /// Disable the discovery service.
-    #[arg(short, long)]
-    disable_discovery: bool,
+    #[clap(flatten)]
+    network: NetworkOpts,
 }
 
 impl Command {
@@ -90,7 +86,14 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let config: Config = confy::load_path(&self.config).unwrap_or_default();
+        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
+        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+        if !self.network.trusted_peers.is_empty() {
+            self.network.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
         info!("reth {} starting", crate_version!());
 
         info!("Opening database at {}", &self.db);
@@ -106,7 +109,7 @@ impl Command {
         let consensus: Arc<BeaconConsensus> = todo!(); // Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
 
         let network = config
-            .network_config(db.clone(), self.chain, self.disable_discovery)
+            .network_config(db.clone(), self.chain, self.network.disable_discovery)
             .start_network()
             .await?;
 
@@ -117,6 +120,7 @@ impl Command {
         // TODO: Remove magic numbers
         let fetch_client = Arc::new(network.fetch_client().await?);
         let mut pipeline = reth_stages::Pipeline::default()
+            .with_sync_state_updater(network.clone())
             .push(HeaderStage {
                 downloader: headers::linear::LinearDownloadBuilder::default()
                     .batch_size(config.stages.headers.downloader_batch_size)
@@ -148,7 +152,10 @@ impl Command {
                 batch_size: config.stages.sender_recovery.batch_size,
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
-            .push(ExecutionStage { config: ExecutorConfig::new_ethereum() });
+            .push(ExecutionStage {
+                config: ExecutorConfig::new_ethereum(),
+                commit_threshold: config.stages.execution.commit_threshold,
+            });
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);
@@ -166,52 +173,4 @@ impl Command {
         info!("Finishing up");
         Ok(())
     }
-}
-
-/// Opens up an existing database or creates a new one at the specified path.
-fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
-    std::fs::create_dir_all(path.as_ref())?;
-    let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-        path.as_ref(),
-        reth_db::mdbx::EnvKind::RW,
-    )?;
-    db.create_tables()?;
-
-    Ok(db)
-}
-
-/// Write the genesis block if it has not already been written
-#[allow(clippy::field_reassign_with_default)]
-fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, reth_db::Error> {
-    let tx = db.tx_mut()?;
-    if let Some((_, hash)) = tx.cursor::<tables::CanonicalHeaders>()?.first()? {
-        debug!("Genesis already written, skipping.");
-        return Ok(hash)
-    }
-    debug!("Writing genesis block.");
-
-    // Insert account state
-    for (address, account) in &genesis.alloc {
-        tx.put::<tables::PlainAccountState>(
-            *address,
-            Account {
-                nonce: account.nonce.unwrap_or_default(),
-                balance: account.balance,
-                bytecode_hash: None,
-            },
-        )?;
-    }
-
-    // Insert header
-    let header: Header = genesis.into();
-    let hash = header.hash_slow();
-    tx.put::<tables::CanonicalHeaders>(0, hash)?;
-    tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::BlockBodies>((0, hash).into(), Default::default())?;
-    tx.put::<tables::BlockTransitionIndex>((0, hash).into(), 0)?;
-    tx.put::<tables::HeaderTD>((0, hash).into(), header.difficulty.into())?;
-    tx.put::<tables::Headers>((0, hash).into(), header)?;
-
-    tx.commit()?;
-    Ok(hash)
 }
