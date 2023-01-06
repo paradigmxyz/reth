@@ -116,6 +116,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, "Unwinding");
         // Lookup latest tx id that we should unwind to
         let latest_tx_id = tx.get_block_body_by_num(input.unwind_to)?.last_tx_index();
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
