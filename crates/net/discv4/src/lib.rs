@@ -832,9 +832,18 @@ impl Discv4Service {
 
     /// Message handler for an incoming `Ping`
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
-        // update the record
+        let mut address = remote_addr.ip();
+
+        // convert IPv4 mapped IPv6 address
+        if let IpAddr::V6(v6) = address {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                address = v4.into()
+            }
+        }
+
+        // create the record
         let record = NodeRecord {
-            address: remote_addr.ip(),
+            address,
             udp_port: remote_addr.port(),
             tcp_port: ping.from.tcp_port,
             id: remote_id,
@@ -1843,10 +1852,11 @@ mod tests {
     use super::*;
     use crate::{
         bootnodes::mainnet_nodes,
-        test_utils::{create_discv4, create_discv4_with_config, rng_record},
+        test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record},
     };
+    use rand::{thread_rng, Rng};
     use reth_primitives::{hex_literal::hex, ForkHash};
-    use std::future::poll_fn;
+    use std::{future::poll_fn, net::Ipv4Addr};
 
     #[test]
     fn test_local_rotator() {
@@ -1915,6 +1925,38 @@ mod tests {
             }
             println!("total peers {}", table.len());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_mapped_ipv4() {
+        reth_tracing::init_tracing();
+        let mut rng = thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+        let addr: SocketAddr = (v6, 30303).into();
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: 0,
+            enr_sq: Some(rng.gen()),
+        };
+
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, H256::random());
+
+        let key = kad_key(id);
+        match service.kbuckets.entry(&key) {
+            kbucket::Entry::Present(entry, _) => {
+                let node_addr = entry.value().record.address;
+                assert!(node_addr.is_ipv4());
+                assert_eq!(node_addr, IpAddr::from(v4));
+            }
+            _ => unreachable!(),
+        };
     }
 
     #[tokio::test(flavor = "multi_thread")]
