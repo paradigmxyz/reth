@@ -51,7 +51,7 @@ where
         status: Status,
         fork_filter: ForkFilter,
     ) -> Result<(EthStream<S>, Status), EthStreamError> {
-        tracing::trace!("sending eth status ...");
+        tracing::trace!(?status, "sending eth status to peer");
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
@@ -78,6 +78,8 @@ where
                 return Err(err.into())
             }
         };
+
+        tracing::trace!(?msg, "received first eth message from peer");
 
         // TODO: Add any missing checks
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89

@@ -170,7 +170,20 @@ fn extract_fork_blocks(genesis: &Genesis) -> Vec<u64> {
 
     // filter out the None values
     fork_blocks_opt.retain(|block| block.is_some());
-    fork_blocks_opt.iter().map(|block| block.unwrap()).collect()
+
+    // safely use unwrap (the vec is now guaranteed to have no None values)
+    let mut fork_blocks: Vec<u64> = fork_blocks_opt.iter().map(|block| block.unwrap()).collect();
+
+    // Sort the fork block numbers to permit chronological XOR
+    fork_blocks.sort();
+
+    // Deduplicate block numbers applying multiple forks (each block number should only be
+    // represented once)
+    fork_blocks_opt.dedup();
+
+    // Skip any forks in block 0, that's the genesis ruleset
+    fork_blocks.retain(|block| *block != 0);
+    fork_blocks
 }
 
 /// Starts the reth pipeline with the given config, consensus, db, and fetch client.
@@ -893,7 +906,7 @@ async fn sync_from_clique_geth() {
 
         // TODO: remove
         // wait for stuff to happen (we are using period 1, so we expect about 10 blocks)
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
         // wait for a certain number of blocks to be mined
         let block = provider.get_block_number().await.unwrap();
