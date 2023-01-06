@@ -53,7 +53,7 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
-            bandwidth_meter,
+            _bandwidth_meter: bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
         };
         Self { inner: Arc::new(inner) }
@@ -239,8 +239,8 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
-    /// Used to measure inbound & outbound bandwidth across network streams
-    bandwidth_meter: BandwidthMeter,
+    /// Used to measure inbound & outbound bandwidth across network streams (currently unused)
+    _bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
 }
