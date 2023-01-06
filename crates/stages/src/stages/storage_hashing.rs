@@ -18,12 +18,12 @@ const STORAGE_HASHING: StageId = StageId("StorageHashing");
 /// [`HashedStorage`][reth_interfaces::db::tables::HashedStorage] table.
 #[derive(Debug)]
 pub struct StorageHashingStage {
-    /// The size of inserted items after which the control
-    /// flow will be returned to the pipeline for commit
-    pub commit_threshold: u64,
     /// The threshold for switching from incremental hashing
     /// of changes to whole storage hashing
     pub clean_threshold: u64,
+    /// The size of inserted items after which the control
+    /// flow will be returned to the pipeline for commit
+    pub commit_threshold: u64,
 }
 
 #[async_trait::async_trait]
@@ -175,9 +175,9 @@ mod tests {
 
     stage_test_suite_ext!(StorageHashingTestRunner);
 
-    /// Execute a block range with a single account and storage
+    /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
-    async fn execute_single_account() {
+    async fn execute_clean() {
         let (previous_stage, stage_progress) = (500, 100);
 
         // Set up the runner
@@ -344,10 +344,6 @@ mod tests {
     }
 
     impl StorageHashingTestRunner {
-        // fn set_commit_threshold(&mut self, threshold: u64) {
-        //     self.commit_threshold = threshold;
-        // }
-
         fn set_clean_threshold(&mut self, threshold: u64) {
             self.clean_threshold = threshold;
         }
