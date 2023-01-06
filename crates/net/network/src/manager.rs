@@ -38,7 +38,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
 };
-use reth_primitives::{PeerId, H256};
+use reth_primitives::{PeerId, H256, ChainSpec};
 use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
@@ -146,7 +146,7 @@ where
             listener_addr,
             peers_config,
             sessions_config,
-            genesis_hash,
+            chain_spec,
             block_import,
             network_mode,
             boot_nodes,
@@ -182,7 +182,7 @@ where
             hello_message,
             fork_filter,
         );
-        let state = NetworkState::new(client, discovery, peers_manager, genesis_hash);
+        let state = NetworkState::new(client, discovery, peers_manager, chain_spec.genesis_hash());
 
         let swarm = Swarm::new(incoming, sessions, state);
 

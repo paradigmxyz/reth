@@ -14,6 +14,7 @@ use crate::{
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 use reth_executor::Config as ExecutorConfig;
+use reth_primitives::ChainSpecUnified;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
@@ -58,7 +59,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecification,
+    chain: ChainSpecUnified,
 
     /// Enable Prometheus metrics.
     ///
@@ -131,9 +132,7 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let chain_id = self.chain.consensus.chain_id;
-                let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
-                let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
+                let consensus: Arc<BeaconConsensus> = todo!(); // Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -144,12 +143,7 @@ impl Command {
                 }
 
                 let network = config
-                    .network_config(
-                        db.clone(),
-                        chain_id,
-                        genesis_hash,
-                        self.network.disable_discovery,
-                    )
+                    .network_config(db.clone(), self.chain, self.network.disable_discovery)
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);

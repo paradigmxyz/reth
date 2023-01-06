@@ -8,7 +8,10 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS};
+use reth_primitives::{
+    Chain, ChainSpec, ChainSpecUnified, ForkFilter, Hardfork, NodeRecord, PeerId, H256,
+    MAINNET_GENESIS,
+};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
@@ -51,10 +54,8 @@ pub struct NetworkConfig<C> {
     pub peers_config: PeersConfig,
     /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// The id of the network
-    pub chain: Chain,
-    /// Genesis hash of the network
-    pub genesis_hash: H256,
+    /// The chain spec
+    pub chain_spec: ChainSpecUnified,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -136,10 +137,8 @@ pub struct NetworkConfigBuilder<C> {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-    /// The network's chain id
-    chain: Chain,
-    /// Network genesis hash
-    genesis_hash: H256,
+    /// The network's chain spec
+    chain_spec: ChainSpecUnified,
     /// The block importer type.
     block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
@@ -170,8 +169,7 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
-            genesis_hash: MAINNET_GENESIS,
+            chain_spec: ChainSpecUnified::Mainnet,
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
@@ -203,9 +201,9 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Sets the chain ID.
-    pub fn chain_id<Id: Into<Chain>>(mut self, chain_id: Id) -> Self {
-        self.chain = chain_id.into();
+    /// Sets the chain spec.
+    pub fn chain_spec<CS: Into<ChainSpecUnified>>(mut self, chain_spec: CS) -> Self {
+        self.chain_spec = chain_spec.into();
         self
     }
 
@@ -241,12 +239,6 @@ impl<C> NetworkConfigBuilder<C> {
     /// Sets a custom config for how sessions are handled.
     pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
-        self
-    }
-
-    /// Sets the genesis hash for the network.
-    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
-        self.genesis_hash = genesis_hash;
         self
     }
 
@@ -305,8 +297,7 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr,
             peers_config,
             sessions_config,
-            chain,
-            genesis_hash,
+            chain_spec,
             block_import,
             network_mode,
             executor,
@@ -328,7 +319,7 @@ impl<C> NetworkConfigBuilder<C> {
         let fork_filter = fork_filter.unwrap_or_else(|| {
             let head = head.unwrap_or_default();
             // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
-            ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
+            ForkFilter::new(head, chain_spec.genesis_hash(), Hardfork::all_concrete_forks(&chain_spec))
         });
 
         NetworkConfig {
@@ -342,8 +333,7 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
-            chain,
-            genesis_hash,
+            chain_spec,
             block_import,
             network_mode,
             executor,
