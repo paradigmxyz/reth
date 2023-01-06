@@ -48,7 +48,7 @@ impl reth_rlp::Decodable for Bloom {
 
 impl reth_rlp::Encodable for Bloom {
     fn length(&self) -> usize {
-        BLOOM_BYTE_LENGTH
+        self.0.length()
     }
 
     fn encode(&self, out: &mut dyn bytes::BufMut) {
