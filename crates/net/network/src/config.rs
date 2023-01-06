@@ -56,8 +56,6 @@ pub struct NetworkConfig<C> {
     pub sessions_config: SessionsConfig,
     /// The chain spec
     pub chain_spec: ChainSpecUnified,
-    /// Genesis hash of the network
-    pub genesis_hash: H256,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -139,10 +137,8 @@ pub struct NetworkConfigBuilder<C> {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-    /// The network's chain id
+    /// The network's chain spec
     chain_spec: ChainSpecUnified,
-    /// Network genesis hash
-    genesis_hash: H256,
     /// The block importer type.
     block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
@@ -174,7 +170,6 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: None,
             sessions_config: None,
             chain_spec: ChainSpecUnified::Mainnet,
-            genesis_hash: MAINNET_GENESIS, // TODO: remove this field as it's in chain_spec
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
@@ -206,7 +201,7 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Sets the chain ID.
+    /// Sets the chain spec.
     pub fn chain_spec<CS: Into<ChainSpecUnified>>(mut self, chain_spec: CS) -> Self {
         self.chain_spec = chain_spec.into();
         self
@@ -244,12 +239,6 @@ impl<C> NetworkConfigBuilder<C> {
     /// Sets a custom config for how sessions are handled.
     pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
-        self
-    }
-
-    /// Sets the genesis hash for the network.
-    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
-        self.genesis_hash = genesis_hash;
         self
     }
 
@@ -309,7 +298,6 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config,
             sessions_config,
             chain_spec,
-            genesis_hash,
             block_import,
             network_mode,
             executor,
@@ -346,7 +334,6 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain_spec,
-            genesis_hash,
             block_import,
             network_mode,
             executor,
