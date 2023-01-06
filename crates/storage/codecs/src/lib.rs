@@ -221,6 +221,7 @@ impl Compact for Bytes {
     }
 }
 
+/// Implements the [`Compact`] trait for fixed size hash types like [`H256`].
 #[macro_export]
 macro_rules! impl_hash_compact {
     ($($name:tt),+) => {
