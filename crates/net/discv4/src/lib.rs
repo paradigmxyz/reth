@@ -511,6 +511,11 @@ impl Discv4Service {
         }
     }
 
+    /// Returns the [PeerId] that identifies this node
+    pub fn local_peer_id(&self) -> &PeerId {
+        &self.local_node_record.id
+    }
+
     /// Returns the address of the UDP socket
     pub fn local_addr(&self) -> SocketAddr {
         self.local_address
@@ -738,7 +743,7 @@ impl Discv4Service {
     }
 
     fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
-        if record.id == self.local_node_record.id {
+        if record.id == *self.local_peer_id() {
             return
         }
 
@@ -854,7 +859,7 @@ impl Discv4Service {
                 self.notify(DiscoveryUpdate::Added(record));
                 None
             }
-            _ => return,
+            kbucket::Entry::SelfEntry => return,
         };
 
         // send the pong
@@ -882,6 +887,11 @@ impl Discv4Service {
 
     // Guarding function for [`Self::send_ping`] that applies pre-checks
     fn try_ping(&mut self, node: NodeRecord, reason: PingReason) {
+        if node.id == *self.local_peer_id() {
+            // don't ping ourselves
+            return
+        }
+
         if self.pending_pings.contains_key(&node.id) ||
             self.pending_find_nodes.contains_key(&node.id)
         {
@@ -1939,6 +1949,39 @@ mod tests {
             Poll::Ready(())
         })
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_no_local_in_closest() {
+        reth_tracing::init_tracing();
+
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let target_key = kad_key(PeerId::random());
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        let closest = service
+            .kbuckets
+            .closest_values(&target_key)
+            .map(|n| n.value.record)
+            .take(MAX_NODES_PER_BUCKET)
+            .collect::<Vec<_>>();
+
+        assert_eq!(closest.len(), 1);
+        assert!(!closest.iter().any(|r| r.id == *service.local_peer_id()));
     }
 
     #[tokio::test(flavor = "multi_thread")]
