@@ -908,6 +908,11 @@ async fn sync_from_clique_geth() {
         // let's just convert into a reth header and compare
         let geth_genesis_header = block_to_header(genesis_block.clone()).seal();
         assert_eq!(geth_genesis_header, sealed_genesis, "genesis headers should match, we computed {sealed_genesis:#?} but geth computed {geth_genesis_header:#?}");
+        println!("genesis headers match");
+
+        // print out each genesis headers
+        println!("genesis header: {:#?}", sealed_genesis);
+        println!("geth genesis block: {:#?}", genesis_block);
 
         // make sure we have the same hash
         let genesis_hash: H256 = genesis_block.hash.unwrap().0.into();
