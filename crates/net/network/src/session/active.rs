@@ -94,7 +94,7 @@ impl ActiveSession {
     fn on_incoming(&mut self, msg: EthMessage) -> Option<(EthStreamError, EthMessage)> {
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
-        /// storing to receiver half internally so the pending response can be polled.
+        /// storing the receiver half internally so the pending response can be polled.
         macro_rules! on_request {
             ($req:ident, $resp_item:ident, $req_item:ident) => {
                 let RequestPair { request_id, message: request } = $req;
@@ -118,7 +118,7 @@ impl ActiveSession {
 
         /// Processes a response received from the peer
         macro_rules! on_response {
-            ($this:ident, $resp:ident, $item:ident) => {
+            ($resp:ident, $item:ident) => {
                 let RequestPair { request_id, message } = $resp;
                 #[allow(clippy::collapsible_match)]
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
@@ -126,10 +126,10 @@ impl ActiveSession {
                         let _ = response.send(Ok(message));
                     } else {
                         req.request.send_bad_response();
-                        $this.on_bad_message();
+                        self.on_bad_message();
                     }
                 } else {
-                    $this.on_bad_message()
+                    self.on_bad_message()
                 }
             };
         }
@@ -159,31 +159,31 @@ impl ActiveSession {
                 on_request!(req, BlockHeaders, GetBlockHeaders);
             }
             EthMessage::BlockHeaders(resp) => {
-                on_response!(self, resp, GetBlockHeaders);
+                on_response!(resp, GetBlockHeaders);
             }
             EthMessage::GetBlockBodies(req) => {
                 on_request!(req, BlockBodies, GetBlockBodies);
             }
             EthMessage::BlockBodies(resp) => {
-                on_response!(self, resp, GetBlockBodies);
+                on_response!(resp, GetBlockBodies);
             }
             EthMessage::GetPooledTransactions(req) => {
                 on_request!(req, PooledTransactions, GetPooledTransactions);
             }
             EthMessage::PooledTransactions(resp) => {
-                on_response!(self, resp, GetPooledTransactions);
+                on_response!(resp, GetPooledTransactions);
             }
             EthMessage::GetNodeData(req) => {
                 on_request!(req, NodeData, GetNodeData);
             }
             EthMessage::NodeData(resp) => {
-                on_response!(self, resp, GetNodeData);
+                on_response!(resp, GetNodeData);
             }
             EthMessage::GetReceipts(req) => {
                 on_request!(req, Receipts, GetReceipts);
             }
             EthMessage::Receipts(resp) => {
-                on_response!(self, resp, GetReceipts);
+                on_response!(resp, GetReceipts);
             }
         };
 
@@ -507,7 +507,8 @@ mod tests {
     #![allow(dead_code)]
     use super::*;
     use crate::session::{
-        config::REQUEST_TIMEOUT, handle::PendingSessionEvent, start_pending_incoming_session,
+        config::INITIAL_REQUEST_TIMEOUT, handle::PendingSessionEvent,
+        start_pending_incoming_session,
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
@@ -631,8 +632,8 @@ mod tests {
                         conn,
                         queued_outgoing: Default::default(),
                         received_requests: Default::default(),
-                        timeout_interval: tokio::time::interval(REQUEST_TIMEOUT),
-                        request_timeout: REQUEST_TIMEOUT,
+                        timeout_interval: tokio::time::interval(INITIAL_REQUEST_TIMEOUT),
+                        request_timeout: INITIAL_REQUEST_TIMEOUT,
                     }
                 }
                 _ => {
