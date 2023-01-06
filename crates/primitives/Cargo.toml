@@ -51,14 +51,13 @@ hex-literal = "0.3"
 modular-bitfield = "0.11.2"
 derive_more = "0.99"
 url = "2.3"
+impl-serde = "0.4.0"
 
 # proof related
 triehash = "0.8"
 # See to replace hashers to simplify libraries
 plain_hasher = "0.2"
 hash-db = "0.15"
-
-impl-serde = "0.4.0"
 
 [dev-dependencies]
 arbitrary = { version = "1.1.7", features = ["derive"] }
@@ -68,7 +67,6 @@ test-fuzz = "3.0.4"
 rand = "0.8"
 revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde", "arbitrary"] }
 proptest = { version = "1.0" }
-proptest-derive = "0.2.0"
 
 
 # necessary so we don't hit a "undeclared 'std'": 

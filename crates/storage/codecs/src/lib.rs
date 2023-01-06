@@ -291,19 +291,6 @@ mod tests {
         assert_eq!(bytes::Bytes::from_compact(&buf, list.len()), (list, vec![1].as_slice()));
     }
 
-    // #[test]
-    // fn compact_bloom() {
-    //     let mut buf = vec![];
-    //     assert_eq!(Bloom::default().to_compact(&mut buf), 256);
-    //     assert_eq!(buf, vec![0; 256]);
-
-    //     // Add some noise data.
-    //     buf.push(1);
-
-    //     // Bloom shouldn't care about the len passed, since it's not actually compacted.
-    //     assert_eq!(Bloom::from_compact(&buf, 1000), (Bloom::default(), vec![1u8].as_slice()));
-    // }
-
     #[test]
     fn compact_address() {
         let mut buf = vec![];
