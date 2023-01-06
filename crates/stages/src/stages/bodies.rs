@@ -183,6 +183,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers, transactions and tx hash to number
         let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
         let mut ommers_cursor = tx.cursor_mut::<tables::BlockOmmers>()?;

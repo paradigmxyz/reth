@@ -9,6 +9,7 @@ use crate::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
         init::{init_db, init_genesis},
     },
+    NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
@@ -73,9 +74,8 @@ pub struct Command {
     #[arg(long = "debug.tip")]
     tip: Option<H256>,
 
-    /// Disable the discovery service.
-    #[arg(short, long)]
-    disable_discovery: bool,
+    #[clap(flatten)]
+    network: NetworkOpts,
 }
 
 impl Command {
@@ -86,7 +86,14 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let config: Config = confy::load_path(&self.config).unwrap_or_default();
+        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
+        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+        if !self.network.trusted_peers.is_empty() {
+            self.network.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
         info!("reth {} starting", crate_version!());
 
         info!("Opening database at {}", &self.db);
@@ -104,7 +111,7 @@ impl Command {
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         let network = config
-            .network_config(db.clone(), chain_id, genesis_hash, self.disable_discovery)
+            .network_config(db.clone(), chain_id, genesis_hash, self.network.disable_discovery)
             .start_network()
             .await?;
 

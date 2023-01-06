@@ -23,7 +23,11 @@ revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
-ethbloom = { version = "0.13", features = ["codec"] }
+
+# Bloom
+fixed-hash = { version = "0.8", default-features = false, features = [
+    "rustc-hex",
+] }
 
 # crypto
 secp256k1 = { version = "0.24.2", default-features = false, features = [
@@ -47,6 +51,7 @@ hex-literal = "0.3"
 modular-bitfield = "0.11.2"
 derive_more = "0.99"
 url = "2.3"
+impl-serde = "0.4.0"
 
 # proof related
 triehash = "0.8"
@@ -61,8 +66,13 @@ hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
 revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde", "arbitrary"] }
+proptest = { version = "1.0" }
 
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
 secp256k1 = "0.24.2"
+
+[features]
+default = []
+arbitrary = ["dep:arbitrary", "revm-interpreter/arbitrary"]
