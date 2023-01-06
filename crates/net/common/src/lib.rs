@@ -9,3 +9,4 @@
 
 pub mod ban_list;
 pub mod metrics;
+pub mod bandwidth_meter;

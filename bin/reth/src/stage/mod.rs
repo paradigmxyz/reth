@@ -9,11 +9,11 @@ use crate::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
         init::{init_db, init_genesis},
     },
+    NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 use reth_executor::Config as ExecutorConfig;
-use reth_primitives::NodeRecord;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
@@ -99,22 +99,6 @@ enum StageEnum {
     Bodies,
     Senders,
     Execution,
-}
-
-#[derive(Debug, Parser)]
-struct NetworkOpts {
-    /// Disable the discovery service.
-    #[arg(short, long)]
-    disable_discovery: bool,
-
-    /// Target trusted peer enodes
-    /// --trusted-peers enode://abcd@192.168.0.1:30303
-    #[arg(long)]
-    trusted_peers: Vec<NodeRecord>,
-
-    /// Connect only to trusted peers
-    #[arg(long)]
-    trusted_only: bool,
 }
 
 impl Command {

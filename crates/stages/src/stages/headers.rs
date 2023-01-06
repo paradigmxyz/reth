@@ -144,6 +144,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
+        info!(target: "sync::stages::headers", to_block = input.unwind_to, "Unwinding");
         tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;

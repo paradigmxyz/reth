@@ -17,6 +17,7 @@ use reth_eth_wire::{
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
+use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
@@ -47,7 +48,7 @@ pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
+    pub(crate) conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -513,6 +514,7 @@ mod tests {
         EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
+    use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
@@ -540,6 +542,7 @@ mod tests {
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
+        bandwidth_meter: BandwidthMeter,
     }
 
     impl SessionBuilder {
@@ -584,11 +587,13 @@ mod tests {
             let session_id = self.next_id();
             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
+            let metered_stream =
+                MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
                 session_id,
-                stream,
+                metered_stream,
                 pending_sessions_tx,
                 remote_addr,
                 self.secret_key,
@@ -655,6 +660,7 @@ mod tests {
                 local_peer_id,
                 status: StatusBuilder::default().build(),
                 fork_filter: Hardfork::Frontier.fork_filter(),
+                bandwidth_meter: BandwidthMeter::default(),
             }
         }
     }

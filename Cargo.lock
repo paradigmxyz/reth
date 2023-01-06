@@ -3786,8 +3786,11 @@ dependencies = [
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
+ "pin-project",
+ "reth-ecies",
  "reth-metrics-derive",
  "reth-primitives",
+ "tokio",
 ]
 
 [[package]]
@@ -3816,7 +3819,9 @@ dependencies = [
  "fnv",
  "futures",
  "hex",
+ "linked-hash-map",
  "linked_hash_set",
+ "metrics",
  "parking_lot 0.12.1",
  "pin-project",
  "rand 0.8.5",
@@ -3824,6 +3829,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
+ "reth-metrics-derive",
  "reth-net-common",
  "reth-primitives",
  "reth-provider",
@@ -3850,14 +3856,16 @@ dependencies = [
  "bytes",
  "crc",
  "derive_more",
- "ethbloom",
  "ethers-core",
+ "fixed-hash",
  "hash-db",
  "hex",
  "hex-literal",
+ "impl-serde",
  "modular-bitfield",
  "parity-scale-codec",
  "plain_hasher",
+ "proptest",
  "rand 0.8.5",
  "reth-codecs",
  "reth-rlp",
@@ -3923,7 +3931,6 @@ dependencies = [
  "rlp",
  "secp256k1 0.24.2",
  "smol_str",
- "tracing",
 ]
 
 [[package]]

@@ -12,3 +12,8 @@ Types shared accross network code
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-metrics-derive = { path = "../../metrics/metrics-derive" }
+reth-ecies = { path = "../ecies" }
+
+# async
+pin-project = "1.0"
+tokio = { version = "1.21.2", features = ["full"] }
