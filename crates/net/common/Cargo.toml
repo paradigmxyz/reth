@@ -17,3 +17,6 @@ reth-ecies = { path = "../ecies" }
 # async
 pin-project = "1.0"
 tokio = { version = "1.21.2", features = ["full"] }
+
+# metrics
+metrics = "0.20.1"
