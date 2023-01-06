@@ -291,6 +291,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        info!(target: "sync::stages::execution", to_block = input.unwind_to, "Unwinding");
+
         // Acquire changeset cursors
         let mut account_changeset = tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
