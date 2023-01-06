@@ -12,6 +12,7 @@ use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
+use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -43,6 +44,7 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
+        bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -51,6 +53,7 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
+            bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
         };
         Self { inner: Arc::new(inner) }
@@ -200,6 +203,11 @@ impl NetworkHandle {
             msg: SharedTransactions(msg),
         })
     }
+
+    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
+        &self.inner.bandwidth_meter
+    }
 }
 
 impl StatusUpdater for NetworkHandle {
@@ -236,6 +244,8 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
+    /// Used to measure inbound & outbound bandwidth across network streams (currently unused)
+    bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
 }

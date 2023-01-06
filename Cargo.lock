@@ -3786,7 +3786,10 @@ dependencies = [
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
+ "pin-project",
+ "reth-ecies",
  "reth-primitives",
+ "tokio",
 ]
 
 [[package]]
