@@ -8,11 +8,11 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_net_common::bandwidth_monitor::BandwidthMeter;
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
+use reth_net_common::bandwidth_monitor::BandwidthMeter;
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
