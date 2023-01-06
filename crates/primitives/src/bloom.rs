@@ -1,9 +1,86 @@
 //! Bloom related utilities.
+use crate::{keccak256, Log};
+use bytes::Buf;
+use derive_more::{AsRef, Deref};
+use fixed_hash::construct_fixed_hash;
+use impl_serde::impl_fixed_hash_serde;
+use reth_codecs::Compact;
+use reth_rlp::{Decodable, DecodeError, Encodable};
 
-use crate::{keccak256, Bloom, Log};
+#[cfg(test)]
+use proptest::{
+    arbitrary::{any_with, Arbitrary as PropTestArbitrary, ParamsFor},
+    strategy::{BoxedStrategy, Strategy},
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use arbitrary::Arbitrary;
 
 /// Length of bloom filter used for Ethereum.
 pub const BLOOM_BYTE_LENGTH: usize = 256;
+
+construct_fixed_hash! {
+    /// revm 2048 bits type.
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(Arbitrary))]
+    #[derive(AsRef,Deref)]
+    pub struct Bloom(256);
+}
+
+#[cfg(test)]
+impl PropTestArbitrary for Bloom {
+    type Parameters = ParamsFor<u8>;
+    type Strategy = BoxedStrategy<Bloom>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        proptest::collection::vec(any_with::<u8>(args), BLOOM_BYTE_LENGTH)
+            .prop_map(move |vec| Bloom::from_slice(&vec))
+            .boxed()
+    }
+}
+
+impl_fixed_hash_serde!(Bloom, BLOOM_BYTE_LENGTH);
+
+impl Decodable for Bloom {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Decodable::decode(buf).map(Self)
+    }
+}
+
+impl Encodable for Bloom {
+    fn length(&self) -> usize {
+        self.0.length()
+    }
+
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        self.0.encode(out)
+    }
+}
+
+impl Compact for Bloom {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        buf.put_slice(&self.0);
+        std::mem::size_of::<Bloom>()
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        if len == 0 {
+            return (Bloom::default(), buf)
+        }
+
+        let v =
+            Bloom::from_slice(buf.get(..std::mem::size_of::<Bloom>()).expect("size not matching"));
+        buf.advance(std::mem::size_of::<Bloom>());
+        (v, buf)
+    }
+
+    fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        self.to_compact(buf)
+    }
+
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        Self::from_compact(buf, len)
+    }
+}
 
 // See Section 4.3.1 "Transaction Receipt" of the Yellow Paper
 fn m3_2048(bloom: &mut Bloom, x: &[u8]) {
@@ -68,5 +145,20 @@ mod tests {
                 "00000000001400000000000000008000000000000000000000000000000000"
             ))
         );
+    }
+    #[test]
+    fn arbitrary() {
+        proptest::proptest!(|(bloom: Bloom)| {
+            let mut buf = vec![];
+            bloom.to_compact(&mut buf);
+
+            // Add noise
+            buf.push(1);
+
+            let (decoded, remaining_buf) = Bloom::from_compact(&buf, buf.len());
+
+            assert!(bloom == decoded);
+            assert!(remaining_buf.len() == 1);
+        });
     }
 }

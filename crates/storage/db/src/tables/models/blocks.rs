@@ -164,8 +164,7 @@ mod test {
         ommer.ommers.push(Header::default());
         ommer.ommers.push(Header::default());
         assert!(
-            ommer.clone() ==
-                StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress().into()).unwrap()
+            ommer.clone() == StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress()).unwrap()
         );
     }
 }
