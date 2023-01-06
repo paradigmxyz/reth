@@ -834,9 +834,9 @@ impl Discv4Service {
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
         // update the record
         let record = NodeRecord {
-            address: ping.from.address,
+            address: remote_addr.ip(),
+            udp_port: remote_addr.port(),
             tcp_port: ping.from.tcp_port,
-            udp_port: ping.from.udp_port,
             id: remote_id,
         };
 
