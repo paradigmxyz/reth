@@ -832,22 +832,14 @@ impl Discv4Service {
 
     /// Message handler for an incoming `Ping`
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
-        let mut address = remote_addr.ip();
-
-        // convert IPv4 mapped IPv6 address
-        if let IpAddr::V6(v6) = address {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                address = v4.into()
-            }
-        }
-
         // create the record
         let record = NodeRecord {
-            address,
+            address: remote_addr.ip(),
             udp_port: remote_addr.port(),
             tcp_port: ping.from.tcp_port,
             id: remote_id,
-        };
+        }
+        .into_ipv4_mapped();
 
         let key = kad_key(record.id);
 
@@ -1016,7 +1008,8 @@ impl Discv4Service {
                     tcp_port: remote_addr.port(),
                     udp_port: remote_addr.port(),
                     id: node_id,
-                };
+                }
+                .into_ipv4_mapped();
                 let val = NodeEntry::new(node);
                 let _ = entry.insert(
                     val,
@@ -1126,7 +1119,7 @@ impl Discv4Service {
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that where discovered.
-        for node in msg.nodes {
+        for node in msg.nodes.into_iter().map(NodeRecord::into_ipv4_mapped) {
             // prevent banned peers from being added to the context
             if self.config.ban_list.is_banned(&node.id, &node.address) {
                 trace!(target: "discv4", peer_id=?node.id, ip=?node.address, "ignoring banned record");
