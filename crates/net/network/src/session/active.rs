@@ -513,7 +513,10 @@ mod tests {
         EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_primitives::{ForkFilter, Hardfork, MainnetSpec, ChainSpec};
+    use reth_primitives::{
+        chains::{Hardforks, MainnetSpec},
+        ForkFilter, Hardfork,
+    };
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::TcpListener;

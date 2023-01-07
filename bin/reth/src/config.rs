@@ -6,7 +6,7 @@ use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
 };
-use reth_primitives::ChainSpecUnified;
+use reth_primitives::chains::ChainSpecUnified;
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 

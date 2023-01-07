@@ -14,7 +14,7 @@ use crate::{
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 use reth_executor::Config as ExecutorConfig;
-use reth_primitives::ChainSpecUnified;
+use reth_primitives::chains::ChainSpecUnified;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},

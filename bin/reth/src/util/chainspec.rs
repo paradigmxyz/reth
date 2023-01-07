@@ -1,6 +1,6 @@
 use reth_primitives::{
-    utils::serde_helpers::deserialize_stringified_u64, Address, Bytes, ChainSpecUnified, Header,
-    H256, U256,
+    chains::ChainSpecUnified, utils::serde_helpers::deserialize_stringified_u64, Address, Bytes,
+    Header, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};

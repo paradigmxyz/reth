@@ -17,7 +17,7 @@ use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{ChainSpecUnified, H256};
+use reth_primitives::{chains::ChainSpecUnified, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{

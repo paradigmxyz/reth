@@ -1,6 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{Chain, ChainSpec, ForkId, Hardfork, MainnetSpec, H256, U256};
+use reth_primitives::{
+    chains::{Essentials, Hardforks, MainnetSpec},
+    Chain, ForkId, Hardfork, H256, U256,
+};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};

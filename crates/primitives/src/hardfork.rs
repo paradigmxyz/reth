@@ -1,4 +1,4 @@
-use crate::{BlockNumber, ForkFilter, ForkHash, ForkId, MAINNET_GENESIS, ChainSpec};
+use crate::{chains::ChainSpec, BlockNumber};
 use std::str::FromStr;
 
 #[allow(missing_docs)]
@@ -80,21 +80,25 @@ impl Default for Hardfork {
 }
 
 impl<CS: ChainSpec> From<(&CS, BlockNumber)> for Hardfork {
-    fn from((chain_spec , num): (&CS, BlockNumber)) -> Self {
+    fn from((chain_spec, num): (&CS, BlockNumber)) -> Self {
         match num {
             _i if num < chain_spec.fork_id(&Hardfork::Frontier).next => Hardfork::Frontier,
             _i if num < chain_spec.fork_id(&Hardfork::Dao).next => Hardfork::Dao,
             _i if num < chain_spec.fork_id(&Hardfork::Homestead).next => Hardfork::Homestead,
             _i if num < chain_spec.fork_id(&Hardfork::Tangerine).next => Hardfork::Tangerine,
-            _i if num < chain_spec.fork_id(&Hardfork::SpuriousDragon).next => Hardfork::SpuriousDragon,
+            _i if num < chain_spec.fork_id(&Hardfork::SpuriousDragon).next => {
+                Hardfork::SpuriousDragon
+            }
             _i if num < chain_spec.fork_id(&Hardfork::Byzantium).next => Hardfork::Byzantium,
-            _i if num < chain_spec.fork_id(&Hardfork::Constantinople).next => Hardfork::Constantinople,
+            _i if num < chain_spec.fork_id(&Hardfork::Constantinople).next => {
+                Hardfork::Constantinople
+            }
             _i if num < chain_spec.fork_id(&Hardfork::Istanbul).next => Hardfork::Istanbul,
             _i if num < chain_spec.fork_id(&Hardfork::Muirglacier).next => Hardfork::Muirglacier,
             _i if num < chain_spec.fork_id(&Hardfork::Berlin).next => Hardfork::Berlin,
             _i if num < chain_spec.fork_id(&Hardfork::London).next => Hardfork::London,
             _i if num < chain_spec.fork_id(&Hardfork::ArrowGlacier).next => Hardfork::ArrowGlacier,
-    
+
             _ => Hardfork::Latest,
         }
     }
@@ -106,11 +110,8 @@ pub struct ConcreteHardfork<'a, CS> {
 }
 
 impl<'a, CS> ConcreteHardfork<'a, CS> {
-    pub fn new(chain_spec: &'a CS, fork: Hardfork) -> Self{
-        Self {
-            chain_spec,
-            fork
-        }
+    pub fn new(chain_spec: &'a CS, fork: Hardfork) -> Self {
+        Self { chain_spec, fork }
     }
 }
 
@@ -122,13 +123,17 @@ impl<'a, CS: ChainSpec> From<ConcreteHardfork<'a, CS>> for BlockNumber {
 
 #[cfg(test)]
 mod tests {
-    use crate::{forkid::ForkHash, hardfork::Hardfork, MainnetSpec, ChainSpec};
+    use crate::{
+        chains::{Hardforks, MainnetSpec},
+        forkid::ForkHash,
+        hardfork::Hardfork,
+    };
     use crc::crc32;
 
     #[test]
     fn test_hardfork_blocks() {
         let mainnet = MainnetSpec::default();
-        
+
         let hf: Hardfork = (&mainnet, 12_965_000u64).into();
         assert_eq!(hf, Hardfork::London);
 

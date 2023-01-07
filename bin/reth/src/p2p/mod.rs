@@ -7,7 +7,9 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
-use reth_primitives::{BlockHashOrNumber, ChainSpecUnified, Header, NodeRecord, SealedHeader};
+use reth_primitives::{
+    chains::ChainSpecUnified, BlockHashOrNumber, Header, NodeRecord, SealedHeader,
+};
 use std::sync::Arc;
 
 use crate::{

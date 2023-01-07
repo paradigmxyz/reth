@@ -9,8 +9,8 @@ use crate::{
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{
-    Chain, ChainSpec, ChainSpecUnified, ForkFilter, Hardfork, NodeRecord, PeerId, H256,
-    MAINNET_GENESIS,
+    chains::{ChainSpecUnified, Essentials},
+    Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS,
 };
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
@@ -319,7 +319,11 @@ impl<C> NetworkConfigBuilder<C> {
         let fork_filter = fork_filter.unwrap_or_else(|| {
             let head = head.unwrap_or_default();
             // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
-            ForkFilter::new(head, chain_spec.genesis_hash(), Hardfork::all_concrete_forks(&chain_spec))
+            ForkFilter::new(
+                head,
+                chain_spec.genesis_hash(),
+                Hardfork::all_concrete_forks(&chain_spec),
+            )
         });
 
         NetworkConfig {
