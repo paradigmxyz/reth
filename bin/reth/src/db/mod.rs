@@ -12,6 +12,7 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
+use std::{collections::HashMap, fmt::Debug};
 use tracing::{error, info};
 
 /// `reth db` command
@@ -81,7 +82,14 @@ impl Command {
             Subcommands::Stats { .. } => {
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-                stats_table.set_header(["Table Name", "# Entries", "Total Size (KB)"]);
+                stats_table.set_header([
+                    "Table Name",
+                    "# Entries",
+                    "Branch Pages",
+                    "Leaf Pages",
+                    "Overflow Pages",
+                    "Total Size (KB)",
+                ]);
 
                 tool.db.view(|tx| {
                     for table in tables::TABLES.iter().map(|(_, name)| name) {
@@ -106,6 +114,9 @@ impl Command {
                         let mut row = Row::new();
                         row.add_cell(Cell::new(table))
                             .add_cell(Cell::new(stats.entries()))
+                            .add_cell(Cell::new(branch_pages))
+                            .add_cell(Cell::new(leaf_pages))
+                            .add_cell(Cell::new(overflow_pages))
                             .add_cell(Cell::new(table_size / 1024));
                         stats_table.add_row(row);
                     }
@@ -118,7 +129,57 @@ impl Command {
                 tool.seed(*len)?;
             }
             Subcommands::List(args) => {
-                tool.list(args)?;
+                macro_rules! list_tables {
+                    ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
+                        match $arg {
+                            $(stringify!($table) => {
+                                let map = tool.list::<tables::$table>($start, $len)?;
+                                let mut table = ComfyTable::new();
+                                table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+                                table.set_header(["Key", "Value"]);
+                                for (key, value) in map.into_iter() {
+                                    let mut row = Row::new();
+                                    // TODO: Cleanly format key / value types
+                                    // For tables with longer decompressed values, i.e. `Headers`, formatting
+                                    // the value via the `Debug` trait breaks the table's formatting.
+                                    row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(format!("{value:?}")));
+                                    table.add_row(row);
+                                }
+
+                                tool.db.view(|tx| {
+                                    let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
+                                    let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", $arg))?;
+                                    println!("{table}");
+                                    println!("-> Showing entry {} to {} out of {} entries.", $start, $start + $len, stats.entries());
+                                    Ok::<(), eyre::Report>(())
+                                })?
+                            },)*
+                            _ => {
+                                error!("Unknown table.");
+                                Ok(())
+                            }
+                        }?
+                    };
+                }
+
+                list_tables!(
+                    args.table.as_str(),
+                    args.start,
+                    args.len => [
+                        CanonicalHeaders,
+                        HeaderTD,
+                        HeaderNumbers,
+                        Headers,
+                        BlockBodies,
+                        BlockOmmers,
+                        TxHashNumber,
+                        PlainAccountState,
+                        BlockTransitionIndex,
+                        TxTransitionIndex,
+                        SyncStage,
+                        Transactions
+                    ]
+                );
             }
             Subcommands::Drop => {
                 tool.drop()?;
@@ -156,41 +217,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 
-    /// Lists the given table data
-    fn list(&mut self, args: &ListArgs) -> Result<()> {
-        macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
-                match $arg {
-                    $(stringify!($table) => {
-                        self.list_table::<tables::$table>($start, $len)?
-                    },)*
-                    _ => {
-                        error!("Unknown table.");
-                        return Ok(())
-                    }
-                }
-            };
-        }
-
-        list_tables!(args.table.as_str(), args.start, args.len => [
-            CanonicalHeaders,
-            HeaderTD,
-            HeaderNumbers,
-            Headers,
-            BlockBodies,
-            BlockOmmers,
-            TxHashNumber,
-            PlainAccountState,
-            BlockTransitionIndex,
-            TxTransitionIndex,
-            SyncStage,
-            Transactions,
-        ]);
-
-        Ok(())
-    }
-
-    fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
+    /// Grabs the contents of the table within a certain index range and places them
+    /// into a [HashMap].
+    fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<HashMap<T::Key, T::Value>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
@@ -205,33 +234,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             walker.skip(start).take(len).collect::<Vec<_>>()
         })?;
 
-        if data.is_empty() {
-            error!("Table is empty.");
-            return Ok(())
-        }
-
-        let mut table = ComfyTable::new();
-        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(["Entry Index", "Key", "Value"]);
-        for (i, entry) in data.into_iter().enumerate() {
-            match entry {
-                Ok((key, value)) => {
-                    let mut row = Row::new();
-                    row.add_cell(Cell::new(format!("{}", start + i)))
-                        // TODO: Cleanly format key / value types
-                        // For tables with longer decompressed values, i.e. `Headers`, formatting
-                        // the value via the `Debug` trait breaks the table's formatting.
-                        .add_cell(Cell::new(format!("{key:?}")))
-                        .add_cell(Cell::new(format!("{value:?}")));
-                    table.add_row(row);
-                }
-                Err(e) => eyre::bail!(e),
-            }
-        }
-
-        println!("{table}");
-
-        Ok(())
+        data.into_iter()
+            .collect::<Result<HashMap<T::Key, T::Value>, _>>()
+            .map_err(|e| eyre::eyre!(e))
     }
 
     fn drop(&mut self) -> Result<()> {
