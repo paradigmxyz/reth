@@ -3511,7 +3511,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "codecs-derive",
- "ethers-core",
  "modular-bitfield",
  "revm-interpreter",
  "serde",
