@@ -6,13 +6,14 @@ use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
     database::Database,
+    mdbx::{Env, EnvironmentKind},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::{collections::HashMap, fmt::Debug};
+use std::collections::HashMap;
 use tracing::{error, info};
 
 /// `reth db` command
@@ -129,57 +130,7 @@ impl Command {
                 tool.seed(*len)?;
             }
             Subcommands::List(args) => {
-                macro_rules! list_tables {
-                    ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
-                        match $arg {
-                            $(stringify!($table) => {
-                                let map = tool.list::<tables::$table>($start, $len)?;
-                                let mut table = ComfyTable::new();
-                                table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-                                table.set_header(["Key", "Value"]);
-                                for (key, value) in map.into_iter() {
-                                    let mut row = Row::new();
-                                    // TODO: Cleanly format key / value types
-                                    // For tables with longer decompressed values, i.e. `Headers`, formatting
-                                    // the value via the `Debug` trait breaks the table's formatting.
-                                    row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(format!("{value:?}")));
-                                    table.add_row(row);
-                                }
-
-                                tool.db.view(|tx| {
-                                    let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
-                                    let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", $arg))?;
-                                    println!("{table}");
-                                    println!("-> Showing entry {} to {} out of {} entries.", $start, $start + $len, stats.entries());
-                                    Ok::<(), eyre::Report>(())
-                                })?
-                            },)*
-                            _ => {
-                                error!("Unknown table.");
-                                Ok(())
-                            }
-                        }?
-                    };
-                }
-
-                list_tables!(
-                    args.table.as_str(),
-                    args.start,
-                    args.len => [
-                        CanonicalHeaders,
-                        HeaderTD,
-                        HeaderNumbers,
-                        Headers,
-                        BlockBodies,
-                        BlockOmmers,
-                        TxHashNumber,
-                        PlainAccountState,
-                        BlockTransitionIndex,
-                        TxTransitionIndex,
-                        SyncStage,
-                        Transactions
-                    ]
-                );
+                tool.list_table(args)?;
             }
             Subcommands::Drop => {
                 tool.drop()?;
@@ -217,8 +168,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 
-    /// Grabs the contents of the table within a certain index range and places them
-    /// into a [HashMap].
+    /// Grabs the contents of the table within a certain index range and places the
+    /// entries into a [HashMap].
     fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<HashMap<T::Key, T::Value>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
@@ -272,6 +223,61 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             TxSenders,
             Config,
             SyncStage,
+        ]);
+
+        Ok(())
+    }
+}
+
+impl<'a, E: EnvironmentKind> DbTool<'a, Env<E>> {
+    /// Lists the contents of a db table in a human-readable format and print to stdout.
+    fn list_table(&mut self, args: &ListArgs) -> Result<()> {
+        macro_rules! list_tables {
+            ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
+                match $arg {
+                    $(stringify!($table) => {
+                        let map = self.list::<tables::$table>($start, $len)?;
+                        let mut table = ComfyTable::new();
+                        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+                        table.set_header(["Key", "Value"]);
+                        for (key, value) in map.into_iter() {
+                            let mut row = Row::new();
+                            // TODO: Cleanly format key / value types
+                            // For tables with longer decompressed values, i.e. `Headers`, formatting
+                            // the value via the `Debug` trait breaks the table's formatting.
+                            row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(format!("{value:?}")));
+                            table.add_row(row);
+                        }
+
+                        self.db.view(|tx| {
+                            let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
+                            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+                            println!("{table}");
+                            println!("-> Showing entry {} to {} out of {} entries.", $start, $start + $len, stats.entries());
+                            Ok::<(), eyre::Report>(())
+                        })?
+                    },)*
+                    _ => {
+                        error!("Unknown table.");
+                        Ok(())
+                    }
+                }?
+            };
+        }
+
+        list_tables!(args.table.as_str(), args.start, args.len => [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            TxHashNumber,
+            PlainAccountState,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            SyncStage,
+            Transactions
         ]);
 
         Ok(())
