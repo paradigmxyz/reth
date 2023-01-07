@@ -252,8 +252,28 @@ impl<'a, E: EnvironmentKind> DbTool<'a, Env<E>> {
                         self.db.view(|tx| {
                             let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
                             let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+                            let final_entry_idx = stats.entries() - 1;
+                            if $start > final_entry_idx {
+                                error!(
+                                    "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
+                                    start = $start,
+                                    table = stringify!($table)
+                                );
+                                return Ok(())
+                            }
+
                             println!("{table}");
-                            println!("-> Showing entry {} to {} out of {} entries.", $start, $start + $len, stats.entries());
+                            println!(
+                                "-> Showing {len} entries in range [{start}, {end}] out of {num_entries} entries.",
+                                len = $len,
+                                start = $start,
+                                end = if ($start + $len) > final_entry_idx {
+                                    final_entry_idx
+                                } else {
+                                    $start + $len - 1
+                                },
+                                num_entries = final_entry_idx + 1
+                            );
                             Ok::<(), eyre::Report>(())
                         })?
                     },)*
