@@ -4,6 +4,7 @@ use crate::{
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
+    metrics::TransactionsManagerMetrics,
     network::NetworkHandleMessage,
     peers::ReputationChangeKind,
     NetworkHandle,
@@ -101,6 +102,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
+    /// TransactionsManager metrics
+    metrics: TransactionsManagerMetrics,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -130,6 +133,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedReceiverStream::new(from_network),
+            metrics: Default::default(),
         }
     }
 }
@@ -235,6 +239,9 @@ where
             }
         }
 
+        // Update propagated transactions metrics
+        self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+
         propagated
     }
 
@@ -315,6 +322,9 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
+
+                // Update new peers metrics
+                self.metrics.lost_peers.increment(1);
             }
             NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
                 // insert a new peer
@@ -327,6 +337,9 @@ where
                         request_tx: messages,
                     },
                 );
+
+                // Update new peers metrics
+                self.metrics.new_peers.increment(1);
 
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
