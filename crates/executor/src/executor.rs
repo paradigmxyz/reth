@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::StateProvider;
 use revm::{
     db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
-    Return, SpecId, B160, EVM, U256 as evmU256,
+    Return, SpecId, EVM,
 };
 use std::collections::BTreeMap;
 
@@ -95,7 +95,7 @@ pub struct AccountChangeSet {
     /// Old and New account account change.
     pub account: AccountInfoChangeSet,
     /// Storage containing key -> (OldValue,NewValue). in case that old value is not existing
-    /// we can expect to have U256::zero(), same with new value.
+    /// we can expect to have U256::ZERO, same with new value.
     pub storage: BTreeMap<U256, (U256, U256)>,
     /// Just to make sure that we are taking selfdestruct cleaning we have this field that wipes
     /// storage. There are instances where storage is changed but account is not touched, so we
@@ -124,7 +124,7 @@ pub struct ExecutionResult {
 /// BTreeMap is used to have sorted values
 pub fn commit_changes<DB: StateProvider>(
     db: &mut SubState<DB>,
-    changes: hashbrown::HashMap<B160, RevmAccount>,
+    changes: hashbrown::HashMap<H160, RevmAccount>,
 ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
     let mut change = BTreeMap::new();
     let mut new_bytecodes = BTreeMap::new();
@@ -132,7 +132,7 @@ pub fn commit_changes<DB: StateProvider>(
     for (address, account) in changes {
         if account.is_destroyed {
             // get old account that we are destroying.
-            let db_account = match db.accounts.entry(B160(address.0)) {
+            let db_account = match db.accounts.entry(address) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(_entry) => {
                     panic!("Left panic to critically jumpout if happens, as every account shound be hot loaded.");
@@ -141,7 +141,7 @@ pub fn commit_changes<DB: StateProvider>(
             // Insert into `change` a old account and None for new account
             // and mark storage to be mapped
             change.insert(
-                H160(address.0),
+                address,
                 AccountChangeSet {
                     account: AccountInfoChangeSet::Destroyed { old: to_reth_acc(&db_account.info) },
                     storage: BTreeMap::new(),
@@ -175,7 +175,7 @@ pub fn commit_changes<DB: StateProvider>(
             // get old account that is going to be overwritten or none if it does not exist
             // and get new account that was just inserted. new account mut ref is used for
             // inserting storage
-            let (account_info_changeset, new_account) = match db.accounts.entry(B160(address.0)) {
+            let (account_info_changeset, new_account) = match db.accounts.entry(address) {
                 Entry::Vacant(entry) => {
                     let entry = entry.insert(Default::default());
                     entry.info = account.info.clone();
@@ -217,19 +217,13 @@ pub fn commit_changes<DB: StateProvider>(
 
             // insert storage into new db account.
             new_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                storage.insert(
-                    U256(*key.as_limbs()),
-                    (
-                        U256(*value.original_value().as_limbs()),
-                        U256(*value.present_value().as_limbs()),
-                    ),
-                );
+                storage.insert(key, (value.original_value(), value.present_value()));
                 (key, value.present_value())
             }));
 
             // Insert into change.
             change.insert(
-                H160(address.0),
+                address,
                 AccountChangeSet { account: account_info_changeset, storage, wipe_storage },
             );
         }
@@ -313,7 +307,7 @@ pub fn execute<DB: StateProvider>(
     evm.database(db);
 
     let spec_id = config.spec_upgrades.revm_spec(header.number);
-    evm.env.cfg.chain_id = evmU256::from_limbs(config.chain_id.0);
+    evm.env.cfg.chain_id = config.chain_id;
     evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(header.number);
     evm.env.cfg.perf_all_precompiles_have_balance = false;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
@@ -447,7 +441,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
             .into_iter()
             .map(|(beneficiary, reward)| -> Result<_, _> {
                 let changeset = db
-                    .basic(B160(beneficiary.0))
+                    .basic(beneficiary)
                     .map_err(|_| Error::ProviderError)?
                     // if account is present append `Changed` changeset for block reward
                     .map(|acc| {
@@ -458,7 +452,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
                     })
                     // if account is not present append `Created` changeset
                     .unwrap_or(AccountInfoChangeSet::Created {
-                        new: Account { nonce: 0, balance: reward.into(), bytecode_hash: None },
+                        new: Account { nonce: 0, balance: U256::from(reward), bytecode_hash: None },
                     });
                 Ok((beneficiary, changeset))
             })
@@ -559,17 +553,24 @@ mod tests {
         // pre staet
         db.insert_account(
             H160(hex!("1000000000000000000000000000000000000000")),
-            Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None },
+            Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None },
             Some(hex!("5a465a905090036002900360015500").into()),
             HashMap::new(),
         );
 
-        let account3_old_info =
-            Account { balance: 0x3635c9adc5dea00000u128.into(), nonce: 0x00, bytecode_hash: None };
+        let account3_old_info = Account {
+            balance: U256::from(0x3635c9adc5dea00000u128),
+            nonce: 0x00,
+            bytecode_hash: None,
+        };
 
         db.insert_account(
             H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
-            Account { balance: 0x3635c9adc5dea00000u128.into(), nonce: 0x00, bytecode_hash: None },
+            Account {
+                balance: U256::from(0x3635c9adc5dea00000u128),
+                nonce: 0x00,
+                bytecode_hash: None,
+            },
             None,
             HashMap::new(),
         );
@@ -592,17 +593,20 @@ mod tests {
         assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let _account1_info = Account { balance: 0x00.into(), nonce: 0x00, bytecode_hash: None };
+        let _account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
         let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
         let account2_info = Account {
-            balance: (0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128).into(), /* decrease for
-                                                                                * block reward */
+            balance: U256::from(0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128), /* decrease for
+                                                                                   * block reward */
             nonce: 0x00,
             bytecode_hash: None,
         };
         let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let account3_info =
-            Account { balance: 0x3635c9adc5de996b46u128.into(), nonce: 0x01, bytecode_hash: None };
+        let account3_info = Account {
+            balance: U256::from(0x3635c9adc5de996b46u128),
+            nonce: 0x01,
+            bytecode_hash: None,
+        };
 
         assert_eq!(
             changesets.changeset.get(&account1).unwrap().account,
@@ -623,7 +627,8 @@ mod tests {
         // check block rewards changeset.
         let mut block_rewarded_acc_info = account2_info;
         // add Blocks 2 eth reward and 2>>5 for one ommer
-        block_rewarded_acc_info.balance += (WEI_2ETH + (WEI_2ETH >> 5) * 1).into();
+        block_rewarded_acc_info.balance += U256::from(WEI_2ETH + (WEI_2ETH >> 5));
+
         assert_eq!(
             out.block_reward,
             Some(BTreeMap::from([
@@ -639,7 +644,7 @@ mod tests {
                     AccountInfoChangeSet::Created {
                         new: Account {
                             nonce: 0,
-                            balance: ((8 * WEI_2ETH) >> 3).into(),
+                            balance: U256::from((8 * WEI_2ETH) >> 3),
                             bytecode_hash: None
                         }
                     }
@@ -653,8 +658,8 @@ mod tests {
         let storage = &changesets.changeset.get(&account1).unwrap().storage;
         assert_eq!(storage.len(), 1, "Only one storage change");
         assert_eq!(
-            storage.get(&1.into()),
-            Some(&(0.into(), 2.into())),
+            storage.get(&U256::from(1)),
+            Some(&(U256::ZERO, U256::from(2))),
             "Storage change from 0 to 2 on slot 1"
         );
     }
@@ -664,8 +669,8 @@ mod tests {
         let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
         let address = H160::zero();
         let tx_num = 0;
-        let acc1 = Account { balance: 1.into(), nonce: 2, bytecode_hash: Some(H256::zero()) };
-        let acc2 = Account { balance: 3.into(), nonce: 4, bytecode_hash: Some(H256::zero()) };
+        let acc1 = Account { balance: U256::from(1), nonce: 2, bytecode_hash: Some(H256::zero()) };
+        let acc2 = Account { balance: U256::from(3), nonce: 4, bytecode_hash: Some(H256::zero()) };
 
         let tx = db.tx_mut().unwrap();
 

@@ -17,7 +17,7 @@ The main difference between metrics and traces is therefore that metrics are sys
 
 To add metrics use the [`metrics`][metrics] crate. 
 1. Add the code emitting the metric.
-2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages_metrics_describer.rs).
+2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/metrics.rs).
 3. Document the metric in this file.
 
 #### Metric anatomy
@@ -68,6 +68,17 @@ How the metrics are exposed to the end-user is determined by the CLI.
 - `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
 - `transaction_pool.invalid_transactions`: Number of invalid transactions 
 - `transaction_pool.removed_transactions`: Number of removed transactions from the pool
+
+#### Network
+- `network.connected_peers`: Number of currently connected peers
+- `network.tracked_peers`: Number of peers known to the node
+- `network.pending_session_failures`: Cumulative number of failures of pending sessions
+- `network.closed_sessions`: Total number of sessions closed
+- `network.incoming_connections`: Number of active incoming connections
+- `network.outgoing_connections`: Number of active outgoing connections
+- `network.total_incoming_connections`: Total number of incoming connections handled
+- `network.total_outgoing_connections`: Total number of outgoing connections established
+- `network.invalid_messages_received`: Number of invalid/malformed messages received from peers
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html

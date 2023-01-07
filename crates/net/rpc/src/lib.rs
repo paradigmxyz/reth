@@ -11,6 +11,7 @@
 //!
 //! Provides the implementation of all RPC interfaces.
 
+mod admin;
 mod engine;
 mod eth;
 mod net;

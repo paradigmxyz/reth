@@ -62,6 +62,8 @@ pub enum ReputationChangeKind {
 
 /// How the [`ReputationChangeKind`] are weighted.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ReputationChangeWeights {
     /// Weight for [`ReputationChangeKind::BadMessage`]
     pub bad_message: Reputation,

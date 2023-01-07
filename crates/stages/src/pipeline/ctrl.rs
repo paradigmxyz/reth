@@ -11,5 +11,15 @@ pub(crate) enum ControlFlow {
         bad_block: Option<BlockNumber>,
     },
     /// The pipeline is allowed to continue executing stages.
-    Continue,
+    Continue {
+        /// The progress of the last stage
+        progress: u64,
+    },
+    NoProgress,
+}
+
+impl ControlFlow {
+    pub(crate) fn should_continue(&self) -> bool {
+        matches!(self, ControlFlow::Continue { .. } | ControlFlow::NoProgress)
+    }
 }

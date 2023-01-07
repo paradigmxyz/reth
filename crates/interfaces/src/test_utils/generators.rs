@@ -80,8 +80,8 @@ pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1:
     let (rec_id, data) = s.serialize_compact();
 
     Ok(Signature {
-        r: U256::from_big_endian(&data[..32]),
-        s: U256::from_big_endian(&data[32..64]),
+        r: U256::try_from_be_slice(&data[..32]).unwrap(),
+        s: U256::try_from_be_slice(&data[32..64]).unwrap(),
         odd_y_parity: rec_id.to_i32() != 0,
     })
 }

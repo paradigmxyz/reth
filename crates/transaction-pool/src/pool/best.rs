@@ -78,7 +78,7 @@ mod tests {
     use super::*;
     use crate::{
         pool::pending::PendingPool,
-        test_util::{MockOrdering, MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
     };
 
     #[test]

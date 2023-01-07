@@ -130,7 +130,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
 impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        self.tx.get::<tables::CanonicalHeaders>(number.as_u64()).map_err(Into::into)
+        self.tx.get::<tables::CanonicalHeaders>(number.to::<u64>()).map_err(Into::into)
     }
 }
 
@@ -232,7 +232,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for LatestStateProviderRef<'a, 'b, TX
 impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for LatestStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        self.db.get::<tables::CanonicalHeaders>(number.as_u64()).map_err(Into::into)
+        self.db.get::<tables::CanonicalHeaders>(number.to::<u64>()).map_err(Into::into)
     }
 }
 

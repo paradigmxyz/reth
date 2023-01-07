@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use bytes::BytesMut;
-use reth_primitives::{Address, BlockNumber, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
+use reth_primitives::{Address, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
@@ -56,7 +56,7 @@ impl From<SealedBlock> for ExecutionPayload {
             gas_used: value.gas_used.into(),
             timestamp: value.timestamp.into(),
             extra_data: value.extra_data.clone().into(),
-            base_fee_per_gas: value.base_fee_per_gas.unwrap_or_default().into(),
+            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
             transactions,
             withdrawal: None,
@@ -147,7 +147,7 @@ pub struct TransitionConfiguration {
     /// Maps on TERMINAL_BLOCK_HASH parameter of EIP-3675
     pub terminal_block_hash: H256,
     /// Maps on TERMINAL_BLOCK_NUMBER parameter of EIP-3675
-    pub terminal_block_number: BlockNumber,
+    pub terminal_block_number: U64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

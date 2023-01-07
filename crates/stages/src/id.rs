@@ -1,3 +1,4 @@
+use crate::stages::{bodies::BODIES, headers::HEADERS};
 use metrics::absolute_counter;
 use reth_db::{
     tables::SyncStage,
@@ -20,6 +21,11 @@ impl Display for StageId {
 }
 
 impl StageId {
+    /// Returns a flag indicating if it's a downloading stage
+    pub fn is_downloading_stage(&self) -> bool {
+        *self == HEADERS || *self == BODIES
+    }
+
     /// Get the last committed progress of this stage.
     pub fn get_progress<'db>(&self, tx: &impl DbTx<'db>) -> Result<Option<BlockNumber>, DbError> {
         tx.get::<SyncStage>(self.0.as_bytes().to_vec())
@@ -44,5 +50,11 @@ mod tests {
     fn stage_id_display() {
         assert_eq!(StageId("foo").to_string(), "foo");
         assert_eq!(StageId("bar").to_string(), "bar");
+    }
+
+    #[test]
+    fn is_downloading_stage() {
+        assert!(HEADERS.is_downloading_stage());
+        assert!(BODIES.is_downloading_stage());
     }
 }

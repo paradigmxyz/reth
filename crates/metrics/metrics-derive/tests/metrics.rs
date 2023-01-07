@@ -1,11 +1,10 @@
-use std::{collections::HashMap, sync::Mutex};
-
 use metrics::{
     set_recorder, Counter, Gauge, Histogram, Key, KeyName, Recorder, SharedString, Unit,
 };
 use once_cell::sync::Lazy;
 use reth_metrics_derive::Metrics;
 use serial_test::serial;
+use std::{collections::HashMap, sync::Mutex};
 
 #[allow(dead_code)]
 #[derive(Metrics)]
@@ -23,7 +22,7 @@ struct CustomMetrics {
     histo: Histogram,
 }
 
-static RECORDER: Lazy<TestRecorder> = Lazy::new(|| TestRecorder::new());
+static RECORDER: Lazy<TestRecorder> = Lazy::new(TestRecorder::new);
 
 #[test]
 #[serial]

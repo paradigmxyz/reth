@@ -9,6 +9,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, EthStream, P2PStream, Status,
 };
+use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::{
@@ -93,7 +94,7 @@ pub(crate) enum PendingSessionEvent {
         peer_id: PeerId,
         capabilities: Arc<Capabilities>,
         status: Status,
-        conn: EthStream<P2PStream<ECIESStream<TcpStream>>>,
+        conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
         direction: Direction,
         client_id: String,
     },

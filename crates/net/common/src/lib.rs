@@ -8,3 +8,4 @@
 //! Shared types across reth-net
 
 pub mod ban_list;
+pub mod bandwidth_meter;

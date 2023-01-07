@@ -130,11 +130,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12",
+                            "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
+                            "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                         )
                         .unwrap(),
                     },
@@ -154,11 +154,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
+                            "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
+                            "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                         )
                         .unwrap(),
                     },
@@ -192,11 +192,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12",
+                            "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
+                            "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                         )
                         .unwrap(),
                     },
@@ -216,11 +216,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
+                            "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
+                            "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                         )
                         .unwrap(),
                     },
@@ -257,11 +257,11 @@ mod test {
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
-                            "35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
+                            "0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
+                            "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                         )
                         .unwrap(),
                     },
@@ -283,11 +283,11 @@ mod test {
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
-                            "59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
+                            "0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
+                            "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                         )
                         .unwrap(),
                     },
@@ -307,11 +307,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071",
+                            "0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
+                            "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                         )
                         .unwrap(),
                     },
@@ -331,11 +331,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a",
+                            "0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
+                            "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                         )
                         .unwrap(),
                     },
@@ -355,11 +355,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae",
+                            "0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
+                            "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                         )
                         .unwrap(),
                     },
@@ -400,11 +400,11 @@ mod test {
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
-                            "35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
+                            "0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
+                            "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                         )
                         .unwrap(),
                     },
@@ -426,11 +426,11 @@ mod test {
                     Signature {
                         odd_y_parity: true,
                         r: U256::from_str(
-                            "59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
+                            "0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
+                            "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                         )
                         .unwrap(),
                     },
@@ -450,11 +450,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071",
+                            "0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
+                            "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                         )
                         .unwrap(),
                     },
@@ -474,11 +474,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a",
+                            "0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
+                            "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                         )
                         .unwrap(),
                     },
@@ -498,11 +498,11 @@ mod test {
                     Signature {
                         odd_y_parity: false,
                         r: U256::from_str(
-                            "eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae",
+                            "0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae",
                         )
                         .unwrap(),
                         s: U256::from_str(
-                            "3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
+                            "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                         )
                         .unwrap(),
                     },

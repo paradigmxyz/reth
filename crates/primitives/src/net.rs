@@ -47,6 +47,29 @@ impl NodeRecord {
         Self::new(addr, id)
     }
 
+    /// Converts the `address` into an [`Ipv4Addr`] if the `address` is a mapped
+    /// [Ipv6Addr](std::net::Ipv6Addr).
+    ///
+    /// Returns `true` if the address was converted.
+    ///
+    /// See also [std::net::Ipv6Addr::to_ipv4_mapped]
+    pub fn convert_ipv4_mapped(&mut self) -> bool {
+        // convert IPv4 mapped IPv6 address
+        if let IpAddr::V6(v6) = self.address {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                self.address = v4.into();
+                return true
+            }
+        }
+        false
+    }
+
+    /// Same as [Self::convert_ipv4_mapped] but consumes the type
+    pub fn into_ipv4_mapped(mut self) -> Self {
+        self.convert_ipv4_mapped();
+        self
+    }
+
     /// Creates a new record from a socket addr and peer id.
     #[allow(unused)]
     pub fn new(addr: SocketAddr, id: PeerId) -> Self {
@@ -141,6 +164,40 @@ mod tests {
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
     use reth_rlp::{Decodable, Encodable};
+
+    #[test]
+    fn test_mapped_ipv6() {
+        let mut rng = thread_rng();
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+
+        let record = NodeRecord {
+            address: v6.into(),
+            tcp_port: rng.gen(),
+            udp_port: rng.gen(),
+            id: PeerId::random(),
+        };
+
+        assert!(record.clone().convert_ipv4_mapped());
+        assert_eq!(record.into_ipv4_mapped().address, IpAddr::from(v4));
+    }
+
+    #[test]
+    fn test_mapped_ipv4() {
+        let mut rng = thread_rng();
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+
+        let record = NodeRecord {
+            address: v4.into(),
+            tcp_port: rng.gen(),
+            udp_port: rng.gen(),
+            id: PeerId::random(),
+        };
+
+        assert!(!record.clone().convert_ipv4_mapped());
+        assert_eq!(record.into_ipv4_mapped().address, IpAddr::from(v4));
+    }
 
     #[test]
     fn test_noderecord_codec_ipv4() {

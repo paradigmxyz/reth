@@ -21,7 +21,7 @@ pub struct Config {
 impl Config {
     /// Create new config for ethereum.
     pub fn new_ethereum() -> Self {
-        Self { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() }
+        Self { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() }
     }
 }
 

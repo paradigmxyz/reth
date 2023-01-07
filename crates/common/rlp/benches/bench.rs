@@ -33,10 +33,7 @@ fn bench_encode(c: &mut Criterion) {
     c.bench_function("encode_1000_u64", |b| {
         b.iter(|| {
             let mut out = BytesMut::new();
-            reth_rlp::encode_list(
-                (0..1000u64).into_iter().collect::<Vec<_>>().as_slice(),
-                &mut out,
-            );
+            reth_rlp::encode_list((0..1000u64).collect::<Vec<_>>().as_slice(), &mut out);
         })
     });
 }
@@ -59,7 +56,7 @@ fn bench_decode(c: &mut Criterion) {
         })
     });
     c.bench_function("decode_1000_u64", |b| {
-        let input = (0..1000u64).into_iter().collect::<Vec<_>>();
+        let input = (0..1000u64).collect::<Vec<_>>();
         let mut data = BytesMut::new();
         reth_rlp::encode_list(input.as_slice(), &mut data);
         b.iter(|| {

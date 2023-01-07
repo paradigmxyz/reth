@@ -1,6 +1,6 @@
 //! Reth block execution/validation configuration and constants
 use reth_executor::{Config as ExecutorConfig, SpecUpgrades};
-use reth_primitives::BlockNumber;
+use reth_primitives::{BlockNumber, U256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -80,7 +80,7 @@ impl Default for Config {
 impl From<&Config> for ExecutorConfig {
     fn from(value: &Config) -> Self {
         Self {
-            chain_id: value.chain_id.into(),
+            chain_id: U256::from(value.chain_id),
             spec_upgrades: SpecUpgrades {
                 frontier: 0,
                 homestead: value.homestead_block,

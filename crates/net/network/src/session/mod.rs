@@ -19,6 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -88,6 +89,8 @@ pub(crate) struct SessionManager {
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
+    /// Used to measure inbound & outbound bandwidth across all managed streams
+    bandwidth_meter: BandwidthMeter,
 }
 
 // === impl SessionManager ===
@@ -101,6 +104,7 @@ impl SessionManager {
         status: Status,
         hello_message: HelloMessage,
         fork_filter: ForkFilter,
+        bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -121,6 +125,7 @@ impl SessionManager {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
+            bandwidth_meter,
         }
     }
 
@@ -186,10 +191,11 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
+        let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
-            stream,
+            metered_stream,
             pending_events,
             remote_addr,
             self.secret_key,
@@ -220,6 +226,7 @@ impl SessionManager {
             self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
+            self.bandwidth_meter.clone(),
         ));
 
         let handle = PendingSessionHandle {
@@ -606,7 +613,7 @@ pub struct ExceedsSessionLimit(pub(crate) u32);
 pub(crate) async fn start_pending_incoming_session(
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
-    stream: TcpStream,
+    stream: MeteredStream<TcpStream>,
     events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -642,9 +649,10 @@ async fn start_pending_outbound_session(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
+    bandwidth_meter: BandwidthMeter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => stream,
+        Ok(stream) => MeteredStream::new_with_meter(stream, bandwidth_meter),
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {
@@ -677,7 +685,7 @@ async fn start_pending_outbound_session(
 async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
-    stream: TcpStream,
+    stream: MeteredStream<TcpStream>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -753,7 +761,7 @@ async fn authenticate(
 /// On Success return the authenticated stream as [`PendingSessionEvent`]
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream(
-    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
+    stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     direction: Direction,

@@ -97,7 +97,7 @@ impl Default for Status {
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
-            total_difficulty: 17_179_869_184u64.into(),
+            total_difficulty: U256::from(17_179_869_184u64),
             blockhash: MAINNET_GENESIS,
             genesis: MAINNET_GENESIS,
             forkid: Hardfork::Frontier.fork_id(),

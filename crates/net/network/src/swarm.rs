@@ -237,7 +237,7 @@ where
                 if self.sessions.is_valid_fork_id(fork_id) {
                     self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
                 } else {
-                    self.state_mut().peers_mut().remove_discovered_node(peer_id);
+                    self.state_mut().peers_mut().remove_peer(peer_id);
                 }
             }
         }

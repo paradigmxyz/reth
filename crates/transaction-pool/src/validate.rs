@@ -27,7 +27,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
 
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
-pub trait TransactionValidator: Send + Sync + 'static {
+pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 

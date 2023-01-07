@@ -192,7 +192,7 @@ struct NetworkInner {
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
     local_peer_id: PeerId,
-    /// Access to the all the nodes
+    /// Access to all the nodes
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
@@ -234,7 +234,7 @@ While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`
 
 #### Usage of `NetworkHandle` in the Pipeline
 
-In the pipeline, the `NetworkHandle` is used to instantiate the `FetchClient` - which we'll get into next - and is used in the `HeaderStage` to update the node's ["status"](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#status-0x00) (record the the total difficulty, hash, and height of the last processed block).
+In the pipeline, the `NetworkHandle` is used to instantiate the `FetchClient` - which we'll get into next - and is used in the `HeaderStage` to update the node's ["status"](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#status-0x00) (record the total difficulty, hash, and height of the last processed block).
 
 [File: crates/stages/src/stages/headers.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/headers.rs)
 ```rust,ignore
@@ -321,7 +321,7 @@ pub struct NetworkState<C> {
 
 #### Usage of `FetchClient` in the Pipeline
 
-The `FetchClient` implements the `HeadersClient` and `BodiesClient` traits, defining the funcionality to get headers and block bodies from available peers.
+The `FetchClient` implements the `HeadersClient` and `BodiesClient` traits, defining the functionality to get headers and block bodies from available peers.
 
 [File: crates/net/network/src/fetch/client.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/fetch/client.rs)
 ```rust,ignore
@@ -489,7 +489,7 @@ pub struct GetBlockHeaders {
     pub limit: u64,
 
     /// The number of blocks that the node should skip while traversing and returning headers.
-    /// A skip value of zero denotes that the peer should return contiguous heaaders, starting from
+    /// A skip value of zero denotes that the peer should return contiguous headers, starting from
     /// [`start_block`](#structfield.start_block) and returning at most
     /// [`limit`](#structfield.limit) headers.
     pub skip: u32,
@@ -807,7 +807,7 @@ struct Peer {
 
 Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of. 
 
-The `request_tx` field on the `Peer` is used the sender end of a channel to send requests to the session with the peer.
+The `request_tx` field on the `Peer` is used at the sender end of a channel to send requests to the session with the peer.
 
 After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of the transactions in the node's transaction pool are sent to the peer in a [`NewPooledTransactionHashes` message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08).
 

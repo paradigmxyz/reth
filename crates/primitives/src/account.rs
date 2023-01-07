@@ -22,7 +22,7 @@ impl Account {
 
 #[cfg(test)]
 mod tests {
-    use crate::Account;
+    use crate::{Account, U256};
     use reth_codecs::Compact;
 
     #[test]
@@ -32,7 +32,7 @@ mod tests {
         let len = acc.to_compact(&mut buf);
         assert_eq!(len, 2);
 
-        acc.balance = 2.into();
+        acc.balance = U256::from(2);
         let len = acc.to_compact(&mut buf);
         assert_eq!(len, 3);
 

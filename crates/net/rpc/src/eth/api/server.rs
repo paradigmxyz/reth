@@ -42,10 +42,9 @@ where
     }
 
     fn block_number(&self) -> Result<U256> {
-        Ok(EthApiSpec::chain_info(self)
-            .with_message("failed to read chain info")?
-            .best_number
-            .into())
+        Ok(U256::from(
+            EthApiSpec::chain_info(self).with_message("failed to read chain info")?.best_number,
+        ))
     }
 
     async fn chain_id(&self) -> Result<Option<U64>> {

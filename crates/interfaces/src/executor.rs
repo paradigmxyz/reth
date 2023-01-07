@@ -4,11 +4,9 @@ use thiserror::Error;
 
 /// Takes block and executes it, returns error
 #[async_trait]
-pub trait BlockExecutor {
+pub trait BlockExecutor: Send + Sync {
     /// Execute block
-    async fn execute(&self, _block: Block) -> Error {
-        Error::VerificationFailed
-    }
+    async fn execute(&self, _block: Block) -> Error;
 }
 
 /// BlockExecutor Errors
