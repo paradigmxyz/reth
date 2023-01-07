@@ -16,7 +16,6 @@ no_codec = ["codecs-derive/no_codec"]
 [dependencies]
 bytes = "1.2.1"
 codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }
-ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde"] }
 
 [dev-dependencies]
