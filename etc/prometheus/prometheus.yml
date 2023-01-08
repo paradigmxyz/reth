@@ -1,0 +1,7 @@
+scrape_configs:
+  - job_name: reth
+    metrics_path: "/"
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9000']
+
