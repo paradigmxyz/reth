@@ -89,6 +89,7 @@ This list may be non-exhaustive.
 - `network.total_incoming_connections`: Total number of incoming connections handled
 - `network.total_outgoing_connections`: Total number of outgoing connections established
 - `network.invalid_messages_received`: Number of invalid/malformed messages received from peers
+- `network.propagated_transactions`: Total number of propagated transactions
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html
