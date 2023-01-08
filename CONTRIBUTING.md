@@ -172,14 +172,6 @@ If a pull request appears to be abandoned or stalled, it is polite to first chec
 
 _Adapted from the [Foundry contributing guide][foundry-contributing]_.
 
-### Releasing
-
-Releases are automatically done by the release workflow when a tag is pushed, however, these steps still need to be taken:
-
-1. Ensure that the versions in the relevant `Cargo.toml` files are up-to-date.
-2. Update documentation links.
-3. Perform a final audit for breaking changes.
-
 [rust-coc]: https://github.com/rust-lang/rust/blob/master/CODE_OF_CONDUCT.md
 [coc-header]: #code-of-conduct
 [dev-tg]: https://t.me/paradigm_reth
