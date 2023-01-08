@@ -53,23 +53,33 @@ How the metrics are exposed to the end-user is determined by the CLI.
 - Metric names should not contain spaces
 - Add a unit to the metric where appropriate
   - Use the Prometheus [base units][prom_base_units]
+- Do not add rate-metrics
+  - Rates can be calculated by e.g. Prometheus on the fly
+- Avoid duplicate metrics
+  - An example would be adding two metrics for connections: `reth.p2p.connections` for current connections and `reth.p2p.connections.total` for total connections. One of these metrics can be used to infer the other.
 
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
 
 ### Current metrics
-#### StagedSync Headers
+
+This list may be non-exhaustive.
+
+#### Stage: Headers
+
 - `stages.headers.counter`: Number of headers successfully retrieved
 - `stages.headers.timeout_error`: Number of timeout errors while requesting headers
 - `stages.headers.validation_errors`: Number of validation errors while requesting headers
 - `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
 - `stages.headers.request_time`: Elapsed time of successful header requests
 
-#### Transaction Pool
+#### Component: Transaction Pool
+
 - `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
 - `transaction_pool.invalid_transactions`: Number of invalid transactions 
 - `transaction_pool.removed_transactions`: Number of removed transactions from the pool
 
-#### Network
+#### Component: Network
+
 - `network.connected_peers`: Number of currently connected peers
 - `network.tracked_peers`: Number of peers known to the node
 - `network.pending_session_failures`: Cumulative number of failures of pending sessions
