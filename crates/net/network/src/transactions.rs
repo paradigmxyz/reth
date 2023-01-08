@@ -322,9 +322,6 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
-
-                // Update new peers metrics
-                self.metrics.lost_peers.increment(1);
             }
             NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
                 // insert a new peer
@@ -337,9 +334,6 @@ where
                         request_tx: messages,
                     },
                 );
-
-                // Update new peers metrics
-                self.metrics.new_peers.increment(1);
 
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool

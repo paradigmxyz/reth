@@ -39,10 +39,4 @@ pub struct NetworkMetrics {
 pub struct TransactionsManagerMetrics {
     /// Total number of propagated transactions
     pub(crate) propagated_transactions: Counter,
-
-    /// Total number of new peers
-    pub(crate) new_peers: Counter,
-
-    /// Total number of lost peers
-    pub(crate) lost_peers: Counter,
 }
