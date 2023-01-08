@@ -85,12 +85,12 @@ impl Error {
             ffi::MDBX_PROBLEM => Error::Problem,
             ffi::MDBX_BUSY => Error::Busy,
             ffi::MDBX_EMULTIVAL => Error::Multival,
-            ffi::MDBX_EBADSIGN => Error::BadSignature,
             ffi::MDBX_WANNA_RECOVERY => Error::WannaRecovery,
             ffi::MDBX_EKEYMISMATCH => Error::KeyMismatch,
             ffi::MDBX_EINVAL => Error::DecodeError,
             ffi::MDBX_EACCESS => Error::Access,
             ffi::MDBX_TOO_LARGE => Error::TooLarge,
+            ffi::MDBX_EBADSIGN => Error::BadSignature,
             other => Error::Other(other),
         }
     }
@@ -100,6 +100,7 @@ impl Error {
         let err_code = match self {
             Error::KeyExist => ffi::MDBX_KEYEXIST,
             Error::NotFound => ffi::MDBX_NOTFOUND,
+            Error::NoData => ffi::MDBX_ENODATA,
             Error::PageNotFound => ffi::MDBX_PAGE_NOTFOUND,
             Error::Corrupted => ffi::MDBX_CORRUPTED,
             Error::Panic => ffi::MDBX_PANIC,
@@ -125,6 +126,7 @@ impl Error {
             Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
+            Error::BadSignature => ffi::MDBX_EBADSIGN,
             Error::Other(err_code) => *err_code,
             _ => unreachable!(),
         };
@@ -140,10 +142,14 @@ impl From<Error> for u32 {
 
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{}", unsafe {
-            let err = ffi::mdbx_strerror(self.to_err_code() as i32);
-            str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
-        })
+        let value = match self {
+            Self::DecodeErrorLenDiff => "Mismatched data length",
+            _ => unsafe {
+                let err = ffi::mdbx_strerror(self.to_err_code() as i32);
+                str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
+            },
+        };
+        write!(fmt, "{value}")
     }
 }
 
