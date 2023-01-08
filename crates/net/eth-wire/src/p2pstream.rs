@@ -12,7 +12,7 @@ use pin_project::pin_project;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, VecDeque, HashSet},
     io,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -501,9 +501,7 @@ pub fn set_capability_offsets(
     // ANDREW: Why does this only return a single shared capability?
 ) -> Result<SharedCapability, P2PStreamError> {
     // find intersection of capabilities
-    // ANDREW: This only allows for one version of a given capability...
-    let our_capabilities_map =
-        local_capabilities.into_iter().map(|c| (c.name, c.version)).collect::<HashMap<_, _>>();
+    let our_capabilities = local_capabilities.into_iter().collect::<HashSet<_>>();
 
     // map of capability name to version
     let mut shared_capabilities = HashMap::new();
@@ -523,17 +521,16 @@ pub fn set_capability_offsets(
     let mut shared_capability_names = BTreeSet::new();
 
     // find highest shared version of each shared capability
-    for capability in peer_capabilities {
+    for peer_capability in peer_capabilities {
         // if this is Some, we share this capability
-        if let Some(version) = our_capabilities_map.get(&capability.name) {
+        if our_capabilities.get(&peer_capability).is_some() {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
-            // ANDREW: I feel like this only makes sense under the assumption that we have all lower versions of each of the capabilities...
-            // I.e. in `our_capabilities_map` we only store our highest version, and whatever the peer's highest version is (capped at our version),
-            // we know we can support it.
-            if capability.version <= *version {
-                shared_capabilities.insert(capability.name.clone(), capability.version);
-                shared_capability_names.insert(capability.name);
+
+            let version = shared_capabilities.get(&peer_capability.name);
+            if version.is_none() || (version.is_some() && peer_capability.version > *version.unwrap() ) {
+                shared_capabilities.insert(peer_capability.name.clone(), peer_capability.version);
+                shared_capability_names.insert(peer_capability.name);
             }
         }
     }
