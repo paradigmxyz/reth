@@ -493,11 +493,15 @@ where
 /// capabilities and the input list of locally supported capabilities.
 ///
 /// Currently only `eth` versions 66 and 67 are supported.
+// ANDREW: We should also mention that the `p2p` protocol (version 5?) is supported,
+// but it's not expected to be in `local_capabilities`
 pub fn set_capability_offsets(
     local_capabilities: Vec<Capability>,
     peer_capabilities: Vec<Capability>,
+    // ANDREW: Why does this only return a single shared capability?
 ) -> Result<SharedCapability, P2PStreamError> {
     // find intersection of capabilities
+    // ANDREW: This only allows for one version of a given capability...
     let our_capabilities_map =
         local_capabilities.into_iter().map(|c| (c.name, c.version)).collect::<HashMap<_, _>>();
 
@@ -524,6 +528,9 @@ pub fn set_capability_offsets(
         if let Some(version) = our_capabilities_map.get(&capability.name) {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
+            // ANDREW: I feel like this only makes sense under the assumption that we have all lower versions of each of the capabilities...
+            // I.e. in `our_capabilities_map` we only store our highest version, and whatever the peer's highest version is (capped at our version),
+            // we know we can support it.
             if capability.version <= *version {
                 shared_capabilities.insert(capability.name.clone(), capability.version);
                 shared_capability_names.insert(capability.name);
@@ -557,6 +564,7 @@ pub fn set_capability_offsets(
                 tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
             }
             SharedCapability::Eth { .. } => {
+                // ANDREW: Nit, but we could increment the offset first and avoid a clone here
                 shared_with_offsets.push(shared_capability.clone());
 
                 // increment the offset if the capability is known
@@ -850,6 +858,52 @@ mod tests {
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();
     }
+
+    #[test]
+    fn test_peer_lower_capability_version() {
+        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
+
+        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+
+        assert_eq!(
+            shared_capability,
+            SharedCapability::Eth {
+                version: EthVersion::Eth66,
+                offset: MAX_RESERVED_MESSAGE_ID + 1
+            }
+        )
+    }
+
+    #[test]
+    fn test_peer_capability_version_too_low() {
+        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth67.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
+
+        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities);
+
+        assert!(matches!(
+            shared_capability,
+            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+        ))
+    }
+
+    #[test]
+    fn test_peer_capability_version_too_high() {
+        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth67.into()];
+
+        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities);
+
+        assert!(matches!(
+            shared_capability,
+            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+        ))
+    }
+
+    // TODO: (If possible) test for message ID offsets being consistent with a Geth peer
+    // Can also just test for proper message ID assignment (lexicographic ordering)
+    // Could be useful in case the `Ord` implementation for `SmolStr` changes at any point and we update the crate
 
     #[test]
     fn snappy_decode_encode_ping() {
