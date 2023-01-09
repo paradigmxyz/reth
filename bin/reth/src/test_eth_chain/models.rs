@@ -187,7 +187,7 @@ pub enum ForkSpec {
     Constantinople, // SKIPPED
     /// Constantinople fix
     ConstantinopleFix,
-    /// Instanbul
+    /// Istanbul
     Istanbul,
     /// Berlin
     Berlin,
@@ -236,7 +236,7 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
                 panic!("Not supported")
             }
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
-                panic!("Overriden with PETERSBURG")
+                panic!("Overridden with PETERSBURG")
             }
         }
     }
@@ -473,6 +473,6 @@ mod test {
         ]"#;
 
         let res = serde_json::from_str::<Vec<Transaction>>(test);
-        assert!(res.is_ok(), "Failed to deserialize transactin with error: {res:?}");
+        assert!(res.is_ok(), "Failed to deserialize transaction with error: {res:?}");
     }
 }

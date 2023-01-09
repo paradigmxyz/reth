@@ -31,7 +31,7 @@ pub fn validate_header_standalone(
         return Err(Error::TimestampIsInFuture { timestamp: header.timestamp, present_timestamp })
     }
 
-    // From yellow papper: extraData: An arbitrary byte array containing data
+    // From yellow paper: extraData: An arbitrary byte array containing data
     // relevant to this block. This must be 32 bytes or fewer; formally Hx.
     if header.extra_data.len() > 32 {
         return Err(Error::ExtraDataExceedsMax { len: header.extra_data.len() })
@@ -124,7 +124,7 @@ pub fn validate_transaction_regarding_header(
     Ok(())
 }
 
-/// Iterate over all transactions, verify them agains each other and against the block.
+/// Iterate over all transactions, verify them against each other and against the block.
 /// There is no gas check done as [REVM](https://github.com/bluealloy/revm/blob/fd0108381799662098b7ab2c429ea719d6dfbf28/crates/revm/src/evm_impl.rs#L113-L131) already checks that.
 pub fn validate_all_transaction_regarding_block_and_nonces<
     'a,
@@ -155,7 +155,7 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
             }
             Entry::Vacant(entry) => {
                 let account = provider.basic_account(transaction.signer())?.unwrap_or_default();
-                // Signer account shoudn't have bytecode. Presence of bytecode means this is a
+                // Signer account shouldn't have bytecode. Presence of bytecode means this is a
                 // smartcontract.
                 if account.has_bytecode() {
                     return Err(Error::SignerAccountHasBytecode.into())

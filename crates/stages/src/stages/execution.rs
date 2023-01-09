@@ -474,7 +474,7 @@ mod tests {
             "Post changed of a account"
         );
         // assert storage
-        // Get on dupsort would return only first value. This is good enought for this test.
+        // Get on dupsort would return only first value. This is good enough for this test.
         assert_eq!(
             tx.get::<tables::PlainStorageState>(account1),
             Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) })),

@@ -162,7 +162,7 @@ impl TestHeadersClient {
         lock.extend(headers);
     }
 
-    /// Set repsonse error
+    /// Set response error
     pub async fn set_error(&self, err: RequestError) {
         let mut lock = self.error.lock().await;
         lock.replace(err);

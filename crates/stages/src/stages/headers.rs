@@ -408,7 +408,7 @@ mod tests {
 
         // Checkpoint and no gap
         tx.put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
@@ -418,7 +418,7 @@ mod tests {
 
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
@@ -428,7 +428,7 @@ mod tests {
 
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
             .expect("failed to write header");
         assert_matches!(

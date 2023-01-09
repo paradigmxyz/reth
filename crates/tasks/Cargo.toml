@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
-description = "Task managment"
+description = "Task management"
 
 [dependencies]
 tokio = { version = "1", features = ["sync", "rt"] }
