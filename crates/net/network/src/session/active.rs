@@ -120,6 +120,8 @@ impl ActiveSession {
         macro_rules! on_response {
             ($resp:ident, $item:ident) => {
                 let RequestPair { request_id, message } = $resp;
+                // TODO: update peer request timeout
+                // and maybe extract this into a method for cleanliness
                 #[allow(clippy::collapsible_match)]
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     if let PeerRequest::$item { response, .. } = req.request {
@@ -195,7 +197,7 @@ impl ActiveSession {
         let request_id = self.next_id();
         let msg = request.create_request_message(request_id);
         self.queued_outgoing.push_back(msg.into());
-        let req = InflightRequest { request, deadline };
+        let req = InflightRequest { request, timestamp: Instant::now(), deadline };
         self.inflight_requests.insert(request_id, req);
     }
 
@@ -322,6 +324,7 @@ impl ActiveSession {
         for id in timedout {
             warn!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
             let req = self.inflight_requests.remove(&id).expect("exists; qed");
+            // TODO: increase peer request timeout
             req.request.send_err_response(RequestError::Timeout);
         }
     }
@@ -478,7 +481,12 @@ pub(crate) struct ReceivedRequest {
 
 /// A request that waits for a response from the peer
 pub(crate) struct InflightRequest {
+    /// Message
     request: PeerRequest,
+    /// Instant when the request was sent
+    #[allow(dead_code)]
+    timestamp: Instant,
+    /// Time limit for the response
     deadline: Instant,
 }
 
