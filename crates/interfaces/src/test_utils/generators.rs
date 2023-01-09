@@ -176,7 +176,11 @@ pub fn random_eoa_account() -> (Address, Account) {
 /// Docs
 pub fn random_eoa_account_range(acc_range: &mut std::ops::Range<u64>) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
-    while let Some(_) = acc_range.next() {
+    // while let Some(_) = acc_range.next() {
+    //     accounts.push(random_eoa_account())
+    // }
+
+    for _ in acc_range.by_ref() {
         accounts.push(random_eoa_account())
     }
     accounts

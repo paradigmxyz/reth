@@ -122,10 +122,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             }
             let hashed_addr = keccak256(acc_before_tx.address);
             if let Some(acc) = acc_before_tx.info {
-                println!("ENTRE ACA 1");
                 hashed_acc_cursor.upsert(hashed_addr, acc)?;
             } else if hashed_acc_cursor.seek_exact(hashed_addr)?.is_some() {
-                println!("ENTRE ACA 2");
                 hashed_acc_cursor.delete_current()?;
             }
 
@@ -139,19 +137,13 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        db::Transaction,
-        test_utils::{
-            ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-            UnwindStageTestRunner, PREV_STAGE_ID, stage_test_suite_ext,
-        },
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+        PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_block_range;
-    use reth_primitives::{
-        hex_literal::hex, Account, SealedBlock, StorageEntry, TransactionKind, TxLegacy, H160,
-        H256, U256,
-    };
+    use reth_primitives::{Account, SealedBlock, H256, U256};
     use reth_provider::insert_canonical_block;
     use test_utils::*;
 
@@ -171,20 +163,6 @@ mod tests {
 
         runner.seed_execution(input).expect("failed to seed execution");
 
-        runner.tx.query(|tx| {
-            let mut block_trans_cursor = tx.cursor::<tables::AccountChangeSet>()?;
-            let mut entry = block_trans_cursor.last()?;
-
-            while let Some((key, value)) = entry {
-                println!("TRANSITION ID: {:?}", key);
-                println!("ACC BEFORE: {:?}", value.info.unwrap());
-
-                entry = block_trans_cursor.prev()?;
-            }
-
-            Ok(())
-        }).unwrap();
-
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
@@ -203,7 +181,6 @@ mod tests {
         };
         use reth_db::{
             cursor::DbCursorRO,
-            models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
         };
@@ -254,6 +231,8 @@ mod tests {
                 Ok(())
             }
 
+            /// Iterates over PlainAccount table and checks that the accounts match the ones
+            /// in the HashedAccount table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.tx.query(|tx| {
                     let mut acc_cursor = tx.cursor::<tables::PlainAccountState>()?;
@@ -261,7 +240,6 @@ mod tests {
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let hashed_addr = keccak256(address);
-                        println!("ACCOUNT: {:?}", account);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {
                             assert_eq!(acc, account)
                         }
@@ -272,16 +250,21 @@ mod tests {
                 Ok(())
             }
 
+            /// Same as check_hashed_accounts, only that checks with the old account state,
+            /// namely, the same account with nonce - 1 and balance - 1.
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.tx.query(|tx| {
                     let mut acc_cursor = tx.cursor::<tables::PlainAccountState>()?;
                     let mut hashed_acc_cursor = tx.cursor::<tables::HashedAccount>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
-                        let Account { nonce, balance, ..} = account;
-                        let old_acc = Account { nonce: nonce - 1, balance: balance - U256::from(1), bytecode_hash: None};
+                        let Account { nonce, balance, .. } = account;
+                        let old_acc = Account {
+                            nonce: nonce - 1,
+                            balance: balance - U256::from(1),
+                            bytecode_hash: None,
+                        };
                         let hashed_addr = keccak256(address);
-                        println!("ACCOUNT: {:?}", account);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {
                             assert_eq!(acc, old_acc)
                         }
@@ -333,20 +316,29 @@ mod tests {
                 self.insert_accounts(&accounts)?;
 
                 // seed account changeset
-                self.tx.commit(|tx| {
-                    let (_, last_transition) = tx.cursor::<tables::BlockTransitionIndex>()?.last()?.unwrap();
+                self.tx
+                    .commit(|tx| {
+                        let (_, last_transition) =
+                            tx.cursor::<tables::BlockTransitionIndex>()?.last()?.unwrap();
 
-                    let first_transition = last_transition - n_accounts;
+                        let first_transition =
+                            last_transition.checked_sub(n_accounts).unwrap_or_default();
 
-                    for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
-                        let Account {nonce, balance, .. } = acc;
-                        let prev_acc = Account {nonce: nonce - 1, balance: balance - U256::from(1), bytecode_hash: None};
-                        let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
-                        tx.put::<tables::AccountChangeSet>(t, acc_before_tx)?;
-                    } 
+                        for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
+                            let Account { nonce, balance, .. } = acc;
+                            let prev_acc = Account {
+                                nonce: nonce - 1,
+                                balance: balance - U256::from(1),
+                                bytecode_hash: None,
+                            };
+                            let acc_before_tx =
+                                AccountBeforeTx { address: *addr, info: Some(prev_acc) };
+                            tx.put::<tables::AccountChangeSet>(t, acc_before_tx)?;
+                        }
 
-                    Ok(())
-                }).unwrap();
+                        Ok(())
+                    })
+                    .unwrap();
 
                 Ok(accounts)
             }
