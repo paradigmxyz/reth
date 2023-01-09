@@ -28,9 +28,13 @@ use reth_stages::{
 use std::{net::SocketAddr, sync::Arc};
 use tracing::{debug, info};
 
-/// Start the client
+/// Start the node
 #[derive(Debug, Parser)]
 pub struct Command {
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
+    config: ConfigPath,
+
     /// The path to the database folder.
     ///
     /// Defaults to the OS-specific data directory:
@@ -40,10 +44,6 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: DbPath,
-
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
 
     /// The chain this node is running.
     ///
@@ -65,13 +65,13 @@ pub struct Command {
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
-    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address)]
+    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
 
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip")]
+    #[arg(long = "debug.tip", help_heading = "Debug")]
     tip: Option<H256>,
 
     #[clap(flatten)]

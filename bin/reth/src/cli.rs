@@ -51,7 +51,7 @@ pub enum Commands {
 }
 
 #[derive(Parser)]
-#[command(author, version="0.1", about="Reth binary", long_about = None)]
+#[command(author, version = "0.1", about = "Reth", long_about = None)]
 struct Cli {
     /// The command to run
     #[clap(subcommand)]
@@ -64,10 +64,10 @@ struct Cli {
     /// -vvv    Info
     /// -vvvv   Debug
     /// -vvvvv  Traces (warning: very verbose!)
-    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 2, verbatim_doc_comment)]
+    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 2, verbatim_doc_comment, help_heading = "Display")]
     verbosity: u8,
 
     /// Silence all log output.
-    #[clap(long, global = true)]
+    #[clap(long, global = true, help_heading = "Display")]
     silent: bool,
 }
