@@ -12,7 +12,7 @@ use pin_project::pin_project;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque, HashSet},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -527,7 +527,9 @@ pub fn set_capability_offsets(
             // highest wins, others are ignored
 
             let version = shared_capabilities.get(&peer_capability.name);
-            if version.is_none() || (version.is_some() && peer_capability.version > *version.unwrap() ) {
+            if version.is_none() ||
+                (version.is_some() && peer_capability.version > *version.unwrap())
+            {
                 shared_capabilities.insert(peer_capability.name.clone(), peer_capability.version);
                 shared_capability_names.insert(peer_capability.name);
             }
@@ -856,10 +858,12 @@ mod tests {
 
     #[test]
     fn test_peer_lower_capability_version() {
-        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()];
+        let local_capabilities: Vec<Capability> =
+            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()];
         let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
 
-        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+        let shared_capability =
+            set_capability_offsets(local_capabilities, peer_capabilities).unwrap();
 
         assert_eq!(
             shared_capability,
@@ -898,7 +902,8 @@ mod tests {
 
     // TODO: (If possible) test for message ID offsets being consistent with a Geth peer
     // Can also just test for proper message ID assignment (lexicographic ordering)
-    // Could be useful in case the `Ord` implementation for `SmolStr` changes at any point and we update the crate
+    // Could be useful in case the `Ord` implementation for `SmolStr` changes at any point and we
+    // update the crate
 
     #[test]
     fn snappy_decode_encode_ping() {
