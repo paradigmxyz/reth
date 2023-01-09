@@ -91,17 +91,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let last_block = input.stage_progress.unwrap_or_default();
 
         // Get next canonical block hashes to execute.
-        let mut canonicals = tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
-        let mut headers = tx.cursor::<tables::Headers>()?;
+        let mut headers = tx.cursor_read::<tables::Headers>()?;
         // Get bodies with canonical hashes.
-        let mut bodies_cursor = tx.cursor::<tables::BlockBodies>()?;
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
-        let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
+        let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
         // Get transaction of the block that we are executing.
-        let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
-        let mut tx_sender = tx.cursor::<tables::TxSenders>()?;
+        let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
 
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
@@ -294,8 +294,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         info!(target: "sync::stages::execution", to_block = input.unwind_to, "Unwinding");
 
         // Acquire changeset cursors
-        let mut account_changeset = tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
-        let mut storage_changeset = tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
+        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
         let from_transition_rev = tx.get_block_transition_by_num(input.unwind_to)? + 1;
         let to_transition_rev = tx.get_block_transition_by_num(input.stage_progress)? + 1;

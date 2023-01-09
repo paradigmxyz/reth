@@ -76,10 +76,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         // Acquire the cursor for inserting elements
-        let mut senders_cursor = tx.cursor_mut::<tables::TxSenders>()?;
+        let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor::<tables::Transactions>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Walk the transactions from start to end index (inclusive)
         let entries = tx_cursor
             .walk(start_tx_index)?
@@ -278,7 +278,7 @@ mod tests {
                     }
 
                     let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
-                    let mut body_cursor = tx.cursor::<tables::BlockBodies>()?;
+                    let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
                     body_cursor.seek_exact((start_block, start_hash).into())?;
 
                     while let Some((_, body)) = body_cursor.next()? {
