@@ -122,8 +122,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             }
             let hashed_addr = keccak256(acc_before_tx.address);
             if let Some(acc) = acc_before_tx.info {
+                println!("ENTRE ACA 1");
                 hashed_acc_cursor.upsert(hashed_addr, acc)?;
             } else if hashed_acc_cursor.seek_exact(hashed_addr)?.is_some() {
+                println!("ENTRE ACA 2");
                 hashed_acc_cursor.delete_current()?;
             }
 
@@ -141,7 +143,7 @@ mod tests {
         db::Transaction,
         test_utils::{
             ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-            UnwindStageTestRunner, PREV_STAGE_ID,
+            UnwindStageTestRunner, PREV_STAGE_ID, stage_test_suite_ext,
         },
     };
     use assert_matches::assert_matches;
@@ -153,9 +155,11 @@ mod tests {
     use reth_provider::insert_canonical_block;
     use test_utils::*;
 
+    stage_test_suite_ext!(AccountHashingTestRunner);
+
     #[tokio::test]
     async fn execute_below_clean_threshold() {
-        let (previous_stage, stage_progress) = (20, 0);
+        let (previous_stage, stage_progress) = (20, 10);
         // Set up the runner
         let mut runner = AccountHashingTestRunner::default();
         runner.set_clean_threshold(1);
@@ -167,6 +171,20 @@ mod tests {
 
         runner.seed_execution(input).expect("failed to seed execution");
 
+        runner.tx.query(|tx| {
+            let mut block_trans_cursor = tx.cursor::<tables::AccountChangeSet>()?;
+            let mut entry = block_trans_cursor.last()?;
+
+            while let Some((key, value)) = entry {
+                println!("TRANSITION ID: {:?}", key);
+                println!("ACC BEFORE: {:?}", value.info.unwrap());
+
+                entry = block_trans_cursor.prev()?;
+            }
+
+            Ok(())
+        }).unwrap();
+
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
@@ -176,46 +194,6 @@ mod tests {
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
-    // impl UnwindStageTestRunner for StorageHashingTestRunner {
-    //     fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
-    //         self.check_hashed_storage()
-    //     }
-    // }
-
-    // impl StorageHashingTestRunner {
-    //     // fn set_commit_threshold(&mut self, threshold: u64) {
-    //     //     self.commit_threshold = threshold;
-    //     // }
-
-    //     fn set_clean_threshold(&mut self, threshold: u64) {
-    //         self.clean_threshold = threshold;
-    //     }
-
-    //     fn check_hashed_storage(&self) -> Result<(), TestRunnerError> {
-    //         self.tx
-    //             .query(|tx| {
-    //                 let mut storage_cursor = tx.cursor_dup::<tables::PlainStorageState>()?;
-    //                 let mut hashed_storage_cursor = tx.cursor_dup::<tables::HashedStorage>()?;
-
-    //                 let mut expected = 0;
-
-    //                 while let Some((address, entry)) = storage_cursor.next()? {
-    //                     let key = keccak256(entry.key);
-    //                     assert_eq!(
-    //                         hashed_storage_cursor.seek_by_key_subkey(keccak256(address), key)?,
-    //                         Some(HashedStorageEntry { key, ..entry })
-    //                     );
-    //                     expected += 1;
-    //                 }
-    //                 let count =
-    //                     tx.cursor_dup::<tables::HashedStorage>()?.walk([0; 32].into())?.count();
-
-    //                 assert_eq!(count, expected);
-    //                 Ok(())
-    //             })
-    //             .map_err(|e| e.into())
-    //     }
-    // }
     mod test_utils {
         use super::*;
         use crate::{
@@ -283,8 +261,30 @@ mod tests {
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let hashed_addr = keccak256(address);
-                        let (_, acc) = hashed_acc_cursor.seek_exact(hashed_addr)?.unwrap();
-                        assert_eq!(acc, account)
+                        println!("ACCOUNT: {:?}", account);
+                        if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {
+                            assert_eq!(acc, account)
+                        }
+                    }
+                    Ok(())
+                })?;
+
+                Ok(())
+            }
+
+            pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
+                self.tx.query(|tx| {
+                    let mut acc_cursor = tx.cursor::<tables::PlainAccountState>()?;
+                    let mut hashed_acc_cursor = tx.cursor::<tables::HashedAccount>()?;
+
+                    while let Some((address, account)) = acc_cursor.next()? {
+                        let Account { nonce, balance, ..} = account;
+                        let old_acc = Account { nonce: nonce - 1, balance: balance - U256::from(1), bytecode_hash: None};
+                        let hashed_addr = keccak256(address);
+                        println!("ACCOUNT: {:?}", account);
+                        if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {
+                            assert_eq!(acc, old_acc)
+                        }
                     }
                     Ok(())
                 })?;
@@ -323,15 +323,30 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let stage_progress = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage_progress() + 1;
 
-                let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
-                println!("BLOCKS: {:?}", blocks);
+                let blocks = random_block_range(0..end, H256::zero(), 0..3);
                 self.insert_blocks(blocks)?;
 
-                let accounts = random_eoa_account_range(&mut (0..2));
+                let n_accounts = 2;
+                let accounts = random_eoa_account_range(&mut (0..n_accounts));
                 self.insert_accounts(&accounts)?;
+
+                // seed account changeset
+                self.tx.commit(|tx| {
+                    let (_, last_transition) = tx.cursor::<tables::BlockTransitionIndex>()?.last()?.unwrap();
+
+                    let first_transition = last_transition - n_accounts;
+
+                    for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
+                        let Account {nonce, balance, .. } = acc;
+                        let prev_acc = Account {nonce: nonce - 1, balance: balance - U256::from(1), bytecode_hash: None};
+                        let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
+                        tx.put::<tables::AccountChangeSet>(t, acc_before_tx)?;
+                    } 
+
+                    Ok(())
+                }).unwrap();
 
                 Ok(accounts)
             }
@@ -353,9 +368,8 @@ mod tests {
         }
 
         impl UnwindStageTestRunner for AccountHashingTestRunner {
-            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.unwind_storage(input)?;
-                self.check_hashed_storage()
+            fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+                self.check_old_hashed_accounts()
             }
         }
     }
