@@ -48,7 +48,7 @@ impl From<Genesis> for Header {
             gas_limit: genesis.gas_limit,
             difficulty: genesis.difficulty,
             nonce: genesis.nonce,
-            extra_data: genesis.extra_data.0,
+            extra_data: genesis.extra_data,
             state_root: genesis.state_root,
             timestamp: genesis.timestamp,
             mix_hash: genesis.mix_hash,

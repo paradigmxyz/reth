@@ -143,7 +143,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EthConsensusEngine<
             timestamp: payload.timestamp.as_u64(),
             mix_hash: payload.prev_randao,
             base_fee_per_gas: Some(payload.base_fee_per_gas.to::<u64>()),
-            extra_data: payload.extra_data.0,
+            extra_data: payload.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
@@ -372,7 +372,7 @@ mod tests {
 
             // Valid extra data
             let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
-                b.header.extra_data = BytesMut::zeroed(32).freeze();
+                b.header.extra_data = BytesMut::zeroed(32).freeze().into();
                 b
             });
             assert_matches!(engine.try_construct_block(block_with_valid_extra_data.into()), Ok(_));
@@ -380,7 +380,7 @@ mod tests {
             // Invalid extra data
             let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
             let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
-                b.header.extra_data = block_with_invalid_extra_data.clone();
+                b.header.extra_data = block_with_invalid_extra_data.clone().into();
                 b
             });
             assert_matches!(
