@@ -4,17 +4,28 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+// TODO rm later
+#![allow(missing_docs, unreachable_pub, unused)]
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 
-use std::task::{Context, Poll};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::trace;
 
 mod config;
+pub mod resolver;
+mod sync;
 pub mod tree;
 
+use crate::{
+    sync::SyncTree,
+    tree::{LinkEntry, ParseDnsEntryError},
+};
 pub use config::DnsDiscoveryConfig;
 
 /// [DnsDiscoveryService] front-end.
@@ -37,13 +48,15 @@ pub struct DnsDiscoveryService {
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
     /// All subscribers for event updates.
     event_listener: Vec<mpsc::Sender<DnsDiscoveryEvent>>,
+    /// All the trees that can be synced.
+    trees: HashMap<Arc<LinkEntry>, SyncTree>,
 }
 
 // === impl DnsDiscoveryService ===
 
 impl DnsDiscoveryService {
     /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
-    pub fn new(config: DnsDiscoveryConfig) -> Self {
+    pub fn new(_config: DnsDiscoveryConfig) -> Self {
         todo!()
     }
 
@@ -71,17 +84,21 @@ impl DnsDiscoveryService {
     ///
     /// Remove channels that got closed.
     fn notify(&mut self, event: DnsDiscoveryEvent) {
-        self.event_listener.retain(|listener| {
-            let open = listener.try_send(event.clone()).is_ok();
-            if !open {
-                trace!(target : "dns", "event listener channel closed",);
-            }
-            open
-        });
+        self.event_listener.retain(|listener| listener.try_send(event.clone()).is_ok());
     }
 
+    /// Starts syncing the given link to a tree.
+    pub fn sync_tree(&mut self, link: &str) -> Result<(), ParseDnsEntryError> {
+        let _link: LinkEntry = link.parse()?;
+
+        Ok(())
+    }
+
+    /// Resolves an entry
+    fn resolve_entry(&mut self, _domain: impl Into<String>, _hash: impl Into<String>) {}
+
     /// Advances the state of the DNS discovery service by polling,triggering lookups
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+    pub(crate) fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<()> {
         Poll::Pending
     }
 }

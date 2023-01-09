@@ -10,7 +10,7 @@
 //!
 //! where
 //!
-//!    enr-root and link-root refer to the root hashes of subtrees containing nodes and links
+//!    enr-root and link-root refer to the root hashes of subtrees containing nodes and links to
 //! subtrees.
 //!   `sequence-number` is the tree’s update sequence number, a decimal integer.
 //!    `signature` is a 65-byte secp256k1 EC signature over the keccak256 hash of the record
@@ -18,9 +18,10 @@
 
 use crate::tree::ParseDnsEntryError::{FieldNotFound, UnknownEntry};
 use bytes::Bytes;
-use data_encoding::{Encoding, BASE32_NOPAD, BASE64URL_NOPAD};
+use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
 use reth_primitives::hex;
+use secp256k1::SecretKey;
 use std::{fmt, str::FromStr};
 
 const ROOT_V1_PREFIX: &str = "enrtree-root:v1";
@@ -206,8 +207,8 @@ impl fmt::Display for BranchEntry {
 }
 
 /// A link entry
-#[derive(Debug, Clone)]
-pub struct LinkEntry<K: EnrKeyUnambiguous> {
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct LinkEntry<K: EnrKeyUnambiguous = SecretKey> {
     domain: String,
     pubkey: K::PublicKey,
 }
