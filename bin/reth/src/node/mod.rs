@@ -3,16 +3,17 @@
 //! Starts the client
 use crate::{
     config::Config,
-    dirs::{ConfigPath, DbPath},
-    prometheus_exporter, NetworkOpts,
+    dirs::{ConfigPath, DbPath, StandardPath},
+    prometheus_exporter,
+    utils::{
+        chainspec::{chain_spec_value_parser, ChainSpecification},
+        init::{init_db, init_genesis},
+        parse_socket_address,
+    },
+    NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
-use reth_cli_utils::{
-    chainspec::{chain_spec_value_parser, ChainSpecification},
-    init::{init_db, init_genesis},
-    parse_socket_address,
-};
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
@@ -33,7 +34,7 @@ use tracing::{debug, info};
 pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
+    config: StandardPath<ConfigPath>,
 
     /// The path to the database folder.
     ///
@@ -43,7 +44,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: StandardPath<DbPath>,
 
     /// The chain this node is running.
     ///

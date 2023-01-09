@@ -1,17 +1,21 @@
 //! CLI definition and entrypoint to executable
 use crate::{
-    db, node, p2p, stage, test_eth_chain,
-    utils::reth_tracing::{self},
+    db,
+    dirs::{LogsDir, StandardPath},
+    node, p2p, stage, test_eth_chain,
+    utils::{reth_tracing, reth_tracing::BoxedLayer},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
-use tracing::{metadata::LevelFilter, Level};
-use tracing_subscriber::{filter::Directive, util::SubscriberInitExt};
+use std::str::FromStr;
+use tracing::{metadata::LevelFilter, Level, Subscriber};
+use tracing_subscriber::{filter::Directive, registry::LookupSpan};
 
-/// main function that parses cli and runs command
+/// Parse CLI options, set up logging and run the chosen command.
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
-    reth_tracing::build_subscriber(opt.verbosity.directive()).init();
+    let (layer, guard) = opt.logs.layer();
+    reth_tracing::init(vec![layer, reth_tracing::stdout(opt.verbosity.directive())]);
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -55,13 +59,59 @@ struct Cli {
     command: Commands,
 
     #[clap(flatten)]
+    logs: Logs,
+
+    #[clap(flatten)]
     verbosity: Verbosity,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Logging")]
+pub struct Logs {
+    /// The path to put log files in.
+    #[arg(
+        long = "log.directory",
+        value_name = "PATH",
+        global = true,
+        default_value_t,
+        conflicts_with = "journald"
+    )]
+    log_directory: StandardPath<LogsDir>,
+
+    /// Log events to journald.
+    #[arg(long = "log.journald", global = true, conflicts_with = "log_directory")]
+    journald: bool,
+
+    /// The filter to use for logs written to the log file.
+    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    filter: String,
+}
+
+impl Logs {
+    /// Builds a tracing layer from the current log options.
+    ///
+    /// TODO: journald vs log file
+    fn layer<S>(&self) -> (BoxedLayer<S>, Option<tracing_appender::non_blocking::WorkerGuard>)
+    where
+        S: Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
+        let directive = Directive::from_str(self.filter.as_str())
+            .unwrap_or_else(|_| Directive::from_str("debug").unwrap());
+
+        if self.journald {
+            (reth_tracing::journald(directive).expect("Could not connect to journald"), None)
+        } else {
+            let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
+            (layer, Some(guard))
+        }
+    }
 }
 
 #[derive(Args)]
 #[command(next_help_heading = "Display")]
 struct Verbosity {
-    /// Set the minimum log level for stdout.
+    /// Set the minimum log level.
     ///
     /// -v      Errors
     /// -vv     Warnings

@@ -3,12 +3,13 @@
 //! Stage debugging tool
 use crate::{
     config::Config,
-    dirs::{ConfigPath, DbPath},
-    prometheus_exporter, NetworkOpts,
-};
-use reth_cli_utils::{
-    chainspec::{chain_spec_value_parser, ChainSpecification},
-    init::{init_db, init_genesis},
+    dirs::{ConfigPath, DbPath, StandardPath},
+    prometheus_exporter,
+    utils::{
+        chainspec::{chain_spec_value_parser, ChainSpecification},
+        init::{init_db, init_genesis},
+    },
+    NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
@@ -36,11 +37,11 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: StandardPath<DbPath>,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
+    config: StandardPath<ConfigPath>,
 
     /// The chain this node is running.
     ///
