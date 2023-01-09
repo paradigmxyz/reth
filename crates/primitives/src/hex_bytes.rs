@@ -1,9 +1,4 @@
 use bytes::Buf;
-#[cfg(test)]
-use proptest::{
-    arbitrary::{any_with, Arbitrary as PropTestArbitrary, ParamsFor},
-    strategy::{BoxedStrategy, Strategy},
-};
 use reth_codecs::Compact;
 use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -217,14 +212,16 @@ impl Compact for Bytes {
     }
 }
 
-#[cfg(test)]
-impl PropTestArbitrary for Bytes {
-    type Parameters = ParamsFor<u8>;
-    type Strategy = BoxedStrategy<Bytes>;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for Bytes {
+    type Parameters = proptest::arbitrary::ParamsFor<u8>;
+    type Strategy = proptest::prelude::BoxedStrategy<Bytes>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        proptest::collection::vec(any_with::<u8>(args), 0..1000)
-            .prop_map(move |vec| bytes::Bytes::copy_from_slice(&vec).into())
+        proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), 0..1000)
+            .prop_map(move |vec| bytes::Bytes::from(vec).into())
             .boxed()
     }
 }
@@ -365,7 +362,7 @@ mod tests {
     fn arbitrary() {
         proptest::proptest!(|(bytes: Bytes)| {
             let mut buf = vec![];
-            dbg!(bytes.clone()).to_compact(&mut buf);
+            bytes.clone().to_compact(&mut buf);
 
             let (decoded, remaining_buf) = Bytes::from_compact(&buf, buf.len());
 
