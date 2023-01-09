@@ -1,6 +1,12 @@
-use reth_codecs::{main_codec, Compact};
+use bytes::Buf;
+#[cfg(test)]
+use proptest::{
+    arbitrary::{any_with, Arbitrary as PropTestArbitrary, ParamsFor},
+    strategy::{BoxedStrategy, Strategy},
+};
+use reth_codecs::Compact;
 use reth_rlp::{Decodable, DecodeError, Encodable};
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     borrow::Borrow,
     clone::Clone,
@@ -11,8 +17,7 @@ use std::{
 use thiserror::Error;
 
 /// Wrapper type around Bytes to deserialize/serialize "0x" prefixed ethereum hex strings
-#[main_codec]
-#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Bytes(
     #[serde(serialize_with = "serialize_bytes", deserialize_with = "deserialize_bytes")]
     pub  bytes::Bytes,
@@ -83,6 +88,12 @@ impl<'a> IntoIterator for &'a Bytes {
 
     fn into_iter(self) -> Self::IntoIter {
         self.as_ref().iter()
+    }
+}
+
+impl From<&[u8]> for Bytes {
+    fn from(src: &[u8]) -> Self {
+        Self(bytes::Bytes::copy_from_slice(src))
     }
 }
 
@@ -193,6 +204,37 @@ where
     }
     .map(Into::into)
     .map_err(|e| serde::de::Error::custom(e.to_string()))
+}
+
+impl Compact for Bytes {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        let len = self.len();
+        buf.put(self.0);
+        len
+    }
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        (buf.copy_to_bytes(len).into(), buf)
+    }
+}
+
+#[cfg(test)]
+impl PropTestArbitrary for Bytes {
+    type Parameters = ParamsFor<u8>;
+    type Strategy = BoxedStrategy<Bytes>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        proptest::collection::vec(any_with::<u8>(args), 0..1000)
+            .prop_map(move |vec| bytes::Bytes::copy_from_slice(&vec).into())
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Bytes {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let size = u.int_in_range(0..=1000)?;
+        Ok(Self(bytes::Bytes::copy_from_slice(u.bytes(size)?)))
+    }
 }
 
 #[cfg(test)]
@@ -317,5 +359,18 @@ mod tests {
 
         let wrong_b = bytes::Bytes::from("0123absd");
         assert_ne!(wrong_b, b);
+    }
+
+    #[test]
+    fn arbitrary() {
+        proptest::proptest!(|(bytes: Bytes)| {
+            let mut buf = vec![];
+            dbg!(bytes.clone()).to_compact(&mut buf);
+
+            let (decoded, remaining_buf) = Bytes::from_compact(&buf, buf.len());
+
+            assert!(bytes == decoded);
+            assert!(remaining_buf.is_empty());
+        });
     }
 }

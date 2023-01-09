@@ -55,7 +55,7 @@ impl From<SealedBlock> for ExecutionPayload {
             gas_limit: value.gas_limit.into(),
             gas_used: value.gas_used.into(),
             timestamp: value.timestamp.into(),
-            extra_data: value.extra_data.clone().into(),
+            extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
             transactions,

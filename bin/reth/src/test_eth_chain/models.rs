@@ -80,7 +80,7 @@ impl From<Header> for SealedHeader {
                 base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.to::<u64>()),
                 beneficiary: value.coinbase,
                 difficulty: value.difficulty.0,
-                extra_data: value.extra_data.0,
+                extra_data: value.extra_data,
                 gas_limit: value.gas_limit.0.to::<u64>(),
                 gas_used: value.gas_used.0.to::<u64>(),
                 mix_hash: value.mix_hash,
