@@ -3631,6 +3631,7 @@ dependencies = [
  "hmac",
  "pin-project",
  "rand 0.8.5",
+ "reth-net-common",
  "reth-primitives",
  "reth-rlp",
  "secp256k1 0.24.2",
@@ -3786,7 +3787,6 @@ name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
  "pin-project",
- "reth-ecies",
  "reth-primitives",
  "tokio",
 ]
