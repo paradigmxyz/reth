@@ -14,7 +14,7 @@ use tracing_subscriber::{filter::Directive, registry::LookupSpan};
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
-    let (layer, guard) = opt.logs.layer();
+    let (layer, _guard) = opt.logs.layer();
     reth_tracing::init(vec![layer, reth_tracing::stdout(opt.verbosity.directive())]);
 
     match opt.command {
@@ -67,7 +67,7 @@ struct Cli {
 
 #[derive(Args)]
 #[command(next_help_heading = "Logging")]
-pub struct Logs {
+struct Logs {
     /// The path to put log files in.
     #[arg(
         long = "log.directory",

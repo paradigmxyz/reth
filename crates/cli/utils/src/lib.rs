@@ -135,6 +135,9 @@ pub mod reth_tracing {
         (layer, guard)
     }
 
+    /// Builds a new tracing layer that writes events to journald.
+    ///
+    /// The events are filtered by `directive`.
     pub fn journald<S>(directive: impl Into<Directive>) -> std::io::Result<BoxedLayer<S>>
     where
         S: Subscriber,
