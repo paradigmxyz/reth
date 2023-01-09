@@ -208,6 +208,9 @@ pub enum ForkSpec {
     /// After Merge plus new PUSH0 opcode
     #[serde(alias = "Merge+3855")]
     MergePush0,
+    /// Fork Spec which is unknown to us
+    #[serde(other)]
+    Unknown,
 }
 
 impl From<ForkSpec> for reth_executor::SpecUpgrades {
@@ -237,6 +240,9 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
             }
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
+            }
+            ForkSpec::Unknown => {
+                panic!("Unknown fork");
             }
         }
     }
