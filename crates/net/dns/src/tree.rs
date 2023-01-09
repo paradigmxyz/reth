@@ -16,13 +16,11 @@
 //!    `signature` is a 65-byte secp256k1 EC signature over the keccak256 hash of the record
 //! content, excluding the sig= part, encoded as URL-safe base64 (RFC-4648).
 
-use crate::tree::ParseDnsEntryError::UnknownEntry;
-use base64::{
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
-    Engine,
-};
+use crate::tree::ParseDnsEntryError::{FieldNotFound, UnknownEntry};
 use bytes::Bytes;
+use data_encoding::{Encoding, BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
+use reth_primitives::hex;
 use std::{fmt, str::FromStr};
 
 const ROOT_V1_PREFIX: &str = "enrtree-root:v1";
@@ -57,6 +55,14 @@ impl<K: EnrKeyUnambiguous> fmt::Display for DnsEntry<K> {
 pub enum ParseDnsEntryError {
     #[error("Unknown Entry: {0}")]
     UnknownEntry(String),
+    #[error("Field {0} not found.")]
+    FieldNotFound(&'static str),
+    #[error("Base64 decoding failed: {0}")]
+    Base64DecodeError(String),
+    #[error("Base32 decoding failed: {0}")]
+    Base32DecodeError(String),
+    #[error("{0}")]
+    RlpDecodeError(String),
     #[error("{0}")]
     Other(String),
 }
@@ -66,13 +72,13 @@ impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(s) = s.strip_prefix(ROOT_V1_PREFIX) {
-            TreeRootEntry::parse(s).map(DnsEntry::Root)
+            TreeRootEntry::parse_value(s).map(DnsEntry::Root)
         } else if let Some(s) = s.strip_prefix(BRANCH_PREFIX) {
-            BranchEntry::parse(s).map(DnsEntry::Branch)
+            BranchEntry::parse_value(s).map(DnsEntry::Branch)
         } else if let Some(s) = s.strip_prefix(LINK_PREFIX) {
-            LinkEntry::parse(s).map(DnsEntry::Link)
+            LinkEntry::parse_value(s).map(DnsEntry::Link)
         } else if let Some(s) = s.strip_prefix(ENR_PREFIX) {
-            NodeEntry::parse(s).map(DnsEntry::Node)
+            NodeEntry::parse_value(s).map(DnsEntry::Node)
         } else {
             Err(UnknownEntry(s.to_string()))
         }
@@ -80,11 +86,11 @@ impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
 }
 
 /// Represents an `enr-root` hash of subtrees containing nodes and links.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TreeRootEntry {
     enr_root: String,
     link_root: String,
-    sequence_number: usize,
+    sequence_number: u64,
     signature: Bytes,
 }
 
@@ -94,8 +100,23 @@ impl TreeRootEntry {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse(s: &str) -> Result<Self, ParseDnsEntryError> {
-        todo!()
+    fn parse_value(mut input: &str) -> Result<Self, ParseDnsEntryError> {
+        let input = &mut input;
+        let enr_root = parse_value(input, "e=", "ENR Root", |s| Ok(s.to_string()))?;
+        let link_root = parse_value(input, "l=", "Link Root", |s| Ok(s.to_string()))?;
+        let sequence_number = parse_value(input, "seq=", "Sequence number", |s| {
+            s.parse::<u64>().map_err(|_| {
+                ParseDnsEntryError::Other(format!("Failed to parse sequence number {s}"))
+            })
+        })?;
+        let signature = parse_value(input, "sig=", "Signature", |s| {
+            BASE64URL_NOPAD.decode(s.as_bytes()).map_err(|err| {
+                ParseDnsEntryError::Base64DecodeError(format!("signature error: {err}"))
+            })
+        })?
+        .into();
+
+        Ok(Self { enr_root, link_root, sequence_number, signature })
     }
 
     /// Returns the _unsigned_ content pairs of the entry:
@@ -112,16 +133,39 @@ impl TreeRootEntry {
 
     /// Verify the signature of the record.
     #[must_use]
-    fn verify<K: EnrKey>(&self, pubkey: &K::PublicKey) -> bool {
+    pub fn verify<K: EnrKey>(&self, pubkey: &K::PublicKey) -> bool {
         let mut sig = self.signature.clone();
         sig.truncate(64);
         pubkey.verify_v4(self.content().as_bytes(), &sig)
     }
 }
 
+impl FromStr for TreeRootEntry {
+    type Err = ParseDnsEntryError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(s) = s.strip_prefix(ROOT_V1_PREFIX) {
+            Self::parse_value(s)
+        } else {
+            Err(UnknownEntry(s.to_string()))
+        }
+    }
+}
+
+impl fmt::Debug for TreeRootEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TreeRootEntry")
+            .field("enr_root", &self.enr_root)
+            .field("link_root", &self.link_root)
+            .field("sequence_number", &self.sequence_number)
+            .field("signature", &hex::encode(self.signature.as_ref()))
+            .finish()
+    }
+}
+
 impl fmt::Display for TreeRootEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} sig={}", self.content(), Engine::encode(&STANDARD, self.signature.as_ref()))
+        write!(f, "{} sig={}", self.content(), BASE64URL_NOPAD.encode(self.signature.as_ref()))
     }
 }
 
@@ -137,8 +181,21 @@ impl BranchEntry {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse(s: &str) -> Result<Self, ParseDnsEntryError> {
-        todo!()
+    fn parse_value(input: &str) -> Result<Self, ParseDnsEntryError> {
+        let children = input.trim().split(',').map(str::to_string).collect();
+        Ok(Self { children })
+    }
+}
+
+impl FromStr for BranchEntry {
+    type Err = ParseDnsEntryError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(s) = s.strip_prefix(BRANCH_PREFIX) {
+            Self::parse_value(s)
+        } else {
+            Err(UnknownEntry(s.to_string()))
+        }
     }
 }
 
@@ -161,8 +218,28 @@ impl<K: EnrKeyUnambiguous> LinkEntry<K> {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse(s: &str) -> Result<Self, ParseDnsEntryError> {
-        todo!()
+    fn parse_value(input: &str) -> Result<Self, ParseDnsEntryError> {
+        let (pubkey, domain) = input.split_once('@').ok_or_else(|| {
+            ParseDnsEntryError::Other(format!("Missing @ delimiter in Link entry: {input}"))
+        })?;
+        let pubkey = K::decode_public(&BASE32_NOPAD.decode(pubkey.as_bytes()).map_err(|err| {
+            ParseDnsEntryError::Base32DecodeError(format!("pubkey error: {err}"))
+        })?)
+        .map_err(|err| ParseDnsEntryError::RlpDecodeError(err.to_string()))?;
+
+        Ok(Self { domain: domain.to_string(), pubkey })
+    }
+}
+
+impl<K: EnrKeyUnambiguous> FromStr for LinkEntry<K> {
+    type Err = ParseDnsEntryError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(s) = s.strip_prefix(LINK_PREFIX) {
+            Self::parse_value(s)
+        } else {
+            Err(UnknownEntry(s.to_string()))
+        }
     }
 }
 
@@ -172,7 +249,7 @@ impl<K: EnrKeyUnambiguous> fmt::Display for LinkEntry<K> {
             f,
             "{}{}@{}",
             LINK_PREFIX,
-            Engine::encode(&URL_SAFE_NO_PAD, self.pubkey.encode_uncompressed().as_ref()),
+            BASE32_NOPAD.encode(self.pubkey.encode().as_ref()),
             self.domain
         )
     }
@@ -184,20 +261,123 @@ pub struct NodeEntry<K: EnrKeyUnambiguous> {
     enr: Enr<K>,
 }
 
-// === impl LinkEntry ===
+// === impl NodeEntry ===
 
 impl<K: EnrKeyUnambiguous> NodeEntry<K> {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse(s: &str) -> Result<Self, ParseDnsEntryError> {
-        let enr: Enr<K> = s.parse().map_err(|msg| ParseDnsEntryError::Other(msg))?;
+    fn parse_value(s: &str) -> Result<Self, ParseDnsEntryError> {
+        let enr: Enr<K> = s.parse().map_err(ParseDnsEntryError::Other)?;
         Ok(Self { enr })
+    }
+}
+
+impl<K: EnrKeyUnambiguous> FromStr for NodeEntry<K> {
+    type Err = ParseDnsEntryError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(s) = s.strip_prefix(ENR_PREFIX) {
+            Self::parse_value(s)
+        } else {
+            Err(UnknownEntry(s.to_string()))
+        }
     }
 }
 
 impl<K: EnrKeyUnambiguous> fmt::Display for NodeEntry<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", ENR_PREFIX, self.enr.to_base64())
+        self.enr.to_base64().fmt(f)
+    }
+}
+
+/// Parses the value of the key value pair
+fn parse_value<F, V>(
+    input: &mut &str,
+    key: &str,
+    err: &'static str,
+    f: F,
+) -> Result<V, ParseDnsEntryError>
+where
+    F: Fn(&str) -> Result<V, ParseDnsEntryError>,
+{
+    ensure_strip_key(input, key, err)?;
+    let val = input.split_whitespace().next().ok_or(FieldNotFound(err))?;
+    *input = &input[val.len()..];
+
+    f(val)
+}
+
+/// Strips the `key` from the `input`
+///
+/// Returns an err if the `input` does not start with the `key`
+fn ensure_strip_key(
+    input: &mut &str,
+    key: &str,
+    err: &'static str,
+) -> Result<(), ParseDnsEntryError> {
+    *input = input.trim_start().strip_prefix(key).ok_or(FieldNotFound(err))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secp256k1::SecretKey;
+
+    #[test]
+    fn parse_root_entry() {
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let root: TreeRootEntry = s.parse().unwrap();
+        assert_eq!(root.to_string(), s);
+
+        match s.parse::<DnsEntry<SecretKey>>().unwrap() {
+            DnsEntry::Root(root) => {
+                assert_eq!(root.to_string(), s);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn parse_branch_entry() {
+        let s = "enrtree-branch:CCCCCCCCCCCCCCCCCCCC,BBBBBBBBBBBBBBBBBBBB";
+        let entry: BranchEntry = s.parse().unwrap();
+        assert_eq!(entry.to_string(), s);
+
+        match s.parse::<DnsEntry<SecretKey>>().unwrap() {
+            DnsEntry::Branch(entry) => {
+                assert_eq!(entry.to_string(), s);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn parse_link_entry() {
+        let s = "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@nodes.example.org";
+        let entry: LinkEntry<SecretKey> = s.parse().unwrap();
+        assert_eq!(entry.to_string(), s);
+
+        match s.parse::<DnsEntry<SecretKey>>().unwrap() {
+            DnsEntry::Link(entry) => {
+                assert_eq!(entry.to_string(), s);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn parse_enr_entry() {
+        let s = "enr:-HW4QES8QIeXTYlDzbfr1WEzE-XKY4f8gJFJzjJL-9D7TC9lJb4Z3JPRRz1lP4pL_N_QpT6rGQjAU9Apnc-C1iMP36OAgmlkgnY0iXNlY3AyNTZrMaED5IdwfMxdmR8W37HqSFdQLjDkIwBd4Q_MjxgZifgKSdM";
+        let entry: NodeEntry<SecretKey> = s.parse().unwrap();
+        assert_eq!(entry.to_string(), s);
+
+        match s.parse::<DnsEntry<SecretKey>>().unwrap() {
+            DnsEntry::Node(entry) => {
+                assert_eq!(entry.to_string(), s);
+            }
+            _ => unreachable!(),
+        }
     }
 }
