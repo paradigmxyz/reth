@@ -14,7 +14,7 @@ use tokio::sync::mpsc::{
 struct MeteredSenderMetrics {
     /// Number of messages sent
     messages_sent: Counter,
-    /// Number of errors when sending messages
+    /// Number of failed message deliveries
     send_errors: Counter,
 }
 
