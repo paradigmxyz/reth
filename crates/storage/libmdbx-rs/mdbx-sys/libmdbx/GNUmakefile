@@ -6,7 +6,7 @@
 #
 ################################################################################
 #
-# Basic internal definitios. For a customizable variables and options see below.
+# Basic internal definitions. For a customizable variables and options see below.
 #
 $(info // The GNU Make $(MAKE_VERSION))
 SHELL         := $(shell env bash -c 'echo $$BASH')

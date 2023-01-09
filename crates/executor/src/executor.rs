@@ -89,7 +89,7 @@ impl AccountInfoChangeSet {
     }
 }
 
-/// Diff change set that is neede for creating history index and updating current world state.
+/// Diff change set that is needed for creating history index and updating current world state.
 #[derive(Debug, Clone)]
 pub struct AccountChangeSet {
     /// Old and New account account change.
@@ -107,7 +107,7 @@ pub struct AccountChangeSet {
 /// and block reward if present
 #[derive(Debug)]
 pub struct ExecutionResult {
-    /// Transaction changeest contraining [Receipt], changed [Accounts][Account] and Storages.
+    /// Transaction changeset containing [Receipt], changed [Accounts][Account] and Storages.
     pub changesets: Vec<TransactionChangeSet>,
     /// Block reward if present. It represent changeset for block reward slot in
     /// [tables::AccountChangeSet] .
@@ -135,7 +135,7 @@ pub fn commit_changes<DB: StateProvider>(
             let db_account = match db.accounts.entry(address) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(_entry) => {
-                    panic!("Left panic to critically jumpout if happens, as every account shound be hot loaded.");
+                    panic!("Left panic to critically jumpout if happens, as every account should be hot loaded.");
                 }
             };
             // Insert into `change` a old account and None for new account
@@ -185,7 +185,7 @@ pub fn commit_changes<DB: StateProvider>(
                 Entry::Occupied(entry) => {
                     let entry = entry.into_mut();
 
-                    // account is present inside cache but is markes as NotExisting.
+                    // account is present inside cache but is marked as NotExisting.
                     let account_changeset =
                         if matches!(entry.account_state, AccountState::NotExisting) {
                             AccountInfoChangeSet::Created { new: to_reth_acc(&account.info) }
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(
             changesets.changeset.get(&account2).unwrap().account,
             AccountInfoChangeSet::Created { new: account2_info },
-            "New acccount"
+            "New account"
         );
         assert_eq!(
             changesets.changeset.get(&account3).unwrap().account,

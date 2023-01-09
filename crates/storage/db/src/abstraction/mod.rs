@@ -1,4 +1,4 @@
-/// Commont return types
+/// Common return types
 pub mod common;
 /// Cursor database traits.
 pub mod cursor;

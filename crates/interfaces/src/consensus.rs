@@ -70,7 +70,7 @@ pub enum Error {
     TransactionPriorityFeeMoreThenMaxFee,
     #[error("Transaction chain_id does not match.")]
     TransactionChainId,
-    #[error("Transation max fee is less them block base fee.")]
+    #[error("Transaction max fee is less them block base fee.")]
     TransactionMaxFeeLessThenBaseFee,
     #[error("Transaction signer does not have account.")]
     SignerAccountNotExisting,

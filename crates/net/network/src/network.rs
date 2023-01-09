@@ -255,7 +255,7 @@ struct NetworkInner {
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
-    /// Removes a peer from the peerset correponding to the given kind.
+    /// Removes a peer from the peerset corresponding to the given kind.
     RemovePeer(PeerId, PeerKind),
     /// Disconnect a connection to a peer if it exists.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
@@ -280,7 +280,7 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
-    /// Get PeerInfo fro all the peers
+    /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),

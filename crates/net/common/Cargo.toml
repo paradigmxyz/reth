@@ -5,7 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 description = """
-Types shared accross network code
+Types shared across network code
 """
 
 [dependencies]

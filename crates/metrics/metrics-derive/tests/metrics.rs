@@ -15,7 +15,7 @@ struct CustomMetrics {
     #[metric(rename = "second_gauge", describe = "A gauge with metric attribute description.")]
     gauge2: Gauge,
     /// Some doc comment
-    #[metric(describe = "Metric attribute description will be preffered over doc comment.")]
+    #[metric(describe = "Metric attribute description will be preferred over doc comment.")]
     counter: Counter,
     /// A renamed histogram.
     #[metric(rename = "histogram")]
@@ -60,7 +60,7 @@ fn describe_metrics() {
         TestMetric {
             ty: TestMetricTy::Counter,
             description: Some(
-                "Metric attribute description will be preffered over doc comment.".to_owned()
+                "Metric attribute description will be preferred over doc comment.".to_owned()
             )
         }
     );

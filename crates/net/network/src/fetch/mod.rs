@@ -71,7 +71,7 @@ impl StateFetcher {
     ///
     /// Invoked when an active session was closed.
     ///
-    /// This cancels als inflight request and sends an error to the receiver.
+    /// This cancels also inflight request and sends an error to the receiver.
     pub(crate) fn on_session_closed(&mut self, peer: &PeerId) {
         self.peers.remove(peer);
         if let Some(req) = self.inflight_headers_requests.remove(peer) {
