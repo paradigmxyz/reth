@@ -194,15 +194,13 @@ mod tests {
         let actual_inbound = bandwidth_meter.total_inbound();
         assert_eq!(
             actual_inbound, expected_inbound,
-            "Expected {} inbound bytes, but got {}",
-            expected_inbound, actual_inbound,
+            "Expected {expected_inbound} inbound bytes, but got {actual_inbound}",
         );
 
         let actual_outbound = bandwidth_meter.total_outbound();
         assert_eq!(
             actual_outbound, expected_outbound,
-            "Expected {} inbound bytes, but got {}",
-            expected_outbound, actual_outbound,
+            "Expected {expected_outbound} inbound bytes, but got {actual_outbound}",
         );
     }
 
