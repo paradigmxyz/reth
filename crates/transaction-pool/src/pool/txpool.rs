@@ -1363,4 +1363,19 @@ mod tests {
         )
         .unwrap();
     }
+
+    #[test]
+    fn reject_tx_over_gas_limit() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let tx = MockTransaction::eip1559().with_gas_limit(30_000_001);
+
+        assert!(matches!(
+            pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
+            Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
+        ));
+    }
 }
