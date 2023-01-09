@@ -493,12 +493,11 @@ where
 /// capabilities and the input list of locally supported capabilities.
 ///
 /// Currently only `eth` versions 66 and 67 are supported.
-// ANDREW: We should also mention that the `p2p` protocol (version 5?) is supported,
-// but it's not expected to be in `local_capabilities`
+/// Additionally, the `p2p` capability versions 4 and 5 are supported, but are
+/// expected _not_ to be in either `local_capabilities` or `peer_capabilities`.
 pub fn set_capability_offsets(
     local_capabilities: Vec<Capability>,
     peer_capabilities: Vec<Capability>,
-    // ANDREW: Why does this only return a single shared capability?
 ) -> Result<SharedCapability, P2PStreamError> {
     // find intersection of capabilities
     let our_capabilities = local_capabilities.into_iter().collect::<HashSet<_>>();
@@ -561,11 +560,10 @@ pub fn set_capability_offsets(
                 tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
             }
             SharedCapability::Eth { .. } => {
-                // ANDREW: Nit, but we could increment the offset first and avoid a clone here
-                shared_with_offsets.push(shared_capability.clone());
-
                 // increment the offset if the capability is known
                 offset += shared_capability.num_messages()?;
+
+                shared_with_offsets.push(shared_capability);
             }
         }
     }
