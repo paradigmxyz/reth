@@ -115,6 +115,9 @@ pub mod reth_tracing {
     /// Builds a new tracing layer that appends to a log file.
     ///
     /// The events are filtered by `directive`.
+    ///
+    /// The boxed layer and a guard is returned. When the guard is dropped the buffer for the log
+    /// file is immediately flushed to disk. Any events after the guard is dropped may be missed.
     pub fn file<S>(
         directive: impl Into<Directive>,
         dir: impl AsRef<Path>,
@@ -138,6 +141,8 @@ pub mod reth_tracing {
     /// Builds a new tracing layer that writes events to journald.
     ///
     /// The events are filtered by `directive`.
+    ///
+    /// If the layer cannot connect to journald for any reason this function will return an error.
     pub fn journald<S>(directive: impl Into<Directive>) -> std::io::Result<BoxedLayer<S>>
     where
         S: Subscriber,
