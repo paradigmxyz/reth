@@ -45,7 +45,6 @@ serde = "1.0"
 serde_with = "2.1.0"
 thiserror = "1"
 sucds = "0.5.0"
-arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 hex = "0.4"
 hex-literal = "0.3"
 modular-bitfield = "0.11.2"
@@ -58,6 +57,10 @@ triehash = "0.8"
 # See to replace hashers to simplify libraries
 plain_hasher = "0.2"
 hash-db = "0.15"
+
+# optional
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+proptest = { version = "1.0", optional = true }
 
 [dev-dependencies]
 arbitrary = { version = "1.1.7", features = ["derive"] }
@@ -75,4 +78,4 @@ secp256k1 = "0.24.2"
 
 [features]
 default = []
-arbitrary = ["dep:arbitrary", "revm-interpreter/arbitrary"]
+arbitrary = ["dep:arbitrary", "dep:proptest", "revm-interpreter/arbitrary"]
