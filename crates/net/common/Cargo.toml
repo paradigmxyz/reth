@@ -11,7 +11,6 @@ Types shared across network code
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-ecies = { path = "../ecies" }
 
 # async
 pin-project = "1.0"
