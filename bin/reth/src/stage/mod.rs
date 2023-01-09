@@ -4,12 +4,11 @@
 use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
-    prometheus_exporter,
-    util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::{init_db, init_genesis},
-    },
-    NetworkOpts,
+    prometheus_exporter, NetworkOpts,
+};
+use reth_cli_utils::{
+    chainspec::{chain_spec_value_parser, ChainSpecification},
+    init::{init_db, init_genesis},
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;

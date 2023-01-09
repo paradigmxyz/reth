@@ -4,16 +4,15 @@
 use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
-    prometheus_exporter,
-    util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::{init_db, init_genesis},
-        parse_socket_address,
-    },
-    NetworkOpts,
+    prometheus_exporter, NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
+use reth_cli_utils::{
+    chainspec::{chain_spec_value_parser, ChainSpecification},
+    init::{init_db, init_genesis},
+    parse_socket_address,
+};
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
