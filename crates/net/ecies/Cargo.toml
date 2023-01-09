@@ -9,6 +9,7 @@ readme = "README.md"
 [dependencies]
 reth-rlp = { path = "../../common/rlp", features = ["derive", "ethereum-types", "std"] }
 reth-primitives = { path = "../../primitives" }
+reth-net-common = { path = "../common" }
 
 futures = "0.3.24"
 thiserror = "1.0.37"

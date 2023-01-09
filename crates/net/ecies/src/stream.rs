@@ -4,19 +4,16 @@ use crate::{
 };
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
+use reth_net_common::stream::HasRemoteAddr;
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,
     io,
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{debug, instrument, trace};
@@ -28,18 +25,6 @@ pub struct ECIESStream<Io> {
     #[pin]
     stream: Framed<Io, ECIESCodec>,
     remote_id: PeerId,
-}
-
-/// This trait is just for instrumenting the stream with a socket addr
-pub trait HasRemoteAddr {
-    /// Maybe returns a [`SocketAddr`]
-    fn remote_addr(&self) -> Option<SocketAddr>;
-}
-
-impl HasRemoteAddr for TcpStream {
-    fn remote_addr(&self) -> Option<SocketAddr> {
-        self.peer_addr().ok()
-    }
 }
 
 impl<Io> ECIESStream<Io>
@@ -162,7 +147,7 @@ mod tests {
     use super::*;
     use crate::util::pk2id;
     use secp256k1::{rand, SECP256K1};
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpStream};
 
     #[tokio::test]
     async fn can_write_and_read() {

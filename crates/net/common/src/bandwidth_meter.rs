@@ -20,7 +20,6 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use reth_ecies::stream::HasRemoteAddr;
 use std::{
     convert::TryFrom as _,
     io,
@@ -36,6 +35,8 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
+
+use crate::stream::HasRemoteAddr;
 
 /// Meters bandwidth usage of streams
 #[derive(Debug)]
