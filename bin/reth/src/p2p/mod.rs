@@ -8,17 +8,14 @@ use reth_interfaces::p2p::{
 };
 use reth_network::FetchClient;
 use reth_primitives::{
-    chains::ChainSpecUnified, BlockHashOrNumber, Header, NodeRecord, SealedHeader,
+    chains::ChainSpecUnified, BlockHashOrNumber, NodeRecord, SealedHeader,
 };
 use std::sync::Arc;
 
 use crate::{
     config::Config,
     dirs::ConfigPath,
-    util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        hash_or_num_value_parser,
-    },
+    util::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
 };
 
 /// `reth p2p` command

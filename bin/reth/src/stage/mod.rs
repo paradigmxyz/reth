@@ -5,15 +5,12 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
     prometheus_exporter,
-    util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::{init_db, init_genesis},
-    },
+    util::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
-use reth_executor::Config as ExecutorConfig;
+
 use reth_primitives::chains::ChainSpecUnified;
 use reth_stages::{
     metrics::HeaderMetrics,
@@ -132,7 +129,7 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let consensus: Arc<BeaconConsensus> = todo!(); // Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
+                let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain));
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -177,10 +174,8 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                let mut stage = ExecutionStage {
-                    config: ExecutorConfig::new_ethereum(),
-                    commit_threshold: num_blocks,
-                };
+                let mut stage =
+                    ExecutionStage { chain_spec: self.chain, commit_threshold: num_blocks };
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

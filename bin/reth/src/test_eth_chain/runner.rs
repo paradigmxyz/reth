@@ -9,8 +9,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_executor::SpecUpgrades;
 use reth_primitives::{
+    chains::{ChainSpecUnified, NetworkUpgrades},
     keccak256, Account as RethAccount, Address, JsonU256, SealedBlock, SealedHeader, StorageEntry,
     H256, U256,
 };
@@ -102,9 +102,9 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         debug!("Executing {:?} spec: {:?}", name, suite.network);
 
-        let spec_upgrades: SpecUpgrades = suite.network.into();
+        let chain_spec: ChainSpecUnified = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;
-        let has_block_reward = spec_upgrades.paris != 0;
+        let has_block_reward = chain_spec.paris_block() != 0;
 
         // Create db and acquire transaction
         let db = create_test_rw_db::<WriteMap>();
@@ -167,10 +167,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereum 1.
-        let mut stage = ExecutionStage::new(
-            reth_executor::Config { chain_id: U256::from(1), spec_upgrades },
-            1000,
-        );
+        let mut stage = ExecutionStage::new(chain_spec, 1000);
 
         // Call execution stage
         let input = ExecInput {

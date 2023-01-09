@@ -1,7 +1,7 @@
 use crate::{EthVersion, StatusBuilder};
 
 use reth_primitives::{
-    chains::{Essentials, Hardforks, MainnetSpec},
+    chains::{Essentials, MainnetSpec, NetworkUpgrades},
     Chain, ForkId, Hardfork, H256, U256,
 };
 use reth_rlp::{RlpDecodable, RlpEncodable};
@@ -105,7 +105,7 @@ impl Default for Status {
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: chain.genesis_hash(),
             genesis: chain.genesis_hash(),
-            forkid: chain.fork_id(&Hardfork::Frontier),
+            forkid: chain.fork_id(Hardfork::Frontier),
         }
     }
 }

@@ -5,17 +5,13 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath},
     prometheus_exporter,
-    util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification, Genesis},
-        init::{init_db, init_genesis},
-    },
+    util::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
-use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{chains::ChainSpecUnified, H256};
 use reth_stages::{
@@ -106,7 +102,7 @@ impl Command {
             HeaderMetrics::describe();
         }
 
-        let consensus: Arc<BeaconConsensus> = todo!(); // Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
+        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain));
 
         let network = config
             .network_config(db.clone(), self.chain, self.network.disable_discovery)
@@ -153,7 +149,7 @@ impl Command {
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
             .push(ExecutionStage {
-                config: ExecutorConfig::new_ethereum(),
+                chain_spec: self.chain,
                 commit_threshold: config.stages.execution.commit_threshold,
             });
 

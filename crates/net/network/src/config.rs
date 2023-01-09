@@ -10,7 +10,7 @@ use crate::{
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{
     chains::{ChainSpecUnified, Essentials},
-    Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS,
+    ForkFilter, Hardfork, NodeRecord, PeerId,
 };
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
@@ -322,7 +322,7 @@ impl<C> NetworkConfigBuilder<C> {
             ForkFilter::new(
                 head,
                 chain_spec.genesis_hash(),
-                Hardfork::all_concrete_forks(&chain_spec),
+                Hardfork::all_forks_blocks(&chain_spec),
             )
         });
 

@@ -3,18 +3,7 @@ use reth_primitives::{
     Header, H256, U256,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
-
-/// Defines a chain, including it's genesis block, chain ID and fork block numbers.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ChainSpecification {
-    /// Consensus configuration.
-    #[serde(rename = "config")]
-    pub consensus: reth_consensus::Config,
-    /// The genesis block of the chain.
-    #[serde(flatten)]
-    pub genesis: Genesis,
-}
+use std::collections::HashMap;
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -69,7 +58,7 @@ pub struct GenesisAccount {
     pub balance: U256,
 }
 
-/// Clap value parser for [ChainSpecification]s that takes either a built-in chainspec or the path
+/// Clap value parser for [ChainSpecUnified]s that takes either a built-in chainspec or the path
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpecUnified, eyre::Error> {
     Ok(match s {

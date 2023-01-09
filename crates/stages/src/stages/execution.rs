@@ -10,12 +10,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_executor::{
-    config::SpecUpgrades,
     executor::AccountChangeSet,
     revm_wrap::{State, SubState},
-    Config,
 };
-use reth_primitives::{Address, Header, StorageEntry, TransactionSignedEcRecovered, H256, U256};
+use reth_primitives::{
+    chains::ChainSpecUnified, Address, Header, StorageEntry, TransactionSignedEcRecovered, H256,
+    U256,
+};
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
 use tracing::*;
@@ -52,24 +53,21 @@ const EXECUTION: StageId = StageId("Execution");
 #[derive(Debug)]
 pub struct ExecutionStage {
     /// Executor configuration.
-    pub config: Config,
+    pub chain_spec: ChainSpecUnified,
     /// Commit threshold
     pub commit_threshold: u64,
 }
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self {
-            config: Config { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() },
-            commit_threshold: 1000,
-        }
+        Self { chain_spec: ChainSpecUnified::Mainnet, commit_threshold: 1000 }
     }
 }
 
 impl ExecutionStage {
     /// Create new execution stage with specified config.
-    pub fn new(config: Config, commit_threshold: u64) -> Self {
-        Self { config, commit_threshold }
+    pub fn new(chain_spec: ChainSpecUnified, commit_threshold: u64) -> Self {
+        Self { chain_spec, commit_threshold }
     }
 }
 
@@ -193,7 +191,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             header,
                             &recovered_transactions,
                             ommers,
-                            &self.config,
+                            &self.chain_spec,
                             state_provider,
                         )
                     })
@@ -433,7 +431,8 @@ mod tests {
 
         // execute
         let mut execution_stage = ExecutionStage::default();
-        execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
+        execution_stage.chain_spec =
+            ChainSpecUnified::Mainnet.into_customized().berlin_activated().build();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
         assert_eq!(output, ExecOutput { stage_progress: 1, done: true });
@@ -519,7 +518,8 @@ mod tests {
         // execute
 
         let mut execution_stage = ExecutionStage::default();
-        execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
+        execution_stage.chain_spec =
+            ChainSpecUnified::Mainnet.into_customized().berlin_activated().build();
         let _ = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 

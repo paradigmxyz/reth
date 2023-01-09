@@ -2,16 +2,19 @@ use crate::{BlockNumber, ForkFilter, ForkId, Hardfork, H256};
 use core::fmt::Debug;
 use ethers_core::types::Chain;
 
-pub trait ChainSpec: Essentials + Hardforks {}
+pub trait ChainSpec: Essentials + NetworkUpgrades {}
 
 pub trait Essentials: 'static + Debug + Sync + Send + Unpin {
     fn id(&self) -> u64;
     fn genesis_hash(&self) -> H256;
 }
 
-pub trait Hardforks: Essentials {
-    fn fork_block(&self, fork: &Hardfork) -> u64;
-    fn fork_id(&self, fork: &Hardfork) -> ForkId;
+pub trait NetworkUpgrades: Essentials {
+    fn fork_block(&self, fork: Hardfork) -> u64;
+    fn fork_id(&self, fork: Hardfork) -> ForkId;
+    fn paris_block(&self) -> u64;
+    fn shanghai_block(&self) -> u64;
+    fn merge_terminal_total_difficulty(&self) -> u128;
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
     ///
@@ -21,13 +24,13 @@ pub trait Hardforks: Essentials {
         let all_forks = Hardfork::all_forks();
         let future_forks: Vec<BlockNumber> = all_forks
             .iter()
-            .filter(|f| self.fork_block(f) > self.fork_block(&fork))
-            .map(|f| self.fork_block(f))
+            .filter(|f| self.fork_block(**f) > self.fork_block(fork))
+            .map(|f| self.fork_block(*f))
             .collect();
 
         // this data structure is not chain-agnostic, so we can pass in the constant mainnet
         // genesis
-        ForkFilter::new(self.fork_block(&fork), self.genesis_hash(), future_forks)
+        ForkFilter::new(self.fork_block(fork), self.genesis_hash(), future_forks)
     }
 }
 
@@ -36,7 +39,7 @@ pub trait Builtin: 'static + Debug + Sync + Send + Unpin {
     const GENESIS_HASH: H256;
 }
 
-impl<T: Essentials + Hardforks> ChainSpec for T {}
+impl<T: Essentials + NetworkUpgrades> ChainSpec for T {}
 
 impl<T: Builtin> Essentials for T {
     fn id(&self) -> u64 {

@@ -1,9 +1,9 @@
 //! ALl functions for verification of block
-use crate::{config, Config};
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
-    BlockNumber, Header, SealedBlock, SealedHeader, Transaction, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
+    chains::{ChainSpecUnified, Essentials, NetworkUpgrades},
+    BlockNumber, Hardfork, Header, SealedBlock, SealedHeader, Transaction,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
 use std::{
@@ -11,10 +11,12 @@ use std::{
     time::SystemTime,
 };
 
+use crate::config;
+
 /// Validate header standalone
 pub fn validate_header_standalone(
     header: &SealedHeader,
-    config: &config::Config,
+    chain_spec: &ChainSpecUnified,
 ) -> Result<(), Error> {
     // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
     if header.gas_used > header.gas_limit {
@@ -38,13 +40,14 @@ pub fn validate_header_standalone(
     }
 
     // Check if base fee is set.
-    if header.number >= config.london_block && header.base_fee_per_gas.is_none() {
+    if header.number >= chain_spec.fork_block(Hardfork::London) && header.base_fee_per_gas.is_none()
+    {
         return Err(Error::BaseFeeMissing)
     }
 
     // EIP-3675: Upgrade consensus to Proof-of-Stake:
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if header.number >= config.paris_block {
+    if header.number >= chain_spec.paris_block() {
         if header.difficulty != U256::ZERO {
             return Err(Error::TheMergeDifficultyIsNotZero)
         }
@@ -69,21 +72,23 @@ pub fn validate_header_standalone(
 /// The only parameter from the header that affects the transaction is `base_fee`.
 pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
-    config: &Config,
+    chain_spec: &ChainSpecUnified,
     at_block_number: BlockNumber,
     base_fee: Option<u64>,
 ) -> Result<(), Error> {
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if config.eip_155_block <= at_block_number && chain_id.is_some() {
+            if chain_spec.fork_block(Hardfork::SpuriousDragon) <= at_block_number &&
+                chain_id.is_some()
+            {
                 return Err(Error::TransactionOldLegacyChainId)
             }
             *chain_id
         }
         Transaction::Eip2930(TxEip2930 { chain_id, .. }) => {
             // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
-            if config.berlin_block > at_block_number {
+            if chain_spec.fork_block(Hardfork::Berlin) > at_block_number {
                 return Err(Error::TransactionEip2930Disabled)
             }
             Some(*chain_id)
@@ -95,7 +100,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
-            if config.berlin_block > at_block_number {
+            if chain_spec.fork_block(Hardfork::Berlin) > at_block_number {
                 return Err(Error::TransactionEip1559Disabled)
             }
 
@@ -109,7 +114,7 @@ pub fn validate_transaction_regarding_header(
         }
     };
     if let Some(chain_id) = chain_id {
-        if chain_id != config.chain_id {
+        if chain_id != chain_spec.id() {
             return Err(Error::TransactionChainId)
         }
     }
@@ -133,14 +138,14 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
     transactions: impl Iterator<Item = &'a TransactionSignedEcRecovered>,
     header: &Header,
     provider: Provider,
-    config: &Config,
+    chain_spec: &ChainSpecUnified,
 ) -> RethResult<()> {
     let mut account_nonces = HashMap::new();
 
     for transaction in transactions {
         validate_transaction_regarding_header(
             transaction,
-            config,
+            chain_spec,
             header.number,
             header.base_fee_per_gas,
         )?;
@@ -236,7 +241,7 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
 pub fn validate_header_regarding_parent(
     parent: &SealedHeader,
     child: &SealedHeader,
-    config: &config::Config,
+    chain_spec: &ChainSpecUnified,
 ) -> Result<(), Error> {
     // Parent number is consistent.
     if parent.number + 1 != child.number {
@@ -255,7 +260,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if config.paris_block > child.number {
+    if chain_spec.paris_block() > child.number {
         // TODO how this needs to be checked? As ice age did increment it by some formula
     }
 
@@ -263,7 +268,7 @@ pub fn validate_header_regarding_parent(
 
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
-    if config.london_block == child.number {
+    if chain_spec.fork_block(Hardfork::London) == child.number {
         parent_gas_limit = parent.gas_limit * config::EIP1559_ELASTICITY_MULTIPLIER;
     }
 
@@ -283,10 +288,10 @@ pub fn validate_header_regarding_parent(
     }
 
     // EIP-1559 check base fee
-    if child.number >= config.london_block {
+    if child.number >= chain_spec.fork_block(Hardfork::London) {
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
 
-        let expected_base_fee = if config.london_block == child.number {
+        let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == child.number {
             config::EIP1559_INITIAL_BASE_FEE
         } else {
             // This BaseFeeMissing will not happen as previous blocks are checked to have them.
@@ -335,12 +340,12 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
 pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     block: &SealedBlock,
     provider: Provider,
-    config: &Config,
+    chain_spec: &ChainSpecUnified,
 ) -> RethResult<()> {
-    validate_header_standalone(&block.header, config)?;
+    validate_header_standalone(&block.header, chain_spec)?;
     validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
-    validate_header_regarding_parent(&parent, &block.header, config)?;
+    validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
 
     // NOTE: depending on the need of the stages, recovery could be done in different place.
     let transactions = block
@@ -353,7 +358,7 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
         transactions.iter(),
         &block.header,
         provider,
-        config,
+        chain_spec,
     )?;
     Ok(())
 }
@@ -495,19 +500,21 @@ mod tests {
     fn sanity_check() {
         let (block, parent) = mock_block();
         let provider = Provider::new(Some(parent));
-        let config = Config::default();
 
-        assert_eq!(full_validation(&block, provider, &config), Ok(()), "Validation should pass");
+        assert_eq!(
+            full_validation(&block, provider, &ChainSpecUnified::Mainnet),
+            Ok(()),
+            "Validation should pass"
+        );
     }
 
     #[test]
     fn validate_known_block() {
         let (block, _) = mock_block();
         let provider = Provider::new_known();
-        let config = Config::default();
 
         assert_eq!(
-            full_validation(&block, provider, &config),
+            full_validation(&block, provider, &ChainSpecUnified::Mainnet),
             Err(Error::BlockKnown { hash: block.hash(), number: block.number }.into()),
             "Should fail with error"
         );
@@ -519,14 +526,13 @@ mod tests {
         let tx1 = mock_tx(0);
         let tx2 = mock_tx(1);
         let provider = Provider::new_known();
-        let config = Config::default();
 
         let txs = vec![tx1, tx2];
         validate_all_transaction_regarding_block_and_nonces(
             txs.iter(),
             &block.header,
             provider,
-            &config,
+            &ChainSpecUnified::Mainnet,
         )
         .expect("To Pass");
     }
@@ -536,7 +542,6 @@ mod tests {
         let (block, _) = mock_block();
         let tx1 = mock_tx(1);
         let provider = Provider::new_known();
-        let config = Config::default();
 
         let txs = vec![tx1];
         assert_eq!(
@@ -544,7 +549,7 @@ mod tests {
                 txs.iter(),
                 &block.header,
                 provider,
-                &config,
+                &ChainSpecUnified::Mainnet,
             ),
             Err(Error::TransactionNonceNotConsistent.into())
         )
@@ -556,7 +561,6 @@ mod tests {
         let tx1 = mock_tx(0);
         let tx2 = mock_tx(3);
         let provider = Provider::new_known();
-        let config = Config::default();
 
         let txs = vec![tx1, tx2];
         assert_eq!(
@@ -564,7 +568,7 @@ mod tests {
                 txs.iter(),
                 &block.header,
                 provider,
-                &config,
+                &ChainSpecUnified::Mainnet,
             ),
             Err(Error::TransactionNonceNotConsistent.into())
         );

@@ -514,7 +514,7 @@ mod tests {
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_primitives::{
-        chains::{Hardforks, MainnetSpec},
+        chains::{MainnetSpec, NetworkUpgrades},
         ForkFilter, Hardfork,
     };
     use secp256k1::{SecretKey, SECP256K1};

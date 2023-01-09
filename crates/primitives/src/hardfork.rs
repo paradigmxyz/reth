@@ -1,4 +1,4 @@
-use crate::{chains::ChainSpec, BlockNumber};
+use crate::{chains::NetworkUpgrades, BlockNumber};
 use std::str::FromStr;
 
 #[allow(missing_docs)]
@@ -41,8 +41,10 @@ impl Hardfork {
         ]
     }
 
-    pub fn all_concrete_forks<'a, CS>(chain_spec: &'a CS) -> Vec<ConcreteHardfork<'a, CS>> {
-        Self::all_forks().into_iter().map(|f| ConcreteHardfork::new(chain_spec, f)).collect()
+    pub fn all_forks_blocks<'a, CS: NetworkUpgrades>(
+        chain_spec: &'a CS,
+    ) -> Vec<impl Into<BlockNumber> + 'a> {
+        Self::all_forks().into_iter().map(|f| HardforkWithChain::new(chain_spec, f)).collect()
     }
 }
 
@@ -79,52 +81,52 @@ impl Default for Hardfork {
     }
 }
 
-impl<CS: ChainSpec> From<(&CS, BlockNumber)> for Hardfork {
-    fn from((chain_spec, num): (&CS, BlockNumber)) -> Self {
+impl<H: NetworkUpgrades> From<(&H, BlockNumber)> for Hardfork {
+    fn from((chain_spec, num): (&H, BlockNumber)) -> Self {
         match num {
-            _i if num < chain_spec.fork_id(&Hardfork::Frontier).next => Hardfork::Frontier,
-            _i if num < chain_spec.fork_id(&Hardfork::Dao).next => Hardfork::Dao,
-            _i if num < chain_spec.fork_id(&Hardfork::Homestead).next => Hardfork::Homestead,
-            _i if num < chain_spec.fork_id(&Hardfork::Tangerine).next => Hardfork::Tangerine,
-            _i if num < chain_spec.fork_id(&Hardfork::SpuriousDragon).next => {
+            _i if num < chain_spec.fork_id(Hardfork::Frontier).next => Hardfork::Frontier,
+            _i if num < chain_spec.fork_id(Hardfork::Dao).next => Hardfork::Dao,
+            _i if num < chain_spec.fork_id(Hardfork::Homestead).next => Hardfork::Homestead,
+            _i if num < chain_spec.fork_id(Hardfork::Tangerine).next => Hardfork::Tangerine,
+            _i if num < chain_spec.fork_id(Hardfork::SpuriousDragon).next => {
                 Hardfork::SpuriousDragon
             }
-            _i if num < chain_spec.fork_id(&Hardfork::Byzantium).next => Hardfork::Byzantium,
-            _i if num < chain_spec.fork_id(&Hardfork::Constantinople).next => {
+            _i if num < chain_spec.fork_id(Hardfork::Byzantium).next => Hardfork::Byzantium,
+            _i if num < chain_spec.fork_id(Hardfork::Constantinople).next => {
                 Hardfork::Constantinople
             }
-            _i if num < chain_spec.fork_id(&Hardfork::Istanbul).next => Hardfork::Istanbul,
-            _i if num < chain_spec.fork_id(&Hardfork::Muirglacier).next => Hardfork::Muirglacier,
-            _i if num < chain_spec.fork_id(&Hardfork::Berlin).next => Hardfork::Berlin,
-            _i if num < chain_spec.fork_id(&Hardfork::London).next => Hardfork::London,
-            _i if num < chain_spec.fork_id(&Hardfork::ArrowGlacier).next => Hardfork::ArrowGlacier,
+            _i if num < chain_spec.fork_id(Hardfork::Istanbul).next => Hardfork::Istanbul,
+            _i if num < chain_spec.fork_id(Hardfork::Muirglacier).next => Hardfork::Muirglacier,
+            _i if num < chain_spec.fork_id(Hardfork::Berlin).next => Hardfork::Berlin,
+            _i if num < chain_spec.fork_id(Hardfork::London).next => Hardfork::London,
+            _i if num < chain_spec.fork_id(Hardfork::ArrowGlacier).next => Hardfork::ArrowGlacier,
 
             _ => Hardfork::Latest,
         }
     }
 }
 
-pub struct ConcreteHardfork<'a, CS> {
+pub struct HardforkWithChain<'a, CS> {
     chain_spec: &'a CS,
     fork: Hardfork,
 }
 
-impl<'a, CS> ConcreteHardfork<'a, CS> {
+impl<'a, CS> HardforkWithChain<'a, CS> {
     pub fn new(chain_spec: &'a CS, fork: Hardfork) -> Self {
         Self { chain_spec, fork }
     }
 }
 
-impl<'a, CS: ChainSpec> From<ConcreteHardfork<'a, CS>> for BlockNumber {
-    fn from(value: ConcreteHardfork<'a, CS>) -> Self {
-        value.chain_spec.fork_block(&value.fork)
+impl<'a, H: NetworkUpgrades> From<HardforkWithChain<'a, H>> for BlockNumber {
+    fn from(value: HardforkWithChain<'a, H>) -> Self {
+        value.chain_spec.fork_block(value.fork)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        chains::{Hardforks, MainnetSpec},
+        chains::{MainnetSpec, NetworkUpgrades},
         forkid::ForkHash,
         hardfork::Hardfork,
     };
@@ -157,7 +159,7 @@ mod tests {
         let mut curr_forkhash = ForkHash(crc32::checksum_ieee(&genesis[..]).to_be_bytes());
 
         // now we go through enum members
-        let frontier_forkid = mainnet.fork_id(&Hardfork::Frontier);
+        let frontier_forkid = mainnet.fork_id(Hardfork::Frontier);
         assert_eq!(curr_forkhash, frontier_forkid.hash);
 
         // list of the above hardforks
@@ -165,8 +167,8 @@ mod tests {
 
         // check that the curr_forkhash we compute matches the output of each fork_id returned
         for hardfork in hardforks {
-            curr_forkhash += mainnet.fork_block(&hardfork);
-            assert_eq!(curr_forkhash, mainnet.fork_id(&hardfork).hash);
+            curr_forkhash += mainnet.fork_block(hardfork);
+            assert_eq!(curr_forkhash, mainnet.fork_id(hardfork).hash);
         }
     }
 }
