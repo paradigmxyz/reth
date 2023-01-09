@@ -256,6 +256,15 @@ impl<T: TransactionOrdering> TxPool<T> {
                             *transaction.hash(),
                         ))
                     }
+                    InsertErr::TxGasLimitMoreThanAvailableBlockGas {
+                        transaction,
+                        block_gas_limit,
+                        tx_gas_limit,
+                    } => Err(PoolError::TxExceedsGasLimit(
+                        *transaction.hash(),
+                        block_gas_limit,
+                        tx_gas_limit,
+                    )),
                 }
             }
         }
@@ -770,6 +779,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// This will enforce all additional rules in the context of this pool, such as:
     ///   - Spam protection: reject new non-local transaction from a sender that exhausted its slot
     ///     capacity.
+    ///   - Gas limit: reject transactions if they exceed a block's maximum gas.
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
@@ -782,6 +792,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     transaction: Arc::new(transaction),
                 })
             }
+        }
+        if transaction.gas_limit() > self.block_gas_limit {
+            return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
+                block_gas_limit: self.block_gas_limit,
+                tx_gas_limit: transaction.gas_limit(),
+                transaction: Arc::new(transaction),
+            })
         }
         Ok(transaction)
     }
@@ -1006,6 +1023,12 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     ///
     /// The sender can be considered a spammer at this point.
     ExceededSenderTransactionsCapacity { transaction: Arc<ValidPoolTransaction<T>> },
+    /// Transaction gas limit exceeds block's gas limit
+    TxGasLimitMoreThanAvailableBlockGas {
+        transaction: Arc<ValidPoolTransaction<T>>,
+        block_gas_limit: u64,
+        tx_gas_limit: u64,
+    },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -1339,5 +1362,20 @@ mod tests {
             on_chain_nonce,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn reject_tx_over_gas_limit() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let tx = MockTransaction::eip1559().with_gas_limit(30_000_001);
+
+        assert!(matches!(
+            pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
+            Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
+        ));
     }
 }

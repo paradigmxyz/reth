@@ -56,7 +56,7 @@ pub trait TransactionValidator: Send + Sync {
     ) -> TransactionValidationOutcome<Self::Transaction>;
 }
 
-/// A valida transaction in the pool.
+/// A valid transaction in the pool.
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,
@@ -64,7 +64,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
-    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`.
+    /// Total cost of the transaction: `feeCap x gasLimit + transferredValue`.
     pub cost: U256,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,
