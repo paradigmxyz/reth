@@ -120,12 +120,11 @@ impl ActiveSession {
         macro_rules! on_response {
             ($resp:ident, $item:ident) => {
                 let RequestPair { request_id, message } = $resp;
-                // TODO: update peer request timeout
-                // and maybe extract this into a method for cleanliness
                 #[allow(clippy::collapsible_match)]
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     if let PeerRequest::$item { response, .. } = req.request {
                         let _ = response.send(Ok(message));
+                        self.update_request_timeout(req.timestamp, Instant::now())
                     } else {
                         req.request.send_bad_response();
                         self.on_bad_message();
@@ -324,9 +323,26 @@ impl ActiveSession {
         for id in timedout {
             warn!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
             let req = self.inflight_requests.remove(&id).expect("exists; qed");
-            // TODO: increase peer request timeout
+            self.update_request_timeout(req.timestamp, req.deadline);
             req.request.send_err_response(RequestError::Timeout);
         }
+    }
+
+    /// Updates the request timeout with a message's timestamps
+    fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
+        // TODO: inline or constant? where should we put this? What would be
+        // a sensible value for the minimum?
+        /// Minimum timeout value
+        const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
+        /// Amount of RTTs before timeout
+        const TIMER_MULTIPLIER: u32 = 4;
+
+        // TODO: use a more sophisticated formula
+        let elapsed = received.saturating_duration_since(sent);
+        let updated_timeout = (7 * self.request_timeout + elapsed * TIMER_MULTIPLIER) / 8;
+
+        self.request_timeout = updated_timeout.max(MINIMUM_TIMEOUT);
+        self.timeout_interval = tokio::time::interval(self.request_timeout);
     }
 }
 
@@ -484,7 +500,6 @@ pub(crate) struct InflightRequest {
     /// Message
     request: PeerRequest,
     /// Instant when the request was sent
-    #[allow(dead_code)]
     timestamp: Instant,
     /// Time limit for the response
     deadline: Instant,
