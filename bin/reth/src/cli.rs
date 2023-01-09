@@ -89,8 +89,6 @@ struct Logs {
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    ///
-    /// TODO: journald vs log file
     fn layer<S>(&self) -> (BoxedLayer<S>, Option<tracing_appender::non_blocking::WorkerGuard>)
     where
         S: Subscriber,
