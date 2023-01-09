@@ -8,7 +8,7 @@ use crate::{
     util::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
         init::{init_db, init_genesis},
-        socketaddr_value_parser,
+        parse_socket_address,
     },
     NetworkOpts,
 };
@@ -66,7 +66,7 @@ pub struct Command {
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
-    #[arg(long, value_name = "SOCKET", value_parser = socketaddr_value_parser)]
+    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address)]
     metrics: Option<SocketAddr>,
 
     /// Set the chain tip manually for testing purposes.
