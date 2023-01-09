@@ -1,0 +1,34 @@
+[package]
+name = "reth-dns-discovery"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "Support for EIP-1459 Node Discovery via DNS"
+
+[dependencies]
+# reth
+reth-primitives = { path = "../../primitives" }
+
+# ethereum
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+enr = { version = "0.7.0",  default-features = false, features = ["rust-secp256k1"] }
+
+# async/futures
+tokio = { version = "1", features = ["io-util", "net", "time"] }
+tokio-stream = "0.1"
+
+# trust-dns
+trust-dns-resolver = "0.22"
+
+# misc
+data-encoding = "2"
+bytes = "1.2"
+tracing = "0.1"
+thiserror = "1.0"
+async-trait = "0.1.61"
