@@ -27,6 +27,7 @@ tokio-stream = "0.1"
 trust-dns-resolver = "0.22"
 
 # misc
+base64 = "0.21"
 bytes = "1.2"
 tracing = "0.1"
 thiserror = "1.0"

@@ -7,14 +7,15 @@
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 
-mod config;
-mod record;
-
-pub use config::DnsDiscoveryConfig;
 use std::task::{Context, Poll};
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::trace;
+
+mod config;
+pub mod tree;
+
+pub use config::DnsDiscoveryConfig;
 
 /// [DnsDiscoveryService] front-end.
 #[derive(Clone)]
@@ -71,7 +72,7 @@ impl DnsDiscoveryService {
     /// Remove channels that got closed.
     fn notify(&mut self, event: DnsDiscoveryEvent) {
         self.event_listener.retain(|listener| {
-            let open = listener.send(event.clone()).is_ok();
+            let open = listener.try_send(event.clone()).is_ok();
             if !open {
                 trace!(target : "dns", "event listener channel closed",);
             }
