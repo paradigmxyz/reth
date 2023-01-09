@@ -12,7 +12,7 @@ pub async fn run() -> eyre::Result<()> {
     reth_tracing::build_subscriber(if opt.silent {
         TracingMode::Silent
     } else {
-        TracingMode::from(opt.verbose)
+        TracingMode::from(opt.verbosity)
     })
     .init();
 
@@ -57,11 +57,17 @@ struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
-    /// Use verbose output
-    #[clap(short, long, action = ArgAction::Count, global = true)]
-    verbose: u8,
+    /// Set the minimum log level for stdout.
+    ///
+    /// -v      Errors
+    /// -vv     Warnings
+    /// -vvv    Info
+    /// -vvvv   Debug
+    /// -vvvvv  Traces (warning: very verbose!)
+    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 2, verbatim_doc_comment)]
+    verbosity: u8,
 
-    /// Silence all output
+    /// Silence all log output.
     #[clap(long, global = true)]
     silent: bool,
 }
