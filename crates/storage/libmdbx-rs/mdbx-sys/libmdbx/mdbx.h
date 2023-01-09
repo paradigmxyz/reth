@@ -695,11 +695,11 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
  * automatically (de)initialization, releasing reader lock table slots
  * and so on.
  *
- * If MDBX builded as a DLL this is done out-of-the-box by DllEntry() function,
- * which called automatically by Windows core with passing corresponding reason
- * argument.
+ * If MDBX is built as a DLL this is done out-of-the-box by DllEntry(),
+ * function which called automatically by Windows core with passing corresponding
+ * reason argument.
  *
- * Otherwise, if MDBX was builded not as a DLL, some black magic
+ * Otherwise, if MDBX was built not as a DLL, some black magic
  * may be required depending of Windows version:
  *
  *  - Modern Windows versions, including Windows Vista and later, provides
@@ -881,7 +881,7 @@ enum MDBX_constants {
 /* DEBUG & LOGGING ************************************************************/
 
 /** \addtogroup c_debug
- * \note Most of debug feature enabled only when libmdbx builded with
+ * \note Most of debug feature enabled only when libmdbx is built with
  * \ref MDBX_DEBUG build option. @{ */
 
 /** Log level
@@ -946,7 +946,7 @@ typedef enum MDBX_log_level_t MDBX_log_level_t;
  *
  * \details `MDBX_DBG_DUMP` and `MDBX_DBG_LEGACY_MULTIOPEN` always have an
  * effect, but `MDBX_DBG_ASSERT`, `MDBX_DBG_AUDIT` and `MDBX_DBG_JITTER` only if
- * libmdbx builded with \ref MDBX_DEBUG. */
+ * libmdbx is built with \ref MDBX_DEBUG. */
 enum MDBX_debug_flags_t {
   MDBX_DBG_NONE = 0,
 
@@ -1682,7 +1682,7 @@ enum MDBX_copy_flags_t {
    * pages sequentially */
   MDBX_CP_COMPACT = 1u,
 
-  /** Force to make resizeable copy, i.e. dynamic size instead of fixed */
+  /** Force to make resizable copy, i.e. dynamic size instead of fixed */
   MDBX_CP_FORCE_DYNAMIC_SIZE = 2u
 };
 #ifndef __cplusplus
@@ -2407,7 +2407,7 @@ LIBMDBX_API int mdbx_env_deleteW(const wchar_t *pathnameW,
  *      account skipping free pages.
  *
  *  - \ref MDBX_CP_FORCE_DYNAMIC_SIZE
- *      Force to make resizeable copy, i.e. dynamic size instead of fixed.
+ *      Force to make resizable copy, i.e. dynamic size instead of fixed.
  *
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_copy(MDBX_env *env, const char *dest,
@@ -2863,7 +2863,7 @@ enum MDBX_warmup_flags_t {
   MDBX_warmup_lock = 4,
 
   /** Alters corresponding current resource limits to be enough for lock pages
-   * by \ref MDBX_warmup_lock. However, this option should be used in simpliest
+   * by \ref MDBX_warmup_lock. However, this option should be used in simpler
    * applications since takes into account only current size of this environment
    * disregarding all other factors. For real-world database application you
    * will need full-fledged management of resources and their limits with
@@ -2899,7 +2899,7 @@ DEFINE_ENUM_FLAG_OPERATORS(MDBX_warmup_flags_t)
  * \param [in] timeout_seconds_16dot16  Optional timeout which checking only
  *                              during explicitly peeking database pages
  *                              for loading ones if the \ref MDBX_warmup_force
- *                              option was spefified.
+ *                              option was specified.
  *
  * \returns A non-zero error value on failure and 0 on success.
  * Some possible errors are:
@@ -3027,7 +3027,7 @@ LIBMDBX_API int mdbx_env_get_fd(const MDBX_env *env, mdbx_filehandle_t *fd);
  *    was called after \ref mdbx_env_open() but OUTSIDE a write transaction,
  *    then MDBX will execute internal pseudo-transaction to apply new parameters
  *    (but only if anything has been changed), and changes be visible to any
- *    others processes immediately after succesful completion of function.
+ *    others processes immediately after successful completion of function.
  *
  * Essentially a concept of "automatic size management" is simple and useful:
  *  - There are the lower and upper bounds of the database file size;
@@ -5222,7 +5222,7 @@ mdbx_get_datacmp(MDBX_db_flags_t flags);
  * \param [in] thread         The reader thread ID.
  * \param [in] bytes_used     The number of last used page
  *                            in the MVCC-snapshot which being read,
- *                            i.e. database file can't shrinked beyond this.
+ *                            i.e. database file can't be shrunk beyond this.
  * \param [in] bytes_retained The total size of the database pages that were
  *                            retired by committed write transactions after
  *                            the reader's MVCC-snapshot,

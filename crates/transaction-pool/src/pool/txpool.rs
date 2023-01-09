@@ -150,7 +150,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.by_hash.get(tx_hash).cloned()
     }
 
-    /// Returns all transaction for the hashes, if it exis.
+    /// Returns all transaction for the hashes, if it exists.
     pub(crate) fn get_all<'a>(
         &'a self,
         txs: impl IntoIterator<Item = TxHash> + 'a,
@@ -477,7 +477,7 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Expected base fee for the pending block.
     pending_basefee: U256,
-    /// Minimum base fee required by the protol.
+    /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
     minimal_protocol_basefee: U256,

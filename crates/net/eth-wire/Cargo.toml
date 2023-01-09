@@ -1,6 +1,6 @@
 [package]
 name = "reth-eth-wire"
-description = "Impements the eth/64 and eth/65 P2P protocols"
+description = "Implements the eth/64 and eth/65 P2P protocols"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"

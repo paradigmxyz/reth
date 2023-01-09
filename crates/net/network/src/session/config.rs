@@ -29,7 +29,7 @@ impl Default for SessionsConfig {
             // since the manager is the sender.
             session_command_buffer: 32,
             // This should be greater since the manager is the receiver. The total size will be
-            // `buffer + num sessions`. Each session can therefor fit at least 1 message in the
+            // `buffer + num sessions`. Each session can therefore fit at least 1 message in the
             // channel. The buffer size is additional capacity. The channel is always drained on
             // `poll`.
             session_event_buffer: 64,
