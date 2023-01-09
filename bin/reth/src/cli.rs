@@ -1,20 +1,17 @@
 //! CLI definition and entrypoint to executable
-
-use crate::{db, node, p2p, stage, test_eth_chain};
-
-use clap::{ArgAction, Parser, Subcommand};
-use reth_cli_utils::reth_tracing::{self, TracingMode};
-use tracing_subscriber::util::SubscriberInitExt;
+use crate::{
+    db, node, p2p, stage, test_eth_chain,
+    utils::reth_tracing::{self},
+};
+use clap::{ArgAction, Args, Parser, Subcommand};
+use tracing::{metadata::LevelFilter, Level};
+use tracing_subscriber::{filter::Directive, util::SubscriberInitExt};
 
 /// main function that parses cli and runs command
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
-    reth_tracing::build_subscriber(if opt.silent {
-        TracingMode::Silent
-    } else {
-        TracingMode::from(opt.verbosity)
-    })
-    .init();
+
+    reth_tracing::build_subscriber(opt.verbosity.directive()).init();
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -57,6 +54,13 @@ struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
+    #[clap(flatten)]
+    verbosity: Verbosity,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Display")]
+struct Verbosity {
     /// Set the minimum log level for stdout.
     ///
     /// -v      Errors
@@ -64,10 +68,30 @@ struct Cli {
     /// -vvv    Info
     /// -vvvv   Debug
     /// -vvvvv  Traces (warning: very verbose!)
-    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 2, verbatim_doc_comment, help_heading = "Display")]
+    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
     verbosity: u8,
 
     /// Silence all log output.
-    #[clap(long, global = true, help_heading = "Display")]
-    silent: bool,
+    #[clap(long, alias = "silent", short = 'q', global = true, help_heading = "Display")]
+    quiet: bool,
+}
+
+impl Verbosity {
+    /// Get the corresponding [Directive] for the given verbosity, or none if the verbosity
+    /// corresponds to silent.
+    fn directive(&self) -> Directive {
+        if self.quiet {
+            LevelFilter::OFF.into()
+        } else {
+            let level = match self.verbosity - 1 {
+                0 => Level::ERROR,
+                1 => Level::WARN,
+                2 => Level::INFO,
+                3 => Level::DEBUG,
+                _ => Level::TRACE,
+            };
+
+            format!("reth={}", level).parse().unwrap()
+        }
+    }
 }
