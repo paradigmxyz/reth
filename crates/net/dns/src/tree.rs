@@ -54,7 +54,7 @@ impl<K: EnrKeyUnambiguous> fmt::Display for DnsEntry<K> {
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
 pub enum ParseDnsEntryError {
-    #[error("Unknown Entry: {0}")]
+    #[error("Unknown entry: {0}")]
     UnknownEntry(String),
     #[error("Field {0} not found.")]
     FieldNotFound(&'static str),
