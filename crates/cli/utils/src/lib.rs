@@ -1,3 +1,10 @@
+#![warn(missing_docs, unreachable_pub)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![doc(test(
+    no_crate_inject,
+    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
+))]
+
 //! Utility functions.
 use reth_primitives::{BlockHashOrNumber, H256};
 use std::{
@@ -15,7 +22,7 @@ pub mod chainspec;
 pub mod init;
 
 /// Finds all files in a directory with a given postfix.
-pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<PathBuf> {
+pub fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<PathBuf> {
     WalkDir::new(path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -26,12 +33,12 @@ pub(crate) fn find_all_files_with_postfix(path: &Path, postfix: &str) -> Vec<Pat
 
 /// Parses a user-specified path with support for environment variables and common shorthands (e.g.
 /// ~ for the user's home directory).
-pub(crate) fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
+pub fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
     shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
 }
 
 /// Parse [BlockHashOrNumber]
-pub(crate) fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber, eyre::Error> {
+pub fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber, eyre::Error> {
     match H256::from_str(value) {
         Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
         Err(_) => Ok(BlockHashOrNumber::Number(value.parse()?)),
@@ -48,7 +55,7 @@ pub(crate) fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber,
 /// - Otherwise it is assumed to be a hostname
 ///
 /// An error is returned if the value is empty.
-pub(crate) fn parse_socket_address(value: &str) -> Result<SocketAddr, eyre::Error> {
+pub fn parse_socket_address(value: &str) -> Result<SocketAddr, eyre::Error> {
     if value.is_empty() {
         eyre::bail!("Cannot parse socket address from an empty string");
     }

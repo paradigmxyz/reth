@@ -3541,6 +3541,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
+ "reth-cli-utils",
  "reth-consensus",
  "reth-db",
  "reth-downloaders",
@@ -3561,6 +3562,22 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-futures",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
+name = "reth-cli-utils"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "reth-consensus",
+ "reth-db",
+ "reth-primitives",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "tracing",
  "tracing-subscriber",
  "walkdir",
 ]

@@ -1,4 +1,4 @@
-use crate::util::chainspec::Genesis;
+use crate::chainspec::Genesis;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
