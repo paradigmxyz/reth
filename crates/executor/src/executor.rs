@@ -12,8 +12,8 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Database,
-    Return, SpecId, EVM,
+    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Return, SpecId,
+    EVM,
 };
 use std::collections::BTreeMap;
 
@@ -370,7 +370,8 @@ pub fn execute<DB: StateProvider>(
             .collect();
 
         // commit state
-        let (changeset, new_bytecodes) = commit_changes(evm.db().unwrap(), state);
+        let (changeset, new_bytecodes) =
+            commit_changes(evm.db().expect("Db to not be moved."), state);
 
         // Push transaction changeset and calculte header bloom filter for receipt.
         changesets.push(TransactionChangeSet {
@@ -436,24 +437,51 @@ pub fn block_reward_changeset<DB: StateProvider>(
         *reward_beneficiaries.entry(header.beneficiary).or_default() +=
             reward + (reward >> 5) * ommers.len() as u128;
 
-        // apply block rewards to beneficiaries (Main block and ommers);
+        //
+
+        // create changesets for beneficiaries rewards (Main block and ommers);
         reward_beneficiaries
             .into_iter()
             .map(|(beneficiary, reward)| -> Result<_, _> {
                 let changeset = db
-                    .basic(beneficiary)
-                    .map_err(|_| Error::ProviderError)?
+                    .load_account(beneficiary)
+                    .map_err(|_| Error::ProviderError)
                     // if account is present append `Changed` changeset for block reward
-                    .map(|acc| {
-                        let old = to_reth_acc(&acc);
+                    .map(|db_acc| {
+                        let old = to_reth_acc(&db_acc.info);
                         let mut new = old;
                         new.balance += U256::from(reward);
-                        AccountInfoChangeSet::Changed { new, old }
-                    })
-                    // if account is not present append `Created` changeset
-                    .unwrap_or(AccountInfoChangeSet::Created {
-                        new: Account { nonce: 0, balance: U256::from(reward), bytecode_hash: None },
-                    });
+                        db_acc.info.balance = new.balance;
+                        match db_acc.account_state {
+                            AccountState::NotExisting => {
+                                // if account was not existing that means that storage is not
+                                // present.
+                                db_acc.account_state = AccountState::StorageCleared;
+
+                                // if account was not present append `Created` changeset
+                                AccountInfoChangeSet::Created {
+                                    new: Account {
+                                        nonce: 0,
+                                        balance: new.balance,
+                                        bytecode_hash: None,
+                                    },
+                                }
+                            }
+
+                            AccountState::StorageCleared |
+                            AccountState::Touched |
+                            AccountState::None => {
+                                // If account is None that means that EVM didn't touch it.
+                                // we are changing the state to Touched as account can have storage
+                                // in db.
+                                if matches!(db_acc.account_state, AccountState::None) {
+                                    db_acc.account_state = AccountState::Touched;
+                                }
+                                // if account was present, append changed changeset.
+                                AccountInfoChangeSet::Changed { new, old }
+                            }
+                        }
+                    })?;
                 Ok((beneficiary, changeset))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()
