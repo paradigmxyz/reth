@@ -131,6 +131,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Create state provider with cached state
+        let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
+
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
         for (header, body, ommers) in block_batch.iter() {
@@ -174,9 +177,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 })
                 .collect();
 
-            // for now use default eth config
-            let state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
-
             trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
 
             // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
@@ -194,7 +194,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             &recovered_transactions,
                             ommers,
                             &self.config,
-                            state_provider,
+                            &mut state_provider,
                         )
                     })
                     .expect("Expects that thread name is not null");
@@ -242,7 +242,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             "{address} setting storage:{key} ({old_value} -> {new_value})"
                         );
 
-                        // Always delete old value as duplicate table put will not override it
+                        // Always delete old value as duplicate table, put will not override it
                         tx.delete::<tables::PlainStorageState>(
                             address,
                             Some(StorageEntry { key: hkey, value: old_value }),
@@ -264,8 +264,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     trace!(target: "sync::stages::execution", ?hash, ?bytecode, len = bytecode.len(), "Inserting bytecode");
                     tx.put::<tables::Bytecodes>(hash, bytecode[..bytecode.len()].to_vec())?;
 
-                    // NOTE: bytecode bytes are not inserted in change set and it stand in saparate
-                    // table
+                    // NOTE: bytecode bytes are not inserted in change set and can be found in
+                    // separate table
                 }
             }
 
@@ -297,18 +297,13 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut account_changeset = tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        let from_transition = tx.get_block_transition_by_num(input.stage_progress)?;
+        let from_transition_rev = tx.get_block_transition_by_num(input.unwind_to)? + 1;
+        let to_transition_rev = tx.get_block_transition_by_num(input.stage_progress)? + 1;
 
-        let to_transition = if input.unwind_to != 0 {
-            tx.get_block_transition_by_num(input.unwind_to - 1)?
-        } else {
-            0
-        };
-
-        if to_transition > from_transition {
-            panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", to_transition, input.stage_progress, from_transition, input.unwind_to);
+        if from_transition_rev > to_transition_rev {
+            panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", from_transition_rev, input.stage_progress, to_transition_rev, input.unwind_to);
         }
-        let num_of_tx = (from_transition - to_transition) as usize;
+        let num_of_tx = (to_transition_rev - from_transition_rev) as usize;
 
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
@@ -318,11 +313,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
-        // TODO(dragan) test walking here
         let account_changeset_batch = account_changeset
-            .walk(to_transition)?
+            .walk(from_transition_rev)?
             .take_while(|item| {
-                item.as_ref().map(|(num, _)| *num <= from_transition).unwrap_or_default()
+                item.as_ref().map(|(num, _)| *num < to_transition_rev).unwrap_or_default()
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -336,19 +330,18 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             }
         }
 
-        // TODO(dragan) fix walking here
         // get all batches for storage change
-        let storage_chageset_batch = storage_changeset
-            .walk((to_transition, Address::zero()).into())?
+        let storage_changeset_batch = storage_changeset
+            .walk((from_transition_rev, Address::zero()).into())?
             .take_while(|item| {
                 item.as_ref()
-                    .map(|(key, _)| key.transition_id() <= from_transition)
+                    .map(|(key, _)| key.transition_id() < to_transition_rev)
                     .unwrap_or_default()
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
-        for (key, storage) in storage_chageset_batch.into_iter().rev() {
+        for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
             tx.put::<tables::PlainStorageState>(address, storage.clone())?;
             if storage.value == U256::ZERO {
@@ -360,7 +353,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Discard unwinded changesets
         let mut entry = account_changeset.last()?;
         while let Some((transition_id, _)) = entry {
-            if transition_id < to_transition {
+            if transition_id < from_transition_rev {
                 break
             }
             account_changeset.delete_current()?;
@@ -369,7 +362,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         let mut entry = storage_changeset.last()?;
         while let Some((key, _)) = entry {
-            if key.transition_id() < to_transition {
+            if key.transition_id() < from_transition_rev {
                 break
             }
             storage_changeset.delete_current()?;

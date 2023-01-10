@@ -215,14 +215,14 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
                 tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
             })
             .collect::<Result<Vec<_>, EngineApiError>>()?;
-        let state_provider = SubState::new(State::new(&*self.client));
+        let mut state_provider = SubState::new(State::new(&*self.client));
         let config = (&self.config).into();
         match executor::execute_and_verify_receipt(
             &header,
             &transactions,
             &[],
             &config,
-            state_provider,
+            &mut state_provider,
         ) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, header.hash())),
             Err(err) => Ok(PayloadStatus::new(
