@@ -3,11 +3,12 @@ use ethers_core::{
     utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount},
 };
 use reth_eth_wire::{EthVersion, Status};
-use reth_network::NetworkHandle;
 use reth_primitives::{
     proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, H160, INITIAL_BASE_FEE,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+
+// TODO: clique builder
 
 /// Extracts the genesis block header from an ethers [`Genesis`](ethers_core::utils::Genesis).
 pub(crate) fn genesis_header(genesis: &Genesis) -> Header {
@@ -137,63 +138,6 @@ fn extract_fork_blocks(genesis: &Genesis) -> Vec<u64> {
     // Skip any forks in block 0, that's the genesis ruleset
     fork_blocks.retain(|block| *block != 0);
     fork_blocks
-}
-
-/// Starts the reth pipeline with the given config, consensus, db, and fetch client.
-/// .... TODO: doc
-/// TODO: need to figure out where to put this test as it will import every part of the node.
-pub(crate) async fn start_reth(network: NetworkHandle) {
-    let _fetch_client = Arc::new(network.fetch_client().await.unwrap());
-    // let mut pipeline = reth_stages::Pipeline::default()
-    //     .with_sync_state_updater(network.clone())
-    //     .push(HeaderStage {
-    //         downloader: headers::linear::LinearDownloadBuilder::default()
-    //             .batch_size(config.stages.headers.downloader_batch_size)
-    //             .retries(config.stages.headers.downloader_retries)
-    //             .build(consensus.clone(), fetch_client.clone()),
-    //         consensus: consensus.clone(),
-    //         client: fetch_client.clone(),
-    //         network_handle: network.clone(),
-    //         commit_threshold: config.stages.headers.commit_threshold,
-    //         metrics: HeaderMetrics::default(),
-    //     })
-    //     .push(TotalDifficultyStage {
-    //         commit_threshold: config.stages.total_difficulty.commit_threshold,
-    //     })
-    //     .push(BodyStage {
-    //         downloader: Arc::new(
-    //             bodies::concurrent::ConcurrentDownloader::new(
-    //                 fetch_client.clone(),
-    //                 consensus.clone(),
-    //             )
-    //             .with_batch_size(config.stages.bodies.downloader_batch_size)
-    //             .with_retries(config.stages.bodies.downloader_retries)
-    //             .with_concurrency(config.stages.bodies.downloader_concurrency),
-    //         ),
-    //         consensus: consensus.clone(),
-    //         commit_threshold: config.stages.bodies.commit_threshold,
-    //     })
-    //     .push(SenderRecoveryStage {
-    //         batch_size: config.stages.sender_recovery.batch_size,
-    //         commit_threshold: config.stages.sender_recovery.commit_threshold,
-    //     })
-    //     .push(ExecutionStage {
-    //         config: ExecutorConfig::new_ethereum(),
-    //         commit_threshold: config.stages.execution.commit_threshold,
-    //     });
-
-    // if let Some(tip) = self.tip {
-    //     debug!("Tip manually set: {}", tip);
-    //     consensus.notify_fork_choice_state(ForkchoiceState {
-    //         head_block_hash: tip,
-    //         safe_block_hash: tip,
-    //         finalized_block_hash: tip,
-    //     })?;
-    // }
-
-    // // Run pipeline
-    // info!("Starting pipeline");
-    // pipeline.run(db.clone()).await?;
 }
 
 /// Creates a chain config using the given chain id.

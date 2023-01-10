@@ -11,3 +11,6 @@ mod clique;
 
 #[cfg(test)]
 mod sync;
+
+#[cfg(test)]
+mod reth_builder;

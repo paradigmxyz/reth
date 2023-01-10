@@ -1,10 +1,14 @@
-use crate::clique::{block_to_header, extract_status, genesis_funded, genesis_header, start_reth};
+use crate::{
+    clique::{block_to_header, extract_status, genesis_funded, genesis_header, start_reth},
+    reth_builder::{RethBuilder, RethTestInstance},
+};
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::types::U64;
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Http, Middleware, Provider};
 use ethers_signers::{LocalWallet, Signer};
 use futures::StreamExt;
+use reth_db::mdbx::{Env, WriteMap};
 use reth_net_test_utils::{create_new_geth, enr_to_peer_id, unused_tcp_udp, GETH_TIMEOUT};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
 use reth_primitives::{PeerId, H256};
@@ -152,8 +156,16 @@ async fn sync_from_clique_geth() {
 
         let handle = network.handle().clone();
 
+        // build reth and start the pipeline
+        let reth: RethTestInstance<Env<WriteMap>> = RethBuilder::new()
+            // .db(db)
+            // .consensus(consensus)
+            // .genesis(genesis) // TODO: convert ethers genesis to reth genesis
+            .network(handle.clone())
+            .build();
+
         // start reth then manually connect geth
-        tokio::task::spawn(start_reth(handle.clone()));
+        tokio::task::spawn(reth.start());
         tokio::task::spawn(network);
 
         // create networkeventstream to get the next session established event easily
