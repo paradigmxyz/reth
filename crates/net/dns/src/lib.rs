@@ -9,6 +9,7 @@
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 
+use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
     pin::Pin,
@@ -25,15 +26,18 @@ use tokio_stream::{
 };
 
 mod config;
+mod error;
 pub mod resolver;
 mod sync;
 pub mod tree;
 
+pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
-    sync::SyncTree,
-    tree::{LinkEntry, ParseDnsEntryError},
+    sync::{QueryOutcome, QueryPool, ResolveRootResult, SyncTree},
+    tree::LinkEntry,
 };
 pub use config::DnsDiscoveryConfig;
+use error::ParseDnsEntryError;
 
 /// [DnsDiscoveryService] front-end.
 #[derive(Clone)]
@@ -48,7 +52,7 @@ impl DnsDiscoveryHandle {}
 
 /// A client that discovers nodes via DNS.
 #[must_use = "Service does nothing unless polled"]
-pub struct DnsDiscoveryService {
+pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// Copy of the sender half, so new [`DnsDiscoveryHandle`] can be created on demand.
     command_tx: UnboundedSender<DnsDiscoveryCommand>,
     /// Receiver half of the command channel.
@@ -57,20 +61,30 @@ pub struct DnsDiscoveryService {
     update_listeners: Vec<mpsc::Sender<DnsDiscoveryUpdate>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
+    /// All queries currently in progress
+    queries: QueryPool<R, SecretKey>,
 }
 
 // === impl DnsDiscoveryService ===
 
-impl DnsDiscoveryService {
+impl<R: Resolver> DnsDiscoveryService<R> {
     /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
-    pub fn new(_config: DnsDiscoveryConfig) -> Self {
+    ///
+    /// ```
+    /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
+    /// # fn t() {
+    ///  let service =
+    ///             DnsDiscoveryService::new(DnsResolver::from_system_conf().unwrap(), Default::default());
+    /// # }
+    /// ```
+    pub fn new(resolver: R, config: DnsDiscoveryConfig) -> Self {
         todo!()
     }
 
     /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
     /// service
-    pub fn new_pair(config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
-        let service = Self::new(config);
+    pub fn new_pair(resolver: R, config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
+        let service = Self::new(resolver, config);
         let handle = service.handle();
         (service, handle)
     }
@@ -110,14 +124,23 @@ impl DnsDiscoveryService {
     /// Resolves an entry
     fn resolve_entry(&mut self, _domain: impl Into<String>, _hash: impl Into<String>) {}
 
+    fn on_resolved_root(&mut self, resp: ResolveRootResult<SecretKey>) {}
+
     /// Advances the state of the DNS discovery service by polling,triggering lookups
-    pub(crate) fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
+        while let Poll::Ready(outcome) = self.queries.poll(cx) {
+            // handle query outcome
+            match outcome {
+                QueryOutcome::Root(resp) => self.on_resolved_root(resp),
+            }
+        }
+
         Poll::Pending
     }
 }
 
 /// A Stream events, mainly used for debugging
-impl Stream for DnsDiscoveryService {
+impl<R: Resolver> Stream for DnsDiscoveryService<R> {
     type Item = DnsDiscoveryEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -125,6 +148,7 @@ impl Stream for DnsDiscoveryService {
     }
 }
 
+/// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
 enum DnsDiscoveryCommand {}
 
 /// Represents [NodeRecord] related discovery updates

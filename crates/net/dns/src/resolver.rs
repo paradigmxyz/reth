@@ -6,6 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use tracing::trace;
+pub use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
     error::{ResolveError, ResolveErrorKind},
     proto::DnsHandle,
@@ -14,8 +15,8 @@ use trust_dns_resolver::{
 
 /// A type that can lookup DNS entries
 #[async_trait]
-pub trait Resolver: Send + Sync {
-    /// Performs a textual lookup.
+pub trait Resolver: Send + Sync + Unpin + 'static {
+    /// Performs a textual lookup and returns the first text
     async fn lookup_txt(&self, query: &str) -> Option<String>;
 }
 
@@ -40,6 +41,42 @@ where
                 String::from_utf8(entry.to_vec()).ok()
             }
         }
+    }
+}
+
+/// An asynchronous DNS resolver
+///
+/// See also [TokioAsyncResolver](trust_dns_resolver::TokioAsyncResolver)
+///
+/// ```
+/// # fn t() {
+///  use reth_dns_discovery::resolver::DnsResolver;
+///  let resolver = DnsResolver::from_system_conf().unwrap();
+/// # }
+/// ```
+#[derive(Clone)]
+pub struct DnsResolver(TokioAsyncResolver);
+
+// === impl DnsResolver ===
+
+impl DnsResolver {
+    /// Create a new resolver by wrapping the given [AsyncResolver]
+    pub fn new(resolver: TokioAsyncResolver) -> Self {
+        Self(resolver)
+    }
+
+    /// Constructs a new Tokio based Resolver with the system configuration.
+    ///
+    /// This will use `/etc/resolv.conf` on Unix OSes and the registry on Windows.
+    pub fn from_system_conf() -> Result<Self, ResolveError> {
+        TokioAsyncResolver::tokio_from_system_conf().map(Self::new)
+    }
+}
+
+#[async_trait]
+impl Resolver for DnsResolver {
+    async fn lookup_txt(&self, query: &str) -> Option<String> {
+        Resolver::lookup_txt(&self.0, query).await
     }
 }
 

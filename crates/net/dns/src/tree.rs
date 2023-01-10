@@ -16,7 +16,11 @@
 //!    `signature` is a 65-byte secp256k1 EC signature over the keccak256 hash of the record
 //! content, excluding the sig= part, encoded as URL-safe base64 (RFC-4648).
 
-use crate::tree::ParseDnsEntryError::{FieldNotFound, UnknownEntry};
+use crate::error::{
+    ParseDnsEntryError,
+    ParseDnsEntryError::{FieldNotFound, UnknownEntry},
+    ParseEntryResult,
+};
 use bytes::Bytes;
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
@@ -48,24 +52,6 @@ impl<K: EnrKeyUnambiguous> fmt::Display for DnsEntry<K> {
             DnsEntry::Node(entry) => entry.fmt(f),
         }
     }
-}
-
-/// Error while parsing a [DnsEntry]
-#[derive(thiserror::Error, Debug)]
-#[allow(missing_docs)]
-pub enum ParseDnsEntryError {
-    #[error("Unknown entry: {0}")]
-    UnknownEntry(String),
-    #[error("Field {0} not found.")]
-    FieldNotFound(&'static str),
-    #[error("Base64 decoding failed: {0}")]
-    Base64DecodeError(String),
-    #[error("Base32 decoding failed: {0}")]
-    Base32DecodeError(String),
-    #[error("{0}")]
-    RlpDecodeError(String),
-    #[error("{0}")]
-    Other(String),
 }
 
 impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
@@ -101,7 +87,7 @@ impl TreeRootEntry {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse_value(mut input: &str) -> Result<Self, ParseDnsEntryError> {
+    fn parse_value(mut input: &str) -> ParseEntryResult<Self> {
         let input = &mut input;
         let enr_root = parse_value(input, "e=", "ENR Root", |s| Ok(s.to_string()))?;
         let link_root = parse_value(input, "l=", "Link Root", |s| Ok(s.to_string()))?;
@@ -182,7 +168,7 @@ impl BranchEntry {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse_value(input: &str) -> Result<Self, ParseDnsEntryError> {
+    fn parse_value(input: &str) -> ParseEntryResult<Self> {
         let children = input.trim().split(',').map(str::to_string).collect();
         Ok(Self { children })
     }
@@ -209,8 +195,8 @@ impl fmt::Display for BranchEntry {
 /// A link entry
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct LinkEntry<K: EnrKeyUnambiguous = SecretKey> {
-    domain: String,
-    pubkey: K::PublicKey,
+    pub domain: String,
+    pub pubkey: K::PublicKey,
 }
 
 // === impl LinkEntry ===
@@ -219,7 +205,7 @@ impl<K: EnrKeyUnambiguous> LinkEntry<K> {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse_value(input: &str) -> Result<Self, ParseDnsEntryError> {
+    fn parse_value(input: &str) -> ParseEntryResult<Self> {
         let (pubkey, domain) = input.split_once('@').ok_or_else(|| {
             ParseDnsEntryError::Other(format!("Missing @ delimiter in Link entry: {input}"))
         })?;
@@ -268,7 +254,7 @@ impl<K: EnrKeyUnambiguous> NodeEntry<K> {
     /// Parses the entry from text.
     ///
     /// Caution: This assumes the prefix is already removed.
-    fn parse_value(s: &str) -> Result<Self, ParseDnsEntryError> {
+    fn parse_value(s: &str) -> ParseEntryResult<Self> {
         let enr: Enr<K> = s.parse().map_err(ParseDnsEntryError::Other)?;
         Ok(Self { enr })
     }
@@ -293,14 +279,9 @@ impl<K: EnrKeyUnambiguous> fmt::Display for NodeEntry<K> {
 }
 
 /// Parses the value of the key value pair
-fn parse_value<F, V>(
-    input: &mut &str,
-    key: &str,
-    err: &'static str,
-    f: F,
-) -> Result<V, ParseDnsEntryError>
+fn parse_value<F, V>(input: &mut &str, key: &str, err: &'static str, f: F) -> ParseEntryResult<V>
 where
-    F: Fn(&str) -> Result<V, ParseDnsEntryError>,
+    F: Fn(&str) -> ParseEntryResult<V>,
 {
     ensure_strip_key(input, key, err)?;
     let val = input.split_whitespace().next().ok_or(FieldNotFound(err))?;
@@ -312,11 +293,7 @@ where
 /// Strips the `key` from the `input`
 ///
 /// Returns an err if the `input` does not start with the `key`
-fn ensure_strip_key(
-    input: &mut &str,
-    key: &str,
-    err: &'static str,
-) -> Result<(), ParseDnsEntryError> {
+fn ensure_strip_key(input: &mut &str, key: &str, err: &'static str) -> ParseEntryResult<()> {
     *input = input.trim_start().strip_prefix(key).ok_or(FieldNotFound(err))?;
     Ok(())
 }
