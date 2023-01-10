@@ -1,32 +1,24 @@
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
-    types::{Address, Block, Bytes, U64},
-    utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
+    utils::{Geth},
 };
-use ethers_middleware::SignerMiddleware;
-use futures::StreamExt;
-use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
-use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_interfaces::{
-    p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{SyncState, SyncStateUpdater},
-};
-use reth_net_common::ban_list::BanList;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
+
+
+
+
+
+
+
 use reth_primitives::{
-    proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord,
-    PeerId, H160, H256, INITIAL_BASE_FEE,
+    PeerId,
 };
-use reth_provider::test_utils::NoopProvider;
-use secp256k1::SecretKey;
+
+
 use std::{
-    collections::{HashMap, HashSet},
-    io::{BufRead, BufReader},
     net::SocketAddr,
-    sync::Arc,
     time::Duration,
 };
-use tokio::task;
+
 
 // The timeout for tests that create a GethInstance
 pub const GETH_TIMEOUT: Duration = Duration::from_secs(60);
