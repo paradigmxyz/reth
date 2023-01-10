@@ -5,6 +5,12 @@ use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
 };
+use tracing::trace;
+use trust_dns_resolver::{
+    error::{ResolveError, ResolveErrorKind},
+    proto::DnsHandle,
+    AsyncResolver, ConnectionProvider,
+};
 
 /// A type that can lookup DNS entries
 #[async_trait]
@@ -13,8 +19,32 @@ pub trait Resolver: Send + Sync {
     async fn lookup_txt(&self, query: &str) -> Option<String>;
 }
 
+#[async_trait]
+impl<C, P> Resolver for AsyncResolver<C, P>
+where
+    C: DnsHandle<Error = ResolveError>,
+    P: ConnectionProvider<Conn = C>,
+{
+    async fn lookup_txt(&self, query: &str) -> Option<String> {
+        // See: [AsyncResolver::txt_lookup]
+        // > *hint* queries that end with a '.' are fully qualified names and are cheaper lookups
+        let fqn = if query.ends_with('.') { query.to_string() } else { format!("{}.", query) };
+        match self.txt_lookup(fqn).await {
+            Err(err) => {
+                trace!(?err, ?query, "dns lookup failed");
+                None
+            }
+            Ok(lookup) => {
+                let txt = lookup.into_iter().next()?;
+                let entry = txt.iter().next()?;
+                String::from_utf8(entry.to_vec()).ok()
+            }
+        }
+    }
+}
+
 /// A [Resolver] that uses an in memory map to lookup entries
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MapResolver(HashMap<String, String>);
 
 impl Deref for MapResolver {

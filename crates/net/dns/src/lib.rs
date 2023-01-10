@@ -11,11 +11,18 @@
 
 use std::{
     collections::HashMap,
+    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio::sync::{
+    mpsc,
+    mpsc::{error::TrySendError, UnboundedSender},
+};
+use tokio_stream::{
+    wrappers::{ReceiverStream, UnboundedReceiverStream},
+    Stream,
+};
 
 mod config;
 pub mod resolver;
@@ -47,9 +54,9 @@ pub struct DnsDiscoveryService {
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
     /// All subscribers for event updates.
-    event_listener: Vec<mpsc::Sender<DnsDiscoveryEvent>>,
+    update_listeners: Vec<mpsc::Sender<DnsDiscoveryUpdate>>,
     /// All the trees that can be synced.
-    trees: HashMap<Arc<LinkEntry>, SyncTree>,
+    trees: HashMap<LinkEntry, SyncTree>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -73,18 +80,24 @@ impl DnsDiscoveryService {
         DnsDiscoveryHandle { to_service: self.command_tx.clone() }
     }
 
-    /// Creates a new channel for [`DiscoveryUpdate`]s.
-    pub fn event_listener(&mut self) -> ReceiverStream<DnsDiscoveryEvent> {
+    /// Creates a new channel for [`DnsDiscoveryUpdate`]s.
+    pub fn update_stream(&mut self) -> ReceiverStream<DnsDiscoveryUpdate> {
         let (tx, rx) = mpsc::channel(256);
-        self.event_listener.push(tx);
+        self.update_listeners.push(tx);
         ReceiverStream::new(rx)
     }
 
     /// Sends  the event to all listeners.
     ///
     /// Remove channels that got closed.
-    fn notify(&mut self, event: DnsDiscoveryEvent) {
-        self.event_listener.retain(|listener| listener.try_send(event.clone()).is_ok());
+    fn notify(&mut self, update: DnsDiscoveryUpdate) {
+        self.update_listeners.retain_mut(|listener| match listener.try_send(update.clone()) {
+            Ok(()) => true,
+            Err(err) => match err {
+                TrySendError::Full(_) => true,
+                TrySendError::Closed(_) => false,
+            },
+        });
     }
 
     /// Starts syncing the given link to a tree.
@@ -98,12 +111,25 @@ impl DnsDiscoveryService {
     fn resolve_entry(&mut self, _domain: impl Into<String>, _hash: impl Into<String>) {}
 
     /// Advances the state of the DNS discovery service by polling,triggering lookups
-    pub(crate) fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<()> {
+    pub(crate) fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
         Poll::Pending
     }
 }
 
+/// A Stream events, mainly used for debugging
+impl Stream for DnsDiscoveryService {
+    type Item = DnsDiscoveryEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(Some(ready!(self.get_mut().poll(cx))))
+    }
+}
+
 enum DnsDiscoveryCommand {}
+
+/// Represents [NodeRecord] related discovery updates
+#[derive(Debug, Clone)]
+pub enum DnsDiscoveryUpdate {}
 
 /// Represents dns discovery related update events.
 #[derive(Debug, Clone)]
