@@ -3,16 +3,17 @@
 //! Starts the client
 use crate::{
     config::Config,
-    dirs::{ConfigPath, DbPath},
-    prometheus_exporter, NetworkOpts,
+    dirs::{ConfigPath, DbPath, StandardPath},
+    prometheus_exporter,
+    utils::{
+        chainspec::{chain_spec_value_parser, ChainSpecification},
+        init::{init_db, init_genesis},
+        parse_socket_address,
+    },
+    NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use fdlimit::raise_fd_limit;
-use reth_cli_utils::{
-    chainspec::{chain_spec_value_parser, ChainSpecification},
-    init::{init_db, init_genesis},
-    parse_socket_address,
-};
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_executor::Config as ExecutorConfig;
@@ -28,9 +29,13 @@ use reth_stages::{
 use std::{net::SocketAddr, sync::Arc};
 use tracing::{debug, info};
 
-/// Start the client
+/// Start the node
 #[derive(Debug, Parser)]
 pub struct Command {
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
+    config: StandardPath<ConfigPath>,
+
     /// The path to the database folder.
     ///
     /// Defaults to the OS-specific data directory:
@@ -39,11 +44,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
-
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
+    db: StandardPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -65,13 +66,13 @@ pub struct Command {
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
-    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address)]
+    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
 
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip")]
+    #[arg(long = "debug.tip", help_heading = "Debug")]
     tip: Option<H256>,
 
     #[clap(flatten)]

@@ -2,23 +2,25 @@
 name = "reth-cli-utils"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+# Internal
 reth-primitives = { path = "../../primitives" }
 reth-consensus = { path = "../../consensus", features = ["serde"] }
 reth-db = {path = "../../storage/db", features = ["mdbx", "test-utils"] }
 
-
+# Serialiation
 serde = "1.0"
 serde_json = "1.0"
 eyre = "0.6.8"
 shellexpand = "2.1"
 walkdir = "2.3"
 
+# Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+tracing-journald = "0.3"

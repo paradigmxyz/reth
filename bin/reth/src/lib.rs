@@ -15,13 +15,14 @@ pub mod p2p;
 pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
-
-use clap::Parser;
 pub use reth_cli_utils as utils;
+
+use clap::Args;
 use reth_primitives::NodeRecord;
 
-#[derive(Debug, Parser)]
 /// Parameters for configuring the network more granularly via CLI
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Networking")]
 struct NetworkOpts {
     /// Disable the discovery service.
     #[arg(short, long)]
