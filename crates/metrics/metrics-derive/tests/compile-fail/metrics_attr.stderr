@@ -10,7 +10,7 @@ error: Duplicate `#[metrics(..)]` attribute provided.
 11 | #[metrics()]
    | ^^^^^^^^^^^^
 
-error: `scope = ..` must be set.
+error: Either `scope = ..` or `dynamic = true` must be set.
   --> tests/compile-fail/metrics_attr.rs:15:1
    |
 15 | / #[metrics()]
@@ -70,3 +70,10 @@ error: Unsupported attribute entry.
    |
 51 | #[metrics(random = "value")]
    |           ^^^^^^^^^^^^^^^^
+
+error: `scope = ..` conflicts with `dynamic = true`.
+  --> tests/compile-fail/metrics_attr.rs:55:1
+   |
+55 | / #[metrics(scope = "scope", dynamic = true)]
+56 | | struct CustomMetrics13;
+   | |_______________________^

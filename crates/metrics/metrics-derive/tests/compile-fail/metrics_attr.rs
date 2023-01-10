@@ -50,3 +50,7 @@ struct CustomMetrics11;
 #[derive(Metrics)]
 #[metrics(random = "value")]
 struct CustomMetrics12;
+
+#[derive(Metrics)]
+#[metrics(scope = "scope", dynamic = true)]
+struct CustomMetrics13;
