@@ -1,40 +1,16 @@
-/// Contains builder types and clique-related test setup helpers for geth integration tests.
-
-use reth_net_test_utils::{Testnet, NetworkEventStream, PeerConfig};
-use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
     types::{Address, Block, Bytes, U64},
-    utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
+    utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount},
 };
-use ethers_middleware::SignerMiddleware;
-use ethers_providers::{Http, Middleware, Provider};
-use ethers_signers::{LocalWallet, Signer};
-use futures::StreamExt;
-use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
-use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_interfaces::{
-    p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{SyncState, SyncStateUpdater},
-};
-use reth_net_common::ban_list::BanList;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
+use reth_eth_wire::{EthVersion, Status};
+use reth_network::NetworkHandle;
 use reth_primitives::{
-    proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord,
-    PeerId, H160, H256, INITIAL_BASE_FEE,
+    proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, H160, INITIAL_BASE_FEE,
 };
-use reth_provider::test_utils::NoopProvider;
-use secp256k1::SecretKey;
-use std::{
-    collections::{HashMap, HashSet},
-    io::{BufRead, BufReader},
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-};
-use tokio::task;
+use std::{collections::HashMap, sync::Arc};
 
 /// Extracts the genesis block header from an ethers [`Genesis`](ethers_core::utils::Genesis).
-fn genesis_header(genesis: &Genesis) -> Header {
+pub(crate) fn genesis_header(genesis: &Genesis) -> Header {
     let genesis_alloc = genesis.alloc.clone();
     // convert to reth genesis alloc map
     let reth_alloc = genesis_alloc
@@ -71,7 +47,7 @@ fn convert_genesis_account(genesis_account: &GenesisAccount) -> reth_primitives:
 
 /// Obtains a [`Header`](reth_primitives::Header) from an ethers
 /// [`Block`](ethers_core::types::Block).
-fn block_to_header(block: Block<ethers_core::types::H256>) -> Header {
+pub(crate) fn block_to_header(block: Block<ethers_core::types::H256>) -> Header {
     Header {
         number: block.number.unwrap().as_u64(),
         gas_limit: block.gas_limit.as_u64(),
@@ -104,7 +80,7 @@ fn extract_fork_hash(genesis: &Genesis) -> ForkHash {
 ///
 /// Sets the `blockhash` and `genesis` fields to the genesis block hash, and initializes the
 /// `total_difficulty` as zero.
-fn extract_status(genesis: &Genesis) -> Status {
+pub(crate) fn extract_status(genesis: &Genesis) -> Status {
     let sealed_header = genesis_header(genesis).seal();
     let chain_forkhash = extract_fork_hash(genesis);
 
@@ -166,7 +142,7 @@ fn extract_fork_blocks(genesis: &Genesis) -> Vec<u64> {
 /// Starts the reth pipeline with the given config, consensus, db, and fetch client.
 /// .... TODO: doc
 /// TODO: need to figure out where to put this test as it will import every part of the node.
-async fn start_reth(network: NetworkHandle) {
+pub(crate) async fn start_reth(network: NetworkHandle) {
     let _fetch_client = Arc::new(network.fetch_client().await.unwrap());
     // let mut pipeline = reth_stages::Pipeline::default()
     //     .with_sync_state_updater(network.clone())
@@ -224,7 +200,7 @@ async fn start_reth(network: NetworkHandle) {
 /// Funds the given address with max coins.
 ///
 /// Enables all hard forks up to London at genesis.
-fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
+pub(crate) fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
     // set up a clique config with a short (1s) period and short (8 block) epoch
     let clique_config = CliqueConfig { period: 1, epoch: 8 };
 

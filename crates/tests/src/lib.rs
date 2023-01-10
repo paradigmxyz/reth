@@ -6,5 +6,8 @@
 ))]
 
 //! Integration tests and test helpers for reth.
-mod sync;
+#[cfg(test)]
 mod clique;
+
+#[cfg(test)]
+mod sync;

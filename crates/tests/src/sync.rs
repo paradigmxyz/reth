@@ -1,8 +1,11 @@
+use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
     types::{Address, Block, Bytes, U64},
     utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth},
 };
 use ethers_middleware::SignerMiddleware;
+use ethers_providers::{Http, Middleware, Provider};
+use ethers_signers::{LocalWallet, Signer};
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
@@ -11,6 +14,10 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateUpdater},
 };
 use reth_net_common::ban_list::BanList;
+use reth_net_test_utils::{
+    create_new_geth, enr_to_peer_id, unused_port, unused_tcp_udp, NetworkEventStream, PeerConfig,
+    Testnet, GETH_TIMEOUT,
+};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
 use reth_primitives::{
     proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord,
@@ -26,6 +33,8 @@ use std::{
     time::Duration,
 };
 use tokio::task;
+
+use crate::clique::{block_to_header, extract_status, genesis_funded, genesis_header, start_reth};
 
 /// Integration tests for the full sync pipeline.
 ///
