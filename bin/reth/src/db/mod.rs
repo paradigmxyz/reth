@@ -7,7 +7,7 @@ use reth_db::{
     database::Database,
     table::Table,
     tables,
-    transaction::DbTx,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
@@ -45,6 +45,8 @@ pub enum Subcommands {
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
         len: u64,
     },
+    /// Deletes all database entries
+    Drop,
 }
 
 #[derive(Parser, Debug)]
@@ -111,6 +113,9 @@ impl Command {
             Subcommands::List(args) => {
                 tool.list(args)?;
             }
+            Subcommands::Drop => {
+                tool.drop()?;
+            }
         }
 
         Ok(())
@@ -147,7 +152,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
         macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident,)*]) => {
                 match $arg {
                     $(stringify!($table) => {
                         self.list_table::<tables::$table>($start, $len)?
@@ -172,7 +177,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             BlockTransitionIndex,
             TxTransitionIndex,
             SyncStage,
-            Transactions
+            Transactions,
         ]);
 
         Ok(())
@@ -194,6 +199,44 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         })?;
 
         println!("{data:?}");
+        Ok(())
+    }
+
+    fn drop(&mut self) -> Result<()> {
+        macro_rules! drop_tables {
+            ([$($table:ident,)*]) => {
+                let _tx = self.db.tx_mut()?;
+                $(_tx.clear::<tables::$table>()?;)*
+                _tx.commit()?;
+            };
+        }
+
+        drop_tables!([
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            NonCanonicalTransactions,
+            Transactions,
+            TxHashNumber,
+            Receipts,
+            Logs,
+            PlainAccountState,
+            PlainStorageState,
+            Bytecodes,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            AccountHistory,
+            StorageHistory,
+            AccountChangeSet,
+            StorageChangeSet,
+            TxSenders,
+            Config,
+            SyncStage,
+        ]);
+
         Ok(())
     }
 }
