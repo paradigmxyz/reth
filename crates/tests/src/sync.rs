@@ -1,10 +1,10 @@
+use crate::clique::{block_to_header, extract_status, genesis_funded, genesis_header, start_reth};
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::types::U64;
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Http, Middleware, Provider};
 use ethers_signers::{LocalWallet, Signer};
 use futures::StreamExt;
-
 use reth_net_test_utils::{create_new_geth, enr_to_peer_id, unused_tcp_udp, GETH_TIMEOUT};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager};
 use reth_primitives::{PeerId, H256};
@@ -17,8 +17,6 @@ use std::{
     time::Duration,
 };
 use tokio::task;
-
-use crate::clique::{block_to_header, extract_status, genesis_funded, genesis_header, start_reth};
 
 /// Integration tests for the full sync pipeline.
 ///
