@@ -15,7 +15,10 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateUpdater},
 };
 use reth_net_common::ban_list::BanList;
-use reth_net_test_utils::{NetworkEventStream, PeerConfig, Testnet};
+use reth_net_test_utils::{
+    enr_to_peer_id, unused_port, unused_tcp_udp, NetworkEventStream, PeerConfig, Testnet,
+    GETH_TIMEOUT,
+};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
 use reth_primitives::{
     proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord,
