@@ -474,7 +474,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
                                 // If account is None that means that EVM didn't touch it.
                                 // we are changing the state to Touched as account can have storage
                                 // in db.
-                                if matches!(db_acc.account_state, AccountState::None) {
+                                if db_acc.account_state == AccountState::None {
                                     db_acc.account_state = AccountState::Touched;
                                 }
                                 // if account was present, append changed changeset.
@@ -578,9 +578,13 @@ mod tests {
 
         let mut db = StateProviderTest::default();
 
+        let account1 = H160(hex!("1000000000000000000000000000000000000000"));
+        let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
+        let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+
         // pre staet
         db.insert_account(
-            H160(hex!("1000000000000000000000000000000000000000")),
+            account1,
             Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None },
             Some(hex!("5a465a905090036002900360015500").into()),
             HashMap::new(),
@@ -593,7 +597,7 @@ mod tests {
         };
 
         db.insert_account(
-            H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
+            account3,
             Account {
                 balance: U256::from(0x3635c9adc5dea00000u128),
                 nonce: 0x00,
@@ -621,21 +625,43 @@ mod tests {
         let changesets = out.changesets[0].clone();
         assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
-        let account1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let _account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
-        let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
+        let account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
         let account2_info = Account {
             balance: U256::from(0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128), /* decrease for
                                                                                    * block reward */
             nonce: 0x00,
             bytecode_hash: None,
         };
-        let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let account3_info = Account {
             balance: U256::from(0x3635c9adc5de996b46u128),
             nonce: 0x01,
             bytecode_hash: None,
         };
+
+        let block_reward = U256::from(WEI_2ETH + (WEI_2ETH >> 5));
+
+        // Check if cache is set
+        // account1
+        let cached_acc1 = db.accounts.get(&account1).unwrap();
+        assert_eq!(cached_acc1.info.balance, account1_info.balance);
+        assert_eq!(cached_acc1.info.nonce, account1_info.nonce);
+        assert!(matches!(cached_acc1.account_state, AccountState::Touched));
+        assert_eq!(cached_acc1.storage.len(), 1);
+        assert_eq!(cached_acc1.storage.get(&U256::from(1)), Some(&U256::from(2)));
+
+        // account2 Block reward
+        let cached_acc2 = db.accounts.get(&account2).unwrap();
+        assert_eq!(cached_acc2.info.balance, account2_info.balance + block_reward);
+        assert_eq!(cached_acc2.info.nonce, account2_info.nonce);
+        assert_eq!(cached_acc2.account_state, AccountState::Touched);
+        assert_eq!(cached_acc2.storage.len(), 0);
+
+        // account3
+        let cached_acc3 = db.accounts.get(&account3).unwrap();
+        assert_eq!(cached_acc3.info.balance, account3_info.balance);
+        assert_eq!(cached_acc3.info.nonce, account3_info.nonce);
+        assert!(matches!(cached_acc3.account_state, AccountState::Touched));
+        assert_eq!(cached_acc3.storage.len(), 0);
 
         assert_eq!(
             changesets.changeset.get(&account1).unwrap().account,
@@ -656,8 +682,9 @@ mod tests {
         // check block rewards changeset.
         let mut block_rewarded_acc_info = account2_info;
         // add Blocks 2 eth reward and 2>>5 for one ommer
-        block_rewarded_acc_info.balance += U256::from(WEI_2ETH + (WEI_2ETH >> 5));
+        block_rewarded_acc_info.balance += block_reward;
 
+        // check block reward changeset
         assert_eq!(
             out.block_reward,
             Some(BTreeMap::from([
