@@ -331,8 +331,6 @@ impl ActiveSession {
 
     /// Updates the request timeout with a message's timestamps
     fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
-        // TODO: inline or constant? where should we put this? What would be
-        // a sensible value for the minimum?
         /// Minimum timeout value
         const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
         /// Maximum timeout value
