@@ -1,5 +1,4 @@
 //! Connection tests
-use reth_net_test_utils::{Testnet, NetworkEventStream, PeerConfig};
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::{
     types::{Address, Block, Bytes, U64},
@@ -16,6 +15,7 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateUpdater},
 };
 use reth_net_common::ban_list::BanList;
+use reth_net_test_utils::{NetworkEventStream, PeerConfig, Testnet};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager, PeersConfig};
 use reth_primitives::{
     proofs::genesis_state_root, Chain, ForkHash, ForkId, Header, HeadersDirection, NodeRecord,
