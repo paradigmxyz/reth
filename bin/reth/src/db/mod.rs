@@ -1,17 +1,20 @@
 //! Database debugging tool
 use crate::dirs::DbPath;
 use clap::{Parser, Subcommand};
+use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
     database::Database,
+    mdbx::{Env, EnvironmentKind},
     table::Table,
     tables,
     transaction::DbTx,
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use tracing::info;
+use std::collections::HashMap;
+use tracing::{error, info};
 
 /// `reth db` command
 #[derive(Debug, Parser)]
@@ -76,6 +79,17 @@ impl Command {
         match &self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
+                let mut stats_table = ComfyTable::new();
+                stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+                stats_table.set_header([
+                    "Table Name",
+                    "# Entries",
+                    "Branch Pages",
+                    "Leaf Pages",
+                    "Overflow Pages",
+                    "Total Size (KB)",
+                ]);
+
                 tool.db.view(|tx| {
                     for table in tables::TABLES.iter().map(|(_, name)| name) {
                         let table_db =
@@ -95,21 +109,26 @@ impl Command {
                         let overflow_pages = stats.overflow_pages();
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
-                        info!(
-                            "Table {} has {} entries (total size: {} KB)",
-                            table,
-                            stats.entries(),
-                            table_size / 1024
-                        );
+
+                        let mut row = Row::new();
+                        row.add_cell(Cell::new(table))
+                            .add_cell(Cell::new(stats.entries()))
+                            .add_cell(Cell::new(branch_pages))
+                            .add_cell(Cell::new(leaf_pages))
+                            .add_cell(Cell::new(overflow_pages))
+                            .add_cell(Cell::new(table_size / 1024));
+                        stats_table.add_row(row);
                     }
                     Ok::<(), eyre::Report>(())
                 })??;
+
+                println!("{stats_table}");
             }
             Subcommands::Seed { len } => {
                 tool.seed(*len)?;
             }
             Subcommands::List(args) => {
-                tool.list(args)?;
+                tool.list_table(args)?;
             }
         }
 
@@ -144,19 +163,82 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 
-    /// Lists the given table data
-    fn list(&mut self, args: &ListArgs) -> Result<()> {
+    /// Grabs the contents of the table within a certain index range and places the
+    /// entries into a [HashMap].
+    fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<HashMap<T::Key, T::Value>> {
+        let data = self.db.view(|tx| {
+            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
+
+            // TODO: Upstream this in the DB trait.
+            let start_walker = cursor.current().transpose();
+            let walker = Walker {
+                cursor: &mut cursor,
+                start: start_walker,
+                _tx_phantom: std::marker::PhantomData,
+            };
+
+            walker.skip(start).take(len).collect::<Vec<_>>()
+        })?;
+
+        data.into_iter()
+            .collect::<Result<HashMap<T::Key, T::Value>, _>>()
+            .map_err(|e| eyre::eyre!(e))
+    }
+}
+
+impl<'a, E: EnvironmentKind> DbTool<'a, Env<E>> {
+    /// Lists the contents of a db table in a human-readable format and print to stdout.
+    fn list_table(&mut self, args: &ListArgs) -> Result<()> {
         macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+            ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
                 match $arg {
                     $(stringify!($table) => {
-                        self.list_table::<tables::$table>($start, $len)?
+                        let map = self.list::<tables::$table>($start, $len)?;
+                        let mut table = ComfyTable::new();
+                        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+                        table.set_header(["Key", "Value"]);
+                        for (key, value) in map.into_iter() {
+                            let mut row = Row::new();
+                            // TODO: Cleanly format key / value types
+                            // For tables with longer decompressed values, i.e. `Headers`, formatting
+                            // the value via the `Debug` trait breaks the table's formatting.
+                            row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(format!("{value:?}")));
+                            table.add_row(row);
+                        }
+
+                        self.db.view(|tx| {
+                            let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
+                            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+                            let final_entry_idx = stats.entries() - 1;
+                            if $start > final_entry_idx {
+                                error!(
+                                    "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
+                                    start = $start,
+                                    table = stringify!($table)
+                                );
+                                return Ok(())
+                            }
+
+                            println!("{table}");
+                            println!(
+                                "-> Showing {len} entries in range [{start}, {end}] out of {num_entries} entries.",
+                                len = $len,
+                                start = $start,
+                                end = if ($start + $len) > final_entry_idx {
+                                    final_entry_idx
+                                } else {
+                                    $start + $len - 1
+                                },
+                                num_entries = final_entry_idx + 1
+                            );
+                            Ok::<(), eyre::Report>(())
+                        })?
                     },)*
                     _ => {
-                        tracing::error!("Unknown table.");
-                        return Ok(())
+                        error!("Unknown table.");
+                        Ok(())
                     }
-                }
+                }?
             };
         }
 
@@ -175,25 +257,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             Transactions
         ]);
 
-        Ok(())
-    }
-
-    fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
-        let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
-
-            // TODO: Upstream this in the DB trait.
-            let start_walker = cursor.current().transpose();
-            let walker = Walker {
-                cursor: &mut cursor,
-                start: start_walker,
-                _tx_phantom: std::marker::PhantomData,
-            };
-
-            walker.skip(start).take(len).collect::<Vec<_>>()
-        })?;
-
-        println!("{data:?}");
         Ok(())
     }
 }

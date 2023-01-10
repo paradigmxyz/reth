@@ -51,3 +51,4 @@ futures = "0.3.25"
 strum = "0.24.1"
 tempfile = { version = "3.3.0" }
 backon = "0.2.0"
+comfy-table = "6.1.4"

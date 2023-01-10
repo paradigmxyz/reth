@@ -36,9 +36,9 @@ pub trait Decode: Send + Sync + Sized + Debug {
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
-pub trait Key: Encode + Decode {}
+pub trait Key: Encode + Decode + std::hash::Hash + Eq {}
 
-impl<T> Key for T where T: Encode + Decode {}
+impl<T> Key for T where T: Encode + Decode + std::hash::Hash + Eq {}
 
 /// Generic trait that enforces the database value to implement [`Compress`] and [`Decompress`].
 pub trait Value: Compress + Decompress {}

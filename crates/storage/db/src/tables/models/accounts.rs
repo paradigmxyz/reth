@@ -42,7 +42,7 @@ impl Compact for AccountBeforeTx {
 /// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct TransitionIdAddress(pub (TransitionId, Address));
 
 impl TransitionIdAddress {
