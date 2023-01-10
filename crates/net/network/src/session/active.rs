@@ -3,6 +3,7 @@
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
     session::{
+        config::INITIAL_REQUEST_TIMEOUT,
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
     },
@@ -334,14 +335,20 @@ impl ActiveSession {
         // a sensible value for the minimum?
         /// Minimum timeout value
         const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
+        /// Maximum timeout value
+        const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
+        /// How much the new measurements affect the current timeout (X percent)
+        const SAMPLE_IMPACT: u32 = 10;
         /// Amount of RTTs before timeout
-        const TIMER_MULTIPLIER: u32 = 4;
+        const TIMEOUT_SCALING: u32 = 3;
 
-        // TODO: use a more sophisticated formula
         let elapsed = received.saturating_duration_since(sent);
-        let updated_timeout = (7 * self.request_timeout + elapsed * TIMER_MULTIPLIER) / 8;
 
-        self.request_timeout = updated_timeout.max(MINIMUM_TIMEOUT);
+        let updated_timeout = ((100 - SAMPLE_IMPACT) * self.request_timeout +
+            SAMPLE_IMPACT * elapsed * TIMEOUT_SCALING) /
+            100;
+
+        self.request_timeout = updated_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT);
         self.timeout_interval = tokio::time::interval(self.request_timeout);
     }
 }
