@@ -164,7 +164,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             if has_reward {
                 transition_id += 1;
             }
-            block_transition_cursor.append(numhash, transition_id)?;
+            block_transition_cursor.append(numhash.number(), transition_id)?;
 
             highest_block = numhash.number();
         }
@@ -205,7 +205,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             }
 
             // Delete the block transition if any
-            if block_transition_cursor.seek_exact(key)?.is_some() {
+            if block_transition_cursor.seek_exact(key.number())?.is_some() {
                 block_transition_cursor.delete_current()?;
             }
 
@@ -616,7 +616,7 @@ mod tests {
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
-                        let key = (progress.number, progress.hash()).into();
+                        let key: BlockNumHash = (progress.number, progress.hash()).into();
                         let body = StoredBlockBody {
                             start_tx_id: 0,
                             tx_count: progress.body.len() as u64,
@@ -634,7 +634,7 @@ mod tests {
                         let block_transition_id =
                             last_transition_id + if has_reward { 1 } else { 0 };
 
-                        tx.put::<tables::BlockTransitionIndex>(key, block_transition_id)?;
+                        tx.put::<tables::BlockTransitionIndex>(key.number(), block_transition_id)?;
                         tx.put::<tables::BlockBodies>(key, body)?;
                         tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
                         Ok(())
@@ -667,7 +667,7 @@ mod tests {
                 })?;
                 self.tx.check_no_entry_above::<tables::BlockTransitionIndex, _>(
                     input.unwind_to,
-                    |key| key.number(),
+                    |key| key,
                 )?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.tx
@@ -743,7 +743,7 @@ mod tests {
                         assert_matches!(ommers_cursor.seek_exact(key), Ok(Some(_)), "Block ommers are missing");
 
                         // Validate that block transition exists
-                        assert_matches!(block_transition_cursor.seek_exact(key), Ok(Some(_)), "Block transition is missing");
+                        assert_matches!(block_transition_cursor.seek_exact(key.number()), Ok(Some(_)), "Block transition is missing");
 
                         for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;

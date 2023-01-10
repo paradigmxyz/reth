@@ -1,7 +1,7 @@
 use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
-    TransactionKind, TransactionSigned, TxLegacy, H256, U256,
+    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
+    TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
 
@@ -162,6 +162,24 @@ pub fn random_block_range(
         ));
     }
     blocks
+}
+
+/// Generate random Externaly Owned Account (EOA account without contract).
+pub fn random_eoa_account() -> (Address, Account) {
+    let nonce: u64 = rand::random();
+    let balance = U256::from(rand::random::<u32>());
+    let addr = H160::from(rand::random::<u64>());
+
+    (addr, Account { nonce, balance, bytecode_hash: None })
+}
+
+/// Docs
+pub fn random_eoa_account_range(acc_range: &mut std::ops::Range<u64>) -> Vec<(Address, Account)> {
+    let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
+    for _ in acc_range {
+        accounts.push(random_eoa_account())
+    }
+    accounts
 }
 
 #[cfg(test)]
