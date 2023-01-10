@@ -17,6 +17,7 @@ pub mod stage;
 pub mod test_eth_chain;
 
 use clap::Parser;
+pub use reth_cli_utils as utils;
 use reth_primitives::NodeRecord;
 
 #[derive(Debug, Parser)]
