@@ -15,9 +15,9 @@ pub mod p2p;
 pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
-pub mod util;
 
 use clap::Parser;
+pub use reth_cli_utils as utils;
 use reth_primitives::NodeRecord;
 
 #[derive(Debug, Parser)]

@@ -1,10 +1,9 @@
 //! CLI definition and entrypoint to executable
 
-use crate::{
-    db, node, p2p, stage, test_eth_chain,
-    util::reth_tracing::{self, TracingMode},
-};
+use crate::{db, node, p2p, stage, test_eth_chain};
+
 use clap::{ArgAction, Parser, Subcommand};
+use reth_cli_utils::reth_tracing::{self, TracingMode};
 use tracing_subscriber::util::SubscriberInitExt;
 
 /// main function that parses cli and runs command

@@ -21,6 +21,7 @@ reth-executor = { path = "../../crates/executor" }
 reth-rlp = { path = "../../crates/common/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-downloaders = {path = "../../crates/net/downloaders" }
+reth-cli-utils = { path = "../../crates/cli/utils" }
 
 # tracing
 tracing = "0.1"
