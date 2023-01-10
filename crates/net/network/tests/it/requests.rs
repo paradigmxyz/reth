@@ -1,7 +1,6 @@
 //! Tests for eth related requests
 
-use super::testnet::Testnet;
-use crate::NetworkEventStream;
+use reth_network::test_utils::{Testnet, NetworkEventStream};
 use rand::Rng;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::p2p::{

@@ -5,4 +5,6 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! <reth crate template>
+//! Integration tests and test helpers for reth.
+mod sync;
+mod clique;

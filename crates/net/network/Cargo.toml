@@ -67,6 +67,7 @@ reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
+reth-net-test-utils = { path = "../test-utils" }
 
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
@@ -82,3 +83,4 @@ serial_test = "0.10"
 
 [features]
 serde = ["dep:serde"]
+test-utils = []
