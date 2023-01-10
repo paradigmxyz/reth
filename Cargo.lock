@@ -4227,32 +4227,19 @@ dependencies = [
 name = "reth-net-test-utils"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "enr 0.7.0",
  "ethers-core",
- "ethers-middleware",
- "ethers-providers",
- "ethers-signers",
  "futures",
- "hex",
  "pin-project",
  "rand 0.8.5",
- "reth-discv4",
- "reth-ecies",
  "reth-eth-wire",
- "reth-interfaces",
- "reth-net-common",
  "reth-network",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
- "reth-rlp-derive",
- "reth-tasks",
  "secp256k1 0.24.2",
  "tempfile",
  "tokio",
  "tokio-stream",
- "tracing",
 ]
 
 [[package]]
