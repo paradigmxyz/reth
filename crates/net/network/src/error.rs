@@ -5,7 +5,7 @@ use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
-use std::{fmt, io::ErrorKind};
+use std::{fmt, io, io::ErrorKind};
 
 /// All error variants for the network
 #[derive(Debug, thiserror::Error)]
@@ -114,15 +114,7 @@ impl SessionError for EthStreamError {
 
     fn should_backoff(&self) -> Option<BackoffKind> {
         if let Some(err) = self.as_io() {
-            return match err.kind() {
-                // these usually happen when the remote instantly drops the connection, for example
-                // if the previous connection isn't properly cleaned up yet and the peer is temp.
-                // banned.
-                ErrorKind::ConnectionRefused |
-                ErrorKind::ConnectionReset |
-                ErrorKind::BrokenPipe => Some(BackoffKind::Low),
-                _ => Some(BackoffKind::Medium),
-            }
+            return err.should_backoff()
         }
 
         if let Some(err) = self.as_disconnected() {
@@ -179,6 +171,28 @@ impl SessionError for PendingSessionHandshakeError {
         match self {
             PendingSessionHandshakeError::Eth(eth) => eth.should_backoff(),
             PendingSessionHandshakeError::Ecies(_) => Some(BackoffKind::Low),
+        }
+    }
+}
+
+impl SessionError for io::Error {
+    fn merits_discovery_ban(&self) -> bool {
+        false
+    }
+
+    fn is_fatal_protocol_error(&self) -> bool {
+        false
+    }
+
+    fn should_backoff(&self) -> Option<BackoffKind> {
+        match self.kind() {
+            // these usually happen when the remote instantly drops the connection, for example
+            // if the previous connection isn't properly cleaned up yet and the peer is temp.
+            // banned.
+            ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe => {
+                Some(BackoffKind::Low)
+            }
+            _ => Some(BackoffKind::Medium),
         }
     }
 }
