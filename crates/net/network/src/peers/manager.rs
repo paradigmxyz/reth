@@ -13,6 +13,7 @@ use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
+    io,
     net::{IpAddr, SocketAddr},
     task::{Context, Poll},
     time::Duration,
@@ -336,6 +337,16 @@ impl PeersManager {
         err: &EthStreamError,
     ) {
         self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::Dropped)
+    }
+
+    /// Called when an attempt to create a pending session failed while setting up a tcp connection.
+    pub(crate) fn on_outgoing_connection_failure(
+        &mut self,
+        remote_addr: &SocketAddr,
+        peer_id: &PeerId,
+        err: &io::Error,
+    ) {
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
     }
 
     fn on_connection_failure(
@@ -1036,6 +1047,7 @@ mod test {
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},
+        io,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         pin::Pin,
         task::{Context, Poll},
@@ -1492,6 +1504,41 @@ mod test {
 
         peers.on_active_session_gracefully_closed(peer);
         assert!(peers.peers.get(&peer).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_outgoing_connection_error() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_peer(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::Out);
+
+        assert_eq!(peers.num_outbound_connections(), 1);
+
+        peers.on_outgoing_connection_failure(
+            &socket_addr,
+            &peer,
+            &io::Error::new(io::ErrorKind::ConnectionRefused, ""),
+        );
+
+        assert_eq!(peers.num_outbound_connections(), 0);
     }
 
     #[tokio::test]
