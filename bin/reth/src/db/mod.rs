@@ -180,7 +180,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
         let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
+            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
             // TODO: Upstream this in the DB trait.
             let start_walker = cursor.current().transpose();
