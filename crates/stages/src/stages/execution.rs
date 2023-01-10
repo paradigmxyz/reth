@@ -205,7 +205,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
-        let mut current_transition_id = tx.get_block_transition_by_num(last_block)? + 1;
+        let mut current_transition_id = tx.get_block_transition(last_block)? + 1;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
         // apply changes to plain database.
@@ -297,13 +297,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut account_changeset = tx.cursor_dup_mut::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_mut::<tables::StorageChangeSet>()?;
 
-        let from_transition = tx.get_block_transition_by_num(input.stage_progress)?;
+        let from_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let to_transition = if input.unwind_to != 0 {
-            tx.get_block_transition_by_num(input.unwind_to - 1)?
-        } else {
-            0
-        };
+        let to_transition =
+            if input.unwind_to != 0 { tx.get_block_transition(input.unwind_to - 1)? } else { 0 };
 
         if to_transition > from_transition {
             panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", to_transition, input.stage_progress, from_transition, input.unwind_to);
