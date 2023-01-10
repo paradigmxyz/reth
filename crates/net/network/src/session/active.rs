@@ -338,15 +338,14 @@ impl ActiveSession {
         /// Maximum timeout value
         const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
         /// How much the new measurements affect the current timeout (X percent)
-        const SAMPLE_IMPACT: u32 = 10;
+        const SAMPLE_IMPACT: f64 = 0.1;
         /// Amount of RTTs before timeout
         const TIMEOUT_SCALING: u32 = 3;
 
         let elapsed = received.saturating_duration_since(sent);
 
-        let updated_timeout = ((100 - SAMPLE_IMPACT) * self.request_timeout +
-            SAMPLE_IMPACT * elapsed * TIMEOUT_SCALING) /
-            100;
+        let updated_timeout = self.request_timeout.mul_f64(1.0 - SAMPLE_IMPACT) +
+            elapsed.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
 
         self.request_timeout = updated_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT);
         self.timeout_interval = tokio::time::interval(self.request_timeout);
