@@ -1,26 +1,11 @@
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
-use ethers_core::{
-    utils::{Geth},
-};
+use ethers_core::utils::Geth;
 
+use reth_primitives::PeerId;
 
+use std::{net::SocketAddr, time::Duration};
 
-
-
-
-
-use reth_primitives::{
-    PeerId,
-};
-
-
-use std::{
-    net::SocketAddr,
-    time::Duration,
-};
-
-
-// The timeout for tests that create a GethInstance
+/// The timeout for tests that create a GethInstance
 pub const GETH_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Obtains a PeerId from an ENR. In this case, the PeerId represents the public key contained in

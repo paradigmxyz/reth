@@ -7,8 +7,8 @@
 
 //! Internal helpers for network testing.
 
-mod testnet;
 mod init;
+mod testnet;
 
-pub use testnet::{Testnet, NetworkEventStream, PeerConfig};
-pub use init::{enr_to_peer_id, unused_port, unused_tcp_udp, create_new_geth, GETH_TIMEOUT};
+pub use init::{create_new_geth, enr_to_peer_id, unused_port, unused_tcp_udp, GETH_TIMEOUT};
+pub use testnet::{NetworkEventStream, PeerConfig, Testnet};
