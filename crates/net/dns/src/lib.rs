@@ -40,7 +40,7 @@ use crate::{
     error::ParseEntryResult,
     query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
     sync::{ResolveKind, SyncAction},
-    tree::LinkEntry,
+    tree::{DnsEntry, LinkEntry},
 };
 pub use config::DnsDiscoveryConfig;
 use error::ParseDnsEntryError;
@@ -70,8 +70,8 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     trees: HashMap<LinkEntry, SyncTree>,
     /// All queries currently in progress
     queries: QueryPool<R, SecretKey>,
-
-    entries: HashMap<String, Enr<SecretKey>>,
+    // TODO convert to cache
+    entries: HashMap<String, DnsEntry<SecretKey>>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -172,7 +172,26 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             None => {
                 debug!(domain=%link.domain, ?hash, "Failed to lookup entry")
             }
-            Some(Ok(entry)) => {}
+            Some(Ok(entry)) => {
+                self.entries.insert(hash.clone(), entry.clone());
+                match entry {
+                    DnsEntry::Root(root) => {
+                        debug!(%root, domain=%link.domain, ?hash, "Unexpected root entry");
+                    }
+                    DnsEntry::Link(link_entry) => {
+                        if kind.is_link() {
+                            if let Some(tree) = self.trees.get_mut(&link) {
+                                tree.resolved_links_mut().insert(hash, link_entry.clone());
+                            }
+                            self.sync_tree_with_link(link_entry)
+                        } else {
+                            debug!(%link_entry, domain=%link.domain, ?hash, "Unexpected Link entry");
+                        }
+                    }
+                    DnsEntry::Branch(branch_entry) => {}
+                    DnsEntry::Node(_) => {}
+                }
+            }
         }
     }
 

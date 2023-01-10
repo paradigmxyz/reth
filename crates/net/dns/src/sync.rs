@@ -44,6 +44,10 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         &self.link
     }
 
+    pub(crate) fn resolved_links_mut(&mut self) -> &mut HashMap<String, LinkEntry<K>> {
+        &mut self.resolved_links
+    }
+
     /// Advances the state of the tree by returning actions to perform
     pub(crate) fn poll(&mut self, now: Instant) -> Option<SyncAction> {
         match self.sync_state {
@@ -114,4 +118,16 @@ enum SyncState {
 pub(crate) enum ResolveKind {
     Enr,
     Link,
+}
+
+// === impl ResolveKind ===
+
+impl ResolveKind {
+    pub(crate) fn is_link(&self) -> bool {
+        matches!(self, ResolveKind::Link)
+    }
+
+    pub(crate) fn is_enr(&self) -> bool {
+        matches!(self, ResolveKind::Enr)
+    }
 }
