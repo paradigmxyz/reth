@@ -139,7 +139,7 @@ impl Verbosity {
                 _ => Level::TRACE,
             };
 
-            format!("reth={}", level).parse().unwrap()
+            format!("reth={level}").parse().unwrap()
         }
     }
 }
