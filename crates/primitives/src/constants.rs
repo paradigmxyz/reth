@@ -12,3 +12,9 @@ pub const KECCAK_EMPTY: H256 =
 /// Ommer root of empty list.
 pub const EMPTY_OMMER_ROOT: H256 =
     H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
+
+/// The initial base fee for EIP-1559 blocks.
+///
+/// This is defined in the the [`EIP-1559 spec`](https://eips.ethereum.org/EIPS/eip-1559) as
+/// [`INITIAL_BASE_FEE`].
+pub const INITIAL_BASE_FEE: u64 = 1000000000;

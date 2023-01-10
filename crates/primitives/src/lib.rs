@@ -31,11 +31,11 @@ mod transaction;
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
-pub use account::Account;
+pub use account::{Account, GenesisAccount};
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::Chain;
-pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
+pub use constants::{EMPTY_OMMER_ROOT, INITIAL_BASE_FEE, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, HeadersDirection, SealedHeader};

@@ -1,5 +1,6 @@
 use reth_primitives::{
-    utils::serde_helpers::deserialize_stringified_u64, Address, Bytes, Header, H256, U256,
+    utils::serde_helpers::deserialize_stringified_u64, Address, Bytes, GenesisAccount, Header,
+    H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
@@ -56,16 +57,6 @@ impl From<Genesis> for Header {
             ..Default::default()
         }
     }
-}
-
-/// An account in the state of the genesis block.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GenesisAccount {
-    /// The nonce of the account at genesis.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce: Option<u64>,
-    /// The balance of the account at genesis.
-    pub balance: U256,
 }
 
 /// Clap value parser for [ChainSpecification]s that takes either a built-in chainspec or the path
