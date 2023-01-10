@@ -43,8 +43,8 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
 
         // Acquire cursor over total difficulty and headers tables
-        let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
-        let mut cursor_headers = tx.cursor_mut::<tables::Headers>()?;
+        let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
+        let mut cursor_headers = tx.cursor_write::<tables::Headers>()?;
 
         // Get latest total difficulty
         let last_header_key = tx.get_block_numhash(input.stage_progress.unwrap_or_default())?;
@@ -124,7 +124,7 @@ mod tests {
             self.tx.insert_headers(std::iter::once(&head))?;
             self.tx.commit(|tx| {
                 let td: U256 = tx
-                    .cursor::<tables::HeaderTD>()?
+                    .cursor_read::<tables::HeaderTD>()?
                     .last()?
                     .map(|(_, v)| v)
                     .unwrap_or_default()
@@ -159,7 +159,7 @@ mod tests {
                             .get::<tables::CanonicalHeaders>(initial_stage_progress)?
                             .expect("no initial header hash");
                         let start_key = (initial_stage_progress, start_hash).into();
-                        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+                        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
                         let (_, mut current_header) =
                             header_cursor.seek_exact(start_key)?.expect("no initial header");
                         let mut td: U256 =

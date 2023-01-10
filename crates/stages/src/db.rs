@@ -207,7 +207,7 @@ where
         T: Table,
         F: FnMut(T::Key) -> BlockNumber,
     {
-        let mut cursor = self.cursor_mut::<T>()?;
+        let mut cursor = self.cursor_write::<T>()?;
         let mut entry = cursor.last()?;
         while let Some((key, _)) = entry {
             if selector(key) <= block {
@@ -226,7 +226,7 @@ where
         T1: Table,
         T2: Table<Key = T1::Value>,
     {
-        let mut cursor = self.cursor_mut::<T1>()?;
+        let mut cursor = self.cursor_write::<T1>()?;
         let mut walker = cursor.walk(start_at)?;
         while let Some((_, value)) = walker.next().transpose()? {
             self.delete::<T2>(value, None)?;

@@ -202,7 +202,7 @@ mod tests {
 
         // Cursor
         let tx = env.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor::<Headers>().unwrap();
+        let mut cursor = tx.cursor_read::<Headers>().unwrap();
 
         let first = cursor.first().unwrap();
         assert!(first.is_some(), "First should be our put");
@@ -228,7 +228,7 @@ mod tests {
         // Cursor
         let missing_key = 2;
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor::<CanonicalHeaders>().unwrap();
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         assert_eq!(cursor.current(), Ok(None));
 
         // Seek exact
@@ -255,7 +255,7 @@ mod tests {
 
         let key_to_insert = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
         // INSERT
         cursor.seek_exact(1).unwrap();
@@ -282,7 +282,7 @@ mod tests {
         // APPEND
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
         cursor.seek_exact(1).unwrap();
         assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(4294936878)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
@@ -344,7 +344,7 @@ mod tests {
         // Iterate with cursor
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert!(Some(value00) == cursor.next_dup_val().unwrap());
@@ -355,7 +355,7 @@ mod tests {
         // Seek value with exact subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let mut walker = cursor.walk_dup(key, H256::from_low_u64_be(1)).unwrap();
             assert_eq!(
                 (key, value11),
@@ -393,7 +393,7 @@ mod tests {
         // Iterate with walk_dup
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let first = cursor.first().unwrap().unwrap();
             let mut walker = cursor.walk_dup(first.0, first.1.key).unwrap();
 
@@ -408,7 +408,7 @@ mod tests {
         // Iterate by using `walk`
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let first = cursor.first().unwrap().unwrap();
             let mut walker = cursor.walk(first.0).unwrap();
             assert_eq!(Some(Ok((key1, value00))), walker.next());
@@ -436,7 +436,7 @@ mod tests {
         // Iterate with walk
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let first = cursor.first().unwrap().unwrap();
             let mut walker = cursor.walk(first.0).unwrap();
 
@@ -449,7 +449,7 @@ mod tests {
         // seek_by_key_subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // NOTE: There are two values with same SubKey but only first one is shown
             assert_eq!(Ok(Some(value00.clone())), cursor.seek_by_key_subkey(key1, value00.key));
@@ -471,7 +471,7 @@ mod tests {
         // Seek value with non existing key.
         {
             let tx = db.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor::<AccountHistory>().unwrap();
+            let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
 
             // It will seek the one greater or equal to the query. Since we have `Address | 100`,
             // `Address | 200` in the database and we're querying `Address | 150` it will return us
