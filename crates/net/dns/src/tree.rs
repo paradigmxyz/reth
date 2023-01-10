@@ -75,10 +75,10 @@ impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
 /// Represents an `enr-root` hash of subtrees containing nodes and links.
 #[derive(Clone)]
 pub struct TreeRootEntry {
-    enr_root: String,
-    link_root: String,
-    sequence_number: u64,
-    signature: Bytes,
+    pub enr_root: String,
+    pub link_root: String,
+    pub sequence_number: u64,
+    pub signature: Bytes,
 }
 
 // === impl TreeRootEntry ===

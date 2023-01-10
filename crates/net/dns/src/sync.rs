@@ -1,134 +1,117 @@
-//! Sync trees
-
-use crate::{
-    error::{LookupError, LookupResult, ParseDnsEntryError, ParseEntryResult},
-    resolver::Resolver,
-    tree::{LinkEntry, TreeRootEntry},
-};
-use enr::{Enr, EnrKeyUnambiguous};
+use crate::tree::{LinkEntry, TreeRootEntry};
+use enr::EnrKeyUnambiguous;
 use secp256k1::SecretKey;
 use std::{
-    collections::VecDeque,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{ready, Context, Poll},
+    collections::{HashMap, VecDeque},
+    time::Instant,
 };
-
-/// The `QueryPool` provides an aggregate state machine for driving queries to completion.
-pub(crate) struct QueryPool<R: Resolver, K: EnrKeyUnambiguous> {
-    /// The [Resolver] that's used to lookup queries.
-    resolver: Arc<R>,
-    /// All active queries
-    queries: Vec<Query<K>>,
-    /// buffered results
-    queued_outcomes: VecDeque<QueryOutcome<K>>,
-    // TODO(mattsse): add ratelimiting support
-}
-
-// === impl QueryPool ===
-
-impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
-    /// Resolves the root the link references
-    pub(crate) fn resolve_root(&mut self, link: LinkEntry<K>) {
-        let resolver = Arc::clone(&self.resolver);
-        self.queries.push(Query::Root(Box::pin(async move { resolve_root(resolver, link).await })))
-    }
-
-    pub(crate) fn resolve_branch(&mut self) {
-        let resolver = Arc::clone(&self.resolver);
-        self.queries.push(Query::Branch(Box::pin(async move { resolver.lookup_txt("").await })))
-    }
-
-    /// Advances the state of the queries
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<QueryOutcome<K>> {
-        loop {
-            // drain buffered events first
-            if let Some(event) = self.queued_outcomes.pop_front() {
-                return Poll::Ready(event)
-            }
-
-            // advance all queries
-            for idx in (0..self.queries.len()).rev() {
-                let mut query = self.queries.swap_remove(idx);
-                if let Poll::Ready(outcome) = query.poll(cx) {
-                    self.queued_outcomes.push_back(outcome);
-                } else {
-                    self.queries.push(query);
-                }
-            }
-
-            if self.queued_outcomes.is_empty() {
-                return Poll::Pending
-            }
-        }
-    }
-}
-
-// === Various future/type alias ===
-
-type LookUpFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
-
-pub(crate) type ResolveRootResult<K> =
-    Result<LookupResult<(TreeRootEntry, LinkEntry<K>), K>, LinkEntry<K>>;
-
-type ResolveRootFuture<K> = Pin<Box<dyn Future<Output = ResolveRootResult<K>> + Send>>;
-
-enum Query<K: EnrKeyUnambiguous> {
-    Root(ResolveRootFuture<K>),
-    Branch(LookUpFuture),
-}
-
-// === impl Query ===
-
-impl<K: EnrKeyUnambiguous> Query<K> {
-    /// Advances the query
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<QueryOutcome<K>> {
-        match self {
-            Query::Root(ref mut query) => {
-                let outcome = ready!(query.as_mut().poll(cx));
-                Poll::Ready(QueryOutcome::Root(outcome))
-            }
-            Query::Branch(_) => {
-                todo!()
-            }
-        }
-    }
-}
-
-/// The output the queries return
-pub(crate) enum QueryOutcome<K: EnrKeyUnambiguous> {
-    Root(ResolveRootResult<K>),
-}
 
 /// A sync-able tree
 pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
-    /// The link to this tree.
+    /// Root of the tree
+    root: TreeRootEntry,
+    /// Link to this tree
     link: LinkEntry<K>,
+    /// Timestamp when the root was updated
+    root_updated: Instant,
+    /// The state of the tree sync progress.
+    sync_state: SyncState,
+    /// Links contained in this tree
+    resolved_links: HashMap<String, LinkEntry<K>>,
+    /// Unresolved nodes of the tree
+    missing_nodes: VecDeque<String>,
 }
 
-/// Retries the root entry the link points to and returns the verified entry
-///
-/// Returns an error if the record could be retrieved but is not a root entry or failed to be
-/// verified.
-async fn resolve_root<K: EnrKeyUnambiguous, R: Resolver>(
-    resolver: Arc<R>,
-    link: LinkEntry<K>,
-) -> ResolveRootResult<K> {
-    let root = if let Some(root) = resolver.lookup_txt(&link.domain).await {
-        root
-    } else {
-        return Err(link)
-    };
+// === impl SyncTree ===
 
-    match root.parse::<TreeRootEntry>() {
-        Ok(root) => {
-            if root.verify::<K>(&link.pubkey) {
-                Ok(Ok((root, link)))
-            } else {
-                Ok(Err(LookupError::InvalidRoot(root, link)))
-            }
+impl<K: EnrKeyUnambiguous> SyncTree<K> {
+    pub(crate) fn new(root: TreeRootEntry, link: LinkEntry<K>) -> Self {
+        Self {
+            root,
+            link,
+            root_updated: Instant::now(),
+            sync_state: SyncState::Pending,
+            resolved_links: Default::default(),
+            missing_nodes: Default::default(),
         }
-        Err(err) => Ok(Err(err.into())),
     }
+
+    pub(crate) fn domain(&self) -> &str {
+        &self.link.domain
+    }
+
+    pub(crate) fn link(&self) -> &LinkEntry<K> {
+        &self.link
+    }
+
+    /// Advances the state of the tree by returning actions to perform
+    pub(crate) fn poll(&mut self, now: Instant) -> Option<SyncAction> {
+        match self.sync_state {
+            SyncState::Pending => {
+                self.sync_state = SyncState::Enr;
+                return Some(SyncAction::Link(self.root.link_root.clone()))
+            }
+            SyncState::Enr => {
+                self.sync_state = SyncState::Active;
+                return Some(SyncAction::Enr(self.root.enr_root.clone()))
+            }
+            SyncState::Link => {
+                self.sync_state = SyncState::Active;
+                return Some(SyncAction::Link(self.root.link_root.clone()))
+            }
+            SyncState::Active => {}
+            SyncState::RootUpdate => return None,
+        }
+
+        let next = self.missing_nodes.pop_front()?;
+        Some(SyncAction::Enr(next))
+    }
+
+    /// Updates the root and returns what changed
+    pub(crate) fn update_root(&mut self, root: TreeRootEntry) {
+        let enr = root.enr_root == self.root.enr_root;
+        let link = root.link_root == self.root.link_root;
+
+        self.root = root;
+        self.root_updated = Instant::now();
+
+        let state = match (enr, link) {
+            (true, true) => {
+                self.missing_nodes.clear();
+                SyncState::Pending
+            }
+            (true, _) => {
+                self.missing_nodes.clear();
+                SyncState::Enr
+            }
+            (_, true) => SyncState::Link,
+            _ => {
+                // unchanged
+                return
+            }
+        };
+        self.sync_state = state;
+    }
+}
+
+/// The action to perform by the service
+pub(crate) enum SyncAction {
+    UpdateRoot,
+    Enr(String),
+    Link(String),
+}
+
+/// How the [SyncTree::update_root] changed the root
+enum SyncState {
+    RootUpdate,
+    Pending,
+    Enr,
+    Link,
+    Active,
+}
+
+/// What kind of hash to resolve
+pub(crate) enum ResolveKind {
+    Enr,
+    Link,
 }

@@ -9,12 +9,14 @@
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 
+use enr::Enr;
 use secp256k1::SecretKey;
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc,
@@ -24,20 +26,25 @@ use tokio_stream::{
     wrappers::{ReceiverStream, UnboundedReceiverStream},
     Stream,
 };
+use tracing::{debug, warn};
 
 mod config;
 mod error;
+mod query;
 pub mod resolver;
 mod sync;
 pub mod tree;
 
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
-    sync::{QueryOutcome, QueryPool, ResolveRootResult, SyncTree},
+    error::ParseEntryResult,
+    query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
+    sync::{ResolveKind, SyncAction},
     tree::LinkEntry,
 };
 pub use config::DnsDiscoveryConfig;
 use error::ParseDnsEntryError;
+use sync::SyncTree;
 
 /// [DnsDiscoveryService] front-end.
 #[derive(Clone)]
@@ -63,6 +70,8 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     trees: HashMap<LinkEntry, SyncTree>,
     /// All queries currently in progress
     queries: QueryPool<R, SecretKey>,
+
+    entries: HashMap<String, Enr<SecretKey>>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -71,19 +80,20 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
     ///
     /// ```
+    /// use std::sync::Arc;
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
     /// # fn t() {
     ///  let service =
-    ///             DnsDiscoveryService::new(DnsResolver::from_system_conf().unwrap(), Default::default());
+    ///             DnsDiscoveryService::new(Arc::new(DnsResolver::from_system_conf().unwrap()), Default::default());
     /// # }
     /// ```
-    pub fn new(resolver: R, config: DnsDiscoveryConfig) -> Self {
+    pub fn new(resolver: Arc<R>, config: DnsDiscoveryConfig) -> Self {
         todo!()
     }
 
     /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
     /// service
-    pub fn new_pair(resolver: R, config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
+    pub fn new_pair(resolver: Arc<R>, config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
         let service = Self::new(resolver, config);
         let handle = service.handle();
         (service, handle)
@@ -116,26 +126,100 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     /// Starts syncing the given link to a tree.
     pub fn sync_tree(&mut self, link: &str) -> Result<(), ParseDnsEntryError> {
-        let _link: LinkEntry = link.parse()?;
-
+        self.sync_tree_with_link(link.parse()?);
         Ok(())
     }
 
-    /// Resolves an entry
-    fn resolve_entry(&mut self, _domain: impl Into<String>, _hash: impl Into<String>) {}
+    /// Starts syncing the given link to a tree.
+    pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
+        self.queries.resolve_root(link);
+    }
 
-    fn on_resolved_root(&mut self, resp: ResolveRootResult<SecretKey>) {}
+    /// Resolves an entry
+    fn resolve_entry(&mut self, link: LinkEntry<SecretKey>, hash: String, kind: ResolveKind) {
+        if self.entries.contains_key(&hash) {
+            // already resolved
+            return
+        }
+        self.queries.resolve_entry(link, hash, kind)
+    }
+
+    fn on_resolved_root(&mut self, resp: ResolveRootResult<SecretKey>) {
+        match resp {
+            Ok(Ok((root, link))) => match self.trees.entry(link.clone()) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().update_root(root);
+                }
+                Entry::Vacant(mut entry) => {
+                    entry.insert(SyncTree::new(root, link));
+                }
+            },
+            Ok(Err(err)) => {
+                debug!(?err, "Resolved invalid root")
+            }
+            Err(link) => {
+                debug!(?link, "Failed to lookup root")
+            }
+        }
+    }
+
+    fn on_resolved_entry(&mut self, resp: ResolveEntryResult<SecretKey>) {
+        let ResolveEntryResult { entry, link, hash, kind } = resp;
+        match entry {
+            Some(Err(err)) => {
+                debug!(?err, domain=%link.domain, ?hash, "Failed to parse entry")
+            }
+            None => {
+                debug!(domain=%link.domain, ?hash, "Failed to lookup entry")
+            }
+            Some(Ok(entry)) => {}
+        }
+    }
 
     /// Advances the state of the DNS discovery service by polling,triggering lookups
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
-        while let Poll::Ready(outcome) = self.queries.poll(cx) {
-            // handle query outcome
-            match outcome {
-                QueryOutcome::Root(resp) => self.on_resolved_root(resp),
+        loop {
+            while let Poll::Ready(outcome) = self.queries.poll(cx) {
+                // handle query outcome
+                match outcome {
+                    QueryOutcome::Root(resp) => self.on_resolved_root(resp),
+                    QueryOutcome::Entry(resp) => self.on_resolved_entry(resp),
+                }
+            }
+
+            let mut progress = false;
+            let now = Instant::now();
+            let mut pending_resolves = Vec::new();
+            let mut pending_updates = Vec::new();
+            for tree in self.trees.values_mut() {
+                while let Some(action) = tree.poll(now) {
+                    progress = true;
+                    match action {
+                        SyncAction::UpdateRoot => {
+                            pending_updates.push(tree.link().clone());
+                        }
+                        SyncAction::Enr(hash) => {
+                            pending_resolves.push((tree.link().clone(), hash, ResolveKind::Enr));
+                        }
+                        SyncAction::Link(hash) => {
+                            pending_resolves.push((tree.link().clone(), hash, ResolveKind::Link));
+                        }
+                    }
+                }
+            }
+
+            for (domain, hash, kind) in pending_resolves {
+                self.resolve_entry(domain, hash, kind)
+            }
+
+            for link in pending_updates {
+                self.sync_tree_with_link(link)
+            }
+
+            if !progress {
+                return Poll::Pending
             }
         }
-
-        Poll::Pending
     }
 }
 
