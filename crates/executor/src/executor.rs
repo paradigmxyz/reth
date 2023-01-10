@@ -251,7 +251,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     transactions: &[TransactionSignedEcRecovered],
     ommers: &[Header],
     config: &Config,
-    db: SubState<DB>,
+    db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, ommers, config, db)?;
 
@@ -301,7 +301,7 @@ pub fn execute<DB: StateProvider>(
     transactions: &[TransactionSignedEcRecovered],
     ommers: &[Header],
     config: &Config,
-    db: SubState<DB>,
+    db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut evm = EVM::new();
     evm.database(db);
@@ -392,8 +392,8 @@ pub fn execute<DB: StateProvider>(
         return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
     }
 
-    let mut db = evm.db.expect("It is set at the start of the function");
-    let block_reward = block_reward_changeset(header, ommers, &mut db, config)?;
+    let db = evm.db.expect("It is set at the start of the function");
+    let block_reward = block_reward_changeset(header, ommers, db, config)?;
 
     Ok(ExecutionResult { changesets, block_reward })
 }
@@ -607,13 +607,14 @@ mod tests {
         // make it berlin fork
         config.spec_upgrades = SpecUpgrades::new_berlin_activated();
 
-        let db = SubState::new(State::new(db));
+        let mut db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
             block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
         let out =
-            execute_and_verify_receipt(&block.header, &transactions, &ommers, &config, db).unwrap();
+            execute_and_verify_receipt(&block.header, &transactions, &ommers, &config, &mut db)
+                .unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
