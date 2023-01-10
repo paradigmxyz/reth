@@ -340,7 +340,7 @@ impl ActiveSession {
         }
     }
 
-    /// Updates the request timeout with a message's timestamps
+    /// Updates the request timeout with a request's timestamps
     fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
         let elapsed = received.saturating_duration_since(sent);
 
@@ -503,7 +503,7 @@ pub(crate) struct ReceivedRequest {
 
 /// A request that waits for a response from the peer
 pub(crate) struct InflightRequest {
-    /// Message
+    /// Request sent to peer
     request: PeerRequest,
     /// Instant when the request was sent
     timestamp: Instant,
