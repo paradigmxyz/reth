@@ -76,6 +76,17 @@ pub(crate) struct ActiveSession {
     pub(crate) timeout_interval: Interval,
 }
 
+/// Constants for timeout updating
+
+/// Minimum timeout value
+const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
+/// Maximum timeout value
+const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
+/// How much the new measurements affect the current timeout (X percent)
+const SAMPLE_IMPACT: f64 = 0.1;
+/// Amount of RTTs before timeout
+const TIMEOUT_SCALING: u32 = 3;
+
 impl ActiveSession {
     /// Returns `true` if the session is currently in the process of disconnecting
     fn is_disconnecting(&self) -> bool {
@@ -331,15 +342,6 @@ impl ActiveSession {
 
     /// Updates the request timeout with a message's timestamps
     fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
-        /// Minimum timeout value
-        const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
-        /// Maximum timeout value
-        const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
-        /// How much the new measurements affect the current timeout (X percent)
-        const SAMPLE_IMPACT: f64 = 0.1;
-        /// Amount of RTTs before timeout
-        const TIMEOUT_SCALING: u32 = 3;
-
         let elapsed = received.saturating_duration_since(sent);
 
         let updated_timeout = self.request_timeout.mul_f64(1.0 - SAMPLE_IMPACT) +
