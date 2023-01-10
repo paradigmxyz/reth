@@ -392,7 +392,7 @@ pub fn execute<DB: StateProvider>(
         return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
     }
 
-    let db = evm.db.expect("It is set at the start of the function");
+    let db = evm.db.expect("Db is set at the start of the function");
     let block_reward = block_reward_changeset(header, ommers, db, config)?;
 
     Ok(ExecutionResult { changesets, block_reward })
