@@ -95,11 +95,16 @@ trait XdgPath {
 ///
 /// # Example
 ///
-/// ```rs
-/// let default: StandardPath<DbPath> = StandardPath::default();
-/// let custom = StandardPath::from_str("my/path/to/db").unwrap();
+/// ```
+/// use reth::dirs::{StandardPath, DbPath};
+/// use std::str::FromStr;
 ///
-/// println!("Default db path: {default}, custom db path: {custom}");
+/// // Resolves to the platform-specific database path
+/// let default: StandardPath<DbPath> = StandardPath::default();
+/// // Resolves to `$(pwd)/my/path/to/db`
+/// let custom: StandardPath<DbPath> = StandardPath::from_str("my/path/to/db").unwrap();
+///
+/// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
 #[derive(Clone, Debug)]
 pub struct StandardPath<D>(PathBuf, std::marker::PhantomData<D>);
