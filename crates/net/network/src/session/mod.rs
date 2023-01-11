@@ -365,6 +365,9 @@ impl SessionManager {
 
                 let messages = PeerRequestSender::new(peer_id, to_session_tx);
 
+                let request_timeout =
+                    Arc::new(AtomicU64::new(self.request_timeout.as_millis() as u64));
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -379,9 +382,7 @@ impl SessionManager {
                     queued_outgoing: Default::default(),
                     received_requests: Default::default(),
                     timeout_interval: tokio::time::interval(self.request_timeout),
-                    request_timeout: Arc::new(AtomicU64::new(
-                        self.request_timeout.as_millis() as u64
-                    )),
+                    request_timeout: Arc::clone(&request_timeout),
                 };
 
                 self.spawn(session);
@@ -395,6 +396,7 @@ impl SessionManager {
                     commands_to_session,
                     client_version: client_id,
                     remote_addr,
+                    request_timeout,
                 };
 
                 self.active_sessions.insert(peer_id, handle);

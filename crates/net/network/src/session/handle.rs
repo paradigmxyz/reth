@@ -11,7 +11,12 @@ use reth_eth_wire::{
 };
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    io,
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+    time::Instant,
+};
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
@@ -52,6 +57,8 @@ pub(crate) struct ActiveSessionHandle {
     pub(crate) client_version: String,
     /// The address we're connected to
     pub(crate) remote_addr: SocketAddr,
+    /// The timeout for this peer
+    pub(crate) request_timeout: Arc<AtomicU64>,
 }
 
 // === impl ActiveSessionHandle ===
