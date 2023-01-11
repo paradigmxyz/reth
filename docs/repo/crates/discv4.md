@@ -22,6 +22,7 @@ As mentioned in the network and stages chapters, when the node is first started 
 
 During this process, a new `NetworkManager` is created through the `NetworkManager::new()` function, which starts the discovery protocol through a handful of newly spawned tasks. Lets take a look at how this actually works under the hood. 
 
+[File: ]()
 ```rust ignore
 impl<C> NetworkManager<C>
 where
@@ -58,6 +59,7 @@ where
 
 First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes]() and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function.
 
+[File: ]()
 ```rust ignore
 impl Discovery {
     /// Spawns the discovery service.
@@ -102,6 +104,7 @@ The `NodeRecord::from_secret_key()` takes the socket address used for discovery 
 
 Once the ENR is created, if there is a `discv4_config` supplied to the `Discovery::new()` function, The `Discv4::bind()` function is called to bind to a new UdpSocket and create the disc_v4 service. 
 
+[File: ]()
 ```rust ignore
 impl Discv4 {
     //--snip--
@@ -130,8 +133,8 @@ impl Discv4 {
 
 To better understand what is actually happening when the disc_v4 service is created, lets take a deeper look at the `Discv4Service::new()` function.
 
+[File: ]()
 ```rust ignore
-
 impl Discv4Service {
     /// Create a new instance for a bound [`UdpSocket`].
     pub(crate) fn new(
@@ -185,6 +188,7 @@ First, new channels are initialized to handle incoming and outgoing traffic rela
 
 Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()` function to complete as well, the `discv4_service` is then spawned into its own task and the `Discovery::new()` function returns an new instance of `Discovery`.
 
+[File: ]()
 ```rust ignore
 impl Discovery {
     pub async fn new(
@@ -228,6 +232,7 @@ In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Fu
 Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections. If you would like to check out the function in it's entirety, you can [click here]().
 
 //TODO: highlight where the future is actually being spawned
+[File: ]()
 ```rust ignore
 pub struct Discv4Service {
     //--snip--
@@ -270,6 +275,7 @@ pub struct Discv4Service {
 
 As the function starts, a `loop` is entered and the `Discv4Service.queued_events` are evaluated to see if there are any events ready to be processed. If there is an event ready, the function immediately returns the event wrapped in `Poll::Ready()`. The `queued_events` field is a `VecDeque<Discv4Event>` where `Discv4Event` is an enum containing one of the following variants.
 
+[File: ]()
 ```rust ignore
 pub enum Discv4Event {
     /// A `Ping` message was handled.
@@ -294,6 +300,8 @@ To prevent traffic amplification attacks, implementations must verify that the s
 
 
 
+
+//TODO: walk through discovery.poll()
 In Reth, once a new `NetworkState` is initialized and a new task is spawned, the `poll()` function is used to advance the state of the network.
 
 ```rust ignore
