@@ -29,13 +29,14 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    task::{ready, Context, Poll},
+    task::{ready, Context, Poll}, time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
-
+use metrics::Gauge;
+use reth_metrics_derive::Metrics;
 use crate::stream::HasRemoteAddr;
 
 /// Meters bandwidth usage of streams
@@ -162,6 +163,33 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
 impl HasRemoteAddr for MeteredStream<TcpStream> {
     fn remote_addr(&self) -> Option<SocketAddr> {
         self.inner.remote_addr()
+    }
+}
+
+/// Gauges the inbound and outbound bandwidth for a given
+/// bandwidth meter
+#[derive(Metrics)]
+#[metrics(dynamic = true)]
+pub struct BandwidthMeterMetricsInner {
+    /// Gauges inbound bandwidth
+    inbound_bandwidth: Gauge,
+    /// Gauges outbound bandwidth
+    outbound_bandwidth: Gauge,
+}
+
+pub struct BandwidthMeterMetrics {
+    interval: Duration,
+    bandwidth_meter: BandwidthMeter,
+    metrics: BandwidthMeterMetricsInner,
+}
+
+impl BandwidthMeterMetrics {
+    pub fn new(interval: Duration, bandwidth_meter: BandwidthMeter) -> Self {
+        Self {
+            interval,
+            bandwidth_meter,
+            metrics: BandwidthMeterMetricsInner::default(),
+        }
     }
 }
 
