@@ -58,19 +58,21 @@ triehash = "0.8"
 plain_hasher = "0.2"
 hash-db = "0.15"
 
-# optional
+# arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 proptest = { version = "1.0", optional = true }
+proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
-arbitrary = { version = "1.1.7", features = ["derive"] }
 serde_json = "1.0"
 hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
 revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = ["serde", "arbitrary"] }
-proptest = { version = "1.0" }
 
+arbitrary = { version = "1.1.7", features = ["derive"] }
+proptest = { version = "1.0" }
+proptest-derive = "0.3"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
@@ -78,4 +80,4 @@ secp256k1 = "0.24.2"
 
 [features]
 default = []
-arbitrary = ["dep:arbitrary", "dep:proptest", "revm-interpreter/arbitrary"]
+arbitrary = ["revm-interpreter/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]

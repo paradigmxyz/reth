@@ -22,7 +22,6 @@ parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 futures = "0.3.25"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
-arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 secp256k1 = { version = "0.24.2", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
 modular-bitfield = "0.11.2"
 
@@ -32,6 +31,11 @@ page_size = "0.4.2"
 thiserror = "1.0.37"
 tempfile = { version = "3.3.0", optional = true }
 
+# arbitrary utils
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+proptest = { version = "1.0", optional = true }
+proptest-derive = { version = "0.3", optional = true }
+
 [dev-dependencies]
 tempfile = "3.3.0"
 test-fuzz = "3.0.4"
@@ -39,7 +43,6 @@ test-fuzz = "3.0.4"
 criterion = "0.4.0"
 iai = "0.1.1"
 tokio = { version = "1.21.2", features = ["full"] }
-arbitrary = { version = "1.1.7", features = ["derive"]}
 reth-db = { path = ".", features = ["test-utils","bench"]}
 
 # needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
@@ -47,6 +50,11 @@ secp256k1 = "0.24.2"
 
 reth-interfaces = { path = "../../interfaces", features=["bench"] }
 async-trait = "0.1.58"
+
+arbitrary = { version = "1.1.7", features = ["derive"] }
+proptest = { version = "1.0" }
+proptest-derive = "0.3"
+
 
 [features]
 default = ["mdbx"]
