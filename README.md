@@ -43,7 +43,7 @@ Rust minimum required version to build this project is 1.65.0 published 02.11.20
 
 Prerequisites: libclang, `libclang-dev` on Debian
 
-To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/install-and-build/installing-geth)
+To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/getting-started/installing-geth)
 
 ```sh
 git clone https://github.com/paradigmxyz/reth
