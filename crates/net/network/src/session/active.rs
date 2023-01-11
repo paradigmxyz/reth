@@ -105,7 +105,7 @@ impl ActiveSession {
                     received: Instant::now(),
                 };
                 if self
-                    .try_emit_message(PeerMessage::EthRequest(PeerRequest::$req_item {
+                    .safe_emit_message(PeerMessage::EthRequest(PeerRequest::$req_item {
                         request,
                         response: tx,
                     }))
@@ -253,6 +253,18 @@ impl ActiveSession {
                 "dropping incoming message",
             );
         });
+    }
+
+    /// Send a message back to the [`SessionsManager`]
+    /// covering both broadcasts and incoming requests
+    fn safe_emit_message(
+        &self,
+        message: PeerMessage,
+    ) -> Result<(), mpsc::error::TrySendError<ActiveSessionMessage>> {
+        self.to_session
+            // we want this message to always arrive, so we clone the sender
+            .clone()
+            .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
     }
 
     /// Send a message back to the [`SessionsManager`]
