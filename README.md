@@ -39,7 +39,7 @@ The project is not ready for use. We hope to have full sync implemented sometime
 
 ## Running Reth
 
-See the [Reth Book](https://github.com/paradigmxyz/reth/tree/main/book) for instructions on how to run Reth.
+See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how to run Reth.
 
 ## Build & Test
 
