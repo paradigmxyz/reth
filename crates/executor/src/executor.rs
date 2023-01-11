@@ -365,7 +365,7 @@ pub fn execute<DB: StateProvider>(
             .map(|l| Log {
                 address: H160(l.address.0),
                 topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
-                data: l.data,
+                data: l.data.into(),
             })
             .collect();
 

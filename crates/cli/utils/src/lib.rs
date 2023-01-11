@@ -145,7 +145,7 @@ mod tests {
     fn parse_socket_addresses() {
         for value in ["localhost:9000", ":9000", "9000", "localhost"] {
             let socket_addr = parse_socket_address(value)
-                .expect(&format!("could not parse socket address: {}", value));
+                .unwrap_or_else(|_| panic!("could not parse socket address: {value}"));
 
             assert!(socket_addr.ip().is_loopback());
             assert_eq!(socket_addr.port(), 9000);
