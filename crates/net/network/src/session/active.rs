@@ -344,12 +344,19 @@ impl ActiveSession {
     fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
         let elapsed = received.saturating_duration_since(sent);
 
-        let updated_timeout = self.request_timeout.mul_f64(1.0 - SAMPLE_IMPACT) +
-            elapsed.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
-
-        self.request_timeout = updated_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT);
+        self.request_timeout = calculate_new_timeout(self.request_timeout, elapsed);
         self.timeout_interval = tokio::time::interval(self.request_timeout);
     }
+}
+
+/// Calculates a new timeout using an updated estimation of the RTT
+fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
+    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
+
+    // this dampens sudden changes by taking a weighted mean of the old and new values
+    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
+
+    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
 }
 
 impl Future for ActiveSession {
@@ -807,5 +814,21 @@ mod tests {
         tokio::task::spawn(fut);
 
         rx.await.unwrap();
+    }
+
+    #[test]
+    fn timeout_calculation_sanity_tests() {
+        let rtt = Duration::from_millis(200);
+        // timeout for an RTT of `rtt`
+        let timeout = rtt * TIMEOUT_SCALING;
+
+        // if rtt hasn't changed, timeout shouldn't change
+        assert!(calculate_new_timeout(timeout, rtt) == timeout);
+
+        // if rtt changed, the new timeout should change less than it
+        assert!(calculate_new_timeout(timeout, rtt / 2) < timeout);
+        assert!(calculate_new_timeout(timeout, rtt / 2) > timeout / 2);
+        assert!(calculate_new_timeout(timeout, rtt * 2) > timeout);
+        assert!(calculate_new_timeout(timeout, rtt * 2) < timeout * 2);
     }
 }
