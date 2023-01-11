@@ -28,7 +28,7 @@ where
         let fqn = if query.ends_with('.') { query.to_string() } else { format!("{query}.") };
         match self.txt_lookup(fqn).await {
             Err(err) => {
-                trace!(?err, ?query, "dns lookup failed");
+                trace!(target: "disc::dns", ?err, ?query, "dns lookup failed");
                 None
             }
             Ok(lookup) => {

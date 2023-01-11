@@ -199,7 +199,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 }
             },
             Err((err, link)) => {
-                debug!(?err, ?link, "Failed to lookup root")
+                debug!(target: "disc::dns",?err, ?link, "Failed to lookup root")
             }
         }
     }
@@ -216,10 +216,10 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
         match entry {
             Some(Err(err)) => {
-                debug!(?err, domain=%link.domain, ?hash, "Failed to lookup entry")
+                debug!(target: "disc::dns",?err, domain=%link.domain, ?hash, "Failed to lookup entry")
             }
             None => {
-                debug!(domain=%link.domain, ?hash, "No dns entry")
+                debug!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")
             }
             Some(Ok(entry)) => {
                 // cache entry
@@ -227,7 +227,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
                 match entry {
                     DnsEntry::Root(root) => {
-                        debug!(%root, domain=%link.domain, ?hash, "resolved unexpected root entry");
+                        debug!(target: "disc::dns",%root, domain=%link.domain, ?hash, "resolved unexpected root entry");
                     }
                     DnsEntry::Link(link_entry) => {
                         if kind.is_link() {
@@ -236,7 +236,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                             }
                             self.sync_tree_with_link(link_entry)
                         } else {
-                            debug!(%link_entry, domain=%link.domain, ?hash, "resolved unexpected Link entry");
+                            debug!(target: "disc::dns",%link_entry, domain=%link.domain, ?hash, "resolved unexpected Link entry");
                         }
                     }
                     DnsEntry::Branch(branch_entry) => {
@@ -246,7 +246,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     }
                     DnsEntry::Node(entry) => {
                         if kind.is_link() {
-                            debug!(domain=%link.domain, ?hash, "resolved unexpected enr entry");
+                            debug!(target: "disc::dns",domain=%link.domain, ?hash, "resolved unexpected enr entry");
                         } else {
                             self.on_resolved_enr(entry.enr)
                         }
