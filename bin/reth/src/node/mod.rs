@@ -22,7 +22,8 @@ use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
-        sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
+        sender_recovery::SenderRecoveryStage, storage_hashing::StorageHashingStage,
+        total_difficulty::TotalDifficultyStage,
     },
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -157,7 +158,8 @@ impl Command {
             .push(ExecutionStage {
                 config: ExecutorConfig::new_ethereum(),
                 commit_threshold: config.stages.execution.commit_threshold,
-            });
+            })
+            .push(StorageHashingStage { clean_threshold: 100_000, commit_threshold: 5_000 });
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);

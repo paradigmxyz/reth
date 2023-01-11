@@ -85,7 +85,7 @@ pub trait DbCursorRW<'tx, T: Table> {
 
 /// Read Write Cursor over DupSorted table.
 pub trait DbDupCursorRW<'tx, T: DupSort> {
-    /// Append value to next cursor item
+    /// Delete current value that cursor points to, along with duplicates.
     fn delete_current_duplicates(&mut self) -> Result<(), Error>;
 
     /// Append duplicate value.
