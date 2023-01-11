@@ -350,6 +350,7 @@ impl ActiveSession {
 }
 
 /// Calculates a new timeout using an updated estimation of the RTT
+#[inline]
 fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
     let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
 
