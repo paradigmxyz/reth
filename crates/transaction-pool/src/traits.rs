@@ -271,7 +271,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<U256>;
 
-    /// Returns the number of bytes of the transaction data
+    /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
 }
 
@@ -311,28 +311,14 @@ impl PoolTransaction for PooledTransaction {
     ///
     /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
     fn cost(&self) -> U256 {
-        match &self.transaction.transaction {
-            Transaction::Legacy(tx) => {
-                U256::from(tx.gas_price) * U256::from(tx.gas_limit) + U256::from(tx.value)
-            }
-            Transaction::Eip2930(tx) => {
-                U256::from(tx.gas_price) * U256::from(tx.gas_limit) + U256::from(tx.value)
-            }
-            Transaction::Eip1559(tx) => {
-                U256::from(tx.max_fee_per_gas) * U256::from(tx.gas_limit) + U256::from(tx.value)
-            }
-        }
+        self.cost
     }
 
     /// Returns the effective gas price for this transaction.
     ///
     /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
     fn effective_gas_price(&self) -> U256 {
-        match &self.transaction.transaction {
-            Transaction::Legacy(tx) => U256::from(tx.gas_price),
-            Transaction::Eip2930(tx) => U256::from(tx.gas_price),
-            Transaction::Eip1559(tx) => U256::from(tx.max_fee_per_gas),
-        }
+        self.effective_gas_price
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -362,7 +348,7 @@ impl PoolTransaction for PooledTransaction {
         }
     }
 
-    /// Returns the number of bytes of the transaction data
+    /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
         self.transaction.transaction.input().len()
     }
