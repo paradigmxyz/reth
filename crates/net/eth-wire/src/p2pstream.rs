@@ -528,7 +528,7 @@ pub fn set_capability_offsets(
 
             let version = shared_capabilities.get(&peer_capability.name);
             if version.is_none() ||
-                (version.is_some() && peer_capability.version > *version.unwrap())
+                (version.is_some() && peer_capability.version > *version.expect("is some; qed"))
             {
                 shared_capabilities.insert(peer_capability.name.clone(), peer_capability.version);
                 shared_capability_names.insert(peer_capability.name);
