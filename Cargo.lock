@@ -3750,6 +3750,7 @@ dependencies = [
  "enr 0.7.0",
  "linked_hash_set",
  "lru 0.9.0",
+ "reth-net-common",
  "reth-primitives",
  "secp256k1 0.24.2",
  "thiserror",

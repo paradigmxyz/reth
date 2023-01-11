@@ -3,8 +3,8 @@ use enr::EnrKeyUnambiguous;
 use linked_hash_set::LinkedHashSet;
 use secp256k1::SecretKey;
 use std::{
-    collections::{HashMap},
-    time::Instant,
+    collections::HashMap,
+    time::{Duration, Instant},
 };
 
 /// A sync-able tree
@@ -64,7 +64,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
     }
 
     /// Advances the state of the tree by returning actions to perform
-    pub(crate) fn poll(&mut self, _now: Instant) -> Option<SyncAction> {
+    pub(crate) fn poll(&mut self, now: Instant, update_timeout: Duration) -> Option<SyncAction> {
         match self.sync_state {
             SyncState::Pending => {
                 self.sync_state = SyncState::Enr;
@@ -79,7 +79,10 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
                 return Some(SyncAction::Link(self.root.link_root.clone()))
             }
             SyncState::Active => {
-                // TODO check update interval
+                if now > self.root_updated + update_timeout {
+                    self.sync_state = SyncState::RootUpdate;
+                    return Some(SyncAction::UpdateRoot)
+                }
             }
             SyncState::RootUpdate => return None,
         }

@@ -7,8 +7,17 @@
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 
-use enr::{Enr};
+pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
+use crate::{
+    query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
+    sync::{ResolveKind, SyncAction},
+    tree::{DnsEntry, LinkEntry},
+};
+pub use config::DnsDiscoveryConfig;
+use enr::Enr;
+use error::ParseDnsEntryError;
 use lru::LruCache;
+use reth_primitives::{NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -16,8 +25,9 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
+use sync::SyncTree;
 use tokio::sync::{
     mpsc,
     mpsc::{error::TrySendError, UnboundedSender},
@@ -28,24 +38,12 @@ use tokio_stream::{
 };
 use tracing::{debug, warn};
 
-
 mod config;
 mod error;
 mod query;
 pub mod resolver;
 mod sync;
 pub mod tree;
-
-pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
-use crate::{
-    query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
-    sync::{ResolveKind, SyncAction},
-    tree::{DnsEntry, LinkEntry},
-};
-pub use config::DnsDiscoveryConfig;
-use error::ParseDnsEntryError;
-use reth_primitives::{NodeRecord, PeerId};
-use sync::SyncTree;
 
 /// [DnsDiscoveryService] front-end.
 #[derive(Clone)]
@@ -56,7 +54,18 @@ pub struct DnsDiscoveryHandle {
 
 // === impl DnsDiscovery ===
 
-impl DnsDiscoveryHandle {}
+impl DnsDiscoveryHandle {
+    /// Starts syncing the given link to a tree.
+    pub fn sync_tree(&mut self, link: &str) -> Result<(), ParseDnsEntryError> {
+        self.sync_tree_with_link(link.parse()?);
+        Ok(())
+    }
+
+    /// Starts syncing the given link to a tree.
+    pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
+        let _ = self.to_service.send(DnsDiscoveryCommand::SyncTee(link));
+    }
+}
 
 /// A client that discovers nodes via DNS.
 #[must_use = "Service does nothing unless polled"]
@@ -75,6 +84,8 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     dns_record_cache: LruCache<String, DnsEntry<SecretKey>>,
     /// all buffered events
     queued_events: VecDeque<DnsDiscoveryEvent>,
+    /// The rate at which trees should be updated.
+    recheck_interval: Duration,
 }
 
 // === impl DnsDiscoveryService ===
@@ -90,8 +101,25 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     ///             DnsDiscoveryService::new(Arc::new(DnsResolver::from_system_conf().unwrap()), Default::default());
     /// # }
     /// ```
-    pub fn new(_resolver: Arc<R>, _config: DnsDiscoveryConfig) -> Self {
-        todo!()
+    pub fn new(resolver: Arc<R>, config: DnsDiscoveryConfig) -> Self {
+        let DnsDiscoveryConfig {
+            lookup_timeout,
+            max_requests_per_sec,
+            recheck_interval,
+            dns_record_cache_limit,
+        } = config;
+        let queries = QueryPool::new(resolver, max_requests_per_sec, lookup_timeout);
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        Self {
+            command_tx,
+            command_rx: UnboundedReceiverStream::new(command_rx),
+            node_record_listeners: Default::default(),
+            trees: Default::default(),
+            queries,
+            dns_record_cache: LruCache::new(dns_record_cache_limit),
+            queued_events: Default::default(),
+            recheck_interval,
+        }
     }
 
     /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
@@ -227,6 +255,15 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 return Poll::Ready(event)
             }
 
+            // process all incoming commands
+            while let Poll::Ready(Some(cmd)) = Pin::new(&mut self.command_rx).poll_next(cx) {
+                match cmd {
+                    DnsDiscoveryCommand::SyncTee(link) => {
+                        self.sync_tree_with_link(link);
+                    }
+                }
+            }
+
             while let Poll::Ready(outcome) = self.queries.poll(cx) {
                 // handle query outcome
                 match outcome {
@@ -240,7 +277,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             let mut pending_resolves = Vec::new();
             let mut pending_updates = Vec::new();
             for tree in self.trees.values_mut() {
-                while let Some(action) = tree.poll(now) {
+                while let Some(action) = tree.poll(now, self.recheck_interval) {
                     progress = true;
                     match action {
                         SyncAction::UpdateRoot => {
@@ -281,11 +318,15 @@ impl<R: Resolver> Stream for DnsDiscoveryService<R> {
 }
 
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
-enum DnsDiscoveryCommand {}
+enum DnsDiscoveryCommand {
+    /// Sync a tree
+    SyncTee(LinkEntry),
+}
 
 /// Represents dns discovery related update events.
 #[derive(Debug, Clone)]
 pub enum DnsDiscoveryEvent {
+    /// Resolved an Enr entry via DNS.
     Enr(Enr<SecretKey>),
 }
 

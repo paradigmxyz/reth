@@ -7,7 +7,7 @@ use crate::{
     tree::{DnsEntry, LinkEntry, TreeRootEntry},
 };
 use enr::EnrKeyUnambiguous;
-
+use reth_net_common::ratelimit::{Rate, RateLimit};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -17,9 +17,6 @@ use std::{
     task::{ready, Context, Poll},
     time::Duration,
 };
-use std::time::Instant;
-use tokio::time::Sleep;
-
 
 /// The `QueryPool` provides an aggregate state machine for driving queries to completion.
 pub(crate) struct QueryPool<R: Resolver, K: EnrKeyUnambiguous> {
@@ -31,8 +28,8 @@ pub(crate) struct QueryPool<R: Resolver, K: EnrKeyUnambiguous> {
     active_queries: Vec<Query<K>>,
     /// buffered results
     queued_outcomes: VecDeque<QueryOutcome<K>>,
-    /// Max requests per sec
-    max_requests_per_sec: NonZeroUsize,
+    /// Rate limit for DNS requests
+    rate_limit: RateLimit,
     /// Timeout for DNS lookups.
     lookup_timeout: Duration,
 }
@@ -47,10 +44,13 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
     ) -> Self {
         Self {
             resolver,
-            queued_queries:  Default::default(),
+            queued_queries: Default::default(),
             active_queries: vec![],
             queued_outcomes: Default::default(),
-            max_requests_per_sec,
+            rate_limit: RateLimit::new(Rate::new(
+                max_requests_per_sec.get() as u64,
+                Duration::from_secs(1),
+            )),
             lookup_timeout,
         }
     }
@@ -59,15 +59,16 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
     pub(crate) fn resolve_root(&mut self, link: LinkEntry<K>) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
-        self.queued_queries
-            .push(Query::Root(Box::pin(async move { resolve_root(resolver, link, timeout).await })))
+        self.queued_queries.push_back(Query::Root(Box::pin(async move {
+            resolve_root(resolver, link, timeout).await
+        })))
     }
 
     /// Resolves the [DnsEntry] for `<hash.domain>`
     pub(crate) fn resolve_entry(&mut self, link: LinkEntry<K>, hash: String, kind: ResolveKind) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
-        self.queued_queries.push(Query::Entry(Box::pin(async move {
+        self.queued_queries.push_back(Query::Entry(Box::pin(async move {
             resolve_entry(resolver, link, hash, kind, timeout).await
         })))
     }
@@ -80,7 +81,17 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
                 return Poll::Ready(event)
             }
 
-            // queue in new requests
+            // queue in new queries
+            'queries: loop {
+                if self.rate_limit.poll_ready(cx).is_ready() {
+                    if let Some(query) = self.queued_queries.pop_front() {
+                        self.rate_limit.tick();
+                        self.active_queries.push(query);
+                        continue 'queries
+                    }
+                }
+                break
+            }
 
             // advance all queries
             for idx in (0..self.active_queries.len()).rev() {
@@ -156,7 +167,9 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     let fqn = format!("{hash}.{}", link.domain);
     let mut resp = ResolveEntryResult { entry: None, link, hash, kind };
     match lookup_with_timeout::<R, K>(&resolver, &fqn, timeout).await {
-        Ok(Some(entry)) => resp.entry = Some(entry.parse::<DnsEntry<K>>().map_err(|err| err.into())),
+        Ok(Some(entry)) => {
+            resp.entry = Some(entry.parse::<DnsEntry<K>>().map_err(|err| err.into()))
+        }
         Err(err) => resp.entry = Some(Err(err)),
         Ok(None) => {}
     }
@@ -198,5 +211,44 @@ async fn lookup_with_timeout<R: Resolver, K: EnrKeyUnambiguous>(
     match tokio::time::timeout(timeout, r.lookup_txt(query)).await {
         Ok(res) => Ok(res),
         Err(_) => Err(LookupError::RequestTimedOut),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DnsDiscoveryConfig, MapResolver};
+    use std::future::poll_fn;
+
+    #[tokio::test]
+    async fn test_rate_limit() {
+        let resolver = Arc::new(MapResolver::default());
+        let config = DnsDiscoveryConfig::default();
+        let mut pool = QueryPool::new(resolver, config.max_requests_per_sec, config.lookup_timeout);
+
+        let s = "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@nodes.example.org";
+        let entry: LinkEntry = s.parse().unwrap();
+
+        for _n in 0..config.max_requests_per_sec.get() {
+            poll_fn(|cx| {
+                pool.resolve_root(entry.clone());
+                assert_eq!(pool.queued_queries.len(), 1);
+                assert!(pool.rate_limit.poll_ready(cx).is_ready());
+                let _ = pool.poll(cx);
+                assert_eq!(pool.queued_queries.len(), 0);
+                Poll::Ready(())
+            })
+            .await;
+        }
+
+        pool.resolve_root(entry.clone());
+        assert_eq!(pool.queued_queries.len(), 1);
+        poll_fn(|cx| {
+            assert!(pool.rate_limit.poll_ready(cx).is_pending());
+            let _ = pool.poll(cx);
+            assert_eq!(pool.queued_queries.len(), 1);
+            Poll::Ready(())
+        })
+        .await;
     }
 }
