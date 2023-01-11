@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
