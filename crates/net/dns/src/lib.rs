@@ -367,7 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_root_sync() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let secret_key = SecretKey::new(&mut thread_rng());
         let resolver = MapResolver::default();
@@ -395,7 +395,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_get_node() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let secret_key = SecretKey::new(&mut thread_rng());
         let resolver = MapResolver::default();
@@ -442,7 +442,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recheck_tree() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = DnsDiscoveryConfig {
             recheck_interval: Duration::from_millis(750),
@@ -493,7 +493,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_dns_resolver() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let mut service = DnsDiscoveryService::new(
             Arc::new(DnsResolver::from_system_conf().unwrap()),
