@@ -27,7 +27,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -379,7 +379,9 @@ impl SessionManager {
                     queued_outgoing: Default::default(),
                     received_requests: Default::default(),
                     timeout_interval: tokio::time::interval(self.request_timeout),
-                    request_timeout: self.request_timeout,
+                    request_timeout: Arc::new(AtomicU64::new(
+                        self.request_timeout.as_millis() as u64
+                    )),
                 };
 
                 self.spawn(session);
