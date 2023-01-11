@@ -64,6 +64,9 @@ where
                 .chunks(self.batch_size)
                 .map(move |headers| {
                     (move || self.fetch_bodies(headers.clone()))
+                        // We should not backoff from requests since the downloader does 
+                        //not know what peer the request is being delivered to.
+                        // See: https://github.com/paradigmxyz/reth/issues/809
                         .retry(ConstantBackoff::default().with_delay(Duration::from_secs(0)))
                 })
                 .buffered(self.concurrency)
