@@ -1,7 +1,7 @@
 //! A rate limit implementation to enforce a specific rate.
 
 use std::{
-    future::Future,
+    future::{poll_fn, Future},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -44,6 +44,11 @@ impl RateLimit {
         };
 
         Poll::Ready(())
+    }
+
+    /// Wait until the [RateLimit] is ready.
+    pub async fn wait(&mut self) {
+        poll_fn(|cx| self.poll_ready(cx)).await
     }
 
     /// Updates the [RateLimit] when a new call was triggered
@@ -112,7 +117,6 @@ impl Rate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::future::poll_fn;
 
     #[tokio::test]
     async fn test_rate_limit() {
@@ -140,7 +144,7 @@ mod tests {
         })
         .await;
 
-        tokio::time::advance(limit.rate.duration).await;
+        tokio::time::sleep(limit.rate.duration).await;
 
         poll_fn(|cx| {
             assert!(limit.poll_ready(cx).is_ready());
