@@ -71,9 +71,6 @@ pub fn parse_socket_address(value: &str) -> Result<SocketAddr, eyre::Error> {
     .ok_or_else(|| eyre::eyre!("Could not parse socket address from {}", value))
 }
 
-/// Tracing utility
-pub mod reth_tracing {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
