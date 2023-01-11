@@ -1,20 +1,21 @@
 //! CLI definition and entrypoint to executable
+use crate::{
+    db,
+    dirs::{LogsDir, PlatformPath},
+    node, p2p, stage, test_eth_chain,
+    utils::{reth_tracing, reth_tracing::BoxedLayer},
+};
+use clap::{ArgAction, Args, Parser, Subcommand};
+use std::str::FromStr;
+use tracing::{metadata::LevelFilter, Level, Subscriber};
+use tracing_subscriber::{filter::Directive, registry::LookupSpan};
 
-use crate::{db, node, p2p, stage, test_eth_chain};
-
-use clap::{ArgAction, Parser, Subcommand};
-use reth_cli_utils::reth_tracing::{self, TracingMode};
-use tracing_subscriber::util::SubscriberInitExt;
-
-/// main function that parses cli and runs command
+/// Parse CLI options, set up logging and run the chosen command.
 pub async fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
-    reth_tracing::build_subscriber(if opt.silent {
-        TracingMode::Silent
-    } else {
-        TracingMode::from(opt.verbose)
-    })
-    .init();
+
+    let (layer, _guard) = opt.logs.layer();
+    reth_tracing::init(vec![layer, reth_tracing::stdout(opt.verbosity.directive())]);
 
     match opt.command {
         Commands::Node(command) => command.execute().await,
@@ -51,17 +52,94 @@ pub enum Commands {
 }
 
 #[derive(Parser)]
-#[command(author, version="0.1", about="Reth binary", long_about = None)]
+#[command(author, version = "0.1", about = "Reth", long_about = None)]
 struct Cli {
     /// The command to run
     #[clap(subcommand)]
     command: Commands,
 
-    /// Use verbose output
-    #[clap(short, long, action = ArgAction::Count, global = true)]
-    verbose: u8,
+    #[clap(flatten)]
+    logs: Logs,
 
-    /// Silence all output
-    #[clap(long, global = true)]
-    silent: bool,
+    #[clap(flatten)]
+    verbosity: Verbosity,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Logging")]
+struct Logs {
+    /// The path to put log files in.
+    #[arg(
+        long = "log.directory",
+        value_name = "PATH",
+        global = true,
+        default_value_t,
+        conflicts_with = "journald"
+    )]
+    log_directory: PlatformPath<LogsDir>,
+
+    /// Log events to journald.
+    #[arg(long = "log.journald", global = true, conflicts_with = "log_directory")]
+    journald: bool,
+
+    /// The filter to use for logs written to the log file.
+    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    filter: String,
+}
+
+impl Logs {
+    /// Builds a tracing layer from the current log options.
+    fn layer<S>(&self) -> (BoxedLayer<S>, Option<tracing_appender::non_blocking::WorkerGuard>)
+    where
+        S: Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
+        let directive = Directive::from_str(self.filter.as_str())
+            .unwrap_or_else(|_| Directive::from_str("debug").unwrap());
+
+        if self.journald {
+            (reth_tracing::journald(directive).expect("Could not connect to journald"), None)
+        } else {
+            let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
+            (layer, Some(guard))
+        }
+    }
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Display")]
+struct Verbosity {
+    /// Set the minimum log level.
+    ///
+    /// -v      Errors
+    /// -vv     Warnings
+    /// -vvv    Info
+    /// -vvvv   Debug
+    /// -vvvvv  Traces (warning: very verbose!)
+    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
+    verbosity: u8,
+
+    /// Silence all log output.
+    #[clap(long, alias = "silent", short = 'q', global = true, help_heading = "Display")]
+    quiet: bool,
+}
+
+impl Verbosity {
+    /// Get the corresponding [Directive] for the given verbosity, or none if the verbosity
+    /// corresponds to silent.
+    fn directive(&self) -> Directive {
+        if self.quiet {
+            LevelFilter::OFF.into()
+        } else {
+            let level = match self.verbosity - 1 {
+                0 => Level::ERROR,
+                1 => Level::WARN,
+                2 => Level::INFO,
+                3 => Level::DEBUG,
+                _ => Level::TRACE,
+            };
+
+            format!("reth::cli={level}").parse().unwrap()
+        }
+    }
 }

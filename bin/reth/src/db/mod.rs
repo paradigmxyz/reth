@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::dirs::DbPath;
+use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -7,7 +7,7 @@ use reth_db::{
     database::Database,
     table::Table,
     tables,
-    transaction::DbTx,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
@@ -24,7 +24,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: PlatformPath<DbPath>,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -45,6 +45,8 @@ pub enum Subcommands {
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
         len: u64,
     },
+    /// Deletes all database entries
+    Drop,
 }
 
 #[derive(Parser, Debug)]
@@ -96,6 +98,7 @@ impl Command {
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
                         info!(
+                            target: "reth::cli",
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -110,6 +113,9 @@ impl Command {
             }
             Subcommands::List(args) => {
                 tool.list(args)?;
+            }
+            Subcommands::Drop => {
+                tool.drop()?;
             }
         }
 
@@ -130,7 +136,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        info!("Generating random block range from 0 to {len}");
+        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
@@ -140,20 +146,20 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database seeded with {len} blocks");
+        info!(target: "reth::cli", "Database seeded with {len} blocks");
         Ok(())
     }
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
         macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident,)*]) => {
                 match $arg {
                     $(stringify!($table) => {
                         self.list_table::<tables::$table>($start, $len)?
                     },)*
                     _ => {
-                        tracing::error!("Unknown table.");
+                        tracing::error!(target: "reth::cli", "Unknown table.");
                         return Ok(())
                     }
                 }
@@ -172,7 +178,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             BlockTransitionIndex,
             TxTransitionIndex,
             SyncStage,
-            Transactions
+            Transactions,
         ]);
 
         Ok(())
@@ -180,7 +186,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
         let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
+            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
             // TODO: Upstream this in the DB trait.
             let start_walker = cursor.current().transpose();
@@ -194,6 +200,44 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         })?;
 
         println!("{data:?}");
+        Ok(())
+    }
+
+    fn drop(&mut self) -> Result<()> {
+        macro_rules! drop_tables {
+            ([$($table:ident,)*]) => {
+                let _tx = self.db.tx_mut()?;
+                $(_tx.clear::<tables::$table>()?;)*
+                _tx.commit()?;
+            };
+        }
+
+        drop_tables!([
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            NonCanonicalTransactions,
+            Transactions,
+            TxHashNumber,
+            Receipts,
+            Logs,
+            PlainAccountState,
+            PlainStorageState,
+            Bytecodes,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            AccountHistory,
+            StorageHistory,
+            AccountChangeSet,
+            StorageChangeSet,
+            TxSenders,
+            Config,
+            SyncStage,
+        ]);
+
         Ok(())
     }
 }

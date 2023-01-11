@@ -63,7 +63,7 @@ impl TestTransaction {
     /// Check if the table is empty
     pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
         self.query(|tx| {
-            let last = tx.cursor::<T>()?.last()?;
+            let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
         })
     }
@@ -112,7 +112,7 @@ impl TestTransaction {
         F: FnMut(&Option<<T as Table>::Value>, &S) -> (T::Key, T::Value),
     {
         self.commit(|tx| {
-            let mut cursor = tx.cursor_mut::<T>()?;
+            let mut cursor = tx.cursor_write::<T>()?;
             let mut last = cursor.last()?.map(|(_, v)| v);
             values.iter().try_for_each(|src| {
                 let (k, v) = transform(&last, src);
@@ -134,7 +134,7 @@ impl TestTransaction {
         F: FnMut(T::Key) -> BlockNumber,
     {
         self.query(|tx| {
-            let mut cursor = tx.cursor::<T>()?;
+            let mut cursor = tx.cursor_read::<T>()?;
             if let Some((key, _)) = cursor.last()? {
                 assert!(selector(key) <= num);
             }
@@ -154,7 +154,7 @@ impl TestTransaction {
         F: FnMut(T::Value) -> BlockNumber,
     {
         self.query(|tx| {
-            let mut cursor = tx.cursor::<T>()?;
+            let mut cursor = tx.cursor_read::<T>()?;
             let mut entry = cursor.last()?;
             while let Some((_, value)) = entry {
                 assert!(selector(value) <= num);

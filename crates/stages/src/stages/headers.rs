@@ -107,7 +107,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
                 if self.is_stage_done(tx, current_progress).await? {
                     let stage_progress = current_progress.max(
-                        tx.cursor::<tables::CanonicalHeaders>()?
+                        tx.cursor_read::<tables::CanonicalHeaders>()?
                             .last()?
                             .map(|(num, _)| num)
                             .unwrap_or_default(),
@@ -176,7 +176,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
     ) -> Result<bool, StageError> {
-        let mut header_cursor = tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let (head_num, _) = header_cursor
             .seek_exact(stage_progress)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
@@ -191,8 +191,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         stage_progress: u64,
     ) -> Result<(SealedHeader, H256), StageError> {
         // Create a cursor over canonical header hashes
-        let mut cursor = tx.cursor::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
@@ -259,8 +259,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
+        let mut cursor_header = tx.cursor_write::<tables::Headers>()?;
+        let mut cursor_canonical = tx.cursor_write::<tables::CanonicalHeaders>()?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
