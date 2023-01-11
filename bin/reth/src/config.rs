@@ -142,3 +142,12 @@ impl Default for ExecutionConfig {
         Self { commit_threshold: 5_000 }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    #[test]
+    fn can_serde_config() {
+        let _: Config = confy::load("test", None).unwrap();
+    }
+}

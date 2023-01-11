@@ -13,6 +13,7 @@ use crate::{
     NetworkOpts,
 };
 use clap::{crate_version, Parser};
+use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::BeaconConsensus;
@@ -92,7 +93,8 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
+        let mut config: Config =
+            confy::load_path(&self.config).wrap_err("Could not load config")?;
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
         if !self.network.trusted_peers.is_empty() {
             self.network.trusted_peers.iter().for_each(|peer| {
