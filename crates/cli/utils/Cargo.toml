@@ -21,6 +21,3 @@ walkdir = "2.3"
 
 # Tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
-tracing-journald = "0.3"
