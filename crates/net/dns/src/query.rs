@@ -1,4 +1,4 @@
-//! Sync trees
+//! Handles query execution
 
 use crate::{
     error::{LookupError, LookupResult},
@@ -218,7 +218,6 @@ async fn lookup_with_timeout<R: Resolver>(
 mod tests {
     use super::*;
     use crate::{resolver::TimeoutResolver, DnsDiscoveryConfig, MapResolver};
-
     use std::future::poll_fn;
 
     #[tokio::test]
