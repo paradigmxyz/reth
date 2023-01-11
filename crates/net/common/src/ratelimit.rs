@@ -140,7 +140,7 @@ mod tests {
         })
         .await;
 
-        tokio::time::sleep(limit.rate.duration).await;
+        tokio::time::advance(limit.rate.duration).await;
 
         poll_fn(|cx| {
             assert!(limit.poll_ready(cx).is_ready());
