@@ -54,7 +54,7 @@ This will dump info-level logs throughout the node's operation, as well as trace
 
 Now, you'll probably see a _lot_ of warning logs stemming from attempting to connect to peers, including but not limited to:
     - `error=Some(Eth(P2PStreamError(HandshakeError(NoResponse))))`
-        - This means you hit a timeout when trying to do a devp2p handshake with the given peer
+        - This means that the peer you're attempting to do a devp2p handshake with didn't send you any data
     - `error=Some(Eth(EthHandshakeError(MismatchedGenesis { expected: 0x..., got: 0x... })))`
         - This means you have a different genesis block from the peer, which is likely because they are a node in a different devp2p network (e.g. a testnet, or Polygon, etc.)
     - `error=Some(Eth(P2PStreamError(HandshakeError(NoSharedCapabilities))))`
@@ -64,13 +64,13 @@ Now, you'll probably see a _lot_ of warning logs stemming from attempting to con
 
 These warnings are also nothing to worry about, all of this is part of the normal peering process. But, this gives you a view into how difficult finding good peers is!
 
-You may not want to deal with these logs dumping into your terminal, and may want to run Reth as a background task. To accomplish this, let's run:
+You may want to keep these logs around outside of your terminal. To accomplish this, let's run:
 
 ```bash
-RUST_LOG=info,sync::stages=trace,downloaders=trace nohup cargo r --release -- node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e > reth-out.txt &
+RUST_LOG=info,sync::stages=trace,downloaders=trace cargo r --release -- node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e --log.directory ./
 ```
 
-Here, `nohup` ensures that killing the terminal session doesn't kill the Reth process, `> reth-out.txt` writes the logs to `reth-out.txt` so that you can view them with a tool like `more`, `less`, or `tail`, and `&` runs the task in the background.
+Here, adding `--log.directory` specifies a location to which the logs will be saved (in a file named `reth.log`) so that you can view them with a tool like `more`, `less`, or `tail`.
 
 Now, trying to get a sense of sync progress by scanning through the logs is quite painful. Let's start consuming some metrics.
 
