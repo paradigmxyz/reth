@@ -1,5 +1,5 @@
 use proc_macro::{self, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
 
 mod compact;
@@ -73,8 +73,32 @@ pub fn use_postcard(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
+    derive_arbitrary(
+        _args,
+        quote! {
+            #[derive(Compact, serde::Serialize, serde::Deserialize)]
+            #ast
+        }
+        .into(),
+    )
+}
+
+#[proc_macro_attribute]
+pub fn derive_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    // Avoid duplicate reimports
+    let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
+    let arb_import = format_ident!("{}Arbitratry", ast.ident);
+
     quote! {
-        #[derive(Compact, serde::Serialize, serde::Deserialize)]
+        #[cfg(any(test, feature = "arbitrary"))]
+        use proptest_derive::Arbitrary as #prop_import;
+
+        #[cfg(any(test, feature = "arbitrary"))]
+        use arbitrary::Arbitrary as #arb_import;
+
+        #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
         #ast
     }
     .into()

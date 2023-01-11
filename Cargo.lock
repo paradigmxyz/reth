@@ -3620,9 +3620,12 @@ dependencies = [
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "bytes",
  "codecs-derive",
  "modular-bitfield",
+ "proptest",
+ "proptest-derive",
  "revm-interpreter",
  "serde",
  "test-fuzz",
@@ -3668,6 +3671,8 @@ dependencies = [
  "page_size",
  "parity-scale-codec",
  "postcard",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
  "reth-db",
@@ -3992,6 +3997,7 @@ dependencies = [
  "parity-scale-codec",
  "plain_hasher",
  "proptest",
+ "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
  "reth-rlp",
