@@ -40,6 +40,11 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn root(&self) -> &TreeRootEntry {
+        &self.root
+    }
+
     pub(crate) fn link(&self) -> &LinkEntry<K> {
         &self.link
     }

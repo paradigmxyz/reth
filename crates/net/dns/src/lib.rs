@@ -31,6 +31,7 @@ use sync::SyncTree;
 use tokio::sync::{
     mpsc,
     mpsc::{error::TrySendError, UnboundedSender},
+    oneshot,
 };
 use tokio_stream::{
     wrappers::{ReceiverStream, UnboundedReceiverStream},
@@ -64,6 +65,16 @@ impl DnsDiscoveryHandle {
     /// Starts syncing the given link to a tree.
     pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
         let _ = self.to_service.send(DnsDiscoveryCommand::SyncTee(link));
+    }
+
+    /// Returns the receiver half of new listener channel that streams discovered [`NodeRecord`]s.
+    pub async fn node_record_stream(
+        &self,
+    ) -> Result<ReceiverStream<NodeRecord>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = DnsDiscoveryCommand::NodeRecordUpdates(tx);
+        let _ = self.to_service.send(cmd);
+        rx.await
     }
 }
 
@@ -179,7 +190,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     fn on_resolved_root(&mut self, resp: ResolveRootResult<SecretKey>) {
         match resp {
-            Ok(Ok((root, link))) => match self.trees.entry(link.clone()) {
+            Ok((root, link)) => match self.trees.entry(link.clone()) {
                 Entry::Occupied(mut entry) => {
                     entry.get_mut().update_root(root);
                 }
@@ -187,11 +198,8 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     entry.insert(SyncTree::new(root, link));
                 }
             },
-            Ok(Err(err)) => {
-                debug!(?err, "Resolved invalid root")
-            }
-            Err(link) => {
-                debug!(?link, "Failed to lookup root")
+            Err((err, link)) => {
+                debug!(?err, ?link, "Failed to lookup root")
             }
         }
     }
@@ -205,6 +213,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     fn on_resolved_entry(&mut self, resp: ResolveEntryResult<SecretKey>) {
         let ResolveEntryResult { entry, link, hash, kind } = resp;
+
         match entry {
             Some(Err(err)) => {
                 debug!(?err, domain=%link.domain, ?hash, "Failed to lookup entry")
@@ -260,6 +269,9 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 match cmd {
                     DnsDiscoveryCommand::SyncTee(link) => {
                         self.sync_tree_with_link(link);
+                    }
+                    DnsDiscoveryCommand::NodeRecordUpdates(tx) => {
+                        let _ = tx.send(self.node_record_stream());
                     }
                 }
             }
@@ -321,6 +333,7 @@ impl<R: Resolver> Stream for DnsDiscoveryService<R> {
 enum DnsDiscoveryCommand {
     /// Sync a tree
     SyncTee(LinkEntry),
+    NodeRecordUpdates(oneshot::Sender<ReceiverStream<NodeRecord>>),
 }
 
 /// Represents dns discovery related update events.
@@ -340,4 +353,164 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<NodeRecord> {
     }
     .into_ipv4_mapped();
     Some(record)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::TreeRootEntry;
+    use enr::{EnrBuilder, EnrKey};
+    use reth_primitives::Chain;
+    use secp256k1::rand::thread_rng;
+    use std::future::poll_fn;
+    use std::net::Ipv4Addr;
+    use tokio_stream::StreamExt;
+
+    #[tokio::test]
+    async fn test_start_root_sync() {
+        reth_tracing::init_tracing();
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = MapResolver::default();
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let mut root: TreeRootEntry = s.parse().unwrap();
+        root.sign(&secret_key).unwrap();
+
+        let link =
+            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        resolver.insert(link.domain.clone(), root.to_string());
+
+        let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
+
+        service.sync_tree_with_link(link.clone());
+
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        let tree = service.trees.get(&link).unwrap();
+        assert_eq!(tree.root().clone(), root);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_node() {
+        reth_tracing::init_tracing();
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = MapResolver::default();
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let mut root: TreeRootEntry = s.parse().unwrap();
+        root.sign(&secret_key).unwrap();
+
+        let link =
+            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        resolver.insert(link.domain.clone(), root.to_string());
+
+        let mut builder =  EnrBuilder::new("v4");
+        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303);
+        let enr =
+            builder
+            .build(&secret_key).unwrap();
+
+        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+
+        let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
+
+        let mut node_records = service.node_record_stream();
+
+        let task = tokio::task::spawn(async move {
+            let _ = node_records.next().await.unwrap();
+        });
+
+        service.sync_tree_with_link(link.clone());
+
+        let event = poll_fn(|cx| service.poll(cx)).await;
+
+        match event {
+            DnsDiscoveryEvent::Enr(discovered) => {
+                assert_eq!(discovered, enr);
+            }
+        }
+
+        poll_fn(|cx| {
+            assert!(service.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_recheck_tree() {
+        reth_tracing::init_tracing();
+
+        let config = DnsDiscoveryConfig {
+            recheck_interval: Duration::from_millis(750),
+            ..Default::default()
+        };
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = Arc::new(MapResolver::default());
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let mut root: TreeRootEntry = s.parse().unwrap();
+        root.sign(&secret_key).unwrap();
+
+        let link =
+            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        resolver.insert(link.domain.clone(), root.to_string());
+
+        let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
+
+        service.sync_tree_with_link(link.clone());
+
+        poll_fn(|cx| {
+            assert!(service.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // await recheck timeout
+        tokio::time::sleep(config.recheck_interval).await;
+
+        let enr = EnrBuilder::new("v4").build(&secret_key).unwrap();
+        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+
+        let event = poll_fn(|cx| service.poll(cx)).await;
+
+        match event {
+            DnsDiscoveryEvent::Enr(discovered) => {
+                assert_eq!(discovered, enr);
+            }
+        }
+
+        poll_fn(|cx| {
+            assert!(service.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_dns_resolver() {
+        reth_tracing::init_tracing();
+
+        let mut service = DnsDiscoveryService::new(
+            Arc::new(DnsResolver::from_system_conf().unwrap()),
+            Default::default(),
+        );
+
+        service.sync_tree(&Chain::mainnet().public_dns_network_protocol().unwrap()).unwrap();
+
+        while let Some(event) = service.next().await {
+            match event {
+                DnsDiscoveryEvent::Enr(enr) => {
+                    println!("discovered enr {}", enr.to_base64());
+                }
+            }
+        }
+    }
 }

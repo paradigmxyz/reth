@@ -25,7 +25,7 @@ use crate::error::{
 };
 use bytes::Bytes;
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
-use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
+use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
 use reth_primitives::hex;
 use secp256k1::SecretKey;
 use std::{fmt, str::FromStr};
@@ -75,7 +75,7 @@ impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
 }
 
 /// Represents an `enr-root` hash of subtrees containing nodes and links.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct TreeRootEntry {
     pub enr_root: String,
     pub link_root: String,
@@ -118,6 +118,13 @@ impl TreeRootEntry {
             "{} e={} l={} seq={}",
             ROOT_V1_PREFIX, self.enr_root, self.link_root, self.sequence_number
         )
+    }
+
+    /// Signs the content with the given key
+    pub fn sign<K: EnrKey>(&mut self, key: &K) -> Result<(), EnrError> {
+        let sig = key.sign_v4(self.content().as_bytes()).map_err(|_| EnrError::SigningError)?;
+        self.signature = sig.into();
+        Ok(())
     }
 
     /// Verify the signature of the record.

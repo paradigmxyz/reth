@@ -1,10 +1,9 @@
-use crate::tree::{LinkEntry, TreeRootEntry};
-use enr::EnrKeyUnambiguous;
+use crate::tree::TreeRootEntry;
 
 /// Alias for a parse result
 pub(crate) type ParseEntryResult<T> = Result<T, ParseDnsEntryError>;
 
-pub(crate) type LookupResult<T, K> = Result<T, LookupError<K>>;
+pub(crate) type LookupResult<T> = Result<T, LookupError>;
 
 /// Error while parsing a [DnsEntry]
 #[derive(thiserror::Error, Debug)]
@@ -27,11 +26,13 @@ pub enum ParseDnsEntryError {
 /// Errors that can happen during lookups
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
-pub(crate) enum LookupError<K: EnrKeyUnambiguous> {
+pub(crate) enum LookupError {
     #[error(transparent)]
     Parse(#[from] ParseDnsEntryError),
-    #[error("Failed to verify root {0} with link {1}")]
-    InvalidRoot(TreeRootEntry, LinkEntry<K>),
+    #[error("Failed to verify root {0}")]
+    InvalidRoot(TreeRootEntry),
     #[error("Request timed out")]
     RequestTimedOut,
+    #[error("Entry not found")]
+    EntryNotFound,
 }

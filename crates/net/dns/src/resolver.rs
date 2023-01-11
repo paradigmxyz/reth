@@ -1,10 +1,8 @@
 //! Perform DNS lookups
 
 use async_trait::async_trait;
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+use parking_lot::RwLock;
+use std::collections::HashMap;
 use tracing::trace;
 pub use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
@@ -79,26 +77,45 @@ impl Resolver for DnsResolver {
 }
 
 /// A [Resolver] that uses an in memory map to lookup entries
-#[derive(Debug, Clone, Default)]
-pub struct MapResolver(HashMap<String, String>);
+#[derive(Debug, Default)]
+pub struct MapResolver(RwLock<HashMap<String, String>>);
 
-impl Deref for MapResolver {
-    type Target = HashMap<String, String>;
+// === impl MapResolver ===
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl MapResolver {
+    /// Inserts a key-value pair into the map.
+    pub fn insert(&self, k: String, v: String) -> Option<String> {
+        self.0.write().insert(k, v)
     }
-}
 
-impl DerefMut for MapResolver {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    /// Returns the value corresponding to the key
+    pub fn get(&self, k: &str) -> Option<String> {
+        self.0.read().get(k).cloned()
+    }
+
+    /// Removes a key from the map, returning the value at the key if the key was previously in the
+    /// map.
+    pub fn remove(&self, k: &str) -> Option<String> {
+        self.0.write().remove(k)
     }
 }
 
 #[async_trait]
 impl Resolver for MapResolver {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
-        self.get(query).cloned()
+        self.get(query)
+    }
+}
+
+/// A Resolver that always times out.
+#[cfg(test)]
+pub(crate) struct TimeoutResolver(pub(crate) std::time::Duration);
+
+#[cfg(test)]
+#[async_trait]
+impl Resolver for TimeoutResolver {
+    async fn lookup_txt(&self, _query: &str) -> Option<String> {
+        tokio::time::sleep(self.0).await;
+        None
     }
 }

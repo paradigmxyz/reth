@@ -114,14 +114,14 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
 // === Various future/type alias ===
 
 pub(crate) struct ResolveEntryResult<K: EnrKeyUnambiguous> {
-    pub(crate) entry: Option<LookupResult<DnsEntry<K>, K>>,
+    pub(crate) entry: Option<LookupResult<DnsEntry<K>>>,
     pub(crate) link: LinkEntry<K>,
     pub(crate) hash: String,
     pub(crate) kind: ResolveKind,
 }
 
 pub(crate) type ResolveRootResult<K> =
-    Result<LookupResult<(TreeRootEntry, LinkEntry<K>), K>, LinkEntry<K>>;
+    Result<(TreeRootEntry, LinkEntry<K>), (LookupError, LinkEntry<K>)>;
 
 type ResolveRootFuture<K> = Pin<Box<dyn Future<Output = ResolveRootResult<K>> + Send>>;
 
@@ -166,7 +166,7 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
 ) -> ResolveEntryResult<K> {
     let fqn = format!("{hash}.{}", link.domain);
     let mut resp = ResolveEntryResult { entry: None, link, hash, kind };
-    match lookup_with_timeout::<R, K>(&resolver, &fqn, timeout).await {
+    match lookup_with_timeout::<R>(&resolver, &fqn, timeout).await {
         Ok(Some(entry)) => {
             resp.entry = Some(entry.parse::<DnsEntry<K>>().map_err(|err| err.into()))
         }
@@ -185,29 +185,29 @@ async fn resolve_root<K: EnrKeyUnambiguous, R: Resolver>(
     link: LinkEntry<K>,
     timeout: Duration,
 ) -> ResolveRootResult<K> {
-    let root = match lookup_with_timeout::<R, K>(&resolver, &link.domain, timeout).await {
+    let root = match lookup_with_timeout::<R>(&resolver, &link.domain, timeout).await {
         Ok(Some(root)) => root,
-        Ok(_) => return Err(link),
-        Err(err) => return Ok(Err(err)),
+        Ok(_) => return Err((LookupError::EntryNotFound, link)),
+        Err(err) => return Err((err, link)),
     };
 
     match root.parse::<TreeRootEntry>() {
         Ok(root) => {
             if root.verify::<K>(&link.pubkey) {
-                Ok(Ok((root, link)))
+                Ok((root, link))
             } else {
-                Ok(Err(LookupError::InvalidRoot(root, link)))
+                Err((LookupError::InvalidRoot(root), link))
             }
         }
-        Err(err) => Ok(Err(err.into())),
+        Err(err) => Err((err.into(), link)),
     }
 }
 
-async fn lookup_with_timeout<R: Resolver, K: EnrKeyUnambiguous>(
+async fn lookup_with_timeout<R: Resolver>(
     r: &R,
     query: &str,
     timeout: Duration,
-) -> LookupResult<Option<String>, K> {
+) -> LookupResult<Option<String>> {
     match tokio::time::timeout(timeout, r.lookup_txt(query)).await {
         Ok(res) => Ok(res),
         Err(_) => Err(LookupError::RequestTimedOut),
@@ -217,7 +217,8 @@ async fn lookup_with_timeout<R: Resolver, K: EnrKeyUnambiguous>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DnsDiscoveryConfig, MapResolver};
+    use crate::{resolver::TimeoutResolver, DnsDiscoveryConfig, MapResolver};
+
     use std::future::poll_fn;
 
     #[tokio::test]
@@ -250,5 +251,32 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_timeouts() {
+        let config =
+            DnsDiscoveryConfig { lookup_timeout: Duration::from_millis(500), ..Default::default() };
+        let resolver = Arc::new(TimeoutResolver(config.lookup_timeout * 2));
+        let mut pool = QueryPool::new(resolver, config.max_requests_per_sec, config.lookup_timeout);
+
+        let s = "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@nodes.example.org";
+        let entry: LinkEntry = s.parse().unwrap();
+        pool.resolve_root(entry);
+
+        let outcome = poll_fn(|cx| pool.poll(cx)).await;
+
+        match outcome {
+            QueryOutcome::Root(res) => {
+                let res = res.unwrap_err().0;
+                match res {
+                    LookupError::RequestTimedOut => {}
+                    _ => unreachable!(),
+                }
+            }
+            QueryOutcome::Entry(_) => {
+                unreachable!()
+            }
+        }
     }
 }
