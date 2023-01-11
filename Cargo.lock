@@ -3602,6 +3602,7 @@ dependencies = [
  "reth-provider",
  "reth-rlp",
  "reth-stages",
+ "reth-tracing",
  "reth-transaction-pool",
  "serde",
  "serde_json",
@@ -3612,9 +3613,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-appender",
- "tracing-futures",
- "tracing-subscriber",
  "walkdir",
 ]
 
@@ -3630,9 +3628,6 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tracing",
- "tracing-appender",
- "tracing-journald",
- "tracing-subscriber",
  "walkdir",
 ]
 
@@ -4193,6 +4188,9 @@ name = "reth-tracing"
 version = "0.1.0"
 dependencies = [
  "tracing",
+ "tracing-appender",
+ "tracing-futures",
+ "tracing-journald",
  "tracing-subscriber",
 ]
 
