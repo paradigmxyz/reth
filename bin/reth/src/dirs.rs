@@ -46,6 +46,7 @@ pub fn logs_dir() -> Option<PathBuf> {
 ///
 /// Refer to [dirs_next::data_dir] for cross-platform behavior.
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct DbPath;
 
 impl XdgPath for DbPath {
@@ -58,6 +59,7 @@ impl XdgPath for DbPath {
 ///
 /// Refer to [dirs_next::config_dir] for cross-platform behavior.
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct ConfigPath;
 
 impl XdgPath for ConfigPath {
@@ -70,6 +72,7 @@ impl XdgPath for ConfigPath {
 ///
 /// Refer to [dirs_next::cache_dir] for cross-platform behavior.
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct LogsDir;
 
 impl XdgPath for LogsDir {
