@@ -64,7 +64,7 @@ impl DnsDiscoveryHandle {
 
     /// Starts syncing the given link to a tree.
     pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
-        let _ = self.to_service.send(DnsDiscoveryCommand::SyncTee(link));
+        let _ = self.to_service.send(DnsDiscoveryCommand::SyncTree(link));
     }
 
     /// Returns the receiver half of new listener channel that streams discovered [`NodeRecord`]s.
@@ -267,7 +267,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             // process all incoming commands
             while let Poll::Ready(Some(cmd)) = Pin::new(&mut self.command_rx).poll_next(cx) {
                 match cmd {
-                    DnsDiscoveryCommand::SyncTee(link) => {
+                    DnsDiscoveryCommand::SyncTree(link) => {
                         self.sync_tree_with_link(link);
                     }
                     DnsDiscoveryCommand::NodeRecordUpdates(tx) => {
@@ -332,7 +332,7 @@ impl<R: Resolver> Stream for DnsDiscoveryService<R> {
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
 enum DnsDiscoveryCommand {
     /// Sync a tree
-    SyncTee(LinkEntry),
+    SyncTree(LinkEntry),
     NodeRecordUpdates(oneshot::Sender<ReceiverStream<NodeRecord>>),
 }
 
