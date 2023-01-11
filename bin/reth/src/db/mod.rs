@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::dirs::DbPath;
+use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -24,7 +24,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: PlatformPath<DbPath>,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -98,6 +98,7 @@ impl Command {
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
                         info!(
+                            target: "reth::cli",
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -135,7 +136,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        info!("Generating random block range from 0 to {len}");
+        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
@@ -145,7 +146,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database seeded with {len} blocks");
+        info!(target: "reth::cli", "Database seeded with {len} blocks");
         Ok(())
     }
 
@@ -158,7 +159,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                         self.list_table::<tables::$table>($start, $len)?
                     },)*
                     _ => {
-                        tracing::error!("Unknown table.");
+                        tracing::error!(target: "reth::cli", "Unknown table.");
                         return Ok(())
                     }
                 }

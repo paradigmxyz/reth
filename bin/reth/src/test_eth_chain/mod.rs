@@ -38,12 +38,12 @@ impl Command {
                 }
                 Err(error) => {
                     num_of_failed += 1;
-                    error!("Test {file:?} failed:\n {error}\n");
+                    error!(target: "reth::cli", "Test {file:?} failed:\n{error}");
                 }
             }
         }
 
-        info!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
+        info!(target: "reth::cli", "{num_of_passed}/{} tests passed\n", num_of_passed + num_of_failed);
 
         if num_of_failed != 0 {
             Err(eyre!("Failed {num_of_failed} tests"))
