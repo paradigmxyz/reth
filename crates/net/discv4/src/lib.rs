@@ -1887,7 +1887,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_lookup() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
         let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
 
         let all_nodes = mainnet_nodes();
@@ -1922,7 +1922,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_mapped_ipv4() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
         let mut rng = thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1954,7 +1954,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_single_lookups() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1988,7 +1988,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_no_local_in_closest() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2021,7 +2021,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_random_lookup() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2055,7 +2055,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_service_commands() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (discv4, mut service) = create_discv4_with_config(config).await;
