@@ -1,10 +1,10 @@
-use crate::tree::{DnsEntry, LinkEntry, TreeRootEntry};
+use crate::tree::{LinkEntry, TreeRootEntry};
 use enr::EnrKeyUnambiguous;
 
 /// Alias for a parse result
-pub type ParseEntryResult<T> = std::result::Result<T, ParseDnsEntryError>;
+pub(crate) type ParseEntryResult<T> = Result<T, ParseDnsEntryError>;
 
-pub(crate) type LookupResult<T, K> = std::result::Result<T, LookupError<K>>;
+pub(crate) type LookupResult<T, K> = Result<T, LookupError<K>>;
 
 /// Error while parsing a [DnsEntry]
 #[derive(thiserror::Error, Debug)]
@@ -32,4 +32,6 @@ pub(crate) enum LookupError<K: EnrKeyUnambiguous> {
     Parse(#[from] ParseDnsEntryError),
     #[error("Failed to verify root {0} with link {1}")]
     InvalidRoot(TreeRootEntry, LinkEntry<K>),
+    #[error("Request timed out")]
+    RequestTimedOut,
 }

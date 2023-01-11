@@ -4,15 +4,15 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO rm later
-#![allow(missing_docs, unreachable_pub, unused)]
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 
-use enr::Enr;
+use enr::{Enr};
+use lru::LruCache;
 use secp256k1::SecretKey;
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    net::IpAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -28,6 +28,7 @@ use tokio_stream::{
 };
 use tracing::{debug, warn};
 
+
 mod config;
 mod error;
 mod query;
@@ -37,13 +38,13 @@ pub mod tree;
 
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
-    error::ParseEntryResult,
     query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
     sync::{ResolveKind, SyncAction},
     tree::{DnsEntry, LinkEntry},
 };
 pub use config::DnsDiscoveryConfig;
 use error::ParseDnsEntryError;
+use reth_primitives::{NodeRecord, PeerId};
 use sync::SyncTree;
 
 /// [DnsDiscoveryService] front-end.
@@ -64,14 +65,16 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     command_tx: UnboundedSender<DnsDiscoveryCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
-    /// All subscribers for event updates.
-    update_listeners: Vec<mpsc::Sender<DnsDiscoveryUpdate>>,
+    /// All subscribers for resolved [NodeRecord]s.
+    node_record_listeners: Vec<mpsc::Sender<NodeRecord>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
     /// All queries currently in progress
     queries: QueryPool<R, SecretKey>,
-    // TODO convert to cache
-    entries: HashMap<String, DnsEntry<SecretKey>>,
+    /// Cached dns records
+    dns_record_cache: LruCache<String, DnsEntry<SecretKey>>,
+    /// all buffered events
+    queued_events: VecDeque<DnsDiscoveryEvent>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -87,7 +90,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     ///             DnsDiscoveryService::new(Arc::new(DnsResolver::from_system_conf().unwrap()), Default::default());
     /// # }
     /// ```
-    pub fn new(resolver: Arc<R>, config: DnsDiscoveryConfig) -> Self {
+    pub fn new(_resolver: Arc<R>, _config: DnsDiscoveryConfig) -> Self {
         todo!()
     }
 
@@ -104,18 +107,18 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         DnsDiscoveryHandle { to_service: self.command_tx.clone() }
     }
 
-    /// Creates a new channel for [`DnsDiscoveryUpdate`]s.
-    pub fn update_stream(&mut self) -> ReceiverStream<DnsDiscoveryUpdate> {
+    /// Creates a new channel for [`NodeRecord`]s.
+    pub fn node_record_stream(&mut self) -> ReceiverStream<NodeRecord> {
         let (tx, rx) = mpsc::channel(256);
-        self.update_listeners.push(tx);
+        self.node_record_listeners.push(tx);
         ReceiverStream::new(rx)
     }
 
     /// Sends  the event to all listeners.
     ///
     /// Remove channels that got closed.
-    fn notify(&mut self, update: DnsDiscoveryUpdate) {
-        self.update_listeners.retain_mut(|listener| match listener.try_send(update.clone()) {
+    fn notify(&mut self, record: NodeRecord) {
+        self.node_record_listeners.retain_mut(|listener| match listener.try_send(record) {
             Ok(()) => true,
             Err(err) => match err {
                 TrySendError::Full(_) => true,
@@ -137,8 +140,10 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     /// Resolves an entry
     fn resolve_entry(&mut self, link: LinkEntry<SecretKey>, hash: String, kind: ResolveKind) {
-        if self.entries.contains_key(&hash) {
+        if let Some(entry) = self.dns_record_cache.get(&hash).cloned() {
             // already resolved
+            let cached = ResolveEntryResult { entry: Some(Ok(entry)), link, hash, kind };
+            self.on_resolved_entry(cached);
             return
         }
         self.queries.resolve_entry(link, hash, kind)
@@ -150,7 +155,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 Entry::Occupied(mut entry) => {
                     entry.get_mut().update_root(root);
                 }
-                Entry::Vacant(mut entry) => {
+                Entry::Vacant(entry) => {
                     entry.insert(SyncTree::new(root, link));
                 }
             },
@@ -163,20 +168,29 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         }
     }
 
+    fn on_resolved_enr(&mut self, enr: Enr<SecretKey>) {
+        if let Some(record) = convert_enr_node_record(&enr) {
+            self.notify(record);
+        }
+        self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr))
+    }
+
     fn on_resolved_entry(&mut self, resp: ResolveEntryResult<SecretKey>) {
         let ResolveEntryResult { entry, link, hash, kind } = resp;
         match entry {
             Some(Err(err)) => {
-                debug!(?err, domain=%link.domain, ?hash, "Failed to parse entry")
+                debug!(?err, domain=%link.domain, ?hash, "Failed to lookup entry")
             }
             None => {
-                debug!(domain=%link.domain, ?hash, "Failed to lookup entry")
+                debug!(domain=%link.domain, ?hash, "No dns entry")
             }
             Some(Ok(entry)) => {
-                self.entries.insert(hash.clone(), entry.clone());
+                // cache entry
+                self.dns_record_cache.push(hash.clone(), entry.clone());
+
                 match entry {
                     DnsEntry::Root(root) => {
-                        debug!(%root, domain=%link.domain, ?hash, "Unexpected root entry");
+                        debug!(%root, domain=%link.domain, ?hash, "resolved unexpected root entry");
                     }
                     DnsEntry::Link(link_entry) => {
                         if kind.is_link() {
@@ -185,11 +199,21 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                             }
                             self.sync_tree_with_link(link_entry)
                         } else {
-                            debug!(%link_entry, domain=%link.domain, ?hash, "Unexpected Link entry");
+                            debug!(%link_entry, domain=%link.domain, ?hash, "resolved unexpected Link entry");
                         }
                     }
-                    DnsEntry::Branch(branch_entry) => {}
-                    DnsEntry::Node(_) => {}
+                    DnsEntry::Branch(branch_entry) => {
+                        if let Some(tree) = self.trees.get_mut(&link) {
+                            tree.extend_children(kind, branch_entry.children)
+                        }
+                    }
+                    DnsEntry::Node(entry) => {
+                        if kind.is_link() {
+                            debug!(domain=%link.domain, ?hash, "resolved unexpected enr entry");
+                        } else {
+                            self.on_resolved_enr(entry.enr)
+                        }
+                    }
                 }
             }
         }
@@ -198,6 +222,11 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     /// Advances the state of the DNS discovery service by polling,triggering lookups
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
         loop {
+            // drain buffered events first
+            if let Some(event) = self.queued_events.pop_front() {
+                return Poll::Ready(event)
+            }
+
             while let Poll::Ready(outcome) = self.queries.poll(cx) {
                 // handle query outcome
                 match outcome {
@@ -235,7 +264,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 self.sync_tree_with_link(link)
             }
 
-            if !progress {
+            if !progress && self.queued_events.is_empty() {
                 return Poll::Pending
             }
         }
@@ -254,10 +283,20 @@ impl<R: Resolver> Stream for DnsDiscoveryService<R> {
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
 enum DnsDiscoveryCommand {}
 
-/// Represents [NodeRecord] related discovery updates
-#[derive(Debug, Clone)]
-pub enum DnsDiscoveryUpdate {}
-
 /// Represents dns discovery related update events.
 #[derive(Debug, Clone)]
-pub enum DnsDiscoveryEvent {}
+pub enum DnsDiscoveryEvent {
+    Enr(Enr<SecretKey>),
+}
+
+/// Converts an [Enr] into a [NodeRecord]
+fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<NodeRecord> {
+    let record = NodeRecord {
+        address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
+        tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
+        udp_port: enr.udp4().or_else(|| enr.udp6())?,
+        id: PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]),
+    }
+    .into_ipv4_mapped();
+    Some(record)
+}

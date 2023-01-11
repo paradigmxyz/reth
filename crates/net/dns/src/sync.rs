@@ -1,8 +1,9 @@
 use crate::tree::{LinkEntry, TreeRootEntry};
 use enr::EnrKeyUnambiguous;
+use linked_hash_set::LinkedHashSet;
 use secp256k1::SecretKey;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap},
     time::Instant,
 };
 
@@ -18,8 +19,10 @@ pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
     sync_state: SyncState,
     /// Links contained in this tree
     resolved_links: HashMap<String, LinkEntry<K>>,
+    /// Unresolved links of the tree
+    unresolved_links: LinkedHashSet<String>,
     /// Unresolved nodes of the tree
-    missing_nodes: VecDeque<String>,
+    unresolved_nodes: LinkedHashSet<String>,
 }
 
 // === impl SyncTree ===
@@ -32,12 +35,9 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             root_updated: Instant::now(),
             sync_state: SyncState::Pending,
             resolved_links: Default::default(),
-            missing_nodes: Default::default(),
+            unresolved_links: Default::default(),
+            unresolved_nodes: Default::default(),
         }
-    }
-
-    pub(crate) fn domain(&self) -> &str {
-        &self.link.domain
     }
 
     pub(crate) fn link(&self) -> &LinkEntry<K> {
@@ -48,8 +48,23 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         &mut self.resolved_links
     }
 
+    pub(crate) fn extend_children(
+        &mut self,
+        kind: ResolveKind,
+        children: impl IntoIterator<Item = String>,
+    ) {
+        match kind {
+            ResolveKind::Enr => {
+                self.unresolved_nodes.extend(children);
+            }
+            ResolveKind::Link => {
+                self.unresolved_links.extend(children);
+            }
+        }
+    }
+
     /// Advances the state of the tree by returning actions to perform
-    pub(crate) fn poll(&mut self, now: Instant) -> Option<SyncAction> {
+    pub(crate) fn poll(&mut self, _now: Instant) -> Option<SyncAction> {
         match self.sync_state {
             SyncState::Pending => {
                 self.sync_state = SyncState::Enr;
@@ -63,12 +78,18 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
                 self.sync_state = SyncState::Active;
                 return Some(SyncAction::Link(self.root.link_root.clone()))
             }
-            SyncState::Active => {}
+            SyncState::Active => {
+                // TODO check update interval
+            }
             SyncState::RootUpdate => return None,
         }
 
-        let next = self.missing_nodes.pop_front()?;
-        Some(SyncAction::Enr(next))
+        if let Some(link) = self.unresolved_links.pop_front() {
+            return Some(SyncAction::Link(link))
+        }
+
+        let enr = self.unresolved_nodes.pop_front()?;
+        Some(SyncAction::Enr(enr))
     }
 
     /// Updates the root and returns what changed
@@ -81,14 +102,18 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
 
         let state = match (enr, link) {
             (true, true) => {
-                self.missing_nodes.clear();
+                self.unresolved_nodes.clear();
+                self.unresolved_links.clear();
                 SyncState::Pending
             }
             (true, _) => {
-                self.missing_nodes.clear();
+                self.unresolved_nodes.clear();
                 SyncState::Enr
             }
-            (_, true) => SyncState::Link,
+            (_, true) => {
+                self.unresolved_links.clear();
+                SyncState::Link
+            }
             _ => {
                 // unchanged
                 return
@@ -125,9 +150,5 @@ pub(crate) enum ResolveKind {
 impl ResolveKind {
     pub(crate) fn is_link(&self) -> bool {
         matches!(self, ResolveKind::Link)
-    }
-
-    pub(crate) fn is_enr(&self) -> bool {
-        matches!(self, ResolveKind::Enr)
     }
 }

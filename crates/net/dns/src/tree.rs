@@ -16,6 +16,8 @@
 //!    `signature` is a 65-byte secp256k1 EC signature over the keccak256 hash of the record
 //! content, excluding the sig= part, encoded as URL-safe base64 (RFC-4648).
 
+#![allow(missing_docs)]
+
 use crate::error::{
     ParseDnsEntryError,
     ParseDnsEntryError::{FieldNotFound, UnknownEntry},
@@ -159,7 +161,7 @@ impl fmt::Display for TreeRootEntry {
 /// A branch entry with base32 hashes
 #[derive(Debug, Clone)]
 pub struct BranchEntry {
-    children: Vec<String>,
+    pub children: Vec<String>,
 }
 
 // === impl BranchEntry ===
@@ -245,7 +247,7 @@ impl<K: EnrKeyUnambiguous> fmt::Display for LinkEntry<K> {
 /// The actual [Enr] entry.
 #[derive(Debug, Clone)]
 pub struct NodeEntry<K: EnrKeyUnambiguous> {
-    enr: Enr<K>,
+    pub enr: Enr<K>,
 }
 
 // === impl NodeEntry ===

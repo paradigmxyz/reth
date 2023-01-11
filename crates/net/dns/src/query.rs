@@ -1,46 +1,74 @@
 //! Sync trees
 
 use crate::{
-    error::{LookupError, LookupResult, ParseDnsEntryError, ParseEntryResult},
+    error::{LookupError, LookupResult},
     resolver::Resolver,
     sync::ResolveKind,
     tree::{DnsEntry, LinkEntry, TreeRootEntry},
 };
-use enr::{Enr, EnrKeyUnambiguous};
-use secp256k1::SecretKey;
+use enr::EnrKeyUnambiguous;
+
 use std::{
     collections::VecDeque,
     future::Future,
+    num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
+    time::Duration,
 };
+use std::time::Instant;
+use tokio::time::Sleep;
+
 
 /// The `QueryPool` provides an aggregate state machine for driving queries to completion.
 pub(crate) struct QueryPool<R: Resolver, K: EnrKeyUnambiguous> {
     /// The [Resolver] that's used to lookup queries.
     resolver: Arc<R>,
+    /// Buffered queries
+    queued_queries: VecDeque<Query<K>>,
     /// All active queries
-    queries: Vec<Query<K>>,
+    active_queries: Vec<Query<K>>,
     /// buffered results
     queued_outcomes: VecDeque<QueryOutcome<K>>,
-    // TODO(mattsse): add ratelimiting support
+    /// Max requests per sec
+    max_requests_per_sec: NonZeroUsize,
+    /// Timeout for DNS lookups.
+    lookup_timeout: Duration,
 }
 
 // === impl QueryPool ===
 
 impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
+    pub(crate) fn new(
+        resolver: Arc<R>,
+        max_requests_per_sec: NonZeroUsize,
+        lookup_timeout: Duration,
+    ) -> Self {
+        Self {
+            resolver,
+            queued_queries:  Default::default(),
+            active_queries: vec![],
+            queued_outcomes: Default::default(),
+            max_requests_per_sec,
+            lookup_timeout,
+        }
+    }
+
     /// Resolves the root the link's domain references
     pub(crate) fn resolve_root(&mut self, link: LinkEntry<K>) {
         let resolver = Arc::clone(&self.resolver);
-        self.queries.push(Query::Root(Box::pin(async move { resolve_root(resolver, link).await })))
+        let timeout = self.lookup_timeout;
+        self.queued_queries
+            .push(Query::Root(Box::pin(async move { resolve_root(resolver, link, timeout).await })))
     }
 
     /// Resolves the [DnsEntry] for `<hash.domain>`
     pub(crate) fn resolve_entry(&mut self, link: LinkEntry<K>, hash: String, kind: ResolveKind) {
         let resolver = Arc::clone(&self.resolver);
-        self.queries.push(Query::Entry(Box::pin(async move {
-            resolve_entry(resolver, link, hash, kind).await
+        let timeout = self.lookup_timeout;
+        self.queued_queries.push(Query::Entry(Box::pin(async move {
+            resolve_entry(resolver, link, hash, kind, timeout).await
         })))
     }
 
@@ -52,14 +80,16 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
                 return Poll::Ready(event)
             }
 
+            // queue in new requests
+
             // advance all queries
-            for idx in (0..self.queries.len()).rev() {
-                let mut query = self.queries.swap_remove(idx);
+            for idx in (0..self.active_queries.len()).rev() {
+                let mut query = self.active_queries.swap_remove(idx);
                 if let Poll::Ready(outcome) = query.poll(cx) {
                     self.queued_outcomes.push_back(outcome);
                 } else {
                     // still pending
-                    self.queries.push(query);
+                    self.active_queries.push(query);
                 }
             }
 
@@ -73,7 +103,7 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
 // === Various future/type alias ===
 
 pub(crate) struct ResolveEntryResult<K: EnrKeyUnambiguous> {
-    pub(crate) entry: Option<ParseEntryResult<DnsEntry<K>>>,
+    pub(crate) entry: Option<LookupResult<DnsEntry<K>, K>>,
     pub(crate) link: LinkEntry<K>,
     pub(crate) hash: String,
     pub(crate) kind: ResolveKind,
@@ -121,11 +151,14 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     link: LinkEntry<K>,
     hash: String,
     kind: ResolveKind,
+    timeout: Duration,
 ) -> ResolveEntryResult<K> {
     let fqn = format!("{hash}.{}", link.domain);
     let mut resp = ResolveEntryResult { entry: None, link, hash, kind };
-    if let Some(entry) = resolver.lookup_txt(&fqn).await {
-        resp.entry = Some(entry.parse());
+    match lookup_with_timeout::<R, K>(&resolver, &fqn, timeout).await {
+        Ok(Some(entry)) => resp.entry = Some(entry.parse::<DnsEntry<K>>().map_err(|err| err.into())),
+        Err(err) => resp.entry = Some(Err(err)),
+        Ok(None) => {}
     }
     resp
 }
@@ -137,11 +170,12 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
 async fn resolve_root<K: EnrKeyUnambiguous, R: Resolver>(
     resolver: Arc<R>,
     link: LinkEntry<K>,
+    timeout: Duration,
 ) -> ResolveRootResult<K> {
-    let root = if let Some(root) = resolver.lookup_txt(&link.domain).await {
-        root
-    } else {
-        return Err(link)
+    let root = match lookup_with_timeout::<R, K>(&resolver, &link.domain, timeout).await {
+        Ok(Some(root)) => root,
+        Ok(_) => return Err(link),
+        Err(err) => return Ok(Err(err)),
     };
 
     match root.parse::<TreeRootEntry>() {
@@ -153,5 +187,16 @@ async fn resolve_root<K: EnrKeyUnambiguous, R: Resolver>(
             }
         }
         Err(err) => Ok(Err(err.into())),
+    }
+}
+
+async fn lookup_with_timeout<R: Resolver, K: EnrKeyUnambiguous>(
+    r: &R,
+    query: &str,
+    timeout: Duration,
+) -> LookupResult<Option<String>, K> {
+    match tokio::time::timeout(timeout, r.lookup_txt(query)).await {
+        Ok(res) => Ok(res),
+        Err(_) => Err(LookupError::RequestTimedOut),
     }
 }

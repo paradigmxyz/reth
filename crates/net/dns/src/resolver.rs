@@ -8,9 +8,7 @@ use std::{
 use tracing::trace;
 pub use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
-    error::{ResolveError, ResolveErrorKind},
-    proto::DnsHandle,
-    AsyncResolver, ConnectionProvider,
+    error::ResolveError, proto::DnsHandle, AsyncResolver, ConnectionProvider,
 };
 
 /// A type that can lookup DNS entries
