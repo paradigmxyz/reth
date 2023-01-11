@@ -96,26 +96,26 @@ trait XdgPath {
 /// # Example
 ///
 /// ```
-/// use reth::dirs::{StandardPath, DbPath};
+/// use reth::dirs::{PlatformPath, DbPath};
 /// use std::str::FromStr;
 ///
 /// // Resolves to the platform-specific database path
-/// let default: StandardPath<DbPath> = StandardPath::default();
+/// let default: PlatformPath<DbPath> = PlatformPath::default();
 /// // Resolves to `$(pwd)/my/path/to/db`
-/// let custom: StandardPath<DbPath> = StandardPath::from_str("my/path/to/db").unwrap();
+/// let custom: PlatformPath<DbPath> = PlatformPath::from_str("my/path/to/db").unwrap();
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
 #[derive(Clone, Debug)]
-pub struct StandardPath<D>(PathBuf, std::marker::PhantomData<D>);
+pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
 
-impl<D> Display for StandardPath<D> {
+impl<D> Display for PlatformPath<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.display())
     }
 }
 
-impl<D: XdgPath> Default for StandardPath<D> {
+impl<D: XdgPath> Default for PlatformPath<D> {
     fn default() -> Self {
         Self(
             D::resolve().expect("Could not resolve default path. Set one manually."),
@@ -124,7 +124,7 @@ impl<D: XdgPath> Default for StandardPath<D> {
     }
 }
 
-impl<D> FromStr for StandardPath<D> {
+impl<D> FromStr for PlatformPath<D> {
     type Err = shellexpand::LookupError<VarError>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -132,7 +132,7 @@ impl<D> FromStr for StandardPath<D> {
     }
 }
 
-impl<D> AsRef<Path> for StandardPath<D> {
+impl<D> AsRef<Path> for PlatformPath<D> {
     fn as_ref(&self) -> &Path {
         self.0.as_path()
     }

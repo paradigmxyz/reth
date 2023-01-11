@@ -1,7 +1,7 @@
 //! CLI definition and entrypoint to executable
 use crate::{
     db,
-    dirs::{LogsDir, StandardPath},
+    dirs::{LogsDir, PlatformPath},
     node, p2p, stage, test_eth_chain,
     utils::{reth_tracing, reth_tracing::BoxedLayer},
 };
@@ -76,7 +76,7 @@ struct Logs {
         default_value_t,
         conflicts_with = "journald"
     )]
-    log_directory: StandardPath<LogsDir>,
+    log_directory: PlatformPath<LogsDir>,
 
     /// Log events to journald.
     #[arg(long = "log.journald", global = true, conflicts_with = "log_directory")]

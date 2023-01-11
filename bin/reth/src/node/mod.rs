@@ -3,7 +3,7 @@
 //! Starts the client
 use crate::{
     config::Config,
-    dirs::{ConfigPath, DbPath, StandardPath},
+    dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
@@ -34,7 +34,7 @@ use tracing::{debug, info};
 pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: StandardPath<ConfigPath>,
+    config: PlatformPath<ConfigPath>,
 
     /// The path to the database folder.
     ///
@@ -44,7 +44,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: StandardPath<DbPath>,
+    db: PlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///

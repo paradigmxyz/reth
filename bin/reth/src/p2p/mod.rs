@@ -1,7 +1,7 @@
 //! P2P Debugging tool
 use crate::{
     config::Config,
-    dirs::{ConfigPath, StandardPath},
+    dirs::{ConfigPath, PlatformPath},
     utils::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
         hash_or_num_value_parser,
@@ -23,7 +23,7 @@ use std::sync::Arc;
 pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: StandardPath<ConfigPath>,
+    config: PlatformPath<ConfigPath>,
 
     /// The chain this node is running.
     ///

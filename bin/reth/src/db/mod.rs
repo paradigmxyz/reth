@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::dirs::{DbPath, StandardPath};
+use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -24,7 +24,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: StandardPath<DbPath>,
+    db: PlatformPath<DbPath>,
 
     #[clap(subcommand)]
     command: Subcommands,
