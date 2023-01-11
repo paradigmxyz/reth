@@ -522,7 +522,7 @@ pub fn set_capability_offsets(
     // find highest shared version of each shared capability
     for peer_capability in peer_capabilities {
         // if this is Some, we share this capability
-        if our_capabilities.get(&peer_capability).is_some() {
+        if our_capabilities.contains(&peer_capability) {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
 
