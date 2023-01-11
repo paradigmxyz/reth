@@ -84,6 +84,26 @@ mod with_attrs;
 ///     }
 /// }
 /// ```
+///
+/// Similarly, you can derive metrics with "dynamic" scope,
+/// meaning their scope can be set at the time of instantiation.
+/// For example:
+/// ```
+/// use reth_metrics_derive::Metrics;
+///
+/// #[derive(Metrics)]
+/// #[metrics(dynamic = true)]
+/// struct DynamicScopeMetrics {
+///      // fields...
+/// }
+///
+/// let local_scope = "some_scope";
+/// // Describe
+/// DynamicScopeMetrics::describe(local_scope);
+/// // Instantiate
+/// let metrics = DynamicScopeMetrics::new(local_scope);
+/// ```
+///
 #[proc_macro_derive(Metrics, attributes(metrics, metric))]
 pub fn derive_metrics(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
