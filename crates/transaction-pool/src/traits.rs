@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{
-    Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    TransactionSignedEcRecovered, TxHash, TxType, H256, U256,
+    Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
+    TransactionSignedEcRecovered, TxHash, TxLegacy, TxType, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -271,24 +271,15 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<U256>;
 
-    /// Returns a measurement of the heap usage of this type and all its internals.
+    /// Returns the number of bytes of the transaction data
     fn size(&self) -> usize;
 }
 
 // #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,
-
-    /// Hash of the transaction.
-    pub(crate) hash: TxHash,
-
-    /// The Sender of the transaction.
-    pub(crate) sender: Address,
-
-    /// Returns the nonce for this transaction.
-    pub(crate) nonce: u64,
 
     /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value
     pub(crate) cost: U256,
@@ -296,89 +287,109 @@ pub(crate) struct PooledTransaction {
     /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
     pub(crate) effective_gas_price: U256,
 
-    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
-    pub(crate) gas_limit: u64,
-
-    /// This will return `None` for non-EIP1559 transactions
-    pub(crate) max_fee_per_gas: Option<U256>,
-
-    /// This will return `None` for non-EIP1559 transactions
-    pub(crate) max_priority_fee_per_gas: Option<U256>,
-
     /// Measurement of the heap usage of this type and all its internals.
     pub(crate) size: usize,
 }
 
 impl PoolTransaction for PooledTransaction {
+    /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
-        &self.hash
+        &self.transaction.hash
     }
 
+    /// Returns the Sender of the transaction.
     fn sender(&self) -> Address {
-        self.sender
+        self.transaction.signer()
     }
 
+    /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64 {
-        self.nonce
+        self.transaction.nonce()
     }
 
+    /// Calculates the cost that this transaction is allowed to consume:
+    ///
+    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
     fn cost(&self) -> U256 {
-        self.cost
+        match &self.transaction.transaction {
+            Transaction::Legacy(tx) => {
+                U256::from(tx.gas_price) * U256::from(tx.gas_limit) + U256::from(tx.value)
+            }
+            Transaction::Eip2930(tx) => {
+                U256::from(tx.gas_price) * U256::from(tx.gas_limit) + U256::from(tx.value)
+            }
+            Transaction::Eip1559(tx) => {
+                U256::from(tx.max_fee_per_gas) * U256::from(tx.gas_limit) + U256::from(tx.value)
+            }
+        }
     }
 
+    /// Returns the effective gas price for this transaction.
+    ///
+    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
     fn effective_gas_price(&self) -> U256 {
-        self.effective_gas_price
+        match &self.transaction.transaction {
+            Transaction::Legacy(tx) => U256::from(tx.gas_price),
+            Transaction::Eip2930(tx) => U256::from(tx.gas_price),
+            Transaction::Eip1559(tx) => U256::from(tx.max_fee_per_gas),
+        }
     }
 
+    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64 {
-        self.gas_limit
+        self.transaction.gas_limit()
     }
 
+    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    ///
+    /// This will return `None` for non-EIP1559 transactions
     fn max_fee_per_gas(&self) -> Option<U256> {
-        self.max_fee_per_gas
+        match &self.transaction.transaction {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(tx) => Some(U256::from(tx.max_fee_per_gas)),
+        }
     }
 
+    /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
+    ///
+    /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<U256> {
-        self.max_priority_fee_per_gas
+        match &self.transaction.transaction {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(tx) => Some(U256::from(tx.max_priority_fee_per_gas)),
+        }
     }
 
+    /// Returns the number of bytes of the transaction data
     fn size(&self) -> usize {
-        todo!()
+        self.transaction.transaction.input().len()
     }
 }
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        let sender = tx.signer();
-        let transaction = tx.clone();
-        let hash = tx.hash();
-        let nonce = tx.nonce();
+        let size = tx.transaction.input().len();
 
-        match tx.tx_type() {
-            TxType::Legacy => PooledTransaction {
-                transaction: tx,
-                hash,
-                sender,
-                nonce,
-                cost: todo!(),
-                effective_gas_price: todo!(), // no `gas_price` value on tx
-                gas_limit: tx.gas_limit(),
-                max_fee_per_gas: None,
-                max_priority_fee_per_gas: None,
-                size: todo!(),
+        match &tx.transaction {
+            Transaction::Legacy(t) => PooledTransaction {
+                transaction: tx.clone(),
+                cost: U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value),
+                effective_gas_price: U256::from(t.gas_price),
+                size,
             },
-            TxType::EIP2930 => todo!(),
-            TxType::EIP1559 => PooledTransaction {
-                transaction: tx,
-                hash,
-                sender,
-                nonce,
-                cost: todo!(),
-                effective_gas_price: todo!(),
-                gas_limit: tx.gas_limit(),
-                max_fee_per_gas: Some(U256::from(tx.max_fee_per_gas())),
-                max_priority_fee_per_gas: todo!(), // calculate from max_fee_per_gas - base_fee
-                size: todo!(),
+            Transaction::Eip2930(t) => PooledTransaction {
+                transaction: tx.clone(),
+                cost: U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value),
+                effective_gas_price: U256::from(t.gas_price),
+                size,
+            },
+            Transaction::Eip1559(t) => PooledTransaction {
+                transaction: tx.clone(),
+                cost: U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value),
+                effective_gas_price: U256::from(t.max_fee_per_gas),
+                size,
             },
         }
     }
