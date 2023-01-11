@@ -22,12 +22,10 @@ reth-rlp = { path = "../../crates/common/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-downloaders = {path = "../../crates/net/downloaders" }
 reth-cli-utils = { path = "../../crates/cli/utils" }
+reth-tracing = { path = "../../crates/tracing" }
 
 # tracing
 tracing = "0.1"
-tracing-futures = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
 
 # io
 fdlimit = "0.2.1"

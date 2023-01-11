@@ -3,12 +3,14 @@ use crate::{
     db,
     dirs::{LogsDir, PlatformPath},
     node, p2p, stage, test_eth_chain,
-    utils::{reth_tracing, reth_tracing::BoxedLayer},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use reth_tracing::{
+    tracing::{metadata::LevelFilter, Level, Subscriber},
+    tracing_subscriber::{filter::Directive, registry::LookupSpan},
+    BoxedLayer, FileWorkerGuard,
+};
 use std::str::FromStr;
-use tracing::{metadata::LevelFilter, Level, Subscriber};
-use tracing_subscriber::{filter::Directive, registry::LookupSpan};
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub async fn run() -> eyre::Result<()> {
@@ -89,7 +91,7 @@ struct Logs {
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    fn layer<S>(&self) -> (BoxedLayer<S>, Option<tracing_appender::non_blocking::WorkerGuard>)
+    fn layer<S>(&self) -> (BoxedLayer<S>, Option<FileWorkerGuard>)
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
