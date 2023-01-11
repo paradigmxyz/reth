@@ -19,6 +19,10 @@ use tracing_subscriber::{
     filter::Directive, prelude::*, registry::LookupSpan, EnvFilter, Layer, Registry,
 };
 
+// Re-export tracing crates
+pub use tracing;
+pub use tracing_subscriber;
+
 /// A boxed tracing [Layer].
 pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
@@ -106,13 +110,9 @@ where
 /// # Note
 ///
 /// The subscriber will silently fail if it could not be installed.
-pub fn test_subscriber() {
+pub fn init_test_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .try_init();
 }
-
-// Re-export tracing crates
-pub use tracing;
-pub use tracing_subscriber;
