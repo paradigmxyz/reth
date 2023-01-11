@@ -632,11 +632,12 @@ impl Default for PeersManager {
 /// Tracks stats about connected nodes
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
+    #[cfg_attr(feature = "serde", serde(skip))]
     num_outbound: usize,
     /// Counter for currently occupied slots for active inbound connections.
+    #[cfg_attr(feature = "serde", serde(skip))]
     num_inbound: usize,
     /// Maximum allowed outbound connections.
     max_outbound: usize,
@@ -887,27 +888,27 @@ pub enum PeerAction {
 /// Config type for initiating a [`PeersManager`] instance
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
-    // #[cfg_attr(feature = "serde", serde(flatten))]
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub refill_slots_interval: Duration,
-    /// Restrictions on connections.
-    pub connection_info: ConnectionInfo,
-    /// How to weigh reputation changes.
-    pub reputation_weights: ReputationChangeWeights,
-    /// Restrictions on PeerIds and Ips.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub ban_list: BanList,
-    /// How long to ban bad peers.
-    pub ban_duration: Duration,
-    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
-    /// [`DisconnectReason::TooManyPeers`].
-    pub backoff_durations: PeerBackoffDurations,
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to trusted nodes only?
     pub connect_trusted_nodes_only: bool,
+    /// How long to ban bad peers.
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    pub ban_duration: Duration,
+    /// Restrictions on PeerIds and Ips.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub ban_list: BanList,
+    /// Restrictions on connections.
+    pub connection_info: ConnectionInfo,
+    /// How to weigh reputation changes.
+    pub reputation_weights: ReputationChangeWeights,
+    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
+    /// [`DisconnectReason::TooManyPeers`].
+    pub backoff_durations: PeerBackoffDurations,
 }
 
 impl Default for PeersConfig {
@@ -973,15 +974,17 @@ impl PeersConfig {
 /// See also [`BackoffKind`](BackoffKind).
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct PeerBackoffDurations {
     /// Applies to connection problems where there is a chance that they will be resolved after the
     /// short duration.
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub low: Duration,
     /// Applies to more severe connection problems where there is a lower chance that they will be
     /// resolved.
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub medium: Duration,
     /// Intended for spammers, or bad peers in general.
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub high: Duration,
 }
 
