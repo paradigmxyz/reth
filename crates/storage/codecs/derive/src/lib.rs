@@ -73,7 +73,7 @@ pub fn use_postcard(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
-    derive_arbitrary(
+    derive_compact_arbitrary(
         _args,
         quote! {
             #[derive(Compact, serde::Serialize, serde::Deserialize)]
@@ -84,12 +84,14 @@ pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn derive_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn derive_compact_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
-    // Avoid duplicate reimports
+    // Avoid duplicate names
     let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
     let arb_import = format_ident!("{}Arbitratry", ast.ident);
+    let mod_tests = format_ident!("{}Tests", ast.ident);
+    let type_ident = ast.ident.clone();
 
     quote! {
         #[cfg(any(test, feature = "arbitrary"))]
@@ -100,6 +102,24 @@ pub fn derive_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
 
         #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
         #ast
+
+        #[allow(non_snake_case)]
+        #[cfg(test)]
+        mod #mod_tests {
+            use super::Compact;
+
+            #[test]
+            fn proptest() {
+                proptest::proptest!(|(field: super::#type_ident)| {
+                    let mut buf = vec![];
+
+                    let len = field.clone().to_compact(&mut buf);
+                    let (decoded, _) = super::#type_ident::from_compact(&buf, len);
+
+                    assert!(field == decoded);
+                });
+            }
+        }
     }
     .into()
 }
