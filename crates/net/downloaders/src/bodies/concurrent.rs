@@ -1,4 +1,4 @@
-use backon::{ExponentialBackoff, Retryable};
+use backon::{ConstantBackoff, Retryable};
 use futures_util::{stream, StreamExt, TryStreamExt};
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
@@ -12,7 +12,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{SealedBlock, SealedHeader};
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, sync::Arc, time::Duration};
 
 /// Downloads bodies in batches.
 ///
@@ -64,7 +64,14 @@ where
                 .chunks(self.batch_size)
                 .map(move |headers| {
                     (move || self.fetch_bodies(headers.clone()))
-                        .retry(ExponentialBackoff::default().with_max_times(self.retries))
+                        // We should not backoff from requests since the downloader does
+                        // not know what peer the request is being delivered to.
+                        // See: https://github.com/paradigmxyz/reth/issues/809
+                        .retry(
+                            ConstantBackoff::default()
+                                .with_delay(Duration::from_secs(0))
+                                .with_max_times(self.retries),
+                        )
                 })
                 .buffered(self.concurrency)
                 .map_ok(|blocks| stream::iter(blocks.into_iter()).map(Ok))
