@@ -73,67 +73,84 @@ pub fn parse_socket_address(value: &str) -> Result<SocketAddr, eyre::Error> {
 
 /// Tracing utility
 pub mod reth_tracing {
+    use std::path::Path;
     use tracing::Subscriber;
-    use tracing_subscriber::{prelude::*, EnvFilter};
+    use tracing_subscriber::{
+        filter::Directive, prelude::*, registry::LookupSpan, EnvFilter, Layer, Registry,
+    };
 
-    /// Tracing modes
-    pub enum TracingMode {
-        /// Enable all traces.
-        All,
-        /// Enable debug traces.
-        Debug,
-        /// Enable info traces.
-        Info,
-        /// Enable warn traces.
-        Warn,
-        /// Enable error traces.
-        Error,
-        /// Disable tracing.
-        Silent,
+    /// A boxed tracing [Layer].
+    pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
+
+    /// Initializes a new [Subscriber] based on the given layers.
+    pub fn init(layers: Vec<BoxedLayer<Registry>>) {
+        tracing_subscriber::registry().with(layers).init();
     }
 
-    impl TracingMode {
-        fn into_env_filter(self) -> EnvFilter {
-            match self {
-                Self::All => EnvFilter::new("reth=trace"),
-                Self::Debug => EnvFilter::new("reth=debug"),
-                Self::Info => EnvFilter::new("reth=info"),
-                Self::Warn => EnvFilter::new("reth=warn"),
-                Self::Error => EnvFilter::new("reth=error"),
-                Self::Silent => EnvFilter::new(""),
-            }
-        }
-    }
-
-    impl From<u8> for TracingMode {
-        fn from(value: u8) -> Self {
-            match value {
-                0 => Self::Error,
-                1 => Self::Warn,
-                2 => Self::Info,
-                3 => Self::Debug,
-                _ => Self::All,
-            }
-        }
-    }
-
-    /// Build subscriber
-    // TODO: JSON/systemd support
-    pub fn build_subscriber(mods: TracingMode) -> impl Subscriber {
+    /// Builds a new tracing layer that writes to stdout.
+    ///
+    /// The events are filtered by `default_directive`, unless overriden by `RUST_LOG`.
+    ///
+    /// Colors can be disabled with `RUST_LOG_STYLE=never`, and event targets can be displayed with
+    /// `RUST_LOG_TARGET=1`.
+    pub fn stdout<S>(default_directive: impl Into<Directive>) -> BoxedLayer<S>
+    where
+        S: Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
         // TODO: Auto-detect
-        let no_color = std::env::var("RUST_LOG_STYLE").map(|val| val == "never").unwrap_or(false);
+        let with_ansi = std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(true);
         let with_target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(false);
 
-        // Take env over config
-        let filter = if std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default().is_empty() {
-            mods.into_env_filter()
-        } else {
-            EnvFilter::from_default_env()
-        };
+        let filter =
+            EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy();
 
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_ansi(!no_color).with_target(with_target))
-            .with(filter)
+        tracing_subscriber::fmt::layer()
+            .with_ansi(with_ansi)
+            .with_target(with_target)
+            .with_filter(filter)
+            .boxed()
+    }
+
+    /// Builds a new tracing layer that appends to a log file.
+    ///
+    /// The events are filtered by `directive`.
+    ///
+    /// The boxed layer and a guard is returned. When the guard is dropped the buffer for the log
+    /// file is immediately flushed to disk. Any events after the guard is dropped may be missed.
+    pub fn file<S>(
+        directive: impl Into<Directive>,
+        dir: impl AsRef<Path>,
+        file_name: impl AsRef<Path>,
+    ) -> (BoxedLayer<S>, tracing_appender::non_blocking::WorkerGuard)
+    where
+        S: Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
+        let (writer, guard) =
+            tracing_appender::non_blocking(tracing_appender::rolling::never(dir, file_name));
+        let layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(writer)
+            .with_filter(EnvFilter::default().add_directive(directive.into()))
+            .boxed();
+
+        (layer, guard)
+    }
+
+    /// Builds a new tracing layer that writes events to journald.
+    ///
+    /// The events are filtered by `directive`.
+    ///
+    /// If the layer cannot connect to journald for any reason this function will return an error.
+    pub fn journald<S>(directive: impl Into<Directive>) -> std::io::Result<BoxedLayer<S>>
+    where
+        S: Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
+        Ok(tracing_journald::layer()?
+            .with_filter(EnvFilter::default().add_directive(directive.into()))
+            .boxed())
     }
 }
 

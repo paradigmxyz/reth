@@ -27,6 +27,7 @@ reth-cli-utils = { path = "../../crates/cli/utils" }
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 # io
 fdlimit = "0.2.1"
@@ -47,6 +48,7 @@ eyre = "0.6.8"
 clap = { version = "4.0", features = ["derive", "cargo"] }
 thiserror = "1.0"
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = "0.1"
 futures = "0.3.25"
 strum = "0.24.1"
 tempfile = { version = "3.3.0" }
