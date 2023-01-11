@@ -96,6 +96,7 @@ impl Command {
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
                         info!(
+                            target: "reth::cli",
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -130,7 +131,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        info!("Generating random block range from 0 to {len}");
+        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
@@ -140,7 +141,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database seeded with {len} blocks");
+        info!(target: "reth::cli", "Database seeded with {len} blocks");
         Ok(())
     }
 
@@ -153,7 +154,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                         self.list_table::<tables::$table>($start, $len)?
                     },)*
                     _ => {
-                        tracing::error!("Unknown table.");
+                        tracing::error!(target: "reth::cli", "Unknown table.");
                         return Ok(())
                     }
                 }

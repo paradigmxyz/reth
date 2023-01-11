@@ -3560,6 +3560,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-appender",
  "tracing-futures",

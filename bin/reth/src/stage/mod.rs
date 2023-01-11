@@ -109,13 +109,13 @@ impl Command {
         fdlimit::raise_fd_limit();
 
         if let Some(listen_addr) = self.metrics {
-            info!("Starting metrics endpoint at {}", listen_addr);
+            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
             HeaderMetrics::describe();
         }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
-        info!("reth {} starting stage {:?}", clap::crate_version!(), self.stage);
+        info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
             previous_stage: Some((StageId("No Previous Stage"), self.to)),
