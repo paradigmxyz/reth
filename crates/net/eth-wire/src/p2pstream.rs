@@ -9,6 +9,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
+use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -579,6 +580,7 @@ pub fn set_capability_offsets(
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
+#[derive_arbitrary]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
@@ -710,6 +712,7 @@ impl TryFrom<u8> for P2PMessageID {
 }
 
 /// RLPx `p2p` protocol version
+#[derive_arbitrary]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
     /// `p2p` version 4

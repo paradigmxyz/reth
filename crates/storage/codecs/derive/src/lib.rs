@@ -83,6 +83,8 @@ pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
     )
 }
 
+/// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum. It
+/// also adds roundtrip tests for the `Compact` type.
 #[proc_macro_attribute]
 pub fn derive_compact_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
@@ -120,6 +122,28 @@ pub fn derive_compact_arbitrary(_args: TokenStream, input: TokenStream) -> Token
                 });
             }
         }
+    }
+    .into()
+}
+
+/// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.
+#[proc_macro_attribute]
+pub fn derive_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    // Avoid duplicate names
+    let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
+    let arb_import = format_ident!("{}Arbitratry", ast.ident);
+
+    quote! {
+        #[cfg(any(test, feature = "arbitrary"))]
+        use proptest_derive::Arbitrary as #prop_import;
+
+        #[cfg(any(test, feature = "arbitrary"))]
+        use arbitrary::Arbitrary as #arb_import;
+
+        #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
+        #ast
     }
     .into()
 }
