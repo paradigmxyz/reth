@@ -5,10 +5,7 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{
-        chainspec::chain_spec_value_parser,
-        init::{init_db, init_genesis},
-    },
+    utils::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
