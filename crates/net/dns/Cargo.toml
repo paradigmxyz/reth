@@ -10,6 +10,7 @@ description = "Support for EIP-1459 Node Discovery via DNS"
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
+reth-net-common = { path = "../common" }
 
 # ethereum
 secp256k1 = { version = "0.24", features = [
@@ -28,7 +29,15 @@ trust-dns-resolver = "0.22"
 
 # misc
 data-encoding = "2"
+async-trait = "0.1"
 bytes = "1.2"
-tracing = "0.1"
+linked_hash_set = "0.1"
+lru = "0.9"
 thiserror = "1.0"
-async-trait = "0.1.61"
+tracing = "0.1"
+parking_lot = "0.12"
+
+
+[dev-dependencies]
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
+reth-tracing = { path = "../../tracing" }
