@@ -190,11 +190,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
             // TODO: Upstream this in the DB trait.
             let start_walker = cursor.current().transpose();
-            let walker = Walker {
-                cursor: &mut cursor,
-                start: start_walker,
-                _tx_phantom: std::marker::PhantomData,
-            };
+            let walker = Walker::new(&mut cursor, start_walker);
 
             walker.skip(start).take(len).collect::<Vec<_>>()
         })?;
