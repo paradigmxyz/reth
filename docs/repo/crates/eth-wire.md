@@ -49,15 +49,7 @@ pub enum EthMessageID {
     Status = 0x00,
     NewBlockHashes = 0x01,
     Transactions = 0x02,
-    GetBlockHeaders = 0x03,
-    BlockHeaders = 0x04,
-    GetBlockBodies = 0x05,
-    BlockBodies = 0x06,
-    NewBlock = 0x07,
-    NewPooledTransactionHashes = 0x08,
-    GetPooledTransactions = 0x09,
-    PooledTransactions = 0x0a,
-    GetNodeData = 0x0d,
+    // ...
     NodeData = 0x0e,
     GetReceipts = 0x0f,
     Receipts = 0x10,
@@ -71,10 +63,7 @@ described using a `RequestPair` struct, which is simply a concatenation of the u
 ```rust, ignore
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestPair<T> {
-    /// id for the contained request or response message
     pub request_id: u64,
-
-    /// the request or response message payload
     pub message: T,
 }
 
@@ -99,7 +88,8 @@ pub trait Encodable {
 }
 ```
 These traits describe how the `Ethmessage` should be serialized/deserialized into raw bytes using the RLP format.
-In reth all rlp encoding is handled by the rlp and rlp-derive crates.
+In reth all RLP encoding is handled by the `common/rlp` and `common/rlp-derive` crates.
+
 You can learn more about RLP by looking at the [ETH wiki](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/).
 
 
@@ -111,7 +101,10 @@ Let's understand how an `EthMessage` is implemented by taking a look at the `Tra
 Transactions (0x02)
 [tx₁, tx₂, ...]
 
-Specify transactions that the peer should make sure is included on its transaction queue. The items in the list are transactions in the format described in the main Ethereum specification. Transactions messages must contain at least one (new) transaction, empty Transactions messages are discouraged and may lead to disconnection.
+Specify transactions that the peer should make sure is included on its transaction queue. 
+The items in the list are transactions in the format described in the main Ethereum specification. 
+
+Transactions messages must contain at least one (new) transaction, empty Transactions messages are discouraged and may lead to disconnection.
 ...
 
 ```
@@ -133,11 +126,8 @@ And the corresponding trait implementations:
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSigned {
-    /// Transaction hash
     pub hash: TxHash,
-    /// The transaction signature values
     pub signature: Signature,
-    /// Raw transaction info
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
@@ -164,13 +154,91 @@ impl Decodable for TransactionSigned {
 Now that we know how the types work, let's take a look at how these are utilized in the network.
 
 ## P2PStream
-The most basic stream to talk to other peers is the P2P stream. It takes an underlying stream of bytes and does the following:
+The lowest level stream to communicate with other peers is the P2P stream. It takes an underlying TCP stream and does the following:
 
-1. Tracks and Manages Ping and pong messages and sends them when needed.
-2. Decompresses/Compresses the underlying bytes using snappy. ([EIP 706](https://eips.ethereum.org/EIPS/eip-706))
-3. Sends the decompressed bytes to its parent stream. 
+- Tracks and Manages Ping and pong messages and sends them when needed.
+- Keeps track of the SharedCapabilities between the reth node and its peers.
+- Receives bytes from peers, decompresses and forwards them to its parent stream. 
+- Receives bytes from its parent stream, compresses them and sends it to peers.
 
-// Add code here
+Decompression/Compression of bytes is done with snappy algorithm ([EIP 706](https://eips.ethereum.org/EIPS/eip-706)) 
+using the external `snap` crate. 
+
+[File: crates/net/eth-wire/src/p2pstream.rs](...)
+```rust,ignore
+#[pin_project]
+#[derive(Debug)]
+pub struct P2PStream<S> {
+    #[pin]
+    inner: S,
+    encoder: snap::raw::Encoder,
+    decoder: snap::raw::Decoder,
+    pinger: Pinger,
+    shared_capability: SharedCapability,
+    outgoing_messages: VecDeque<Bytes>,
+    disconnecting: bool,
+}
+```
+### Pinger
+To manage pinging, an instance of the `Pinger` struct is used. This is a state machine which keeps track of how many pings
+we have sent/received and the timeouts associated with them.
+
+[File: crates/net/eth-wire/src/pinger.rs](...)
+```rust,ignore
+#[derive(Debug)]
+pub(crate) struct Pinger {
+    /// The timer used for the next ping.
+    ping_interval: Interval,
+    /// The timer used for the next ping.
+    timeout_timer: Pin<Box<Sleep>>,
+    timeout: Duration,
+    state: PingState,
+}
+
+/// This represents the possible states of the pinger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PingState {
+    /// There are no pings in flight, or all pings have been responded to.
+    Ready,
+    /// We have sent a ping and are waiting for a pong, but the peer has missed n pongs.
+    WaitingForPong,
+    /// The peer has failed to respond to a ping.
+    TimedOut,
+}
+```
+
+State transitions are then implemented like a future, with the `poll_ping` function advancing the state of the pinger.
+
+[File: crates/net/eth-wire/src/pinger.rs](...)
+```rust, ignore
+/// Polls the state of the pinger and returns whether a new ping needs to be sent or if a
+/// previous ping timed out.
+pub(crate) fn poll_ping(
+    &mut self,
+    cx: &mut Context<'_>,
+) -> Poll<Result<PingerEvent, PingerError>> {
+    match self.state() {
+        PingState::Ready => {
+            if self.ping_interval.poll_tick(cx).is_ready() {
+                self.timeout_timer.as_mut().reset(Instant::now() + self.timeout);
+                self.state = PingState::WaitingForPong;
+                return Poll::Ready(Ok(PingerEvent::Ping))
+            }
+        }
+        PingState::WaitingForPong => {
+            if self.timeout_timer.is_elapsed() {
+                self.state = PingState::TimedOut;
+                return Poll::Ready(Ok(PingerEvent::Timeout))
+            }
+        }
+        PingState::TimedOut => {
+            return Poll::Pending
+        }
+    };
+    Poll::Pending
+```
+
+
 
 
 ## EthStream
