@@ -1,14 +1,16 @@
 # eth-wire
 
-The `eth-wire` crate provides low level abstractions of the Ethereum Wire protocol described [here](https://github.com/ethereum/devp2p/blob/master/caps/eth.md).
+The `eth-wire` crate provides abstractions over the [RLPx](https://github.com/ethereum/devp2p/blob/master/rlpx.md) and 
+[Eth wire](https://github.com/ethereum/devp2p/blob/master/caps/eth.md) protocols. 
 
-The crate can be thought of as having 2 components:
+This crate can be thought of as having 2 components:
 
 1. Data structures which serialize and deserialize the eth protcol messages into Rust compatible types.
 2. Abstractions over Tokio Streams which operate on these types.
 
+(Note that ECIES is implemented in a  seperate `reth-ecies` crate.)
 ## Types
-The most basic type is an `ProtocolMessage`. It describes all messages that reth can send/receive.
+The most basic Eth-wire type is an `ProtocolMessage`. It describes all messages that reth can send/receive.
 
 [File: crates/net/eth-wire/src/types/message.rs](...)
 ```rust, ignore
@@ -21,23 +23,12 @@ pub struct ProtocolMessage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EthMessage {
-    /// Status is required for the protocol handshake
     Status(Status),
-    /// The following messages are broadcast to the network
     NewBlockHashes(NewBlockHashes),
-    NewBlock(Box<NewBlock>),
     Transactions(Transactions),
     NewPooledTransactionHashes(NewPooledTransactionHashes),
-
-    // The following messages are request-response message pairs
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
-    BlockHeaders(RequestPair<BlockHeaders>),
-    GetBlockBodies(RequestPair<GetBlockBodies>),
-    BlockBodies(RequestPair<BlockBodies>),
-    GetPooledTransactions(RequestPair<GetPooledTransactions>),
-    PooledTransactions(RequestPair<PooledTransactions>),
-    GetNodeData(RequestPair<GetNodeData>),
-    NodeData(RequestPair<NodeData>),
+    // ...
     GetReceipts(RequestPair<GetReceipts>),
     Receipts(RequestPair<Receipts>),
 }
@@ -76,22 +67,15 @@ These traits are defined as follows:
 pub trait Decodable: Sized {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError>;
 }
-#[auto_impl(&)]
-#[cfg_attr(feature = "alloc", auto_impl(Box, Arc))]
 pub trait Encodable {
     fn encode(&self, out: &mut dyn BufMut);
-    fn length(&self) -> usize {
-        let mut out = BytesMut::new();
-        self.encode(&mut out);
-        out.len()
-    }
+    fn length(&self) -> usize;
 }
 ```
 These traits describe how the `Ethmessage` should be serialized/deserialized into raw bytes using the RLP format.
-In reth all RLP encoding is handled by the `common/rlp` and `common/rlp-derive` crates.
+In reth all [RLP](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/) encode/decode operations are handled by the `common/rlp` and `common/rlp-derive` crates.
 
-You can learn more about RLP by looking at the [ETH wiki](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/).
-
+Note that the `ProtocolMessage` itself implements these traits, so any stream of bytes can be converted into it by calling `ProtocolMessage::decode()` and vice versa with `ProtocolMessage::encode()`. The message type is determined by the first byte of the byte stream.
 
 ### Example: The Transactions message
 Let's understand how an `EthMessage` is implemented by taking a look at the `Transactions` Message. The eth specification describes a Transaction message as a list of RLP encoded transactions:
@@ -117,7 +101,7 @@ pub struct Transactions(
 );
 ```
 
-And the corresponding trait implementations:
+And the corresponding trait implementations are present in the primitives crate.
 
 [File: crates/primitives/src/transaction/mod.rs](...)
 ```rust, ignore
@@ -152,7 +136,7 @@ impl Decodable for TransactionSigned {
 Now that we know how the types work, let's take a look at how these are utilized in the network.
 
 ## P2PStream
-The lowest level stream to communicate with other peers is the P2P stream. It takes an underlying TCP stream and does the following:
+The lowest level stream to communicate with other peers is the P2P stream. It takes an underlying Tokio stream and does the following:
 
 - Tracks and Manages Ping and pong messages and sends them when needed.
 - Keeps track of the SharedCapabilities between the reth node and its peers.
@@ -165,7 +149,6 @@ using the external `snap` crate.
 [File: crates/net/eth-wire/src/p2pstream.rs](...)
 ```rust,ignore
 #[pin_project]
-#[derive(Debug)]
 pub struct P2PStream<S> {
     #[pin]
     inner: S,
@@ -209,8 +192,6 @@ State transitions are then implemented like a future, with the `poll_ping` funct
 
 [File: crates/net/eth-wire/src/pinger.rs](...)
 ```rust, ignore
-/// Polls the state of the pinger and returns whether a new ping needs to be sent or if a
-/// previous ping timed out.
 pub(crate) fn poll_ping(
     &mut self,
     cx: &mut Context<'_>,
@@ -245,10 +226,7 @@ error handling and is omitted here for clarity.
 [File: crates/net/eth-wire/src/p2pstream.rs](...)
 ```rust,ignore
 
-impl<S> Stream for P2PStream<S>
-where
-    S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
-{
+impl<S> Stream for P2PStream<S> {
     type Item = Result<BytesMut, P2PStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -266,6 +244,7 @@ where
             return Poll::Ready(Some(Ok(decompress_buf)))
         }
     }
+}
 ```
 
 Similarly, for the `Sink` trait, we do the reverse, compressing and sending data out to the `inner` stream.
@@ -273,13 +252,7 @@ The important functions in this trait are shown below.
 
 [File: crates/net/eth-wire/src/p2pstream.rs](...)
 ```rust, ignore
-
-impl<S> Sink<Bytes> for P2PStream<S>
-where
-    S: Sink<Bytes, Error = io::Error> + Unpin,
-{
-    type Error = P2PStreamError;
-
+impl<S> Sink<Bytes> for P2PStream<S> {
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let this = self.project();
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
@@ -306,14 +279,58 @@ where
                 }
             }
         }
+    }
+}
 ```
 
 
 ## EthStream
-The P2Pstream is then consumed by a higher level EthStream which performs the RLP decoding/encoding.
-// TODO
+The EthStream is very simple, it does not keep track of any state, it simply wraps the P2Pstream.
 
-The Ethstream is then consumed by the SessionManager using ActiveSession and PendingSessions
-// TODO
+[File: crates/net/eth-wire/src/ethstream.rs](...)
+```rust,ignore
+#[pin_project]
+pub struct EthStream<S> {
+    #[pin]
+    inner: S,
+}
+```
+EthStream's only job is to perform the RLP decoding/encoding, using the `ProtocolMessage::decode()` and `ProtocolMessage::encode()`
+functions we looked at earlier. 
 
-Some loose ends: UnauthP2Pstream and UnauthEthStream
+```rust,ignore
+impl<S, E> Stream for EthStream<S> {
+    // ...
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let bytes = ready!(this.inner.poll_next(cx)).unwrap();
+        // ...
+        let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
+            Ok(m) => m,
+            Err(err) => {
+                tracing::warn!("rlp decode error: msg={bytes:x}");
+                return Poll::Ready(Some(Err(err.into())))
+            }
+        };
+        Poll::Ready(Some(Ok(msg.message)))
+    }
+}
+
+impl<S, E> Sink<EthMessage> for EthStream<S> {
+    // ...
+    fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
+        // ...
+        let mut bytes = BytesMut::new();
+        ProtocolMessage::from(item).encode(&mut bytes);
+
+        let bytes = bytes.freeze();
+        self.project().inner.start_send(bytes)?;
+        Ok(())
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_flush(cx).map_err(Into::into)
+    }
+}
+```
+## UnauthP2Pstream and UnauthEthStream
