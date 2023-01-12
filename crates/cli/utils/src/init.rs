@@ -1,4 +1,3 @@
-use crate::chainspec::Genesis;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -6,7 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, Header, H256};
+use reth_primitives::{Account, Genesis, Header, H256};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
