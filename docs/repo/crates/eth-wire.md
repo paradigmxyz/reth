@@ -103,8 +103,6 @@ Transactions (0x02)
 
 Specify transactions that the peer should make sure is included on its transaction queue. 
 The items in the list are transactions in the format described in the main Ethereum specification. 
-
-Transactions messages must contain at least one (new) transaction, empty Transactions messages are discouraged and may lead to disconnection.
 ...
 
 ```
@@ -238,7 +236,77 @@ pub(crate) fn poll_ping(
     Poll::Pending
 ```
 
+### Sending and receiving data
+To send and recieve data, the P2PStream itself is a future which implemenents the `Stream` and `Sink` traits from the `futures` crate.
 
+For the `Stream` trait, the `inner` stream is polled, decompressed and returned. Most of the code is just 
+error handling and is omitted here for clarity.
+
+[File: crates/net/eth-wire/src/p2pstream.rs](...)
+```rust,ignore
+
+impl<S> Stream for P2PStream<S>
+where
+    S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+{
+    type Item = Result<BytesMut, P2PStreamError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        while let Poll::Ready(res) = this.inner.poll_next_unpin(cx) {
+            let bytes = match res {
+                Some(Ok(bytes)) => bytes,
+                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                None => return Poll::Ready(None),
+            };
+            let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
+            let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
+            this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
+            // ... Omitted Error handling
+            decompress_buf[0] = bytes[0] - this.shared_capability.offset();
+            return Poll::Ready(Some(Ok(decompress_buf)))
+        }
+    }
+```
+
+Similarly, for the `Sink` trait, we do the reverse, compressing and sending data out to the `inner` stream.
+The important functions in this trait are shown below.
+
+[File: crates/net/eth-wire/src/p2pstream.rs](...)
+```rust, ignore
+
+impl<S> Sink<Bytes> for P2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    type Error = P2PStreamError;
+
+    fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+        let this = self.project();
+        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
+        let compressed_size = this.encoder.compress(&item[1..], &mut compressed[1..])?;
+        compressed.truncate(compressed_size + 1);
+        compressed[0] = item[0] + this.shared_capability.offset();
+        this.outgoing_messages.push_back(compressed.freeze());
+        Ok(())
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut this = self.project();
+        loop {
+            match ready!(this.inner.as_mut().poll_flush(cx)) {
+                Err(err) => return Poll::Ready(Err(err.into())),
+                Ok(()) => {
+                    if let Some(message) = this.outgoing_messages.pop_front() {
+                        if let Err(err) = this.inner.as_mut().start_send(message) {
+                            return Poll::Ready(Err(err.into()))
+                        }
+                    } else {
+                        return Poll::Ready(Ok(()))
+                    }
+                }
+            }
+        }
+```
 
 
 ## EthStream
@@ -248,3 +316,4 @@ The P2Pstream is then consumed by a higher level EthStream which performs the RL
 The Ethstream is then consumed by the SessionManager using ActiveSession and PendingSessions
 // TODO
 
+Some loose ends: UnauthP2Pstream and UnauthEthStream
