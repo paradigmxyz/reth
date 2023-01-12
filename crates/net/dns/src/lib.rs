@@ -402,7 +402,8 @@ mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
     use enr::{EnrBuilder, EnrKey};
-    use reth_primitives::Chain;
+    use reth_primitives::{Chain, Hardfork};
+    use reth_rlp::Encodable;
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;
@@ -450,7 +451,10 @@ mod tests {
         resolver.insert(link.domain.clone(), root.to_string());
 
         let mut builder = EnrBuilder::new("v4");
-        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303);
+        let mut buf = Vec::new();
+        let fork_id = Hardfork::Frontier.fork_id();
+        fork_id.encode(&mut buf);
+        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &buf);
         let enr = builder.build(&secret_key).unwrap();
 
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
@@ -460,7 +464,8 @@ mod tests {
         let mut node_records = service.node_record_stream();
 
         let task = tokio::task::spawn(async move {
-            let _ = node_records.next().await.unwrap();
+            let record = node_records.next().await.unwrap();
+            assert_eq!(record.fork_id, Some(fork_id));
         });
 
         service.sync_tree_with_link(link.clone());
