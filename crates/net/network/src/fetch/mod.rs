@@ -11,7 +11,10 @@ use reth_interfaces::p2p::{
 use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
@@ -114,8 +117,13 @@ impl StateFetcher {
     /// Returns the _next_ idle peer that's ready to accept a request.
     /// Once a peer has been yielded, it will be moved to the end of the map
     fn next_peer(&mut self) -> Option<PeerId> {
-        let peer =
-            self.peers.iter().find_map(|(peer_id, peer)| peer.state.is_idle().then_some(*peer_id));
+        let peer = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.state.is_idle())
+            .min_by_key(|(_, peer)| peer.timeout.load(Ordering::SeqCst).to_owned())
+            .map(|(id, _)| id.to_owned());
+
         if let Some(peer_id) = peer {
             // Move to end of the map
             self.peers.get_refresh(&peer_id);
@@ -280,7 +288,6 @@ struct Peer {
     /// Tracks the best number of the peer.
     best_number: u64,
     /// Tracks the current timeout value we use for the peer.
-    #[allow(dead_code)]
     timeout: Arc<AtomicU64>,
 }
 
