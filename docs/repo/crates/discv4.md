@@ -3,7 +3,7 @@
 The `discv4` crate plays an important role in Reth, enabling discovery of other peers across the network. It is recommended to know how [Kademlia distributed hash tables](https://en.wikipedia.org/wiki/Kademlia) and [Ethereum's node discovery protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02) work before reading through this chapter. While all concepts will be explained through the following sections, reading through the links above will make understanding this chapter much easier! With that note out of the way, lets jump into `disc4`.
 
 ## Starting the Node Discovery Protocol
-As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are are started. One of the processes that is initialized is p2p network which starts the node discovery protocol amongst other tasks.  
+As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
 
 [File: bin/reth/src/node/mod.rs]()
 ```rust ignore
@@ -57,7 +57,7 @@ where
 }
 ```
 
-First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes]() and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function.
+First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes]() and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
 
 [File: ]()
 ```rust ignore
@@ -102,7 +102,7 @@ Within this function, the [Ethereum Node Record](https://github.com/ethereum/dev
 
 The `NodeRecord::from_secret_key()` takes the socket address used for discovery and the secret key. The secret key is used to derive a `secp256k1` public key and the peer id is then  from the public key. These values are then used to create an ENR. Ethereum Node Records are used to location and communication with other nodes in the network.
 
-Once the ENR is created, if there is a `discv4_config` supplied to the `Discovery::new()` function, The `Discv4::bind()` function is called to bind to a new UdpSocket and create the disc_v4 service. 
+If the `discv4_config` supplied to the `Discovery::new()` function is `None`, the discv4 service will not be spawned. In this case, no new peers will be discovered across the network. The node will have to rely on manually added peers.However, if the `discv4_config` contains a `Some(Discv4Config)` value, then the `Discv4::bind()` function is called to bind to a new UdpSocket and create the disc_v4 service.
 
 [File: ]()
 ```rust ignore
@@ -185,44 +185,7 @@ impl Discv4Service {
 
 First, new channels are initialized to handle incoming and outgoing traffic related to node discovery. New tasks are then spawned to handle the `receive_loop()` and `send_loop()` functions, which perpetually send incoming disc4 traffic to the `ingress_rx` and outgoing discv4 traffic to the `egress_rx`. Following this, a [`KBucketsTable`]() is initialized to keep track of the node's neighbors throughout the network. If you are unfamiliar with k-buckets, feel free to [follow this link to learn more](https://en.wikipedia.org/wiki/Kademlia#Fixed-size_routing_tables). Following this, the `self_lookup_interval`, `ping_interval` and `evict_expired_requests_interval` are initialized which determine the intervals between self lookups, outgoing ping packets and the time elapsed to remove inactive neighbors from the node's records.
 
-
-Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()` function to complete as well, the `discv4_service` is then spawned into its own task and the `Discovery::new()` function returns an new instance of `Discovery`.
-
-[File: ]()
-```rust ignore
-impl Discovery {
-    pub async fn new(
-        discovery_addr: SocketAddr,
-        sk: SecretKey,
-        discv4_config: Option<Discv4Config>,
-    ) -> Result<Self, NetworkError> {
-        //--snip--
-        if let Some(disc_config) = discv4_config {
-            let (discv4, mut discv4_service) =
-                Discv4::bind(discovery_addr, local_enr, sk, disc_config)
-                    .await
-                    .map_err(NetworkError::Discovery)?;
-            let discv4_updates = discv4_service.update_stream();
-            // spawn the service
-            let _discv4_service = discv4_service.spawn();
-            (Some(discv4), Some(discv4_updates), Some(_discv4_service))
-        } else {
-            (None, None, None)
-        };
-
-        Ok(Self {
-            local_enr,
-            discv4,
-            discv4_updates,
-            _discv4_service,
-            discovered_nodes: Default::default(),
-            queued_events: Default::default(),
-        })
-    }
-}
-```
-
-The newly created `Discovery` type is passed into the `NetworkState::new()` function along with a few other arguments to initialize the network state. The network state is added to the `NetworkManager` where the `NetworkManager` is then spawned into its own task as well.
+Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()` function to complete as well, the `discv4_service` is then spawned into its own task and the `Discovery::new()` function returns an new instance of `Discovery`. The newly created `Discovery` type is passed into the `NetworkState::new()` function along with a few other arguments to initialize the network state. The network state is added to the `NetworkManager` where the `NetworkManager` is then spawned into its own task as well.
 
 
 
@@ -297,7 +260,6 @@ If there is not a `Discv4Event` immediately ready, the function continues, trigg
 
 
 To prevent traffic amplification attacks, implementations must verify that the sender of a query participates in the discovery protocol. The sender of a packet is considered verified if it has sent a valid Pong response with matching ping hash within the last 12 hours.
-
 
 
 
