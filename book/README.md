@@ -1,6 +1,6 @@
 # reth Book
 
-<img src="../assets/reth.jpg" style="border-radius: 20px">
+<img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth.jpg" style="border-radius: 20px">
 
 <!-- Add a quick description about Reth, what it is, the goals of the build, and any other quick overview information   -->
 
