@@ -114,7 +114,8 @@ impl StateFetcher {
         }
     }
 
-    /// Returns the _next_ idle peer that's ready to accept a request.
+    /// Returns the _next_ idle peer that's ready to accept a request,
+    /// prioritizing those with the lowest timeout/latency.
     /// Once a peer has been yielded, it will be moved to the end of the map
     fn next_peer(&mut self) -> Option<PeerId> {
         let peer = self
