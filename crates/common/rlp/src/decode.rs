@@ -252,7 +252,7 @@ decode_integer!(ethnum::U256);
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
-    use revm_interpreter::{B160, B256, U256 as RU256};
+    use revm_interpreter::{ruint::aliases::U128 as RU128, B160, B256, U256 as RU256};
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -337,6 +337,7 @@ mod ethereum_types_support {
     }
 
     fixed_revm_uint_impl!(RU256, 32);
+    fixed_revm_uint_impl!(RU128, 16);
 
     fixed_uint_impl!(U64, 8);
     fixed_uint_impl!(U128, 16);
