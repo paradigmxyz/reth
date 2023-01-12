@@ -286,9 +286,6 @@ pub(crate) struct PooledTransaction {
 
     /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
     pub(crate) effective_gas_price: U256,
-
-    /// Measurement of the heap usage of this type and all its internals.
-    pub(crate) size: usize,
 }
 
 impl PoolTransaction for PooledTransaction {
@@ -356,28 +353,26 @@ impl PoolTransaction for PooledTransaction {
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        let size = tx.transaction.input().len();
+        let (cost, effective_gas_price) = match &tx.transaction {
+            Transaction::Legacy(t) => {
+                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = U256::from(t.gas_price);
+                (cost, effective_gas_price)
+            }
+            Transaction::Eip2930(t) => {
+                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = U256::from(t.gas_price);
+                (cost, effective_gas_price)
+            }
+            Transaction::Eip1559(t) => {
+                let cost =
+                    U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = U256::from(t.max_fee_per_gas);
+                (cost, effective_gas_price)
+            }
+        };
 
-        match &tx.transaction {
-            Transaction::Legacy(t) => PooledTransaction {
-                transaction: tx.clone(),
-                cost: U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value),
-                effective_gas_price: U256::from(t.gas_price),
-                size,
-            },
-            Transaction::Eip2930(t) => PooledTransaction {
-                transaction: tx.clone(),
-                cost: U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value),
-                effective_gas_price: U256::from(t.gas_price),
-                size,
-            },
-            Transaction::Eip1559(t) => PooledTransaction {
-                transaction: tx.clone(),
-                cost: U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value),
-                effective_gas_price: U256::from(t.max_fee_per_gas),
-                size,
-            },
-        }
+        PooledTransaction { transaction: tx, cost, effective_gas_price }
     }
 }
 
