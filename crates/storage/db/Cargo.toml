@@ -37,6 +37,7 @@ proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
+reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
 tempfile = "3.3.0"
 test-fuzz = "3.0.4"
 
