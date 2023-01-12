@@ -493,8 +493,8 @@ where
 /// capabilities and the input list of locally supported capabilities.
 ///
 /// Currently only `eth` versions 66 and 67 are supported.
-/// Additionally, the `p2p` capability versions 4 and 5 are supported, but are
-/// expected _not_ to be in either `local_capabilities` or `peer_capabilities`.
+/// Additionally, the `p2p` capability version 5 is supported, but is
+/// expected _not_ to be in neither `local_capabilities` or `peer_capabilities`.
 pub fn set_capability_offsets(
     local_capabilities: Vec<Capability>,
     peer_capabilities: Vec<Capability>,
@@ -899,11 +899,6 @@ mod tests {
             Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
         ))
     }
-
-    // TODO: (If possible) test for message ID offsets being consistent with a Geth peer
-    // Can also just test for proper message ID assignment (lexicographic ordering)
-    // Could be useful in case the `Ord` implementation for `SmolStr` changes at any point and we
-    // update the crate
 
     #[test]
     fn snappy_decode_encode_ping() {
