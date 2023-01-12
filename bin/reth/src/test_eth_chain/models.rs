@@ -80,7 +80,7 @@ impl From<Header> for SealedHeader {
                 base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.to::<u64>()),
                 beneficiary: value.coinbase,
                 difficulty: value.difficulty.0,
-                extra_data: value.extra_data.0,
+                extra_data: value.extra_data,
                 gas_limit: value.gas_limit.0.to::<u64>(),
                 gas_used: value.gas_used.0.to::<u64>(),
                 mix_hash: value.mix_hash,
@@ -187,7 +187,7 @@ pub enum ForkSpec {
     Constantinople, // SKIPPED
     /// Constantinople fix
     ConstantinopleFix,
-    /// Instanbul
+    /// Istanbul
     Istanbul,
     /// Berlin
     Berlin,
@@ -208,6 +208,9 @@ pub enum ForkSpec {
     /// After Merge plus new PUSH0 opcode
     #[serde(alias = "Merge+3855")]
     MergePush0,
+    /// Fork Spec which is unknown to us
+    #[serde(other)]
+    Unknown,
 }
 
 impl From<ForkSpec> for ChainSpec {
@@ -238,7 +241,10 @@ impl From<ForkSpec> for ChainSpec {
                 panic!("Not supported")
             }
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
-                panic!("Overriden with PETERSBURG")
+                panic!("Overridden with PETERSBURG")
+            }
+            ForkSpec::Unknown => {
+                panic!("Unknown fork");
             }
         }
         .build()
@@ -476,6 +482,6 @@ mod test {
         ]"#;
 
         let res = serde_json::from_str::<Vec<Transaction>>(test);
-        assert!(res.is_ok(), "Failed to deserialize transactin with error: {res:?}");
+        assert!(res.is_ok(), "Failed to deserialize transaction with error: {res:?}");
     }
 }

@@ -1,6 +1,5 @@
 //! Command for running Ethereum chain tests.
 
-use crate::util;
 use clap::Parser;
 use eyre::eyre;
 use std::path::PathBuf;
@@ -24,7 +23,7 @@ impl Command {
         let futs: Vec<_> = self
             .path
             .iter()
-            .flat_map(|item| util::find_all_files_with_postfix(item, ".json"))
+            .flat_map(|item| reth_cli_utils::find_all_files_with_postfix(item, ".json"))
             .map(|file| async { (runner::run_test(file.clone()).await, file) })
             .collect();
 
@@ -39,12 +38,12 @@ impl Command {
                 }
                 Err(error) => {
                     num_of_failed += 1;
-                    error!("Test {file:?} failed:\n {error}\n");
+                    error!(target: "reth::cli", "Test {file:?} failed:\n{error}");
                 }
             }
         }
 
-        info!("\nPASSED {num_of_passed}/{} tests\n", num_of_passed + num_of_failed);
+        info!(target: "reth::cli", "{num_of_passed}/{} tests passed\n", num_of_passed + num_of_failed);
 
         if num_of_failed != 0 {
             Err(eyre!("Failed {num_of_failed} tests"))

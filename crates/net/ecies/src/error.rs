@@ -64,7 +64,7 @@ pub enum ECIESErrorImpl {
     /// Error when decoding RLP data
     #[error(transparent)]
     RLPDecoding(reth_rlp::DecodeError),
-    /// Error when convering to integer
+    /// Error when converting to integer
     #[error(transparent)]
     FromInt(std::num::TryFromIntError),
     /// Error when trying to split an array beyond its length

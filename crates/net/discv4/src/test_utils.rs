@@ -291,7 +291,7 @@ mod tests {
     /// messages and we check the actual service receives answers
     #[tokio::test(flavor = "multi_thread")]
     async fn can_mock_discovery() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let mut rng = thread_rng();
         let (_, mut service) = create_discv4().await;

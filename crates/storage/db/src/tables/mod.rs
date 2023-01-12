@@ -213,7 +213,7 @@ table!(
     ///     // Is there any transaction after number 150 that changed this account?
     ///     {
     ///         let tx = db.tx().expect("");
-    ///         let mut cursor = tx.cursor::<AccountHistory>().unwrap();
+    ///         let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
 
     ///         // It will seek the one greater or equal to the query. Since we have `Address | 100`,
     ///         // `Address | 200` in the database and we're querying `Address | 150` it will return us

@@ -37,17 +37,24 @@ The project is not ready for use. We hope to have full sync implemented sometime
 
 # For Developers
 
+## Running Reth
+
+See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how to run Reth.
+
 ## Build & Test
 
 Rust minimum required version to build this project is 1.65.0 published 02.11.2022
 
-To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/install-and-build/installing-geth)
+Prerequisites: libclang, `libclang-dev` on Debian
+
+To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/getting-started/installing-geth)
 
 ```sh
 git clone https://github.com/paradigmxyz/reth
 cd reth
 cargo test --all
 ```
+
 
 ## Contributing and Getting Help
 

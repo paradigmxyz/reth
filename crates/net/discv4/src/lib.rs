@@ -93,6 +93,7 @@ const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 /// fit in one datagram. The safe number of nodes that always fit in a datagram is 12, with worst
 /// case all of them being IPv6 nodes. This is calculated by `(MAX_PACKET_SIZE - (header + expire +
 /// rlp overhead) / size(rlp(Node_IPv6))`
+/// Even in the best case where all nodes are IPv4, only 14 nodes fit into one packet.
 const SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = (MAX_PACKET_SIZE - 109) / 91;
 
 /// The timeout used to identify expired nodes, 24h
@@ -511,6 +512,11 @@ impl Discv4Service {
         }
     }
 
+    /// Returns the [PeerId] that identifies this node
+    pub fn local_peer_id(&self) -> &PeerId {
+        &self.local_node_record.id
+    }
+
     /// Returns the address of the UDP socket
     pub fn local_addr(&self) -> SocketAddr {
         self.local_address
@@ -738,7 +744,7 @@ impl Discv4Service {
     }
 
     fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
-        if record.id == self.local_node_record.id {
+        if record.id == *self.local_peer_id() {
             return
         }
 
@@ -827,13 +833,14 @@ impl Discv4Service {
 
     /// Message handler for an incoming `Ping`
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
-        // update the record
+        // create the record
         let record = NodeRecord {
-            address: ping.from.address,
+            address: remote_addr.ip(),
+            udp_port: remote_addr.port(),
             tcp_port: ping.from.tcp_port,
-            udp_port: ping.from.udp_port,
             id: remote_id,
-        };
+        }
+        .into_ipv4_mapped();
 
         let key = kad_key(record.id);
 
@@ -854,7 +861,7 @@ impl Discv4Service {
                 self.notify(DiscoveryUpdate::Added(record));
                 None
             }
-            _ => return,
+            kbucket::Entry::SelfEntry => return,
         };
 
         // send the pong
@@ -882,6 +889,11 @@ impl Discv4Service {
 
     // Guarding function for [`Self::send_ping`] that applies pre-checks
     fn try_ping(&mut self, node: NodeRecord, reason: PingReason) {
+        if node.id == *self.local_peer_id() {
+            // don't ping ourselves
+            return
+        }
+
         if self.pending_pings.contains_key(&node.id) ||
             self.pending_find_nodes.contains_key(&node.id)
         {
@@ -997,7 +1009,8 @@ impl Discv4Service {
                     tcp_port: remote_addr.port(),
                     udp_port: remote_addr.port(),
                     id: node_id,
-                };
+                }
+                .into_ipv4_mapped();
                 let val = NodeEntry::new(node);
                 let _ = entry.insert(
                     val,
@@ -1107,7 +1120,7 @@ impl Discv4Service {
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that where discovered.
-        for node in msg.nodes {
+        for node in msg.nodes.into_iter().map(NodeRecord::into_ipv4_mapped) {
             // prevent banned peers from being added to the context
             if self.config.ban_list.is_banned(&node.id, &node.address) {
                 trace!(target: "discv4", peer_id=?node.id, ip=?node.address, "ignoring banned record");
@@ -1833,10 +1846,11 @@ mod tests {
     use super::*;
     use crate::{
         bootnodes::mainnet_nodes,
-        test_utils::{create_discv4, create_discv4_with_config, rng_record},
+        test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record},
     };
+    use rand::{thread_rng, Rng};
     use reth_primitives::{hex_literal::hex, ForkHash};
-    use std::future::poll_fn;
+    use std::{future::poll_fn, net::Ipv4Addr};
 
     #[test]
     fn test_local_rotator() {
@@ -1874,7 +1888,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_lookup() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
         let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
 
         let all_nodes = mainnet_nodes();
@@ -1908,8 +1922,40 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_mapped_ipv4() {
+        reth_tracing::init_test_tracing();
+        let mut rng = thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+        let addr: SocketAddr = (v6, 30303).into();
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: 0,
+            enr_sq: Some(rng.gen()),
+        };
+
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, H256::random());
+
+        let key = kad_key(id);
+        match service.kbuckets.entry(&key) {
+            kbucket::Entry::Present(entry, _) => {
+                let node_addr = entry.value().record.address;
+                assert!(node_addr.is_ipv4());
+                assert_eq!(node_addr, IpAddr::from(v4));
+            }
+            _ => unreachable!(),
+        };
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_single_lookups() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1942,8 +1988,41 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_no_local_in_closest() {
+        reth_tracing::init_test_tracing();
+
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let target_key = kad_key(PeerId::random());
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        let closest = service
+            .kbuckets
+            .closest_values(&target_key)
+            .map(|n| n.value.record)
+            .take(MAX_NODES_PER_BUCKET)
+            .collect::<Vec<_>>();
+
+        assert_eq!(closest.len(), 1);
+        assert!(!closest.iter().any(|r| r.id == *service.local_peer_id()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_random_lookup() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1977,7 +2056,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_service_commands() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (discv4, mut service) = create_discv4_with_config(config).await;

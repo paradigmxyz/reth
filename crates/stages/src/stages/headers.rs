@@ -107,7 +107,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
                 if self.is_stage_done(tx, current_progress).await? {
                     let stage_progress = current_progress.max(
-                        tx.cursor::<tables::CanonicalHeaders>()?
+                        tx.cursor_read::<tables::CanonicalHeaders>()?
                             .last()?
                             .map(|(num, _)| num)
                             .unwrap_or_default(),
@@ -144,6 +144,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
+        info!(target: "sync::stages::headers", to_block = input.unwind_to, "Unwinding");
         tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;
@@ -175,7 +176,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
     ) -> Result<bool, StageError> {
-        let mut header_cursor = tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let (head_num, _) = header_cursor
             .seek_exact(stage_progress)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
@@ -190,8 +191,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         stage_progress: u64,
     ) -> Result<(SealedHeader, H256), StageError> {
         // Create a cursor over canonical header hashes
-        let mut cursor = tx.cursor::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
@@ -258,8 +259,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
+        let mut cursor_header = tx.cursor_write::<tables::Headers>()?;
+        let mut cursor_canonical = tx.cursor_write::<tables::CanonicalHeaders>()?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -407,7 +408,7 @@ mod tests {
 
         // Checkpoint and no gap
         tx.put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
@@ -417,7 +418,7 @@ mod tests {
 
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
@@ -427,7 +428,7 @@ mod tests {
 
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
             .expect("failed to write header");
         assert_matches!(

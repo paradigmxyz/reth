@@ -7,7 +7,7 @@ use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "arbitrary"))]
 use proptest::{
     arbitrary::{any_with, Arbitrary as PropTestArbitrary, ParamsFor},
     strategy::{BoxedStrategy, Strategy},
@@ -29,7 +29,7 @@ construct_fixed_hash! {
 impl_hash_compact!(Bloom);
 impl_fixed_hash_serde!(Bloom, BLOOM_BYTE_LENGTH);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "arbitrary"))]
 impl PropTestArbitrary for Bloom {
     type Parameters = ParamsFor<u8>;
     type Strategy = BoxedStrategy<Bloom>;

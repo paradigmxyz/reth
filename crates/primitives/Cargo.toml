@@ -17,7 +17,7 @@ reth-rlp = { path = "../common/rlp", features = [
 reth-rlp-derive = { path = "../common/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde"] }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = ["serde"] }
 
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
@@ -45,7 +45,6 @@ serde = "1.0"
 serde_with = "2.1.0"
 thiserror = "1"
 sucds = "0.5.0"
-arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 hex = "0.4"
 hex-literal = "0.3"
 modular-bitfield = "0.11.2"
@@ -59,15 +58,21 @@ triehash = "0.8"
 plain_hasher = "0.2"
 hash-db = "0.15"
 
+# arbitrary utils
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+proptest = { version = "1.0", optional = true }
+proptest-derive = { version = "0.3", optional = true }
+
 [dev-dependencies]
-arbitrary = { version = "1.1.7", features = ["derive"] }
 serde_json = "1.0"
 hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a13c9c8a0cda728941f1b26db0beb1025744ea9", features = ["with-serde", "arbitrary"] }
-proptest = { version = "1.0" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = ["serde", "arbitrary"] }
 
+arbitrary = { version = "1.1.7", features = ["derive"] }
+proptest = { version = "1.0" }
+proptest-derive = "0.3"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
@@ -75,4 +80,4 @@ secp256k1 = "0.24.2"
 
 [features]
 default = []
-arbitrary = ["dep:arbitrary", "revm-interpreter/arbitrary"]
+arbitrary = ["revm-interpreter/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]

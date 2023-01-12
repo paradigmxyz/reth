@@ -184,7 +184,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
 pub fn is_log_equal(revm_log: &revm::Log, reth_log: &reth_primitives::Log) -> bool {
     revm_log.topics.len() == reth_log.topics.len() &&
         revm_log.address.0 == reth_log.address.0 &&
-        revm_log.data == reth_log.data &&
+        revm_log.data == reth_log.data.0 &&
         !revm_log
             .topics
             .iter()

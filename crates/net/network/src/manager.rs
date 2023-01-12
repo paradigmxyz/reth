@@ -38,6 +38,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
 };
+use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
@@ -127,6 +128,12 @@ impl<C> NetworkManager<C> {
     pub fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
+
+    /// Returns a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// inside of the [`NetworkHandle`]
+    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
+        self.handle.bandwidth_meter()
+    }
 }
 
 impl<C> NetworkManager<C>
@@ -174,6 +181,8 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
+        let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
+
         let sessions = SessionManager::new(
             secret_key,
             sessions_config,
@@ -181,6 +190,7 @@ where
             status,
             hello_message,
             fork_filter,
+            bandwidth_meter.clone(),
         );
         let state = NetworkState::new(client, discovery, peers_manager, chain_spec.genesis_hash());
 
@@ -196,6 +206,7 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
+            bandwidth_meter,
         );
 
         Ok(Self {
@@ -694,10 +705,16 @@ where
                         ?error,
                         "Outgoing connection error"
                     );
-                    this.swarm
-                        .state_mut()
-                        .peers_mut()
-                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+
+                    this.swarm.state_mut().peers_mut().on_outgoing_connection_failure(
+                        &remote_addr,
+                        &peer_id,
+                        &error,
+                    );
+
+                    this.metrics
+                        .outgoing_connections
+                        .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::BadMessage { peer_id } => {
                     this.swarm
