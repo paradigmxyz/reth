@@ -12,7 +12,7 @@ use pin_project_lite::pin_project;
 use std::{
     fmt,
     future::{poll_fn, Future},
-    net::IpAddr,
+    net::{AddrParseError, IpAddr},
     pin::Pin,
     str::FromStr,
     task::{ready, Context, Poll},
@@ -29,7 +29,9 @@ pub enum NatResolver {
     /// Resolve via Upnp
     Upnp,
     /// Resolve external IP via [public_ip::Resolver]
-    ExternalIp,
+    PublicIp,
+    /// Use the given [IpAddr]
+    ExternalIp(IpAddr),
     /// Resolve nothing
     None,
 }
@@ -48,22 +50,42 @@ impl fmt::Display for NatResolver {
         match self {
             NatResolver::Any => f.write_str("any"),
             NatResolver::Upnp => f.write_str("upnp"),
-            NatResolver::ExternalIp => f.write_str("extip"),
+            NatResolver::PublicIp => f.write_str("publicip"),
+            NatResolver::ExternalIp(ip) => write!(f, "extip:{ip}"),
             NatResolver::None => f.write_str("none"),
         }
     }
 }
 
+/// Error when parsing a [NatResolver]
+#[derive(Debug, thiserror::Error)]
+pub enum ParseNatResolverError {
+    /// Failed to parse provided IP
+    #[error(transparent)]
+    AddrParseError(#[from] AddrParseError),
+    /// Failed to parse due to unknown variant
+    #[error("Unknown Nat Resolver variant: {0}")]
+    UnknonwVariant(String),
+}
+
 impl FromStr for NatResolver {
-    type Err = String;
+    type Err = ParseNatResolverError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let r = match s {
             "any" => NatResolver::Any,
             "upnp" => NatResolver::Upnp,
-            "extip" | "external-ip" => NatResolver::ExternalIp,
             "none" => NatResolver::None,
-            _ => return Err(format!("Unknown Nat Resolver: {s}")),
+            "publicip" | "public-ip" => NatResolver::PublicIp,
+            s => {
+                if let Some(ip) = s.strip_prefix("extip:") {
+                    NatResolver::ExternalIp(ip.parse::<IpAddr>()?)
+                } else {
+                    return Err(ParseNatResolverError::UnknonwVariant(format!(
+                        "Unknown Nat Resolver: {s}"
+                    )))
+                }
+            }
         };
         Ok(r)
     }
@@ -151,7 +173,8 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
             .await
         }
         NatResolver::Upnp => resolve_external_ip_upnp().await,
-        NatResolver::ExternalIp => resolve_external_ip().await,
+        NatResolver::PublicIp => resolve_external_ip().await,
+        NatResolver::ExternalIp(ip) => Some(ip),
         NatResolver::None => None,
     }
 }
@@ -224,6 +247,7 @@ async fn resolve_external_ip() -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[tokio::test]
     #[ignore]
@@ -243,5 +267,16 @@ mod tests {
         dbg!(ip);
         let ip = interval.tick().await;
         dbg!(ip);
+    }
+
+    #[test]
+    fn test_from_str() {
+        assert_eq!(NatResolver::Any, "any".parse().unwrap());
+        assert_eq!(NatResolver::None, "none".parse().unwrap());
+
+        let ip = NatResolver::ExternalIp(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        let s = "extip:0.0.0.0";
+        assert_eq!(ip, s.parse().unwrap());
+        assert_eq!(ip.to_string().as_str(), s);
     }
 }
