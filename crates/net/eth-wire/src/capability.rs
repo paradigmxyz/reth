@@ -78,7 +78,7 @@ impl proptest::arbitrary::Arbitrary for Capability {
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         any_with::<String>(args) // TODO: what possible values?
             .prop_flat_map(move |name| {
-                any_with::<usize>(ParamsFor::<usize>::default()) // TODO: What's the max?
+                any_with::<usize>(()) // TODO: What's the max?
                     .prop_map(move |version| Capability { name: name.clone().into(), version })
             })
             .boxed()

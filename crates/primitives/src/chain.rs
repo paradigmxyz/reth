@@ -144,9 +144,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Chain {
         if u.ratio(1, 2)? {
             let chain = u.int_in_range(0..=(ethers_core::types::Chain::COUNT - 1))?;
 
-            return Ok(Chain::Named(
-                ethers_core::types::Chain::iter().nth(chain as usize).expect("in range"),
-            ))
+            return Ok(Chain::Named(ethers_core::types::Chain::iter().nth(chain).expect("in range")))
         }
 
         Ok(Self::Id(u64::arbitrary(u)?))
@@ -172,7 +170,7 @@ impl proptest::arbitrary::Arbitrary for Chain {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         let named = any::<Selector>()
             .prop_map(move |sel| Chain::Named(sel.select(ethers_core::types::Chain::iter())));
-        let id = any::<u64>().prop_map(|id| Chain::from(id));
+        let id = any::<u64>().prop_map(Chain::from);
         proptest::strategy::Union::new_weighted(vec![(50, named.boxed()), (50, id.boxed())]).boxed()
     }
 }
