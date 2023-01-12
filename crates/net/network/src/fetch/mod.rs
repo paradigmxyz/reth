@@ -408,6 +408,7 @@ mod tests {
         })
         .await;
     }
+
     #[tokio::test]
     async fn test_peer_rotation() {
         let manager = PeersManager::new(PeersConfig::default());
@@ -424,6 +425,31 @@ mod tests {
         assert_eq!(next_peer, Some(peer1));
         // peer1 must now move to the end of the map
         assert_eq!(&peer1, fetcher.peers.back().unwrap().0);
+        assert_eq!(fetcher.next_peer(), Some(peer2));
+    }
+
+    #[tokio::test]
+    async fn test_peer_prioritization() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle());
+        // Add a few random peers
+        let peer1 = H512::random();
+        let peer2 = H512::random();
+        let peer3 = H512::random();
+
+        let peer2_timeout = Arc::new(AtomicU64::new(300));
+
+        fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(30)));
+        fetcher.new_active_peer(peer2, H256::random(), 2, Arc::clone(&peer2_timeout));
+        fetcher.new_active_peer(peer3, H256::random(), 3, Arc::new(AtomicU64::new(50)));
+
+        // Must always get peer1 (lowest timeout)
+        assert_eq!(fetcher.next_peer(), Some(peer1));
+        assert_eq!(fetcher.next_peer(), Some(peer1));
+        // peer2's timeout changes below peer1's
+        peer2_timeout.store(10, Ordering::Relaxed);
+        // Then we get peer 2 always (now lowest)
+        assert_eq!(fetcher.next_peer(), Some(peer2));
         assert_eq!(fetcher.next_peer(), Some(peer2));
     }
 }
