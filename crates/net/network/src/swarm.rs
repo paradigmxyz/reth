@@ -121,12 +121,14 @@ where
                 status,
                 messages,
                 direction,
+                timeout,
             } => {
                 self.state.on_session_activated(
                     peer_id,
                     capabilities.clone(),
                     status,
                     messages.clone(),
+                    timeout,
                 );
                 Some(SwarmEvent::SessionEstablished {
                     peer_id,

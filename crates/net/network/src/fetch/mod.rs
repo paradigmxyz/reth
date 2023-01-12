@@ -11,6 +11,7 @@ use reth_interfaces::p2p::{
 use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
+    sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
@@ -62,8 +63,15 @@ impl StateFetcher {
     }
 
     /// Invoked when connected to a new peer.
-    pub(crate) fn new_active_peer(&mut self, peer_id: PeerId, best_hash: H256, best_number: u64) {
-        self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
+    pub(crate) fn new_active_peer(
+        &mut self,
+        peer_id: PeerId,
+        best_hash: H256,
+        best_number: u64,
+        timeout: Arc<AtomicU64>,
+    ) {
+        self.peers
+            .insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number, timeout });
     }
 
     /// Removes the peer from the peer list, after which it is no longer available for future
@@ -271,6 +279,9 @@ struct Peer {
     best_hash: H256,
     /// Tracks the best number of the peer.
     best_number: u64,
+    /// Tracks the current timeout value we use for the peer.
+    #[allow(dead_code)]
+    timeout: Arc<AtomicU64>,
 }
 
 /// Tracks the state of an individual peer
@@ -398,9 +409,9 @@ mod tests {
         let peer1 = H512::random();
         let peer2 = H512::random();
         let peer3 = H512::random();
-        fetcher.new_active_peer(peer1, H256::random(), 1);
-        fetcher.new_active_peer(peer2, H256::random(), 2);
-        fetcher.new_active_peer(peer3, H256::random(), 3);
+        fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(1)));
+        fetcher.new_active_peer(peer2, H256::random(), 2, Arc::new(AtomicU64::new(1)));
+        fetcher.new_active_peer(peer3, H256::random(), 3, Arc::new(AtomicU64::new(1)));
         let next_peer = fetcher.next_peer();
         // Must get peer1 as our first peer
         assert_eq!(next_peer, Some(peer1));
