@@ -10,6 +10,5 @@ description = "tracing helpers"
 [dependencies]
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
-tracing-futures = "0.2"
 tracing-appender = "0.2"
 tracing-journald = "0.3"
