@@ -20,6 +20,7 @@ reth-executor = { path = "../../crates/executor" }
 # reth-rpc = {path = "../../crates/net/rpc"}
 reth-rlp = { path = "../../crates/common/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
+reth-network-api = {path = "../../crates/net/network-api" }
 reth-downloaders = {path = "../../crates/net/downloaders" }
 reth-cli-utils = { path = "../../crates/cli/utils" }
 reth-tracing = { path = "../../crates/tracing" }

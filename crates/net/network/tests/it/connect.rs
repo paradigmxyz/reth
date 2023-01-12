@@ -14,6 +14,7 @@ use reth_interfaces::{
 };
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
+use reth_network_api::NetworkInfo;
 use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
