@@ -65,9 +65,14 @@ impl ChainSpec {
         self.hardforks.get(&fork).copied()
     }
 
-    /// Get the Paris block number
-    pub fn paris_block(&self) -> Option<BlockNumber> {
-        self.paris_block
+    /// Get the Paris status
+    pub fn paris_status(&self) -> ParisStatus {
+        match self.paris_ttd {
+            Some(terminal_total_difficulty) => {
+                ParisStatus::Supported { terminal_total_difficulty, block: self.paris_block }
+            }
+            None => ParisStatus::NotSupported,
+        }
     }
 
     /// Get the Shanghai block number
@@ -104,7 +109,6 @@ impl ChainSpec {
             let mut curr_forkhash = ForkHash::from(self.genesis_hash());
             let mut curr_block_number = 0;
 
-            println!("Fork block: {:?}", fork_block);
             for (_, b) in self.all_forks_blocks() {
                 if fork_block >= b {
                     if b != curr_block_number {
@@ -120,14 +124,10 @@ impl ChainSpec {
             None
         }
     }
-
-    /// Get an iterator of all harforks with theirs respectives block number
-    pub fn merge_terminal_total_difficulty(&self) -> Option<U256> {
-        self.paris_ttd
-    }
 }
 
 /// A helper to build custom chain specs
+#[derive(Debug, Default)]
 pub struct ChainSpecBuilder;
 
 impl ChainSpecBuilder {
@@ -181,6 +181,40 @@ impl ChainSpecBuilder {
 
     pub fn build(&self) -> ChainSpec {
         todo!()
+    }
+}
+
+/// Merge Status
+#[derive(Debug)]
+pub enum ParisStatus {
+    /// Paris is not supported
+    NotSupported,
+    /// Paris settings has been set in the chain spec
+    Supported {
+        /// The merge terminal total difficulty
+        terminal_total_difficulty: U256,
+        /// The Paris block number
+        block: Option<BlockNumber>,
+    },
+}
+
+impl ParisStatus {
+    /// Returns the Paris block number
+    pub fn block_number(&self) -> Option<BlockNumber> {
+        match &self {
+            ParisStatus::NotSupported => None,
+            ParisStatus::Supported { block, .. } => *block,
+        }
+    }
+
+    /// Returns the merge terminal total difficulty
+    pub fn terminal_total_difficulty(&self) -> Option<U256> {
+        match &self {
+            ParisStatus::NotSupported => None,
+            ParisStatus::Supported { terminal_total_difficulty, .. } => {
+                Some(*terminal_total_difficulty)
+            }
+        }
     }
 }
 

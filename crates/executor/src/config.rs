@@ -13,7 +13,7 @@ pub const WEI_5ETH: u128 = 5000000000000000000u128;
 pub fn revm_spec(chain_spec: &ChainSpec, for_block: BlockNumber) -> revm::SpecId {
     match for_block {
         b if Some(b) >= chain_spec.shanghai_block() => revm::MERGE_EOF,
-        b if Some(b) >= chain_spec.paris_block() => revm::MERGE,
+        b if Some(b) >= chain_spec.paris_status().block_number() => revm::MERGE,
         b if Some(b) >= chain_spec.fork_block(Hardfork::London) => revm::LONDON,
         b if Some(b) >= chain_spec.fork_block(Hardfork::Berlin) => revm::BERLIN,
         b if Some(b) >= chain_spec.fork_block(Hardfork::Istanbul) => revm::ISTANBUL,

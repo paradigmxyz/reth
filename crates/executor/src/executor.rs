@@ -411,7 +411,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
     match header.number {
-        n if Some(n) >= chain_spec.paris_block() => None,
+        n if Some(n) >= chain_spec.paris_status().block_number() => None,
         n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
         n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
         _ => Some(WEI_5ETH),

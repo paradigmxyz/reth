@@ -104,7 +104,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         let chain_spec: ChainSpec = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;
-        let has_block_reward = chain_spec.paris_block().is_some();
+        let has_block_reward = chain_spec.paris_status().block_number().is_some();
 
         // Create db and acquire transaction
         let db = create_test_rw_db::<WriteMap>();

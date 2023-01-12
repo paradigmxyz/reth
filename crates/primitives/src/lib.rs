@@ -37,7 +37,7 @@ pub use account::Account;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::Chain;
-pub use chain_spec::{ChainSpec, ChainSpecBuilder};
+pub use chain_spec::{ChainSpec, ChainSpecBuilder, ParisStatus};
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};

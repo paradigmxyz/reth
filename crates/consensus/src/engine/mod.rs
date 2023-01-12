@@ -188,7 +188,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         };
 
         if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
-            if Some(parent_td) <= self.chain_spec.merge_terminal_total_difficulty() {
+            if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: EngineApiError::PayloadPreMerge.to_string(),
                 }))
@@ -271,7 +271,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
 
         let merge_terminal_td = self
             .chain_spec
-            .merge_terminal_total_difficulty()
+            .paris_status()
+            .terminal_total_difficulty()
             .ok_or(EngineApiError::UnknownMergeTerminalTotalDifficulty)?;
 
         // Compare total difficulty values

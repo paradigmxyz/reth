@@ -47,7 +47,7 @@ pub fn validate_header_standalone(
 
     // EIP-3675: Upgrade consensus to Proof-of-Stake:
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if Some(header.number) >= chain_spec.paris_block() {
+    if Some(header.number) >= chain_spec.paris_status().block_number() {
         if header.difficulty != U256::ZERO {
             return Err(Error::TheMergeDifficultyIsNotZero)
         }
@@ -260,7 +260,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if chain_spec.paris_block() > Some(child.number) {
+    if chain_spec.paris_status().block_number() > Some(child.number) {
         // TODO how this needs to be checked? As ice age did increment it by some formula
     }
 
