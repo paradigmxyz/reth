@@ -30,6 +30,26 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+#[rustfmt::skip]
+#[allow(unreachable_code)]
+pub fn main_codec_no_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {    
+    #[cfg(feature = "compact")]
+    return use_compact_no_arbitrary(args, input);
+
+    #[cfg(feature = "scale")]
+    return use_scale(args, input);
+
+    #[cfg(feature = "postcard")]
+    return use_postcard(args, input);
+
+    #[cfg(feature = "no_codec")]
+    return no_codec(args, input);
+
+    // no features
+    no_codec(args, input)
+}
+
+#[proc_macro_attribute]
 pub fn use_scale(_args: TokenStream, input: TokenStream) -> TokenStream {
     let mut ast = parse_macro_input!(input as DeriveInput);
     let compactable_types = ["u8", "u16", "u32", "i32", "i64", "u64", "f32", "f64"];
@@ -81,6 +101,17 @@ pub fn use_compact(_args: TokenStream, input: TokenStream) -> TokenStream {
         }
         .into(),
     )
+}
+
+#[proc_macro_attribute]
+pub fn use_compact_no_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    quote! {
+        #[derive(Compact, serde::Serialize, serde::Deserialize)]
+        #ast
+    }
+    .into()
 }
 
 /// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum. It

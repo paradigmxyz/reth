@@ -2,7 +2,7 @@ use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{main_codec, main_codec_no_arbitrary, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 pub use tx_type::TxType;
@@ -185,6 +185,15 @@ impl Transaction {
         let mut buf = BytesMut::new();
         self.encode(&mut buf);
         keccak256(&buf)
+    }
+
+    /// Get chain_id.
+    pub fn chain_id(&self) -> Option<&u64> {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => chain_id.as_ref(),
+            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(chain_id),
+            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(chain_id),
+        }
     }
 
     /// Sets the transaction's chain id to the provided value.
@@ -525,7 +534,7 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[main_codec]
+#[main_codec_no_arbitrary]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSigned {
     /// Transaction hash
@@ -536,6 +545,53 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    prelude::{any, Strategy},
+    strategy::BoxedStrategy,
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for TransactionSigned {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<TransactionSigned>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        any::<(Transaction, Signature)>()
+            .prop_map(move |(mut transaction, sig)| {
+                if let Some(chain_id) = transaction.chain_id().cloned() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+                let mut tx =
+                    TransactionSigned { hash: Default::default(), signature: sig, transaction };
+                tx.hash = tx.recalculate_hash();
+                tx
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut transaction = Transaction::arbitrary(u)?;
+        if let Some(chain_id) = transaction.chain_id().cloned() {
+            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        let mut tx = TransactionSigned {
+            hash: Default::default(),
+            signature: Signature::arbitrary(u)?,
+            transaction,
+        };
+        tx.hash = tx.recalculate_hash();
+
+        Ok(tx)
+    }
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
@@ -1122,4 +1178,58 @@ mod tests {
         assert_eq!(signed_tx.hash(), hash, "Expected same hash");
         assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
     }
+
+    #[test]
+    fn teteet() {
+        //         use crate::hex_literal::hex;
+
+        //         let signer: Address = hex!("dd6b8b3dc6b7ad97db52f08a275ff4483e024cea").into();
+        //         let hash: H256 =
+        //
+        // hex!("0ec0b6a2df4d87424e5f6ad2a654e27aaeb7dac20ae9e8385cc09087ad532ee0").into();
+        // chain_id
+        //     : None, nonce
+        //     : 13091308713095230788, gas_price
+        //     : 213407433170791825287850520213750711034, gas_limit
+        //     : 3641371235513288440, to
+        //     : Create, value
+        //     : 301516100762771567591377666061110919354, input
+        //     : Bytes(0xb6846155ef59e452635b6dc2e26f55bd6e8a8b2ea3228229ac22dc6a99faae5385a51dc48119ba51c8b3717719535138e03b6aecddc3058b2f9c89065be7a9319116779edba9b29aa0854b7e9ba79b5ec6e556ed59ef25429996653d035762c6f5d57b28aa8fea8b840916f95ce8999ebf0ebeedc0ea070f3bf7e05c2086328738976ef68feecf325d6f350c25c9ae5e8811dcb3ea4a00bcb00bceb44b4c37127c8fa93a4394e6d730312101f66005b75ca1e6683156f72a52815ef69b000a0867b7d287dfe4c51e8d826d55b97786812df3dbcad6c3abd82f016b44a2563e45266ca40b0fc167fddcb24fc1adfef48c94e8f5a6bd46323ce4dca1435cca34aab04774ae12c372da048d1f7f74f523c17a920bbf7539429b0c3c12b3ee4a451a5ac3e88bd1ae63c4ec65f858247a8dcb25270cb5f11a7e9153852437e7ad70a138c0345f4a1b1767ac948ee1c83f30e2868e7b69bc4feee179b0d94a14b7a3f9b41ea879500f6210090899cfbcb123093f1b9e36e22e9879b99ad09e578d75fd99cb63908c271147c1470b2543952c748b9cc0fd07192aa5bc5f991994dc8cdfb5e167dada2bf03f7f6cddccd9c235a450c8256d9c008e6472261059901b4d41a405b63a3217b11d10a6ca0b8624e6fa1d6946b8963f71c670efa1507ba4663bc5021dff6a40705338160e1d26e4315c00693dc7abc2719edb13b08fd8af7d8832d6b28b7a2f11e02c52af0f933f2e83aa2603adca3d171c98cb9ef3deb4e043cc) }) }
+
+        //         let tx = Transaction::Legacy( TxLegacy {
+        //             chain_id: 1,
+        //             nonce: 0x42,
+        //             gas_limit: 44386,
+        //             to: TransactionKind::Call(
+        // hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),             value: 0,
+        //             input:
+        // hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000"
+        // ).into(),             max_fee_per_gas: 0x4a817c800,
+        //             max_priority_fee_per_gas: 0x3b9aca00,
+        //             access_list: AccessList::default(),
+        //         });
+
+        //         let sig = Signature {
+        //             r:
+        // U256::from_str("0xbf7301ca377173ae58ab0bfd13939e65f5716b2b8b3549f7e8cbe62282720044_U256")
+        //                 .unwrap(),
+        //             s:
+        // U256::from_str("0x6caf23be918faa3d27182e4687dca212c4a9f75ccdff88e8d07097d8f4538208_U256")
+        //                 .unwrap(),
+        //             odd_y_parity: true,
+        //         };
+
+        //         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
+        //         assert_eq!(signed_tx.hash(), hash, "Expected same hash");
+        //         assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should
+        // pass.");
+    }
 }
+
+// TransactionSigned { hash
+//     : 0x1779b67eae4e0ea41d74176d4efdb614d5f1322935923bebab1d487038ed7d4e, signature
+//     : Signature { r
+//: 0xbf7301ca377173ae58ab0bfd13939e65f5716b2b8b3549f7e8cbe62282720044_U256, s
+//: 0x6caf23be918faa3d27182e4687dca212c4a9f75ccdff88e8d07097d8f4538208_U256, odd_y_parity
+// : true }, transaction
+// : Legacy(TxLegacy {
