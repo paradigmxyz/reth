@@ -251,7 +251,16 @@ impl PeersManager {
     /// Temporarily puts the peer in timeout
     fn backoff_peer(&mut self, peer_id: PeerId, kind: BackoffKind) {
         trace!(target: "net::peers", ?peer_id, "backing off");
-        self.ban_list.ban_peer_until(peer_id, self.backoff_durations.backoff_until(kind));
+
+        // Get mutable reference to peer.
+        // TODO: Unwrap should never fail but we should probably add some safety mechanism
+        let peer = self.peers.get_mut(&peer_id).unwrap();
+
+        // Calculates the backoff time and multiplies it with number of times the peer was already
+        // backed off
+        let duration = self.backoff_durations.backoff_until(kind, peer.backoff_counter);
+        self.ban_list.ban_peer_until(peer_id, duration);
+        peer.backoff_counter += 1;
     }
 
     /// Unbans the peer
@@ -704,6 +713,8 @@ pub struct Peer {
     remove_after_disconnect: bool,
     /// The kind of peer
     kind: PeerKind,
+    /// Counts number of times the peer was backed off   
+    backoff_counter: u32,
 }
 
 // === impl Peer ===
@@ -725,6 +736,7 @@ impl Peer {
             fork_id: None,
             remove_after_disconnect: false,
             kind: Default::default(),
+            backoff_counter: 1,
         }
     }
 
@@ -999,9 +1011,10 @@ impl PeerBackoffDurations {
     }
 
     /// Returns the timestamp until which we should backoff
-    pub fn backoff_until(&self, kind: BackoffKind) -> std::time::Instant {
+    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u32) -> std::time::Instant {
+        let backoff_time = self.backoff(kind) * backoff_counter;
         let now = std::time::Instant::now();
-        now + self.backoff(kind)
+        now + backoff_time
     }
 }
 
