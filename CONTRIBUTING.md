@@ -96,6 +96,7 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
   "clippy",
   "--all",
   "--all-features",
+  "--message-format=json",
   "--",
   "-D",
   "warnings"
