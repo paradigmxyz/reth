@@ -90,6 +90,16 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
 ```json
 "editor.formatOnSave": true,
 "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
+"rust-analyzer.checkOnSave.overrideCommand": [
+  "cargo",
+  "+nightly",
+  "clippy",
+  "--all",
+  "--all-features",
+  "--",
+  "-D",
+  "warnings"
+],
 "[rust]": {
   "editor.defaultFormatter": "rust-lang.rust-analyzer"
 }
