@@ -98,8 +98,7 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
   "--all-features",
   "--message-format=json",
   "--",
-  "-D",
-  "warnings"
+  "-D warnings"
 ],
 "[rust]": {
   "editor.defaultFormatter": "rust-lang.rust-analyzer"
