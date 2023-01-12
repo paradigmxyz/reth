@@ -38,7 +38,7 @@ pub struct GetNodeData(pub Vec<H256>);
     Deserialize,
     Default,
 )]
-pub struct NodeData(pub Vec<bytes::Bytes>);
+pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]
 mod test {
