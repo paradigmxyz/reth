@@ -121,7 +121,7 @@ impl StateFetcher {
             .peers
             .iter()
             .filter(|(_, peer)| peer.state.is_idle())
-            .min_by_key(|(_, peer)| peer.timeout.load(Ordering::SeqCst).to_owned())
+            .min_by_key(|(_, peer)| peer.timeout.load(Ordering::Relaxed).to_owned())
             .map(|(id, _)| id.to_owned());
 
         if let Some(peer_id) = peer {

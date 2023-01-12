@@ -243,7 +243,7 @@ impl ActiveSession {
 
     /// Returns the deadline timestamp at which the request times out
     fn request_deadline(&self) -> Instant {
-        Instant::now() + Duration::from_millis(self.request_timeout.load(Ordering::SeqCst))
+        Instant::now() + Duration::from_millis(self.request_timeout.load(Ordering::Relaxed))
     }
 
     /// Handle a Response to the peer
@@ -357,9 +357,9 @@ impl ActiveSession {
     fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
         let elapsed = received.saturating_duration_since(sent);
 
-        let current = Duration::from_millis(self.request_timeout.load(Ordering::SeqCst));
+        let current = Duration::from_millis(self.request_timeout.load(Ordering::Relaxed));
         let request_timeout = calculate_new_timeout(current, elapsed);
-        self.request_timeout.store(request_timeout.as_millis() as u64, Ordering::SeqCst);
+        self.request_timeout.store(request_timeout.as_millis() as u64, Ordering::Relaxed);
         self.timeout_interval = tokio::time::interval(request_timeout);
     }
 }
