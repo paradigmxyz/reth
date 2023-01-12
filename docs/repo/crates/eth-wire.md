@@ -80,25 +80,45 @@ pub struct RequestPair<T> {
 
 ```
 Every `Ethmessage` has a correspoding rust struct which implements the `Encodable` and `Decodable` traits.
-TODO also explain RLPDecodable and RLPEncodable here
+These traits are defined as follows:
 
-These traits describe how the `Ethmessage` should be serialized/deserialized using the RLP encoding.
+[Crate: crates/common/rlp](...)
+```rust, ignore
+pub trait Decodable: Sized {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError>;
+}
+#[auto_impl(&)]
+#[cfg_attr(feature = "alloc", auto_impl(Box, Arc))]
+pub trait Encodable {
+    fn encode(&self, out: &mut dyn BufMut);
+    fn length(&self) -> usize {
+        let mut out = BytesMut::new();
+        self.encode(&mut out);
+        out.len()
+    }
+}
+```
+These traits describe how the `Ethmessage` should be serialized/deserialized into raw bytes using the RLP format.
+In reth all rlp encoding is handled by the rlp and rlp-derive crates.
+You can learn more about RLP by looking at the [ETH wiki](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/).
 
-TODO: add trait definitions
 
+### Example: The Transactions message
+Let's understand how an `EthMessage` is implemented by taking a look at the `Transactions` Message. The eth specification describes a Transaction message as a list of RLP encoded transactions:
 
-Most of these messages are exactly what is defined in the specification.
-For example, lets look at the `Transactions` Message:
-
-The specification describes a Transaction message as a list of RLP encoded transactions.
+[File: ethereum/devp2p/caps/eth.md](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#transactions-0x02)
 ```
 Transactions (0x02)
 [tx₁, tx₂, ...]
+
+Specify transactions that the peer should make sure is included on its transaction queue. The items in the list are transactions in the format described in the main Ethereum specification. Transactions messages must contain at least one (new) transaction, empty Transactions messages are discouraged and may lead to disconnection.
+...
 
 ```
 
 In reth, this is represented as:
 
+[File: crates/net/eth-wire/src/types/broadcast.rs](...)
 ```rust,ignore
 pub struct Transactions(
     /// New transactions for the peer to include in its mempool.
@@ -106,6 +126,9 @@ pub struct Transactions(
 );
 ```
 
+And the corresponding trait implementations:
+
+[File: crates/primitives/src/transaction/mod.rs](...)
 ```rust, ignore
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
@@ -127,24 +150,24 @@ impl Encodable for TransactionSigned {
 
     fn length(&self) -> usize {
         let len = self.payload_len();
-
-        // add the length of the RLP header
         len + length_of_length(len)
     }
 }
 
 impl Decodable for TransactionSigned {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        ...
+        // Implementation omitted for brevity
+        //...
     }
 
 ```
-TODO: Maybe explain ECIES here?
+Now that we know how the types work, let's take a look at how these are utilized in the network.
 
 ## P2PStream
 The most basic stream to talk to other peers is the P2P stream. It takes an underlying stream of bytes and does the following:
+
 1. Tracks and Manages Ping and pong messages and sends them when needed.
-2. Decompresses/Compresses the underlying bytes using snappy. (See EIP 706)
+2. Decompresses/Compresses the underlying bytes using snappy. ([EIP 706](https://eips.ethereum.org/EIPS/eip-706))
 3. Sends the decompressed bytes to its parent stream. 
 
 // Add code here
