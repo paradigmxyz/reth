@@ -93,6 +93,7 @@ const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 /// fit in one datagram. The safe number of nodes that always fit in a datagram is 12, with worst
 /// case all of them being IPv6 nodes. This is calculated by `(MAX_PACKET_SIZE - (header + expire +
 /// rlp overhead) / size(rlp(Node_IPv6))`
+/// Even in the best case where all nodes are IPv4, only 14 nodes fit into one packet.
 const SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = (MAX_PACKET_SIZE - 109) / 91;
 
 /// The timeout used to identify expired nodes, 24h
