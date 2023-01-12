@@ -10,9 +10,8 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{
-    chains::{ChainSpecUnified, NetworkUpgrades},
-    keccak256, Account as RethAccount, Address, JsonU256, SealedBlock, SealedHeader, StorageEntry,
-    H256, U256,
+    keccak256, Account as RethAccount, Address, ChainSpec, JsonU256, SealedBlock, SealedHeader,
+    StorageEntry, H256, U256,
 };
 use reth_rlp::Decodable;
 use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageId, Transaction};
@@ -102,9 +101,9 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         debug!("Executing {:?} spec: {:?}", name, suite.network);
 
-        let chain_spec: ChainSpecUnified = suite.network.into();
+        let chain_spec: ChainSpec = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;
-        let has_block_reward = chain_spec.paris_block() != 0;
+        let has_block_reward = chain_spec.paris_block().is_some();
 
         // Create db and acquire transaction
         let db = create_test_rw_db::<WriteMap>();

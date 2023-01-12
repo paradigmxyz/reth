@@ -11,7 +11,7 @@ use crate::{
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 
-use reth_primitives::chains::ChainSpecUnified;
+use reth_primitives::ChainSpec;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
@@ -56,7 +56,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecUnified,
+    chain: ChainSpec,
 
     /// Enable Prometheus metrics.
     ///
@@ -129,7 +129,8 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain));
+                let consensus: Arc<BeaconConsensus> =
+                    Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -140,7 +141,7 @@ impl Command {
                 }
 
                 let network = config
-                    .network_config(db.clone(), self.chain, self.network.disable_discovery)
+                    .network_config(db.clone(), self.chain.clone(), self.network.disable_discovery)
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);
@@ -175,7 +176,7 @@ impl Command {
             }
             StageEnum::Execution => {
                 let mut stage =
-                    ExecutionStage { chain_spec: self.chain, commit_threshold: num_blocks };
+                    ExecutionStage { chain_spec: self.chain.clone(), commit_threshold: num_blocks };
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

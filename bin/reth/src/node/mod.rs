@@ -13,7 +13,7 @@ use fdlimit::raise_fd_limit;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{chains::ChainSpecUnified, H256};
+use reth_primitives::{ChainSpec, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -56,7 +56,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecUnified,
+    chain: ChainSpec,
 
     /// Enable Prometheus metrics.
     ///
@@ -102,10 +102,10 @@ impl Command {
             HeaderMetrics::describe();
         }
 
-        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain));
+        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
         let network = config
-            .network_config(db.clone(), self.chain, self.network.disable_discovery)
+            .network_config(db.clone(), self.chain.clone(), self.network.disable_discovery)
             .start_network()
             .await?;
 
@@ -149,7 +149,7 @@ impl Command {
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
             .push(ExecutionStage {
-                chain_spec: self.chain,
+                chain_spec: self.chain.clone(),
                 commit_threshold: config.stages.execution.commit_threshold,
             });
 

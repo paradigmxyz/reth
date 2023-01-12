@@ -7,9 +7,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
-use reth_primitives::{
-    chains::ChainSpecUnified, BlockHashOrNumber, NodeRecord, SealedHeader,
-};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
 use std::sync::Arc;
 
 use crate::{
@@ -40,7 +38,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecUnified,
+    chain: ChainSpec,
 
     /// Disable the discovery service.
     #[arg(short, long)]

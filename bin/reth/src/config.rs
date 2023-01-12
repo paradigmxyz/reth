@@ -6,7 +6,7 @@ use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
 };
-use reth_primitives::chains::ChainSpecUnified;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ impl Config {
     pub fn network_config<DB: Database>(
         &self,
         db: Arc<DB>,
-        chain_spec: ChainSpecUnified,
+        chain_spec: ChainSpec,
         disable_discovery: bool,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()

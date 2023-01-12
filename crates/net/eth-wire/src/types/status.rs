@@ -1,9 +1,6 @@
 use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{
-    chains::{Essentials, MainnetSpec, NetworkUpgrades},
-    Chain, ForkId, Hardfork, H256, U256,
-};
+use reth_primitives::{Chain, ChainSpec, ForkId, Hardfork, H256, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -97,7 +94,7 @@ impl Debug for Status {
 // <https://etherscan.io/block/0>
 impl Default for Status {
     fn default() -> Self {
-        let chain = MainnetSpec::default();
+        let chain = ChainSpec::mainnet();
 
         Status {
             version: EthVersion::Eth67 as u8,
@@ -105,7 +102,9 @@ impl Default for Status {
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: chain.genesis_hash(),
             genesis: chain.genesis_hash(),
-            forkid: chain.fork_id(Hardfork::Frontier),
+            forkid: chain
+                .fork_id(Hardfork::Frontier)
+                .expect("The Frontier hardfork should always exist"),
         }
     }
 }

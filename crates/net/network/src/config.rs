@@ -8,10 +8,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{
-    chains::{ChainSpecUnified, Essentials},
-    ForkFilter, Hardfork, NodeRecord, PeerId,
-};
+use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
@@ -55,7 +52,7 @@ pub struct NetworkConfig<C> {
     /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
     /// The chain spec
-    pub chain_spec: ChainSpecUnified,
+    pub chain_spec: ChainSpec,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -138,7 +135,7 @@ pub struct NetworkConfigBuilder<C> {
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
     /// The network's chain spec
-    chain_spec: ChainSpecUnified,
+    chain_spec: ChainSpec,
     /// The block importer type.
     block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
@@ -169,7 +166,7 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain_spec: ChainSpecUnified::Mainnet,
+            chain_spec: ChainSpec::mainnet(),
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
@@ -202,8 +199,8 @@ impl<C> NetworkConfigBuilder<C> {
     }
 
     /// Sets the chain spec.
-    pub fn chain_spec<CS: Into<ChainSpecUnified>>(mut self, chain_spec: CS) -> Self {
-        self.chain_spec = chain_spec.into();
+    pub fn chain_spec(mut self, chain_spec: ChainSpec) -> Self {
+        self.chain_spec = chain_spec;
         self
     }
 
@@ -318,11 +315,10 @@ impl<C> NetworkConfigBuilder<C> {
         // get the fork filter
         let fork_filter = fork_filter.unwrap_or_else(|| {
             let head = head.unwrap_or_default();
-            // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
             ForkFilter::new(
                 head,
                 chain_spec.genesis_hash(),
-                Hardfork::all_forks_blocks(&chain_spec),
+                chain_spec.all_forks_blocks().map(|(_, b)| b),
             )
         });
 

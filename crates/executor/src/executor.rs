@@ -6,10 +6,8 @@ use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom,
-    chains::{ChainSpecUnified, Essentials, NetworkUpgrades},
-    Account, Address, Bloom, Hardfork, Header, Log, Receipt, TransactionSignedEcRecovered, H160,
-    H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
+    TransactionSignedEcRecovered, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -248,7 +246,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     ommers: &[Header],
-    chain_spec: &ChainSpecUnified,
+    chain_spec: &ChainSpec,
     db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let transaction_change_set = execute(header, transactions, ommers, chain_spec, db)?;
@@ -256,7 +254,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     let receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
 
-    if header.number >= chain_spec.fork_block(Hardfork::Byzantium) {
+    if Some(header.number) >= chain_spec.fork_block(Hardfork::Byzantium) {
         verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
     }
     // TODO Before Byzantium, receipts contained state root that would mean that expensive operation
@@ -298,14 +296,14 @@ pub fn execute<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     ommers: &[Header],
-    chain_spec: &ChainSpecUnified,
+    chain_spec: &ChainSpec,
     db: SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut evm = EVM::new();
     evm.database(db);
 
     let spec_id = revm_spec(chain_spec, header.number);
-    evm.env.cfg.chain_id = U256::from(chain_spec.id());
+    evm.env.cfg.chain_id = U256::from(chain_spec.chain_id());
     evm.env.cfg.spec_id = spec_id;
     evm.env.cfg.perf_all_precompiles_have_balance = false;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
@@ -400,7 +398,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
     header: &Header,
     ommers: &[Header],
     db: &mut SubState<DB>,
-    chain_spec: &ChainSpecUnified,
+    chain_spec: &ChainSpec,
 ) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
     // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
     // to config.
@@ -412,9 +410,9 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
     match header.number {
-        n if n >= chain_spec.paris_block() => None,
-        n if n >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
-        n if n >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
+        n if Some(n) >= chain_spec.paris_block() => None,
+        n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
+        n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
         _ => Some(WEI_5ETH),
     }
     .map(|reward| -> Result<_, _> {
@@ -471,8 +469,8 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, SealedBlock, StorageKey, H160, H256,
-        U256,
+        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
+        StorageKey, H160, H256, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -574,7 +572,7 @@ mod tests {
         );
 
         // spec at berlin fork
-        let chain_spec = ChainSpecUnified::Mainnet.into_customized().berlin_activated().build();
+        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
 
         let db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
