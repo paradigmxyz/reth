@@ -21,6 +21,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-net-common = { path = "../common" }
 reth-discv4 = { path = "../discv4" }
+reth-dns-discovery = { path = "../dns" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
 reth-rlp = { path = "../../common/rlp" }
