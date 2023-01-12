@@ -3961,6 +3961,7 @@ dependencies = [
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
+ "thiserror",
  "tokio",
  "tracing",
 ]
