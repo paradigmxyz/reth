@@ -10,9 +10,11 @@
 use igd::aio::search_gateway;
 use pin_project_lite::pin_project;
 use std::{
+    fmt,
     future::{poll_fn, Future},
     net::IpAddr,
     pin::Pin,
+    str::FromStr,
     task::{ready, Context, Poll},
     time::Duration,
 };
@@ -28,6 +30,8 @@ pub enum NatResolver {
     Upnp,
     /// Resolve external IP via [public_ip::Resolver]
     ExternalIp,
+    /// Resolve nothing
+    None,
 }
 
 // === impl NatResolver ===
@@ -36,6 +40,32 @@ impl NatResolver {
     /// Attempts to produce an IP address (best effort).
     pub async fn external_addr(self) -> Option<IpAddr> {
         external_addr_with(self).await
+    }
+}
+
+impl fmt::Display for NatResolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NatResolver::Any => f.write_str("any"),
+            NatResolver::Upnp => f.write_str("upnp"),
+            NatResolver::ExternalIp => f.write_str("extip"),
+            NatResolver::None => f.write_str("none"),
+        }
+    }
+}
+
+impl FromStr for NatResolver {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let r = match s {
+            "any" => NatResolver::Any,
+            "upnp" => NatResolver::Upnp,
+            "extip" | "external-ip" => NatResolver::ExternalIp,
+            "none" => NatResolver::None,
+            _ => return Err(format!("Unknown Nat Resolver: {s}")),
+        };
+        Ok(r)
     }
 }
 
@@ -122,6 +152,7 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
         }
         NatResolver::Upnp => resolve_external_ip_upnp().await,
         NatResolver::ExternalIp => resolve_external_ip().await,
+        NatResolver::None => None,
     }
 }
 
