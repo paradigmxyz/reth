@@ -13,6 +13,13 @@ pub struct AdminApi {
     network: NetworkHandle,
 }
 
+impl AdminApi {
+    /// Creates a new instance of `AdminApi`.
+    pub fn new(network: NetworkHandle) -> AdminApi {
+        AdminApi { network }
+    }
+}
+
 impl AdminApiServer for AdminApi {
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
         self.network.add_peer(record.id, record.tcp_addr());
