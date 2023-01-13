@@ -57,7 +57,7 @@ where
 }
 ```
 
-First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes](https://github.com/paradigmxyz/reth/blob/0xKitsune/book-discv4/crates/net/discv4/src/bootnodes.rs#L8) and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
+First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/bootnodes.rs#L8) and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
 
 [File: ]()
 ```rust ignore
@@ -192,7 +192,7 @@ Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()
 ## Polling the Discv4Service and Discovery Events
 In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html#) is responsible for advancing the computation by polling the future. This is done by calling `Future::poll`.
 
-Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections. If you would like to check out the function in it's entirety, you can [click here](https://github.com/paradigmxyz/reth/blob/0xKitsune/book-discv4/crates/net/discv4/src/lib.rs#L1308).
+Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections. If you would like to check out the function in it's entirety, you can [click here](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1302).
 
 [File: ]()
 ```rust ignore
@@ -259,7 +259,7 @@ If there is not a `Discv4Event` immediately ready, the function continues trigge
 
 To prevent traffic amplification attacks (ie. DNS attacks), implementations must verify that the sender of a query participates in the discovery protocol. The sender of a packet is considered verified if it has sent a valid Pong response with matching ping hash within the last 12 hours.
 
-Next, the Discv4Service handles all incoming [`Discv4Command`](https://github.com/paradigmxyz/reth/blob/0xKitsune/book-discv4/crates/net/discv4/src/lib.rs#L1533)s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
+Next, the Discv4Service handles all incoming [`Discv4Command`](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1527)s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
 
 In Reth, once a new `NetworkState` is initialized as the node starts up and a new task is spawned to handle the network, the `poll()` function is used to advance the state of the network.
 
