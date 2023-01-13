@@ -29,6 +29,7 @@ impl Config {
         chain_id: u64,
         genesis_hash: H256,
         disable_discovery: bool,
+        nat_resolution_method: NatResolver,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
@@ -39,6 +40,7 @@ impl Config {
             .genesis_hash(genesis_hash)
             .chain_id(chain_id)
             .set_discovery(disable_discovery)
+            .discovery(Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)))
             .build()
     }
 }

@@ -84,6 +84,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 impl Command {
@@ -120,7 +123,13 @@ impl Command {
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         let network = config
-            .network_config(db.clone(), chain_id, genesis_hash, self.network.disable_discovery)
+            .network_config(
+                db.clone(),
+                chain_id,
+                genesis_hash,
+                self.network.disable_discovery,
+                self.nat,
+            )
             .start_network()
             .await?;
 

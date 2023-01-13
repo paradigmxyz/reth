@@ -287,8 +287,20 @@ impl<C> NetworkConfigBuilder<C> {
     }
 
     /// Sets the boot nodes.
-    pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
-        self.boot_nodes = nodes.into_iter().collect();
+    // pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
+    //     self.boot_nodes = nodes.into_iter().collect();
+    //     self
+    // }
+
+    /// Sets the boot nodes
+    pub fn set_bootnodes(&mut self, envs: &Option<Vec<NodeRecord>>) -> &mut Self {
+        if let Some(bootnodes) = envs {
+            bootnodes.iter().for_each(|node| {
+                self.boot_nodes.insert(*node);
+            })
+        } else {
+            self.boot_nodes = mainnet_nodes().into_iter().collect();
+        }
         self
     }
 
