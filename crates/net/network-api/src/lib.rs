@@ -26,5 +26,5 @@ pub trait PeersInfo: Send + Sync {
     fn num_connected_peers(&self) -> usize;
 
     /// Returns the Ethereum Node Record of the node.
-    fn node_record(&self) -> NodeRecord;
+    fn local_node_record(&self) -> NodeRecord;
 }
