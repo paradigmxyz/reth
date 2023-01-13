@@ -367,7 +367,7 @@ impl FromRecoveredTransaction for PooledTransaction {
             Transaction::Eip1559(t) => {
                 let cost =
                     U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = U256::from(t.max_fee_per_gas);
+                let effective_gas_price = U256::from(t.max_priority_fee_per_gas);
                 (cost, effective_gas_price)
             }
         };
