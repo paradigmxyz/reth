@@ -33,4 +33,8 @@ pub trait AdminApi {
         item = String
     )]
     fn subscribe(&self);
+
+    /// Returns the ENR of the node.
+    #[method(name = "admin_nodeInfo")]
+    fn node_info(&self) -> Result<NodeRecord>;
 }

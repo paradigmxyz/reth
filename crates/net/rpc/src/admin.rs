@@ -1,5 +1,6 @@
 use jsonrpsee::core::RpcResult;
 use reth_network::{peers::PeerKind, NetworkHandle};
+use reth_network_api::PeersInfo;
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 
@@ -37,6 +38,10 @@ impl AdminApiServer for AdminApi {
         _subscription_sink: jsonrpsee::SubscriptionSink,
     ) -> jsonrpsee::types::SubscriptionResult {
         todo!()
+    }
+
+    fn node_info(&self) -> RpcResult<NodeRecord>  {
+        Ok(self.network.local_node_record())
     }
 }
 
