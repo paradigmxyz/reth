@@ -17,10 +17,10 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
 use lru::LruCache;
-use reth_primitives::{NodeRecord, PeerId};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     net::IpAddr,
     pin::Pin,
     sync::Arc,
@@ -28,16 +28,19 @@ use std::{
     time::{Duration, Instant},
 };
 use sync::SyncTree;
-use tokio::sync::{
-    mpsc,
-    mpsc::{error::TrySendError, UnboundedSender},
-    oneshot,
+use tokio::{
+    sync::{
+        mpsc,
+        mpsc::{error::TrySendError, UnboundedSender},
+        oneshot,
+    },
+    task::JoinHandle,
 };
 use tokio_stream::{
     wrappers::{ReceiverStream, UnboundedReceiverStream},
-    Stream,
+    Stream, StreamExt,
 };
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 mod config;
 mod error;
@@ -70,7 +73,7 @@ impl DnsDiscoveryHandle {
     /// Returns the receiver half of new listener channel that streams discovered [`NodeRecord`]s.
     pub async fn node_record_stream(
         &self,
-    ) -> Result<ReceiverStream<NodeRecord>, oneshot::error::RecvError> {
+    ) -> Result<ReceiverStream<DnsNodeRecordUpdate>, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let cmd = DnsDiscoveryCommand::NodeRecordUpdates(tx);
         let _ = self.to_service.send(cmd);
@@ -86,7 +89,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
     /// All subscribers for resolved [NodeRecord]s.
-    node_record_listeners: Vec<mpsc::Sender<NodeRecord>>,
+    node_record_listeners: Vec<mpsc::Sender<DnsNodeRecordUpdate>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
     /// All queries currently in progress
@@ -97,6 +100,8 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     queued_events: VecDeque<DnsDiscoveryEvent>,
     /// The rate at which trees should be updated.
     recheck_interval: Duration,
+    /// Links to the DNS networks to bootstrap.
+    bootstrap_dns_networks: HashSet<LinkEntry>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -118,6 +123,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             max_requests_per_sec,
             recheck_interval,
             dns_record_cache_limit,
+            bootstrap_dns_networks,
         } = config;
         let queries = QueryPool::new(resolver, max_requests_per_sec, lookup_timeout);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -130,6 +136,27 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             dns_record_cache: LruCache::new(dns_record_cache_limit),
             queued_events: Default::default(),
             recheck_interval,
+            bootstrap_dns_networks: bootstrap_dns_networks.unwrap_or_default(),
+        }
+    }
+
+    /// Spawns this services onto a new task
+    ///
+    /// Note: requires a running runtime
+    pub fn spawn(mut self) -> JoinHandle<()> {
+        tokio::task::spawn(async move {
+            self.bootstrap();
+
+            while let Some(event) = self.next().await {
+                trace!(target : "disc::dns", ?event,  "processed");
+            }
+        })
+    }
+
+    /// Starts discovery with all configured bootstrap links
+    pub fn bootstrap(&mut self) {
+        for link in self.bootstrap_dns_networks.clone() {
+            self.sync_tree_with_link(link);
         }
     }
 
@@ -147,7 +174,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     }
 
     /// Creates a new channel for [`NodeRecord`]s.
-    pub fn node_record_stream(&mut self) -> ReceiverStream<NodeRecord> {
+    pub fn node_record_stream(&mut self) -> ReceiverStream<DnsNodeRecordUpdate> {
         let (tx, rx) = mpsc::channel(256);
         self.node_record_listeners.push(tx);
         ReceiverStream::new(rx)
@@ -156,8 +183,8 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     /// Sends  the event to all listeners.
     ///
     /// Remove channels that got closed.
-    fn notify(&mut self, record: NodeRecord) {
-        self.node_record_listeners.retain_mut(|listener| match listener.try_send(record) {
+    fn notify(&mut self, record: DnsNodeRecordUpdate) {
+        self.node_record_listeners.retain_mut(|listener| match listener.try_send(record.clone()) {
             Ok(()) => true,
             Err(err) => match err {
                 TrySendError::Full(_) => true,
@@ -329,11 +356,20 @@ impl<R: Resolver> Stream for DnsDiscoveryService<R> {
     }
 }
 
+/// The converted discovered [Enr] object
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DnsNodeRecordUpdate {
+    /// Discovered node and it's addresses
+    pub node_record: NodeRecord,
+    /// The forkid of the node, if present in the ENR
+    pub fork_id: Option<ForkId>,
+}
+
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
 enum DnsDiscoveryCommand {
     /// Sync a tree
     SyncTree(LinkEntry),
-    NodeRecordUpdates(oneshot::Sender<ReceiverStream<NodeRecord>>),
+    NodeRecordUpdates(oneshot::Sender<ReceiverStream<DnsNodeRecordUpdate>>),
 }
 
 /// Represents dns discovery related update events.
@@ -344,15 +380,21 @@ pub enum DnsDiscoveryEvent {
 }
 
 /// Converts an [Enr] into a [NodeRecord]
-fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<NodeRecord> {
-    let record = NodeRecord {
+fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
+    use reth_rlp::Decodable;
+
+    let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
         tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
         udp_port: enr.udp4().or_else(|| enr.udp6())?,
         id: PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]),
     }
     .into_ipv4_mapped();
-    Some(record)
+
+    let mut maybe_fork_id = enr.get(b"eth")?;
+    let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
+
+    Some(DnsNodeRecordUpdate { node_record, fork_id })
 }
 
 #[cfg(test)]
@@ -360,7 +402,8 @@ mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
     use enr::{EnrBuilder, EnrKey};
-    use reth_primitives::Chain;
+    use reth_primitives::{Chain, Hardfork};
+    use reth_rlp::Encodable;
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;
@@ -408,7 +451,10 @@ mod tests {
         resolver.insert(link.domain.clone(), root.to_string());
 
         let mut builder = EnrBuilder::new("v4");
-        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303);
+        let mut buf = Vec::new();
+        let fork_id = Hardfork::Frontier.fork_id();
+        fork_id.encode(&mut buf);
+        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &buf);
         let enr = builder.build(&secret_key).unwrap();
 
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
@@ -418,7 +464,8 @@ mod tests {
         let mut node_records = service.node_record_stream();
 
         let task = tokio::task::spawn(async move {
-            let _ = node_records.next().await.unwrap();
+            let record = node_records.next().await.unwrap();
+            assert_eq!(record.fork_id, Some(fork_id));
         });
 
         service.sync_tree_with_link(link.clone());

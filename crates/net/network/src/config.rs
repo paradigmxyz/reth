@@ -25,6 +25,7 @@ mod __reexport {
     pub use secp256k1::SecretKey;
 }
 pub use __reexport::*;
+use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, Status};
 
@@ -41,6 +42,8 @@ pub struct NetworkConfig<C> {
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
     pub boot_nodes: HashSet<NodeRecord>,
+    /// How to set up discovery over DNS.
+    pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
     /// Address to use for discovery
@@ -124,6 +127,8 @@ pub struct NetworkConfigBuilder<C> {
     client: Arc<C>,
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
+    /// How to configure discovery over DNS.
+    dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// All boot nodes to start network discovery with.
@@ -164,6 +169,7 @@ impl<C> NetworkConfigBuilder<C> {
         Self {
             client,
             secret_key,
+            dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
             boot_nodes: Default::default(),
             discovery_addr: None,
@@ -274,6 +280,12 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
+    /// Sets the dns discovery config to use.
+    pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
+        self.dns_discovery_config = Some(config);
+        self
+    }
+
     /// Sets the boot nodes.
     pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         self.boot_nodes = nodes.into_iter().collect();
@@ -299,6 +311,7 @@ impl<C> NetworkConfigBuilder<C> {
         let Self {
             client,
             secret_key,
+            mut dns_discovery_config,
             discovery_v4_builder,
             boot_nodes,
             discovery_addr,
@@ -331,10 +344,22 @@ impl<C> NetworkConfigBuilder<C> {
             ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
         });
 
+        // If default DNS config is used then we add the known dns network to bootstrap from
+        if let Some(dns_networks) =
+            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
+        {
+            if dns_networks.is_empty() {
+                if let Some(link) = chain.public_dns_network_protocol() {
+                    dns_networks.insert(link.parse().expect("is valid DNS link entry"));
+                }
+            }
+        }
+
         NetworkConfig {
             client,
             secret_key,
             boot_nodes,
+            dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
@@ -374,5 +399,30 @@ impl NetworkMode {
     /// Returns true if network has entered proof-of-stake
     pub fn is_stake(&self) -> bool {
         matches!(self, NetworkMode::Stake)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::thread_rng;
+    use reth_dns_discovery::tree::LinkEntry;
+    use reth_provider::test_utils::NoopProvider;
+
+    fn builder() -> NetworkConfigBuilder<NoopProvider> {
+        let secret_key = SecretKey::new(&mut thread_rng());
+        NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+    }
+
+    #[test]
+    fn test_network_dns_defaults() {
+        let config = builder().build();
+
+        let dns = config.dns_discovery_config.unwrap();
+        let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();
+        let mainnet_dns: LinkEntry =
+            Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
+        assert!(bootstrap_nodes.contains(&mainnet_dns));
+        assert_eq!(bootstrap_nodes.len(), 1);
     }
 }
