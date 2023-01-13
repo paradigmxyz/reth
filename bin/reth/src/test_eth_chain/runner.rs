@@ -23,6 +23,23 @@ use std::{
 };
 use tracing::{debug, info, trace};
 
+/// The outcome of a test.
+#[derive(Debug)]
+pub enum TestOutcome {
+    Skipped,
+    Passed,
+    Failed(eyre::Report),
+}
+
+impl From<eyre::Result<TestOutcome>> for TestOutcome {
+    fn from(v: eyre::Result<TestOutcome>) -> TestOutcome {
+        match v {
+            Ok(outcome) => outcome,
+            Err(err) => TestOutcome::Failed(err),
+        }
+    }
+}
+
 /// Tests are test edge cases that are not possible to happen on mainnet, so we are skipping them.
 pub fn should_skip(path: &Path) -> bool {
     // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
@@ -72,15 +89,16 @@ pub fn should_skip(path: &Path) -> bool {
 }
 
 /// Run one JSON-encoded Ethereum blockchain test at the specified path.
-pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
+pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
     let path = path.as_path();
     let json_file = std::fs::read(path)?;
     let suites: Test = serde_json::from_reader(&*json_file)?;
 
     if should_skip(path) {
-        return Ok(())
+        return Ok(TestOutcome::Skipped)
     }
-    info!(target: "reth::cli", ?path, "Running test suite");
+
+    debug!(target: "reth::cli", ?path, "Running test suite");
 
     for (name, suite) in suites.0 {
         if matches!(
@@ -189,7 +207,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         // Validate post state
         match suite.post_state {
             Some(RootOrState::Root(root)) => {
-                info!(target: "reth::cli", "Post-state root: #{root:?}")
+                debug!(target: "reth::cli", "Post-state root: #{root:?}")
             }
             Some(RootOrState::State(state)) => db.view(|tx| -> eyre::Result<()> {
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
@@ -274,8 +292,8 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 }
                 Ok(())
             })??,
-            None => info!(target: "reth::cli", "No post-state"),
+            None => debug!(target: "reth::cli", "No post-state"),
         }
     }
-    Ok(())
+    Ok(TestOutcome::Passed)
 }
