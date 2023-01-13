@@ -166,6 +166,7 @@ impl HasRemoteAddr for MeteredStream<TcpStream> {
     }
 }
 
+// TODO: Use [`Counter`]s instead?
 /// Gauges the inbound and outbound bandwidth for a given
 /// bandwidth meter
 #[derive(Metrics)]
@@ -177,16 +178,18 @@ pub struct BandwidthMeterMetricsInner {
     outbound_bandwidth: Gauge,
 }
 
+/// Used to update bandwidth gauges with data from
+/// the nested [`BandwidthMeter`] on the given `interval`
 pub struct BandwidthMeterMetrics {
-    interval: Duration,
+    /// The [`BandwidthMeter`] from which bandwidth amounts are queried
     bandwidth_meter: BandwidthMeter,
+    /// The metrics struct containing the gauges to update
     metrics: BandwidthMeterMetricsInner,
 }
 
 impl BandwidthMeterMetrics {
-    pub fn new(interval: Duration, bandwidth_meter: BandwidthMeter) -> Self {
+    pub fn new(bandwidth_meter: BandwidthMeter) -> Self {
         Self {
-            interval,
             bandwidth_meter,
             metrics: BandwidthMeterMetricsInner::default(),
         }
