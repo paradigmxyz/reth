@@ -161,6 +161,7 @@ where
             hello_message,
             status,
             fork_filter,
+            dns_discovery_config,
             ..
         } = config;
 
@@ -177,7 +178,9 @@ where
             disc_config
         });
 
-        let discovery = Discovery::new(discovery_addr, secret_key, discovery_v4_config).await?;
+        let discovery =
+            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
+                .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
@@ -705,10 +708,16 @@ where
                         ?error,
                         "Outgoing connection error"
                     );
-                    this.swarm
-                        .state_mut()
-                        .peers_mut()
-                        .apply_reputation_change(&peer_id, ReputationChangeKind::FailedToConnect);
+
+                    this.swarm.state_mut().peers_mut().on_outgoing_connection_failure(
+                        &remote_addr,
+                        &peer_id,
+                        &error,
+                    );
+
+                    this.metrics
+                        .outgoing_connections
+                        .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::BadMessage { peer_id } => {
                     this.swarm

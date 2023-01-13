@@ -72,9 +72,15 @@ pub struct GenesisAccount {
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpecification, eyre::Error> {
     Ok(match s {
-        "mainnet" => serde_json::from_str(include_str!("../../res/chainspec/mainnet.json"))?,
-        "goerli" => serde_json::from_str(include_str!("../../res/chainspec/goerli.json"))?,
-        "sepolia" => serde_json::from_str(include_str!("../../res/chainspec/mainnet.json"))?,
+        "mainnet" => {
+            serde_json::from_str(include_str!("../../../../bin/reth/res/chainspec/mainnet.json"))?
+        }
+        "goerli" => {
+            serde_json::from_str(include_str!("../../../../bin/reth/res/chainspec/goerli.json"))?
+        }
+        "sepolia" => {
+            serde_json::from_str(include_str!("../../../../bin/reth/res/chainspec/sepolia.json"))?
+        }
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?

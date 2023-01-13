@@ -3,9 +3,9 @@
 //! Stage debugging tool
 use crate::{
     config::Config,
-    dirs::{ConfigPath, DbPath},
+    dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    util::{
+    utils::{
         chainspec::{chain_spec_value_parser, ChainSpecification},
         init::{init_db, init_genesis},
     },
@@ -20,10 +20,8 @@ use reth_stages::{
     ExecInput, Stage, StageId, Transaction, UnwindInput,
 };
 
-use clap::Parser;
-use serde::Deserialize;
+use clap::{Parser, ValueEnum};
 use std::{net::SocketAddr, sync::Arc};
-use strum::{AsRefStr, EnumString, EnumVariantNames};
 use tracing::*;
 
 /// `reth stage` command
@@ -37,11 +35,11 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: PlatformPath<DbPath>,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
+    config: PlatformPath<ConfigPath>,
 
     /// The chain this node is running.
     ///
@@ -67,6 +65,7 @@ pub struct Command {
     metrics: Option<SocketAddr>,
 
     /// The name of the stage to run
+    #[arg(value_enum)]
     stage: StageEnum,
 
     /// The height to start at
@@ -89,11 +88,7 @@ pub struct Command {
     network: NetworkOpts,
 }
 
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, AsRefStr, EnumVariantNames, EnumString, Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
 enum StageEnum {
     Headers,
     Bodies,
@@ -109,13 +104,13 @@ impl Command {
         fdlimit::raise_fd_limit();
 
         if let Some(listen_addr) = self.metrics {
-            info!("Starting metrics endpoint at {}", listen_addr);
+            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
             HeaderMetrics::describe();
         }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
-        info!("reth {} starting stage {:?}", clap::crate_version!(), self.stage);
+        info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
             previous_stage: Some((StageId("No Previous Stage"), self.to)),

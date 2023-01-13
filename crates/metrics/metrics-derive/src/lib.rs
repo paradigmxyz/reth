@@ -103,7 +103,6 @@ mod with_attrs;
 /// // Instantiate
 /// let metrics = DynamicScopeMetrics::new(local_scope);
 /// ```
-///
 #[proc_macro_derive(Metrics, attributes(metrics, metric))]
 pub fn derive_metrics(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

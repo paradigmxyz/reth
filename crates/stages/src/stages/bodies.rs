@@ -84,13 +84,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let bodies_to_download = self.bodies_to_download::<DB>(tx, start_block, end_block)?;
 
         // Cursors used to write bodies, ommers and transactions
-        let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let mut ommers_cursor = tx.cursor_mut::<tables::BlockOmmers>()?;
-        let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
+        let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
+        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
 
         // Cursors used to write state transition mapping
-        let mut block_transition_cursor = tx.cursor_mut::<tables::BlockTransitionIndex>()?;
-        let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
+        let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
+        let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
 
         // Get id for the first transaction and first transition in the block
         let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(start_block)?;
@@ -185,13 +185,13 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers, transactions and tx hash to number
-        let mut body_cursor = tx.cursor_mut::<tables::BlockBodies>()?;
-        let mut ommers_cursor = tx.cursor_mut::<tables::BlockOmmers>()?;
-        let mut transaction_cursor = tx.cursor_mut::<tables::Transactions>()?;
-        let mut tx_hash_number_cursor = tx.cursor_mut::<tables::TxHashNumber>()?;
+        let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
+        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         // Cursors to unwind transitions
-        let mut block_transition_cursor = tx.cursor_mut::<tables::BlockTransitionIndex>()?;
-        let mut tx_transition_cursor = tx.cursor_mut::<tables::TxTransitionIndex>()?;
+        let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
+        let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
 
         let mut entry = body_cursor.last()?;
         while let Some((key, body)) = entry {
@@ -245,8 +245,8 @@ impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
         starting_block: BlockNumber,
         target: BlockNumber,
     ) -> Result<Vec<SealedHeader>, StageError> {
-        let mut header_cursor = tx.cursor::<tables::Headers>()?;
-        let mut header_hashes_cursor = tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+        let mut header_hashes_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut walker = header_hashes_cursor
             .walk(starting_block)?
             .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= target));
@@ -454,7 +454,7 @@ mod tests {
         runner
             .tx()
             .commit(|tx| {
-                let mut tx_cursor = tx.cursor_mut::<tables::Transactions>()?;
+                let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
                 let (_, transaction) = tx_cursor.last()?.expect("Could not read last transaction");
                 tx_cursor.delete_current()?;
                 tx.delete::<tables::TxHashNumber>(transaction.hash, None)?;
@@ -689,7 +689,7 @@ mod tests {
             /// Get the last available tx id if any
             pub(crate) fn get_last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
                 let last_body = self.tx.query(|tx| {
-                    let v = tx.cursor::<tables::BlockBodies>()?.last()?;
+                    let v = tx.cursor_read::<tables::BlockBodies>()?.last()?;
                     Ok(v)
                 })?;
                 Ok(match last_body {
@@ -708,12 +708,12 @@ mod tests {
             ) -> Result<(), TestRunnerError> {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
-                    let mut bodies_cursor = tx.cursor::<tables::BlockBodies>()?;
-                    let mut ommers_cursor = tx.cursor::<tables::BlockOmmers>()?;
-                    let mut block_transition_cursor = tx.cursor::<tables::BlockTransitionIndex>()?;
-                    let mut transaction_cursor = tx.cursor::<tables::Transactions>()?;
-                    let mut tx_hash_num_cursor = tx.cursor::<tables::TxHashNumber>()?;
-                    let mut tx_transition_cursor = tx.cursor::<tables::TxTransitionIndex>()?;
+                    let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+                    let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
+                    let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
+                    let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
+                    let mut tx_hash_num_cursor = tx.cursor_read::<tables::TxHashNumber>()?;
+                    let mut tx_transition_cursor = tx.cursor_read::<tables::TxTransitionIndex>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
                         Some((key, _)) => key,

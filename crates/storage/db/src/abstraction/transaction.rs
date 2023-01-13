@@ -40,9 +40,9 @@ pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
     /// freeing of memory pages
     fn commit(self) -> Result<bool, Error>;
     /// Iterate over read only values in table.
-    fn cursor<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error>;
+    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error>;
     /// Iterate over read only values in dup sorted table.
-    fn cursor_dup<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error>;
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error>;
 }
 
 /// Read write transaction that allows writing to database
@@ -54,9 +54,9 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), Error>;
     /// Cursor mut
-    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
+    fn cursor_write<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
     /// DupCursor mut.
-    fn cursor_dup_mut<T: DupSort>(
+    fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error>;
 }

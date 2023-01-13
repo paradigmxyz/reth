@@ -1,4 +1,12 @@
 //! P2P Debugging tool
+use crate::{
+    config::Config,
+    dirs::{ConfigPath, PlatformPath},
+    utils::{
+        chainspec::{chain_spec_value_parser, ChainSpecification},
+        hash_or_num_value_parser,
+    },
+};
 use backon::{ConstantBackoff, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
@@ -10,21 +18,12 @@ use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, Header, NodeRecord, SealedHeader};
 use std::sync::Arc;
 
-use crate::{
-    config::Config,
-    dirs::ConfigPath,
-    util::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        hash_or_num_value_parser,
-    },
-};
-
 /// `reth p2p` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
+    config: PlatformPath<ConfigPath>,
 
     /// The chain this node is running.
     ///
