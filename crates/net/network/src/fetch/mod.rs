@@ -122,7 +122,7 @@ impl StateFetcher {
             .peers
             .iter()
             .filter(|(_, peer)| peer.state.is_idle())
-            .min_by_key(|(_, peer)| peer.timeout.load(Ordering::Relaxed).to_owned())
+            .min_by_key(|(_, peer)| peer.timeout())
             .map(|(id, _)| id.to_owned());
 
         if let Some(peer_id) = peer {
@@ -290,6 +290,12 @@ struct Peer {
     best_number: u64,
     /// Tracks the current timeout value we use for the peer.
     timeout: Arc<AtomicU64>,
+}
+
+impl Peer {
+    fn timeout(&self) -> u64 {
+        self.timeout.load(Ordering::Relaxed)
+    }
 }
 
 /// Tracks the state of an individual peer
