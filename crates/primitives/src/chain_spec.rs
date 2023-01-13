@@ -268,7 +268,9 @@ pub enum ParisStatus {
 }
 
 impl ParisStatus {
-    /// Returns the Paris block number
+    /// Returns the Paris block number if it is known ahead of time.
+    ///
+    /// This is only the case for chains that have already activated the merge.
     pub fn block_number(&self) -> Option<BlockNumber> {
         match &self {
             ParisStatus::NotSupported => None,
