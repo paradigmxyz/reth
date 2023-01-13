@@ -9,9 +9,10 @@ use thiserror::Error;
 
 /// RLPx disconnect reason.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
+    #[default]
     DisconnectRequested = 0x00,
     /// TCP related error
     TcpSubsystemError = 0x01,
@@ -64,12 +65,6 @@ impl Display for DisconnectReason {
         };
 
         write!(f, "{message}")
-    }
-}
-
-impl Default for DisconnectReason {
-    fn default() -> Self {
-        DisconnectReason::DisconnectRequested
     }
 }
 

@@ -10,9 +10,8 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
     let mut traits = vec![];
     let mut roundtrips = vec![];
-    let mut args = args.into_iter();
 
-    while let Some(arg) = args.next() {
+    for arg in args {
         if arg.to_string() == "compact" {
             traits.push(quote! { use super::Compact; });
             roundtrips.push(quote! {
