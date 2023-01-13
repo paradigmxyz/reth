@@ -10,7 +10,7 @@ use std::{
     time::SystemTime,
 };
 
-use crate::config;
+use crate::constants;
 
 /// Validate header standalone
 pub fn validate_header_standalone(
@@ -212,7 +212,7 @@ pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
 
 /// Calculate base fee for next block. EIP-1559 spec
 pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u64) -> u64 {
-    let gas_target = gas_limit / config::EIP1559_ELASTICITY_MULTIPLIER;
+    let gas_target = gas_limit / constants::EIP1559_ELASTICITY_MULTIPLIER;
 
     if gas_used == gas_target {
         return base_fee
@@ -223,14 +223,14 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
             1,
             base_fee as u128 * gas_used_delta as u128 /
                 gas_target as u128 /
-                config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
+                constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
         );
         base_fee + (base_fee_delta as u64)
     } else {
         let gas_used_delta = gas_target - gas_used;
         let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128 /
             gas_target as u128 /
-            config::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
+            constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
 
         base_fee.saturating_sub(base_fee_per_gas_delta as u64)
     }
@@ -268,7 +268,7 @@ pub fn validate_header_regarding_parent(
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
     if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
-        parent_gas_limit = parent.gas_limit * config::EIP1559_ELASTICITY_MULTIPLIER;
+        parent_gas_limit = parent.gas_limit * constants::EIP1559_ELASTICITY_MULTIPLIER;
     }
 
     // Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
@@ -291,7 +291,7 @@ pub fn validate_header_regarding_parent(
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
 
         let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
-            config::EIP1559_INITIAL_BASE_FEE
+            constants::EIP1559_INITIAL_BASE_FEE
         } else {
             // This BaseFeeMissing will not happen as previous blocks are checked to have them.
             calculate_next_block_base_fee(

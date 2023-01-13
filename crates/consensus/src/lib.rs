@@ -9,8 +9,8 @@
 //! # Features
 //!
 //! - `serde`: Enable serde support for configuration types.
-pub mod config;
 pub mod consensus;
+pub mod constants;
 pub mod verification;
 
 /// Engine API module.
