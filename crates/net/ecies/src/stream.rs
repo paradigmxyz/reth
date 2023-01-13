@@ -53,7 +53,7 @@ where
         // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
         // unable to decode another message from the (partially filled) buffer. This usually happens
         // if the remote drops the TcpStream.
-        let msg = msg.ok_or_else(|| ECIESErrorImpl::UnreadableStream)?;
+        let msg = msg.ok_or(ECIESErrorImpl::UnreadableStream)?;
 
         trace!("parsing ecies ack ...");
         if matches!(msg, IngressECIESValue::Ack) {
