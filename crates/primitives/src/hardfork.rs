@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{BlockNumber, ChainSpec};
-use std::{iter::once, str::FromStr};
+use std::{fmt::Display, iter::once, str::FromStr};
 
 #[allow(missing_docs)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -75,6 +75,12 @@ impl FromStr for Hardfork {
 impl Default for Hardfork {
     fn default() -> Self {
         Hardfork::Latest
+    }
+}
+
+impl Display for Hardfork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
