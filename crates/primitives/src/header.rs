@@ -293,9 +293,9 @@ impl SealedHeader {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.
-    #[default]
     Falling,
     /// Rising block number.
+    #[default]
     Rising,
 }
 
@@ -439,8 +439,20 @@ mod tests {
     fn sanity_direction() {
         let reverse = true;
         assert_eq!(HeadersDirection::Falling, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Falling));
 
         let reverse = false;
         assert_eq!(HeadersDirection::Rising, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Rising));
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Falling;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Rising;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
     }
 }
