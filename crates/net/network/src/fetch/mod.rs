@@ -2,7 +2,6 @@
 
 use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
-use linked_hash_map::LinkedHashMap;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{PeerRequestResult, RequestError, RequestResult},
@@ -38,7 +37,7 @@ pub struct StateFetcher {
     inflight_bodies_requests:
         HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of _available_ peers for requests.
-    peers: LinkedHashMap<PeerId, Peer>,
+    peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
     peers_handle: PeersHandle,
     /// Requests queued for processing
@@ -118,18 +117,11 @@ impl StateFetcher {
     /// prioritizing those with the lowest timeout/latency.
     /// Once a peer has been yielded, it will be moved to the end of the map
     fn next_peer(&mut self) -> Option<PeerId> {
-        let peer = self
-            .peers
+        self.peers
             .iter()
             .filter(|(_, peer)| peer.state.is_idle())
             .min_by_key(|(_, peer)| peer.timeout())
-            .map(|(id, _)| *id);
-
-        if let Some(peer_id) = peer {
-            // Move to end of the map
-            self.peers.get_refresh(&peer_id);
-        }
-        peer
+            .map(|(id, _)| *id)
     }
 
     /// Returns the next action to return
@@ -423,16 +415,20 @@ mod tests {
         // Add a few random peers
         let peer1 = H512::random();
         let peer2 = H512::random();
-        let peer3 = H512::random();
         fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(1)));
         fetcher.new_active_peer(peer2, H256::random(), 2, Arc::new(AtomicU64::new(1)));
-        fetcher.new_active_peer(peer3, H256::random(), 3, Arc::new(AtomicU64::new(1)));
-        let next_peer = fetcher.next_peer();
-        // Must get peer1 as our first peer
-        assert_eq!(next_peer, Some(peer1));
-        // peer1 must now move to the end of the map
-        assert_eq!(&peer1, fetcher.peers.back().unwrap().0);
-        assert_eq!(fetcher.next_peer(), Some(peer2));
+
+        let first_peer = fetcher.next_peer().unwrap();
+        assert!(first_peer == peer1 || first_peer == peer2);
+        // Pending disconnect for first_peer
+        fetcher.on_pending_disconnect(&first_peer);
+        // first_peer now isn't idle, so we should get other peer
+        let second_peer = fetcher.next_peer().unwrap();
+        assert!(first_peer == peer1 || first_peer == peer2);
+        assert_ne!(first_peer, second_peer);
+        // without idle peers, returns None
+        fetcher.on_pending_disconnect(&second_peer);
+        assert_eq!(fetcher.next_peer(), None);
     }
 
     #[tokio::test]
