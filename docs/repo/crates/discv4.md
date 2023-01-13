@@ -1,11 +1,11 @@
 # Discv4
 
-The `discv4` crate plays an important role in Reth, enabling discovery of other peers across the network. It is recommended to know how [Kademlia distributed hash tables](https://en.wikipedia.org/wiki/Kademlia) and [Ethereum's node discovery protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02) work before reading through this chapter. While all concepts will be explained through the following sections, reading through the links above will make understanding this chapter much easier! With that note out of the way, lets jump into `disc4`.
+The `discv4` crate plays an important role in Reth, enabling discovery of other peers across the network. It is recommended to know how [Kademlia distributed hash tables](https://en.wikipedia.org/wiki/Kademlia) and [Ethereum's node discovery protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md) work before reading through this chapter. While all concepts will be explained through the following sections, reading through the links above will make understanding this chapter much easier! With that note out of the way, lets jump into `disc4`.
 
 ## Starting the Node Discovery Protocol
 As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
 
-[File: bin/reth/src/node/mod.rs]()
+[File: ]()
 ```rust ignore
   pub async fn execute(&self) -> eyre::Result<()> {
     //--snip--
@@ -57,7 +57,7 @@ where
 }
 ```
 
-First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes]() and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
+First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes](https://github.com/paradigmxyz/reth/blob/0xKitsune/book-discv4/crates/net/discv4/src/bootnodes.rs#L8) and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
 
 [File: ]()
 ```rust ignore
@@ -183,7 +183,7 @@ impl Discv4Service {
 }
 ```
 
-First, new channels are initialized to handle incoming and outgoing traffic related to node discovery. New tasks are then spawned to handle the `receive_loop()` and `send_loop()` functions, which perpetually send incoming disc4 traffic to the `ingress_rx` and outgoing discv4 traffic to the `egress_rx`. Following this, a [`KBucketsTable`]() is initialized to keep track of the node's neighbors throughout the network. If you are unfamiliar with k-buckets, feel free to [follow this link to learn more](https://en.wikipedia.org/wiki/Kademlia#Fixed-size_routing_tables). Following this, the `self_lookup_interval`, `ping_interval` and `evict_expired_requests_interval` are initialized which determines the interval used for periodically looking up targets over the network, outgoing ping packets and the time elapsed to remove inactive neighbors from the node's records.
+First, new channels are initialized to handle incoming and outgoing traffic related to node discovery. New tasks are then spawned to handle the `receive_loop()` and `send_loop()` functions, which perpetually send incoming disc4 traffic to the `ingress_rx` and outgoing discv4 traffic to the `egress_rx`. Following this, a [`KBucketsTable`](https://docs.rs/discv5/0.1.0/discv5/kbucket/struct.KBucketsTable.html) is initialized to keep track of the node's neighbors throughout the network. If you are unfamiliar with k-buckets, feel free to [follow this link to learn more](https://en.wikipedia.org/wiki/Kademlia#Fixed-size_routing_tables). Following this, the `self_lookup_interval`, `ping_interval` and `evict_expired_requests_interval` are initialized which determines the interval used for periodically looking up targets over the network, outgoing ping packets and the time elapsed to remove inactive neighbors from the node's records.
 
 Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()` function to complete as well, the `discv4_service` is then spawned into its own task and the `Discovery::new()` function returns an new instance of `Discovery`. The newly created `Discovery` type is passed into the `NetworkState::new()` function along with a few other arguments to initialize the network state. The network state is added to the `NetworkManager` where the `NetworkManager` is then spawned into its own task as well.
 
@@ -192,7 +192,7 @@ Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()
 ## Polling the Discv4Service and Discovery Events
 In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html#) is responsible for advancing the computation by polling the future. This is done by calling `Future::poll`.
 
-Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections. If you would like to check out the function in it's entirety, you can [click here]().
+Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections. If you would like to check out the function in it's entirety, you can [click here](https://github.com/paradigmxyz/reth/blob/0xKitsune/book-discv4/crates/net/discv4/src/lib.rs#L1308).
 
 [File: ]()
 ```rust ignore
@@ -255,11 +255,11 @@ pub enum Discv4Event {
 }
 ```
 
-If there is not a `Discv4Event` immediately ready, the function continues, triggering self lookup (TODO: explain further why self lookup happens here), removes any nodes that have not sent the node a ping request in the allowable time elapsed (`now.duration_since(enr_request.sent_at) < Discv4Service.config.ping_expiration`) and re-pings all nodes whose endpoint proofs are considered expired. If the node fails to respond to the "ping" with a "pong", the node will be removed from the `KbucketsTable`.
+If there is not a `Discv4Event` immediately ready, the function continues triggering self lookup, and removing any nodes that have not sent a ping request in the allowable time elapsed (`now.duration_since(enr_request.sent_at) < Discv4Service.config.ping_expiration`). Additionally, the node re-pings all nodes whose endpoint proofs are considered expired. If the node fails to respond to the "ping" with a "pong", the node will be removed from the `KbucketsTable`.
 
 To prevent traffic amplification attacks (ie. DNS attacks), implementations must verify that the sender of a query participates in the discovery protocol. The sender of a packet is considered verified if it has sent a valid Pong response with matching ping hash within the last 12 hours.
 
-Next, the Discv4Service handles all incoming [`Discv4Command`]()s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
+Next, the Discv4Service handles all incoming [`Discv4Command`](https://github.com/paradigmxyz/reth/blob/0xKitsune/book-discv4/crates/net/discv4/src/lib.rs#L1533)s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
 
 In Reth, once a new `NetworkState` is initialized as the node starts up and a new task is spawned to handle the network, the `poll()` function is used to advance the state of the network.
 
