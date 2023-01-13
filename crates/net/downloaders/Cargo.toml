@@ -14,14 +14,19 @@ reth-primitives = { path = "../../primitives" }
 reth-rpc-types = { path = "../rpc-types" }
 reth-eth-wire = { path= "../eth-wire" }
 
-# async
+# async/tokio
 async-trait = "0.1.58"
 futures = "0.3"
 futures-util = "0.3.25"
+tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio-stream = "0.1"
 
 # misc
+thiserror = "1"
 backon = "0.2.0"
 tracing = "0.1.37"
+lru = "0.9"
+derive_more = "0.99"
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

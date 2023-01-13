@@ -1103,7 +1103,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru",
+ "lru 0.7.8",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -2557,6 +2557,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e7d46de488603ffdd5f30afbc64fbba2378214a2c3a2fb83abf3d33126df17"
+dependencies = [
+ "hashbrown 0.13.1",
+]
+
+[[package]]
 name = "lru-cache"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3750,14 +3759,18 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "backon",
+ "derive_more",
  "futures",
  "futures-util",
+ "lru 0.9.0",
  "once_cell",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
  "reth-rpc-types",
+ "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

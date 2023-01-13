@@ -46,7 +46,7 @@ impl<DB: Database> BlockProvider for ProviderImpl<DB> {
     }
 
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
-        // TODO
+        // TODO:
         Ok(None)
     }
 

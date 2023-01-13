@@ -10,8 +10,11 @@
 /// The collection of algorithms for downloading block bodies.
 pub mod bodies;
 
-/// The collection of alhgorithms for downloading block headers.
+/// The collection of algorithms for downloading block headers.
 pub mod headers;
+
+/// The optimistic downloader service.
+pub mod optimistic;
 
 #[cfg(test)]
 mod test_utils;
