@@ -2,6 +2,7 @@
 
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use bytes::{BufMut, Bytes};
+use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -32,6 +33,7 @@ pub enum CapabilityMessage {
 }
 
 /// A message indicating a supported capability and capability version.
+#[add_arbitrary_tests(rlp)]
 #[derive(
     Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default, Hash,
 )]

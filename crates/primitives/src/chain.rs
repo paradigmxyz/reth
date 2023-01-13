@@ -1,10 +1,12 @@
 use crate::U256;
 use ethers_core::types::U64;
+use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
 /// Either a named or chain id or the actual id value
+#[add_arbitrary_tests(rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Chain {
     /// Contains a known chain
@@ -324,11 +326,5 @@ mod tests {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
         let chain: Chain = ethers_core::types::Chain::Mainnet.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
-    }
-
-    #[test]
-    fn arbitrary() {
-        proptest::proptest!(|(_chain: Chain)| {
-        });
     }
 }
