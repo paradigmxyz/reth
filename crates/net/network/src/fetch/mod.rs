@@ -2,7 +2,6 @@
 
 use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
-use linked_hash_map::LinkedHashMap;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{PeerRequestResult, RequestError, RequestResult},
@@ -11,6 +10,10 @@ use reth_interfaces::p2p::{
 use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
@@ -34,7 +37,7 @@ pub struct StateFetcher {
     inflight_bodies_requests:
         HashMap<PeerId, Request<Vec<H256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of _available_ peers for requests.
-    peers: LinkedHashMap<PeerId, Peer>,
+    peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
     peers_handle: PeersHandle,
     /// Requests queued for processing
@@ -62,8 +65,15 @@ impl StateFetcher {
     }
 
     /// Invoked when connected to a new peer.
-    pub(crate) fn new_active_peer(&mut self, peer_id: PeerId, best_hash: H256, best_number: u64) {
-        self.peers.insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number });
+    pub(crate) fn new_active_peer(
+        &mut self,
+        peer_id: PeerId,
+        best_hash: H256,
+        best_number: u64,
+        timeout: Arc<AtomicU64>,
+    ) {
+        self.peers
+            .insert(peer_id, Peer { state: PeerState::Idle, best_hash, best_number, timeout });
     }
 
     /// Removes the peer from the peer list, after which it is no longer available for future
@@ -103,16 +113,15 @@ impl StateFetcher {
         }
     }
 
-    /// Returns the _next_ idle peer that's ready to accept a request.
+    /// Returns the _next_ idle peer that's ready to accept a request,
+    /// prioritizing those with the lowest timeout/latency.
     /// Once a peer has been yielded, it will be moved to the end of the map
     fn next_peer(&mut self) -> Option<PeerId> {
-        let peer =
-            self.peers.iter().find_map(|(peer_id, peer)| peer.state.is_idle().then_some(*peer_id));
-        if let Some(peer_id) = peer {
-            // Move to end of the map
-            self.peers.get_refresh(&peer_id);
-        }
-        peer
+        self.peers
+            .iter()
+            .filter(|(_, peer)| peer.state.is_idle())
+            .min_by_key(|(_, peer)| peer.timeout())
+            .map(|(id, _)| *id)
     }
 
     /// Returns the next action to return
@@ -271,6 +280,14 @@ struct Peer {
     best_hash: H256,
     /// Tracks the best number of the peer.
     best_number: u64,
+    /// Tracks the current timeout value we use for the peer.
+    timeout: Arc<AtomicU64>,
+}
+
+impl Peer {
+    fn timeout(&self) -> u64 {
+        self.timeout.load(Ordering::Relaxed)
+    }
 }
 
 /// Tracks the state of an individual peer
@@ -390,6 +407,7 @@ mod tests {
         })
         .await;
     }
+
     #[tokio::test]
     async fn test_peer_rotation() {
         let manager = PeersManager::new(PeersConfig::default());
@@ -397,15 +415,44 @@ mod tests {
         // Add a few random peers
         let peer1 = H512::random();
         let peer2 = H512::random();
+        fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(1)));
+        fetcher.new_active_peer(peer2, H256::random(), 2, Arc::new(AtomicU64::new(1)));
+
+        let first_peer = fetcher.next_peer().unwrap();
+        assert!(first_peer == peer1 || first_peer == peer2);
+        // Pending disconnect for first_peer
+        fetcher.on_pending_disconnect(&first_peer);
+        // first_peer now isn't idle, so we should get other peer
+        let second_peer = fetcher.next_peer().unwrap();
+        assert!(first_peer == peer1 || first_peer == peer2);
+        assert_ne!(first_peer, second_peer);
+        // without idle peers, returns None
+        fetcher.on_pending_disconnect(&second_peer);
+        assert_eq!(fetcher.next_peer(), None);
+    }
+
+    #[tokio::test]
+    async fn test_peer_prioritization() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle());
+        // Add a few random peers
+        let peer1 = H512::random();
+        let peer2 = H512::random();
         let peer3 = H512::random();
-        fetcher.new_active_peer(peer1, H256::random(), 1);
-        fetcher.new_active_peer(peer2, H256::random(), 2);
-        fetcher.new_active_peer(peer3, H256::random(), 3);
-        let next_peer = fetcher.next_peer();
-        // Must get peer1 as our first peer
-        assert_eq!(next_peer, Some(peer1));
-        // peer1 must now move to the end of the map
-        assert_eq!(&peer1, fetcher.peers.back().unwrap().0);
+
+        let peer2_timeout = Arc::new(AtomicU64::new(300));
+
+        fetcher.new_active_peer(peer1, H256::random(), 1, Arc::new(AtomicU64::new(30)));
+        fetcher.new_active_peer(peer2, H256::random(), 2, Arc::clone(&peer2_timeout));
+        fetcher.new_active_peer(peer3, H256::random(), 3, Arc::new(AtomicU64::new(50)));
+
+        // Must always get peer1 (lowest timeout)
+        assert_eq!(fetcher.next_peer(), Some(peer1));
+        assert_eq!(fetcher.next_peer(), Some(peer1));
+        // peer2's timeout changes below peer1's
+        peer2_timeout.store(10, Ordering::Relaxed);
+        // Then we get peer 2 always (now lowest)
+        assert_eq!(fetcher.next_peer(), Some(peer2));
         assert_eq!(fetcher.next_peer(), Some(peer2));
     }
 }
