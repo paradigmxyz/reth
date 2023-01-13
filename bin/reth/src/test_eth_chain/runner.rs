@@ -21,13 +21,16 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 /// The outcome of a test.
 #[derive(Debug)]
 pub enum TestOutcome {
+    /// The test was skipped.
     Skipped,
+    /// The test passed.
     Passed,
+    /// The test failed.
     Failed(eyre::Report),
 }
 
