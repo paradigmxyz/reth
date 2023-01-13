@@ -12,7 +12,6 @@ pub struct ChainSpec {
     genesis: Genesis,
     genesis_hash: H256,
     hardforks: BTreeMap<Hardfork, BlockNumber>,
-    // This is an edge case, maybe we move it into a `Hardforks` struct
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
     shanghai_block: Option<u64>,
@@ -128,59 +127,137 @@ impl ChainSpec {
 
 /// A helper to build custom chain specs
 #[derive(Debug, Default)]
-pub struct ChainSpecBuilder;
+pub struct ChainSpecBuilder {
+    chain_id: Option<ChainId>,
+    genesis: Option<Genesis>,
+    genesis_hash: Option<H256>,
+    hardforks: BTreeMap<Hardfork, BlockNumber>,
+    paris_block: Option<u64>,
+    paris_ttd: Option<U256>,
+    shanghai_block: Option<u64>,
+}
 
 impl ChainSpecBuilder {
+    /// Returns a [ChainSpec] builder
     pub fn new() -> Self {
-        todo!()
+        Self {
+            chain_id: None,
+            genesis: None,
+            genesis_hash: None,
+            hardforks: BTreeMap::new(),
+            paris_block: None,
+            paris_ttd: None,
+            shanghai_block: None,
+        }
     }
 
+    /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
     pub fn mainnet() -> Self {
-        todo!()
+        let mainnet = ChainSpec::mainnet();
+
+        Self {
+            chain_id: Some(mainnet.chain_id),
+            genesis: Some(mainnet.genesis),
+            genesis_hash: Some(mainnet.genesis_hash),
+            hardforks: mainnet.hardforks,
+            paris_block: mainnet.paris_block,
+            paris_ttd: mainnet.paris_ttd,
+            shanghai_block: mainnet.shanghai_block,
+        }
     }
 
-    pub fn paris_activated(&self) -> Self {
-        todo!()
+    /// Sets the chain id
+    pub fn chain_id(mut self, chain_id: ChainId) -> Self {
+        self.chain_id = Some(chain_id);
+        self
     }
 
-    pub fn london_activated(&self) -> Self {
-        todo!()
+    /// Sets the genesis
+    pub fn genesis(mut self, genesis: Genesis) -> Self {
+        self.genesis = Some(genesis);
+        self
     }
 
-    pub fn berlin_activated(&self) -> Self {
-        todo!()
+    /// Enables Frontier
+    pub fn frontier_activated(mut self) -> Self {
+        self.hardforks.insert(Hardfork::Frontier, 0);
+        self
     }
 
-    pub fn istanbul_activated(&self) -> Self {
-        todo!()
+    /// Enables Homestead
+    pub fn homestead_activated(mut self) -> Self {
+        self = self.frontier_activated();
+        self.hardforks.insert(Hardfork::Homestead, 0);
+        self
     }
 
-    pub fn petersburg_activated(&self) -> Self {
-        todo!()
+    /// Enables Tangerine
+    pub fn tangerine_whistle_activated(mut self) -> Self {
+        self = self.homestead_activated();
+        self.hardforks.insert(Hardfork::Tangerine, 0);
+        self
     }
 
-    pub fn byzantium_activated(&self) -> Self {
-        todo!()
+    /// Enables SpuriousDragon
+    pub fn spurious_dragon_activated(mut self) -> Self {
+        self = self.tangerine_whistle_activated();
+        self.hardforks.insert(Hardfork::SpuriousDragon, 0);
+        self
     }
 
-    pub fn spurious_dragon_activated(&self) -> Self {
-        todo!()
+    /// Enables Byzantium
+    pub fn byzantium_activated(mut self) -> Self {
+        self = self.spurious_dragon_activated();
+        self.hardforks.insert(Hardfork::Byzantium, 0);
+        self
     }
 
-    pub fn tangerine_whistle_activated(&self) -> Self {
-        todo!()
+    /// Enables Petersburg
+    pub fn petersburg_activated(mut self) -> Self {
+        self = self.byzantium_activated();
+        self.hardforks.insert(Hardfork::Petersburg, 0);
+        self
     }
 
-    pub fn homestead_activated(&self) -> Self {
-        todo!()
+    /// Enables Istanbul
+    pub fn istanbul_activated(mut self) -> Self {
+        self = self.petersburg_activated();
+        self.hardforks.insert(Hardfork::Istanbul, 0);
+        self
     }
 
-    pub fn frontier_activated(&self) -> Self {
-        todo!()
+    /// Enables Berlin
+    pub fn berlin_activated(mut self) -> Self {
+        self = self.istanbul_activated();
+        self.hardforks.insert(Hardfork::Berlin, 0);
+        self
     }
 
-    pub fn build(&self) -> ChainSpec {
-        todo!()
+    /// Enables London
+    pub fn london_activated(mut self) -> Self {
+        self = self.berlin_activated();
+        self.hardforks.insert(Hardfork::London, 0);
+        self
+    }
+
+    /// Enables Paris
+    pub fn paris_activated(mut self) -> Self {
+        self = self.berlin_activated();
+        self.paris_block = Some(0);
+        self
+    }
+
+    /// Build a [ChainSpec]
+    pub fn build(self) -> ChainSpec {
+        ChainSpec {
+            chain_id: self.chain_id.expect("The chain id is required"),
+            genesis: self.genesis.expect("The genesis is required"),
+            genesis_hash: self.genesis_hash.expect("The genesis hash is required"),
+            hardforks: self.hardforks,
+            paris_block: self.paris_block,
+            paris_ttd: self.paris_ttd,
+            shanghai_block: self.shanghai_block,
+        }
     }
 }
 
