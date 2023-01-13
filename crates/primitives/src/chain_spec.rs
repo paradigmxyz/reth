@@ -287,6 +287,8 @@ impl ParisStatus {
     }
 }
 
+#[cfg(test)]
+mod tests {
 #[test]
 // this test checks that the forkid computation is accurate
 fn test_forkid_from_hardfork() {
@@ -302,4 +304,5 @@ fn test_forkid_from_hardfork() {
 
     let latest_forkid = mainnet.fork_id(Hardfork::Latest).unwrap();
     assert_eq!(0, latest_forkid.next);
+    }
 }
