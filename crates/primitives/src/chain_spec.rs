@@ -45,7 +45,7 @@ impl ChainSpec {
             ]),
             paris_block: Some(15537394),
             paris_ttd: Some(U256::from(58750000000000000000000_u128)),
-            shanghai_block: None,
+            shanghai_block: Some(u64::MAX),
         }
     }
 
