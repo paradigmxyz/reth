@@ -3607,6 +3607,7 @@ dependencies = [
  "reth-executor",
  "reth-interfaces",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3993,6 +3994,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-net-common",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -4009,6 +4011,10 @@ dependencies = [
  "tokio-stream",
  "tracing",
 ]
+
+[[package]]
+name = "reth-network-api"
+version = "0.1.0"
 
 [[package]]
 name = "reth-primitives"
