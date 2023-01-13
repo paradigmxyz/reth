@@ -123,6 +123,11 @@ impl ChainSpec {
             None
         }
     }
+
+    /// Returns a [ChainSpecBuilder] to help build custom specs
+    pub fn builder() -> ChainSpecBuilder {
+        ChainSpecBuilder::default()
+    }
 }
 
 /// A helper to build custom chain specs
@@ -138,19 +143,6 @@ pub struct ChainSpecBuilder {
 }
 
 impl ChainSpecBuilder {
-    /// Returns a [ChainSpec] builder
-    pub fn new() -> Self {
-        Self {
-            chain_id: None,
-            genesis: None,
-            genesis_hash: None,
-            hardforks: BTreeMap::new(),
-            paris_block: None,
-            paris_ttd: None,
-            shanghai_block: None,
-        }
-    }
-
     /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
     pub fn mainnet() -> Self {
         let mainnet = ChainSpec::mainnet();
