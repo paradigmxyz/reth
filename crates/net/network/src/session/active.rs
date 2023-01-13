@@ -711,7 +711,7 @@ mod tests {
                 status: StatusBuilder::default().build(),
                 fork_filter: ChainSpec::mainnet()
                     .fork_filter(Hardfork::Frontier)
-                    .expect("The Frontier fork filter should exists on mainnet"),
+                    .expect("The Frontier fork filter should exist on mainnet"),
                 bandwidth_meter: BandwidthMeter::default(),
             }
         }
