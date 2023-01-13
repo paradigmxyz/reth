@@ -437,6 +437,37 @@ mod tests {
         );
     }
 
+    /// Execute the stage in two steps
+    #[tokio::test]
+    async fn execute_from_previous_progress() {
+        let mut runner = HeadersTestRunner::with_linear_downloader();
+        let (stage_progress, previous_stage) = (600, 1200);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+
+        // skip `after_execution` hook for linear downloader
+        let tip = headers.last().unwrap();
+        runner.consensus.update_tip(tip.hash());
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);
+
+        let rx = runner.execute(input);
+
+        runner.client.clear().await;
+        runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+    }
+
     mod test_runner {
         use crate::{
             metrics::HeaderMetrics,
