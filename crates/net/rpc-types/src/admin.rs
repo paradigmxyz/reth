@@ -1,6 +1,6 @@
-use std::net::{IpAddr, SocketAddr};
-use reth_primitives::{NodeRecord, U256, H512, rpc::H256};
+use reth_primitives::{rpc::H256, NodeRecord, H512, U256};
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, SocketAddr};
 
 /// Represents the `admin_nodeInfo` response, which can be queried for all the information
 /// known about the running node at the networking granularity.
