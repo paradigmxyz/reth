@@ -243,9 +243,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
 name = "base64ct"
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/gakonst/ethers-rs#2eb56e69b777b093ae8c2937d7b3c764f1347280"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1406,11 +1406,11 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/gakonst/ethers-rs#2eb56e69b777b093ae8c2937d7b3c764f1347280"
 dependencies = [
  "async-trait",
  "auto_impl",
- "base64 0.20.0",
+ "base64 0.21.0",
  "enr 0.7.0",
  "ethers-core",
  "futures-core",
