@@ -3,12 +3,13 @@
 //! Stage debugging tool
 use crate::{
     config::Config,
-    dirs::{ConfigPath, DbPath},
-    prometheus_exporter, NetworkOpts,
-};
-use reth_cli_utils::{
-    chainspec::{chain_spec_value_parser, ChainSpecification},
-    init::{init_db, init_genesis},
+    dirs::{ConfigPath, DbPath, PlatformPath},
+    prometheus_exporter,
+    utils::{
+        chainspec::{chain_spec_value_parser, ChainSpecification},
+        init::{init_db, init_genesis},
+    },
+    NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
@@ -36,11 +37,11 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: PlatformPath<DbPath>,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: ConfigPath,
+    config: PlatformPath<ConfigPath>,
 
     /// The chain this node is running.
     ///
@@ -108,13 +109,13 @@ impl Command {
         fdlimit::raise_fd_limit();
 
         if let Some(listen_addr) = self.metrics {
-            info!("Starting metrics endpoint at {}", listen_addr);
+            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
             HeaderMetrics::describe();
         }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
-        info!("reth {} starting stage {:?}", clap::crate_version!(), self.stage);
+        info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
             previous_stage: Some((StageId("No Previous Stage"), self.to)),

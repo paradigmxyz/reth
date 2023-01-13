@@ -14,4 +14,4 @@ tracing = { version = "0.1", default-features = false }
 futures-util = "0.3"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }

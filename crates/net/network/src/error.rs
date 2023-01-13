@@ -1,21 +1,27 @@
 //! Possible errors when interacting with the network.
 
 use crate::session::PendingSessionHandshakeError;
+use reth_dns_discovery::resolver::ResolveError;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
-use std::{fmt, io::ErrorKind};
+use std::{fmt, io, io::ErrorKind};
 
 /// All error variants for the network
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkError {
     /// General IO error.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     /// IO error when creating the discovery service
     #[error("Failed to launch discovery service: {0}")]
-    Discovery(std::io::Error),
+    Discovery(io::Error),
+    /// Error when setting up the DNS resolver failed
+    ///
+    /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
+    #[error("Failed to configure DNS resolver: {0}")]
+    DnsResolver(#[from] ResolveError),
 }
 
 /// Abstraction over errors that can lead to a failed session
@@ -114,15 +120,7 @@ impl SessionError for EthStreamError {
 
     fn should_backoff(&self) -> Option<BackoffKind> {
         if let Some(err) = self.as_io() {
-            return match err.kind() {
-                // these usually happen when the remote instantly drops the connection, for example
-                // if the previous connection isn't properly cleaned up yet and the peer is temp.
-                // banned.
-                ErrorKind::ConnectionRefused |
-                ErrorKind::ConnectionReset |
-                ErrorKind::BrokenPipe => Some(BackoffKind::Low),
-                _ => Some(BackoffKind::Medium),
-            }
+            return err.should_backoff()
         }
 
         if let Some(err) = self.as_disconnected() {
@@ -179,6 +177,28 @@ impl SessionError for PendingSessionHandshakeError {
         match self {
             PendingSessionHandshakeError::Eth(eth) => eth.should_backoff(),
             PendingSessionHandshakeError::Ecies(_) => Some(BackoffKind::Low),
+        }
+    }
+}
+
+impl SessionError for io::Error {
+    fn merits_discovery_ban(&self) -> bool {
+        false
+    }
+
+    fn is_fatal_protocol_error(&self) -> bool {
+        false
+    }
+
+    fn should_backoff(&self) -> Option<BackoffKind> {
+        match self.kind() {
+            // these usually happen when the remote instantly drops the connection, for example
+            // if the previous connection isn't properly cleaned up yet and the peer is temp.
+            // banned.
+            ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe => {
+                Some(BackoffKind::Low)
+            }
+            _ => Some(BackoffKind::Medium),
         }
     }
 }

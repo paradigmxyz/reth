@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Default request timeout for a single request.
 ///
 /// This represents the time we wait for a response until we consider it timed out.
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 pub struct SessionsConfig {
@@ -32,9 +32,9 @@ impl Default for SessionsConfig {
             // `buffer + num sessions`. Each session can therefore fit at least 1 message in the
             // channel. The buffer size is additional capacity. The channel is always drained on
             // `poll`.
-            session_event_buffer: 64,
+            session_event_buffer: 128,
             limits: Default::default(),
-            request_timeout: REQUEST_TIMEOUT,
+            request_timeout: INITIAL_REQUEST_TIMEOUT,
         }
     }
 }

@@ -26,7 +26,7 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 #[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256, reth_db::Error> {
     let tx = db.tx()?;
-    if let Some((_, hash)) = tx.cursor::<tables::CanonicalHeaders>()?.first()? {
+    if let Some((_, hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
         debug!("Genesis already written, skipping.");
         return Ok(hash)
     }

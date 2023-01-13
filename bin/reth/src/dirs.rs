@@ -28,67 +28,111 @@ pub fn config_dir() -> Option<PathBuf> {
     dirs_next::config_dir().map(|root| root.join("reth"))
 }
 
-/// A wrapper type that either parses a user-given path for the reth database or defaults to an
-/// OS-specific path.
-#[derive(Clone, Debug)]
-pub struct DbPath(PathBuf);
+/// Returns the path to the reth cache directory.
+///
+/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+pub fn cache_dir() -> Option<PathBuf> {
+    dirs_next::cache_dir().map(|root| root.join("reth"))
+}
 
-impl Display for DbPath {
+/// Returns the path to the reth logs directory.
+///
+/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+pub fn logs_dir() -> Option<PathBuf> {
+    cache_dir().map(|root| root.join("logs"))
+}
+
+/// Returns the path to the reth database.
+///
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct DbPath;
+
+impl XdgPath for DbPath {
+    fn resolve() -> Option<PathBuf> {
+        database_path()
+    }
+}
+
+/// Returns the path to the default reth configuration file.
+///
+/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct ConfigPath;
+
+impl XdgPath for ConfigPath {
+    fn resolve() -> Option<PathBuf> {
+        config_dir().map(|p| p.join("reth.toml"))
+    }
+}
+
+/// Returns the path to the reth logs directory.
+///
+/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct LogsDir;
+
+impl XdgPath for LogsDir {
+    fn resolve() -> Option<PathBuf> {
+        logs_dir()
+    }
+}
+
+/// A small helper trait for unit structs that represent a standard path following the XDG
+/// path specification.
+trait XdgPath {
+    fn resolve() -> Option<PathBuf>;
+}
+
+/// A wrapper type that either parses a user-given path or defaults to an
+/// OS-specific path.
+///
+/// The [FromStr] implementation supports shell expansions and common patterns such as `~` for the
+/// home directory.
+///
+/// # Example
+///
+/// ```
+/// use reth::dirs::{PlatformPath, DbPath};
+/// use std::str::FromStr;
+///
+/// // Resolves to the platform-specific database path
+/// let default: PlatformPath<DbPath> = PlatformPath::default();
+/// // Resolves to `$(pwd)/my/path/to/db`
+/// let custom: PlatformPath<DbPath> = PlatformPath::from_str("my/path/to/db").unwrap();
+///
+/// assert_ne!(default.as_ref(), custom.as_ref());
+/// ```
+#[derive(Clone, Debug)]
+pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
+
+impl<D> Display for PlatformPath<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.display())
     }
 }
 
-impl Default for DbPath {
-    fn default() -> Self {
-        Self(database_path().expect("Could not determine default database path. Set one manually."))
-    }
-}
-
-impl FromStr for DbPath {
-    type Err = shellexpand::LookupError<VarError>;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(parse_path(s)?))
-    }
-}
-
-impl AsRef<Path> for DbPath {
-    fn as_ref(&self) -> &Path {
-        self.0.as_path()
-    }
-}
-
-/// A wrapper type that either parses a user-given path for the reth config or defaults to an
-/// OS-specific path.
-#[derive(Clone, Debug)]
-pub struct ConfigPath(PathBuf);
-
-impl Display for ConfigPath {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.display())
-    }
-}
-
-impl Default for ConfigPath {
+impl<D: XdgPath> Default for PlatformPath<D> {
     fn default() -> Self {
         Self(
-            config_dir()
-                .expect("Could not determine default database path. Set one manually.")
-                .join("reth.toml"),
+            D::resolve().expect("Could not resolve default path. Set one manually."),
+            std::marker::PhantomData,
         )
     }
 }
 
-impl FromStr for ConfigPath {
+impl<D> FromStr for PlatformPath<D> {
     type Err = shellexpand::LookupError<VarError>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(parse_path(s)?))
+        Ok(Self(parse_path(s)?, std::marker::PhantomData))
     }
 }
 
-impl AsRef<Path> for ConfigPath {
+impl<D> AsRef<Path> for PlatformPath<D> {
     fn as_ref(&self) -> &Path {
         self.0.as_path()
     }

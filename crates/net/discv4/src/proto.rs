@@ -564,6 +564,20 @@ mod tests {
     }
 
     #[test]
+    fn neighbours_max_ipv4() {
+        let mut rng = thread_rng();
+        let msg = Message::Neighbours(Neighbours {
+            nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng)).take(16).collect(),
+            expire: rng.gen(),
+        });
+        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+
+        let (encoded, _) = msg.encode(&secret_key);
+        // Assret that 16 nodes never fit into one packet
+        assert!(encoded.len() > MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
+    }
+
+    #[test]
     fn neighbours_max_nodes() {
         let mut rng = thread_rng();
         for _ in 0..1000 {
