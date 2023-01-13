@@ -20,7 +20,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -117,13 +117,14 @@ where
         capabilities: Arc<Capabilities>,
         status: Status,
         request_tx: PeerRequestSender,
+        timeout: Arc<AtomicU64>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
         let block_number =
             self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number);
+        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
 
         self.active_peers.insert(
             peer,
@@ -500,7 +501,10 @@ mod tests {
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_primitives::{Header, PeerId, H256};
     use reth_provider::test_utils::NoopProvider;
-    use std::{future::poll_fn, sync::Arc};
+    use std::{
+        future::poll_fn,
+        sync::{atomic::AtomicU64, Arc},
+    };
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
@@ -534,7 +538,13 @@ mod tests {
         let (tx, session_rx) = mpsc::channel(1);
         let peer_tx = PeerRequestSender::new(peer_id, tx);
 
-        state.on_session_activated(peer_id, capabilities(), Status::default(), peer_tx);
+        state.on_session_activated(
+            peer_id,
+            capabilities(),
+            Status::default(),
+            peer_tx,
+            Arc::new(AtomicU64::new(1)),
+        );
 
         assert!(state.active_peers.contains_key(&peer_id));
 
