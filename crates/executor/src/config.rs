@@ -12,17 +12,17 @@ pub const WEI_5ETH: u128 = 5000000000000000000u128;
 /// return revm_spec from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, for_block: BlockNumber) -> revm::SpecId {
     match for_block {
-        b if Some(b) >= chain_spec.shanghai_block() => revm::MERGE_EOF,
+        b if chain_spec.fork_active(Hardfork::Shanghai, b) => revm::MERGE_EOF,
         b if Some(b) >= chain_spec.paris_status().block_number() => revm::MERGE,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::London) => revm::LONDON,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Berlin) => revm::BERLIN,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Istanbul) => revm::ISTANBUL,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Petersburg) => revm::PETERSBURG,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Byzantium) => revm::BYZANTIUM,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::SpuriousDragon) => revm::SPURIOUS_DRAGON,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Tangerine) => revm::TANGERINE,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Homestead) => revm::HOMESTEAD,
-        b if Some(b) >= chain_spec.fork_block(Hardfork::Frontier) => revm::FRONTIER,
+        b if chain_spec.fork_active(Hardfork::London, b) => revm::LONDON,
+        b if chain_spec.fork_active(Hardfork::Berlin, b) => revm::BERLIN,
+        b if chain_spec.fork_active(Hardfork::Istanbul, b) => revm::ISTANBUL,
+        b if chain_spec.fork_active(Hardfork::Petersburg, b) => revm::PETERSBURG,
+        b if chain_spec.fork_active(Hardfork::Byzantium, b) => revm::BYZANTIUM,
+        b if chain_spec.fork_active(Hardfork::SpuriousDragon, b) => revm::SPURIOUS_DRAGON,
+        b if chain_spec.fork_active(Hardfork::Tangerine, b) => revm::TANGERINE,
+        b if chain_spec.fork_active(Hardfork::Homestead, b) => revm::HOMESTEAD,
+        b if chain_spec.fork_active(Hardfork::Frontier, b) => revm::FRONTIER,
         _ => panic!("wrong configuration"),
     }
 }

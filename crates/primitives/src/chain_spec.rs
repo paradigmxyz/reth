@@ -64,6 +64,11 @@ impl ChainSpec {
         self.hardforks.get(&fork).copied()
     }
 
+    /// Returns `true` if the given fork is active on the given block
+    pub fn fork_active(&self, fork: Hardfork, current_block: BlockNumber) -> bool {
+        self.fork_block(fork).map(|target| target <= current_block).unwrap_or_default()
+    }
+
     /// Get the Paris status
     pub fn paris_status(&self) -> ParisStatus {
         match self.paris_ttd {
@@ -291,6 +296,8 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
+    use crate::{ChainSpec, Hardfork};
+
 #[test]
 // this test checks that the forkid computation is accurate
 fn test_forkid_from_hardfork() {
