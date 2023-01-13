@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionSignedEcRecovered, TxHash, TxLegacy, TxType, H256, U256,
+    TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -275,7 +275,10 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     fn size(&self) -> usize;
 }
 
-// #[main_codec]
+/// The default [PoolTransaction] for the [Pool](crate::Pool).
+///
+/// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
+/// derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PooledTransaction {
     /// EcRecovered transaction info
