@@ -124,14 +124,18 @@ impl Discovery {
     }
 
     /// Processes an incoming [NodeRecord] update from a discovery service
-    fn on_node_record_update(&mut self, record: NodeRecord, _fork_id: Option<ForkId>) {
+    fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
         let addr = record.tcp_addr();
         match self.discovered_nodes.entry(id) {
             Entry::Occupied(_entry) => {}
             Entry::Vacant(entry) => {
                 entry.insert(addr);
-                self.queued_events.push_back(DiscoveryEvent::Discovered(id, addr))
+                self.queued_events.push_back(DiscoveryEvent::Discovered {
+                    peer_id: id,
+                    socket_addr: addr,
+                    fork_id,
+                });
             }
         }
     }
@@ -210,7 +214,7 @@ impl Discovery {
 /// Events produced by the [`Discovery`] manager.
 pub enum DiscoveryEvent {
     /// A new node was discovered
-    Discovered(PeerId, SocketAddr),
+    Discovered { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
     /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
     EnrForkId(PeerId, ForkId),
 }
