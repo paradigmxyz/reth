@@ -10,6 +10,11 @@ pub fn derive(input: TokenStream) -> TokenStream {
     compact::derive(input)
 }
 
+/// Implements the main codec. If the codec supports it, it will call `derive_arbitrary(..)`.
+/// 
+/// Example usage:
+/// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
+/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary`
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
@@ -95,6 +100,12 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// If `compact` or `rlp` is passed to `derive_arbitrary`, there will be proptest roundtrip tests
 /// generated.
+///
+/// Examples:
+/// * `#[derive_arbitrary]`: will derive arbitrary with no tests.
+/// * `#[derive_arbitrary(rlp)]`: will derive arbitrary and generate rlp roundtrip proptests.
+/// * `#[derive_arbitrary(compact, rlp)]`. will derive arbitrary and generate rlp and compact
+///   roundtrip proptests.
 #[proc_macro_attribute]
 pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
