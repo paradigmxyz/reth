@@ -308,7 +308,7 @@ async fn test_connect_to_trusted_peer() {
         .get_headers(HeadersRequest {
             start: 73174u64.into(),
             limit: 10,
-            direction: HeadersDirection::Rising,
+            direction: HeadersDirection::Falling,
         })
         .await;
 
