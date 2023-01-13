@@ -13,6 +13,7 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -62,11 +63,6 @@ impl NetworkHandle {
     /// How many peers we're currently connected to.
     pub fn num_connected_peers(&self) -> usize {
         self.inner.num_active_peers.load(Ordering::Relaxed)
-    }
-
-    /// Returns the [`SocketAddr`] that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
-        *self.inner.listener_address.lock()
     }
 
     /// Returns the [`PeerId`] used in the network.
@@ -207,6 +203,14 @@ impl NetworkHandle {
     /// Provides a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
+    }
+}
+
+// === API Implementations ===
+
+impl NetworkInfo for NetworkHandle {
+    fn local_addr(&self) -> SocketAddr {
+        *self.inner.listener_address.lock()
     }
 }
 
