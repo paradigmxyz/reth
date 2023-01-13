@@ -92,14 +92,60 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
     stage_test_suite_ext!(TotalDifficultyTestRunner);
 
-    #[derive(Default)]
+    #[tokio::test]
+    async fn execute_with_intermediate_commit() {
+        let threshold = 50;
+        let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
+
+        let mut runner = TotalDifficultyTestRunner::default();
+        runner.set_threshold(threshold);
+
+        let first_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        // Seed only once with full input range
+        runner.seed_execution(first_input).expect("failed to seed execution");
+
+        // Execute first time
+        let result = runner.execute(first_input).await.unwrap();
+        let expected_progress = stage_progress + threshold;
+        assert!(matches!(
+            result,
+            Ok(ExecOutput { done: false, stage_progress })
+                if stage_progress == expected_progress
+        ));
+
+        // Execute second time
+        let second_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(expected_progress),
+        };
+        let result = runner.execute(second_input).await.unwrap();
+        assert!(matches!(
+            result,
+            Ok(ExecOutput { done: true, stage_progress })
+                if stage_progress == previous_stage
+        ));
+
+        assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
+    }
+
     struct TotalDifficultyTestRunner {
         tx: TestTransaction,
+        commit_threshold: u64,
+    }
+
+    impl Default for TotalDifficultyTestRunner {
+        fn default() -> Self {
+            Self { tx: Default::default(), commit_threshold: 500 }
+        }
     }
 
     impl StageTestRunner for TotalDifficultyTestRunner {
@@ -110,7 +156,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TotalDifficultyStage { commit_threshold: 500 }
+            TotalDifficultyStage { commit_threshold: self.commit_threshold }
         }
     }
 
@@ -193,6 +239,10 @@ mod tests {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             self.tx.check_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
             Ok(())
+        }
+
+        fn set_threshold(&mut self, new_threshold: u64) {
+            self.commit_threshold = new_threshold;
         }
     }
 }
