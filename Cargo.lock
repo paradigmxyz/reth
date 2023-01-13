@@ -4016,6 +4016,9 @@ dependencies = [
 [[package]]
 name = "reth-network-api"
 version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+]
 
 [[package]]
 name = "reth-primitives"
