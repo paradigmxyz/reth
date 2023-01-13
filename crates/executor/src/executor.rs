@@ -393,9 +393,51 @@ pub fn execute<DB: StateProvider>(
     }
 
     let db = evm.db.expect("Db is set at the start of the function");
-    let block_reward = block_reward_changeset(header, ommers, db, config)?;
+    let mut block_reward = block_reward_changeset(header, ommers, db, config)?;
+
+    if config.spec_upgrades.dao_fork == header.number {
+        let mut irregular_state_changeset = dao_fork_changeset(db)?;
+        irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
+        block_reward = Some(irregular_state_changeset);
+    }
 
     Ok(ExecutionResult { changesets, block_reward })
+}
+
+/// Irregular state change at Ethereum DAO hardfork
+pub fn dao_fork_changeset<DB: StateProvider>(
+    db: &mut SubState<DB>,
+) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
+    let mut drained_balance = U256::ZERO;
+    // drain all accounts ether
+    let mut changesets = crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS
+        .iter()
+        .map(|&address| {
+            let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
+            let old = to_reth_acc(&db_account.info);
+            let mut new = old;
+            drained_balance += core::mem::take(&mut new.balance);
+            // drain balance
+            db_account.info.balance = U256::ZERO;
+            // assume it is changeset as it is irregular state change
+            Ok((address, AccountInfoChangeSet::Changed { new, old }))
+        })
+        .collect::<Result<BTreeMap<H160, AccountInfoChangeSet>, _>>()?;
+
+    // add drained ether to beneficiary.
+    let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+
+    let beneficiary_db_account = db.load_account(beneficiary).map_err(|_| Error::ProviderError)?;
+    let old = to_reth_acc(&beneficiary_db_account.info);
+    beneficiary_db_account.info.balance += drained_balance;
+    let new = to_reth_acc(&beneficiary_db_account.info);
+
+    let beneficiary_changeset = AccountInfoChangeSet::Changed { new, old };
+
+    // insert changeset
+    changesets.insert(beneficiary, beneficiary_changeset);
+
+    Ok(changesets)
 }
 
 /// Calculate Block reward changeset
