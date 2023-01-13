@@ -40,7 +40,7 @@ impl AdminApiServer for AdminApi {
         todo!()
     }
 
-    fn node_info(&self) -> RpcResult<NodeRecord>  {
+    fn node_info(&self) -> RpcResult<NodeRecord> {
         Ok(self.network.local_node_record())
     }
 }
