@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 
 /// The downloader buffer.
 #[derive(Debug)]
-pub struct DownloadBuffer {
+pub(crate) struct DownloadBuffer {
     // TODO: merge two buffers?
     /// Internal header buffer
     headers: LruCache<H256, SealedHeader>,
@@ -15,7 +15,7 @@ pub struct DownloadBuffer {
 
 impl DownloadBuffer {
     /// Create new instance of [DownloadBuffer].
-    pub fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         let size = NonZeroUsize::new(size).expect("invalid buffer size");
         Self { headers: LruCache::new(size), bodies: LruCache::new(size) }
     }
@@ -23,33 +23,37 @@ impl DownloadBuffer {
 
 impl DownloadBuffer {
     /// Add headers to the buffer.
-    pub fn extend_headers(&mut self, headers: impl Iterator<Item = SealedHeader>) {
+    pub(crate) fn extend_headers(&mut self, headers: impl Iterator<Item = SealedHeader>) {
         for header in headers {
             self.headers.put(header.hash(), header);
         }
     }
 
     /// Add bodies to the buffer.
-    pub fn extend_bodies(&mut self, bodies: impl Iterator<Item = BlockBody>) {
+    pub(crate) fn extend_bodies(&mut self, bodies: impl Iterator<Item = BlockBody>) {
         for _body in bodies {
             // TODO: self.bodies.put(...);
         }
     }
 
     /// Retrieve header from buffer if it exists
-    pub fn retrieve_header(&mut self, hash: H256) -> Option<SealedHeader> {
+    pub(crate) fn retrieve_header(&mut self, hash: H256) -> Option<SealedHeader> {
         self.headers.get(&hash).cloned()
     }
 
     /// Retrieve body from buffer if it exists.
-    pub fn retrieve_body(&mut self, hash: H256) -> Option<BlockBody> {
+    pub(crate) fn retrieve_body(&mut self, hash: H256) -> Option<BlockBody> {
         self.bodies.get(&hash).cloned()
     }
 
     /// Retrieve headers from the buffer by walking the chain.
     /// Next header is the parent of the previous one if any. The collection is
     /// returned when the parent does not exist or we reached the termination hash.
-    pub fn retrieve_header_chain(&mut self, tip: H256, until: H256) -> Option<Vec<SealedHeader>> {
+    pub(crate) fn retrieve_header_chain(
+        &mut self,
+        tip: H256,
+        until: H256,
+    ) -> Option<Vec<SealedHeader>> {
         let tip = self.headers.get(&tip)?.clone();
         let mut next = tip.parent_hash;
         let mut chain = vec![tip];
