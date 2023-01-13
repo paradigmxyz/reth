@@ -715,11 +715,12 @@ impl TryFrom<u8> for P2PMessageID {
 }
 
 /// RLPx `p2p` protocol version
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,
     /// `p2p` version 5
+    #[default]
     V5 = 5,
 }
 
@@ -741,12 +742,6 @@ impl Decodable for ProtocolVersion {
             5 => Ok(ProtocolVersion::V5),
             _ => Err(DecodeError::Custom("unknown p2p protocol version")),
         }
-    }
-}
-
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        ProtocolVersion::V5
     }
 }
 
