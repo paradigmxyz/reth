@@ -39,11 +39,11 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
         }
     }
 
-    let mut compact_tests = TokenStream2::default();
+    let mut tests = TokenStream2::default();
     if !roundtrips.is_empty() {
         let mod_tests = format_ident!("{}Tests", ast.ident);
 
-        compact_tests = quote! {
+        tests = quote! {
             #[allow(non_snake_case)]
             #[cfg(test)]
             mod #mod_tests {
@@ -59,5 +59,5 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
         }
     }
 
-    compact_tests
+    tests
 }

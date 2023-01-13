@@ -99,7 +99,7 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
-    let compact_tests = arbitrary::maybe_generate_tests(args, &ast);
+    let tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names
     let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
@@ -115,7 +115,7 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
         #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
         #ast
 
-        #compact_tests
+        #tests
     }
     .into()
 }
