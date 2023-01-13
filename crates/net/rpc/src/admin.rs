@@ -3,7 +3,10 @@ use reth_network::{peers::PeerKind, NetworkHandle};
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 
-struct AdminApi {
+/// `admin` API implementation.
+///
+/// This type provides the functionality for handling `admin` related requests.
+pub struct AdminApi {
     /// An interface to interact with the network
     network: NetworkHandle,
 }
@@ -34,5 +37,11 @@ impl AdminApiServer for AdminApi {
         _subscription_sink: jsonrpsee::SubscriptionSink,
     ) -> jsonrpsee::types::SubscriptionResult {
         todo!()
+    }
+}
+
+impl std::fmt::Debug for AdminApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdminApi").finish_non_exhaustive()
     }
 }
