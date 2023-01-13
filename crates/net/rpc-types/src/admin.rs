@@ -1,4 +1,5 @@
-use reth_primitives::{NodeRecord, U256};
+use std::net::{IpAddr, SocketAddr};
+use reth_primitives::{NodeRecord, U256, H512, rpc::H256};
 use serde::{Deserialize, Serialize};
 
 /// Represents the `admin_nodeInfo` response, which can be queried for all the information
@@ -11,12 +12,12 @@ pub struct NodeInfo {
     /// Enode in URL format.
     pub enode: String,
     /// ID of the local node.
-    pub id: String,
+    pub id: H512,
     /// IP of the local node.
-    pub ip: String,
+    pub ip: IpAddr,
     /// Address exposed for listening for the local node.
     #[serde(rename = "listenAddr")]
-    pub listen_addr: String,
+    pub listen_addr: SocketAddr,
     /// Local node client name.
     pub name: String,
     /// Ports exposed by the node for discovery and listening.
@@ -30,9 +31,9 @@ impl NodeInfo {
     pub fn new(enr: NodeRecord) -> NodeInfo {
         NodeInfo {
             enode: enr.to_string(),
-            id: enr.id.to_string(),
-            ip: enr.address.to_string(),
-            listen_addr: enr.tcp_addr().to_string(),
+            id: enr.id,
+            ip: enr.address,
+            listen_addr: enr.tcp_addr(),
             name: "Reth".to_owned(),
             ports: Ports { discovery: enr.tcp_port.into(), listener: enr.tcp_port.into() },
             protocols: Protocols {
@@ -64,9 +65,9 @@ pub struct Eth {
     /// Total difficulty of the best chain.
     pub difficulty: U256,
     /// The hash of the genesis block.
-    pub genesis: String,
+    pub genesis: H256,
     /// Hash of the latest block of the best chain.
-    pub head: String,
+    pub head: H256,
     /// Network ID in base 10.
     pub network: u64,
 }
