@@ -11,8 +11,16 @@
 
 use std::net::SocketAddr;
 
-/// Provides general purpose information about the network
+/// Provides general purpose information about the network.
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
+}
+
+/// Provides general purpose information about Peers in the network.
+pub trait PeersInfo: Send + Sync {
+    /// Returns how many peers the network is currently connected to.
+    ///
+    /// Note: this should only include established connections and _not_ ongoing attempts.
+    fn num_connected_peers(&self) -> usize;
 }

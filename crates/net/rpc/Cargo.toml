@@ -17,6 +17,7 @@ reth-rpc-types = { path = "../rpc-types" }
 reth-provider = { path = "../../storage/provider" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-network = { path = "../network" }
+reth-network-api = { path = "../network-api" }
 reth-consensus = { path = "../../consensus", features = ["serde"] }
 
 # rpc
