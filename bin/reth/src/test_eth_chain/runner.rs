@@ -21,7 +21,7 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 /// Tests are test edge cases that are not possible to happen on mainnet, so we are skipping them.
 pub fn should_skip(path: &Path) -> bool {
@@ -80,7 +80,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
     if should_skip(path) {
         return Ok(())
     }
-    info!("Executing test from path: {path:?}");
+    info!(target: "reth::cli", ?path, "Running test suite");
 
     for (name, suite) in suites.0 {
         if matches!(
@@ -101,7 +101,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
 
         let pre_state = suite.pre.0;
 
-        debug!("Executing {:?} spec: {:?}", name, suite.network);
+        debug!(target: "reth::cli", name, network = ?suite.network, "Running test");
 
         let spec_upgrades: SpecUpgrades = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;
@@ -139,7 +139,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 tx.put::<tables::Bytecodes>(code_hash, account.code.to_vec())?;
             }
             account.storage.iter().try_for_each(|(k, v)| {
-                tracing::trace!("Update storage: {address} key:{:?} val:{:?}", k.0, v.0);
+                trace!(target: "reth::cli", ?address, key = ?k.0, value = ?v.0, "Update storage");
                 tx.put::<tables::PlainStorageState>(
                     address,
                     StorageEntry { key: H256::from_slice(&k.0.to_be_bytes::<32>()), value: v.0 },
@@ -164,7 +164,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 map
             }))
         })??;
-        tracing::trace!("Pre state :{:?}", storage);
+        trace!(target: "reth::cli", ?storage, "Pre-state");
 
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereum 1.
@@ -189,7 +189,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
         // Validate post state
         match suite.post_state {
             Some(RootOrState::Root(root)) => {
-                info!("Post state is root: #{root:?}")
+                info!(target: "reth::cli", "Post-state root: #{root:?}")
             }
             Some(RootOrState::State(state)) => db.view(|tx| -> eyre::Result<()> {
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
@@ -269,7 +269,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 }
                 Ok(())
             })??,
-            None => info!("Post state is none"),
+            None => info!(target: "reth::cli", "No post-state"),
         }
     }
     Ok(())

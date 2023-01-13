@@ -1103,7 +1103,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru",
+ "lru 0.7.8",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -1975,6 +1975,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
+]
+
+[[package]]
 name = "hyper"
 version = "0.14.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2538,6 +2554,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
 dependencies = [
  "hashbrown 0.12.3",
+]
+
+[[package]]
+name = "lru"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e7d46de488603ffdd5f30afbc64fbba2378214a2c3a2fb83abf3d33126df17"
+dependencies = [
+ "hashbrown 0.13.1",
 ]
 
 [[package]]
@@ -3582,10 +3607,12 @@ dependencies = [
  "reth-executor",
  "reth-interfaces",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
  "reth-stages",
+ "reth-tracing",
  "reth-transaction-pool",
  "serde",
  "serde_json",
@@ -3594,9 +3621,8 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
- "tracing-futures",
- "tracing-subscriber",
  "walkdir",
 ]
 
@@ -3612,7 +3638,6 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tracing",
- "tracing-subscriber",
  "walkdir",
 ]
 
@@ -3719,7 +3744,12 @@ dependencies = [
  "bytes",
  "data-encoding",
  "enr 0.7.0",
+ "linked_hash_set",
+ "lru 0.9.0",
+ "parking_lot 0.12.1",
+ "reth-net-common",
  "reth-primitives",
+ "reth-tracing",
  "secp256k1 0.24.2",
  "thiserror",
  "tokio",
@@ -3936,6 +3966,7 @@ dependencies = [
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -3954,6 +3985,7 @@ dependencies = [
  "fnv",
  "futures",
  "hex",
+ "humantime-serde",
  "linked-hash-map",
  "linked_hash_set",
  "metrics",
@@ -3966,6 +3998,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-net-common",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3982,6 +4015,10 @@ dependencies = [
  "tokio-stream",
  "tracing",
 ]
+
+[[package]]
+name = "reth-network-api"
+version = "0.1.0"
 
 [[package]]
 name = "reth-primitives"
@@ -4177,6 +4214,8 @@ name = "reth-tracing"
 version = "0.1.0"
 dependencies = [
  "tracing",
+ "tracing-appender",
+ "tracing-journald",
  "tracing-subscriber",
 ]
 
@@ -5330,6 +5369,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-appender"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09d48f71a791638519505cefafe162606f706c25592e4bde4d97600c0195312e"
+dependencies = [
+ "crossbeam-channel",
+ "time",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-attributes"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5360,6 +5410,17 @@ dependencies = [
  "futures-task",
  "pin-project",
  "tracing",
+]
+
+[[package]]
+name = "tracing-journald"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba316a74e8fc3c3896a850dba2375928a9fa171b085ecddfc7c054d39970f3fd"
+dependencies = [
+ "libc",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -20,6 +20,7 @@ normal = [
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-net-common = { path = "../common" }
+reth-network-api = { path = "../network-api" }
 reth-discv4 = { path = "../discv4" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
@@ -37,6 +38,7 @@ tokio-stream = "0.1"
 
 # io
 serde = { version = "1.0", optional = true }
+humantime-serde = { version = "1.1", optional = true }
 
 # metrics
 metrics = "0.20.1"
@@ -79,4 +81,4 @@ tempfile = "3.3"
 serial_test = "0.10"
 
 [features]
-serde = ["dep:serde"]
+serde = ["dep:serde", "dep:humantime-serde"]
