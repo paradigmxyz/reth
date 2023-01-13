@@ -268,8 +268,8 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::Discovered(peer, addr) => {
-                self.peers_manager.add_peer(peer, addr);
+            DiscoveryEvent::Discovered { peer_id, socket_addr, fork_id } => {
+                self.peers_manager.add_peer(peer_id, socket_addr, fork_id);
             }
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
                 self.queued_messages
