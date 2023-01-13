@@ -22,7 +22,7 @@ use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{BlockNumber, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -84,6 +84,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, value_delimiter = ',')]
+    bootnodes: Option<Vec<NodeRecord>>,
 }
 
 impl Command {
@@ -97,7 +100,13 @@ impl Command {
         let mut config: Config =
             confy::load_path(&self.config).wrap_err("Could not load config")?;
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-        if !self.network.trusted_peers.is_empty() {
+
+        // overrides the bootnodes with --bootnodes flag
+        if let Some(bootnodes) = &self.bootnodes {
+            bootnodes.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            })
+        } else if !self.network.trusted_peers.is_empty() {
             self.network.trusted_peers.iter().for_each(|peer| {
                 config.peers.trusted_nodes.insert(*peer);
             });
