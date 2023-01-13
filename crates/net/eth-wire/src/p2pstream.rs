@@ -580,7 +580,7 @@ pub fn set_capability_offsets(
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
@@ -712,7 +712,7 @@ impl TryFrom<u8> for P2PMessageID {
 }
 
 /// RLPx `p2p` protocol version
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
     /// `p2p` version 4

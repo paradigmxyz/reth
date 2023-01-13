@@ -92,9 +92,13 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 /// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.
+///
+/// If `compact` or `rlp` is passed to `derive_arbitrary`, there will be proptest roundtrip tests
+/// generated.
 #[proc_macro_attribute]
 pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
+
     let compact_tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names

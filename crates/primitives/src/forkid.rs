@@ -16,7 +16,7 @@ use std::{
 use thiserror::Error;
 
 /// `CRC32` hash of all previous forks starting from genesis block.
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Copy,
@@ -60,7 +60,7 @@ impl Add<BlockNumber> for ForkHash {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Copy,

@@ -286,7 +286,7 @@ impl SealedHeader {
 /// [`HeadersDirection::Falling`] block numbers for `reverse == false`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.

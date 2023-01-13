@@ -8,10 +8,13 @@ use syn::DeriveInput;
 pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream2 {
     let type_ident = ast.ident.clone();
 
+    let mut traits = vec![];
     let mut roundtrips = vec![];
     let mut args = args.into_iter();
+
     while let Some(arg) = args.next() {
         if arg.to_string() == "compact" {
+            traits.push(quote! { use super::Compact; });
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
@@ -23,6 +26,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                 }
             });
         } else if arg.to_string() == "rlp" {
+            traits.push(quote! { use reth_rlp::{Encodable, Decodable}; });
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
@@ -44,11 +48,11 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             #[allow(non_snake_case)]
             #[cfg(test)]
             mod #mod_tests {
-                use super::*;
+                #(#traits)*
 
                 #[test]
                 fn proptest() {
-                    proptest::proptest!(|(field: super::#type_ident)| {
+                    proptest::proptest!(proptest::prelude::ProptestConfig::with_cases(1000), |(field: super::#type_ident)| {
                         #(#roundtrips)*
                     });
                 }

@@ -76,7 +76,7 @@ pub mod fuzz_rlp {
 
     // see message below for why wrapper types are necessary for fuzzing types that do not have a
     // Default impl
-    #[derive_arbitrary]
+    #[derive_arbitrary(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -118,7 +118,7 @@ pub mod fuzz_rlp {
     //
     // We just provide a default value here so test-fuzz can auto-generate a corpus file for the
     // type.
-    #[derive_arbitrary]
+    #[derive_arbitrary(rlp)]
     #[derive(
         Clone,
         Debug,

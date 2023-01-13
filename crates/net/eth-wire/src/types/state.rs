@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,
@@ -26,7 +26,7 @@ pub struct GetNodeData(pub Vec<H256>);
 ///
 /// Not all nodes are guaranteed to be returned by the peer.
 /// This message was removed in `eth/67`.
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,

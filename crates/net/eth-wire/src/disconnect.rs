@@ -8,7 +8,7 @@ use std::fmt::Display;
 use thiserror::Error;
 
 /// RLPx disconnect reason.
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
