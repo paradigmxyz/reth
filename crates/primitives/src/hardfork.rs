@@ -20,6 +20,7 @@ pub enum Hardfork {
     London,
     ArrowGlacier,
     GrayGlacier,
+    Shanghai,
     Latest,
 }
 
@@ -79,9 +80,8 @@ impl Default for Hardfork {
 
 impl From<(&ChainSpec, BlockNumber)> for Hardfork {
     fn from((chain_spec, num): (&ChainSpec, BlockNumber)) -> Self {
-        if let Some((fork, _)) = once((Hardfork::Frontier, 0))
-            .chain(chain_spec.forks_iter())
-            .find(|(_, b)| *b < num)
+        if let Some((fork, _)) =
+            once((Hardfork::Frontier, 0)).chain(chain_spec.forks_iter()).find(|(_, b)| *b < num)
         {
             fork
         } else {

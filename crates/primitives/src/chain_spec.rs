@@ -79,11 +79,6 @@ impl ChainSpec {
         }
     }
 
-    /// Get the Shanghai block number
-    pub fn shanghai_block(&self) -> Option<BlockNumber> {
-        self.shanghai_block
-    }
-
     /// Get an iterator of all harforks with theirs respectives block number
     pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, BlockNumber)> + '_ {
         self.hardforks.iter().map(|(f, b)| (*f, *b))
@@ -95,11 +90,8 @@ impl ChainSpec {
     /// all known future hardforks to initialize the filter.
     pub fn fork_filter(&self, fork: Hardfork) -> Option<ForkFilter> {
         if let Some(fork_block) = self.fork_block(fork) {
-            let future_forks = self
-                .forks_iter()
-                .map(|(_, b)| b)
-                .filter(|b| *b > fork_block)
-                .collect::<Vec<_>>();
+            let future_forks =
+                self.forks_iter().map(|(_, b)| b).filter(|b| *b > fork_block).collect::<Vec<_>>();
 
             Some(ForkFilter::new(fork_block, self.genesis_hash(), future_forks))
         } else {
@@ -298,20 +290,20 @@ impl ParisStatus {
 mod tests {
     use crate::{ChainSpec, Hardfork};
 
-#[test]
-// this test checks that the forkid computation is accurate
-fn test_forkid_from_hardfork() {
-    let mainnet = ChainSpec::mainnet();
+    #[test]
+    // this test checks that the forkid computation is accurate
+    fn test_forkid_from_hardfork() {
+        let mainnet = ChainSpec::mainnet();
 
-    let frontier_forkid = mainnet.fork_id(Hardfork::Frontier).unwrap();
-    assert_eq!([0xfc, 0x64, 0xec, 0x04], frontier_forkid.hash.0);
-    assert_eq!(1150000, frontier_forkid.next);
+        let frontier_forkid = mainnet.fork_id(Hardfork::Frontier).unwrap();
+        assert_eq!([0xfc, 0x64, 0xec, 0x04], frontier_forkid.hash.0);
+        assert_eq!(1150000, frontier_forkid.next);
 
-    let berlin_forkid = mainnet.fork_id(Hardfork::Berlin).unwrap();
-    assert_eq!([0x0e, 0xb4, 0x40, 0xf6], berlin_forkid.hash.0);
-    assert_eq!(12965000, berlin_forkid.next);
+        let berlin_forkid = mainnet.fork_id(Hardfork::Berlin).unwrap();
+        assert_eq!([0x0e, 0xb4, 0x40, 0xf6], berlin_forkid.hash.0);
+        assert_eq!(12965000, berlin_forkid.next);
 
-    let latest_forkid = mainnet.fork_id(Hardfork::Latest).unwrap();
-    assert_eq!(0, latest_forkid.next);
+        let latest_forkid = mainnet.fork_id(Hardfork::Latest).unwrap();
+        assert_eq!(0, latest_forkid.next);
     }
 }
