@@ -1885,7 +1885,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_lookup() {
         reth_tracing::init_test_tracing();
@@ -1921,7 +1921,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_mapped_ipv4() {
         reth_tracing::init_test_tracing();
         let mut rng = thread_rng();
@@ -1953,7 +1953,7 @@ mod tests {
         };
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_single_lookups() {
         reth_tracing::init_test_tracing();
 
@@ -1987,7 +1987,7 @@ mod tests {
         .await
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_no_local_in_closest() {
         reth_tracing::init_test_tracing();
 
@@ -2020,7 +2020,7 @@ mod tests {
         assert!(!closest.iter().any(|r| r.id == *service.local_peer_id()));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_random_lookup() {
         reth_tracing::init_test_tracing();
 
@@ -2054,7 +2054,7 @@ mod tests {
         assert_eq!(ctx.inner.closest_nodes.borrow().len(), 1);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_service_commands() {
         reth_tracing::init_test_tracing();
 
