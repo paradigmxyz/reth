@@ -80,7 +80,7 @@ impl ChainSpec {
     }
 
     /// Get an iterator of all harforks with theirs respectives block number
-    pub fn all_forks_blocks(&self) -> impl Iterator<Item = (Hardfork, BlockNumber)> + '_ {
+    pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, BlockNumber)> + '_ {
         self.hardforks.iter().map(|(f, b)| (*f, *b))
     }
 
@@ -91,7 +91,7 @@ impl ChainSpec {
     pub fn fork_filter(&self, fork: Hardfork) -> Option<ForkFilter> {
         if let Some(fork_block) = self.fork_block(fork) {
             let future_forks = self
-                .all_forks_blocks()
+                .forks_iter()
                 .map(|(_, b)| b)
                 .filter(|b| *b > fork_block)
                 .collect::<Vec<_>>();
@@ -108,7 +108,7 @@ impl ChainSpec {
             let mut curr_forkhash = ForkHash::from(self.genesis_hash());
             let mut curr_block_number = 0;
 
-            for (_, b) in self.all_forks_blocks() {
+            for (_, b) in self.forks_iter() {
                 if fork_block >= b {
                     if b != curr_block_number {
                         curr_forkhash += b;

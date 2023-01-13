@@ -318,7 +318,7 @@ impl<C> NetworkConfigBuilder<C> {
             ForkFilter::new(
                 head,
                 chain_spec.genesis_hash(),
-                chain_spec.all_forks_blocks().map(|(_, b)| b),
+                chain_spec.forks_iter().map(|(_, b)| b),
             )
         });
 
