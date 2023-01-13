@@ -97,7 +97,7 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
         }
     }
 
-    let scope = scope.ok_or(Error::new_spanned(node, "`scope = ..` must be set."))?;
+    let scope = scope.ok_or_else(|| Error::new_spanned(node, "`scope = ..` must be set."))?;
     Ok(MetricsAttr { scope, separator })
 }
 

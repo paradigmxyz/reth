@@ -240,7 +240,7 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
                     },
                     NodeEvent::Network(NetworkEvent::SessionClosed { peer_id, reason }) => {
                         state.connected_peers -= 1;
-                        let reason = reason.map(|s| s.to_string()).unwrap_or("None".to_string());
+                        let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
                         warn!(target: "reth::cli", connected_peers = state.connected_peers, peer_id = %peer_id, %reason, "Peer disconnected.");
                     },
                     NodeEvent::Pipeline(PipelineEvent::Running { stage_id, stage_progress }) => {
@@ -266,7 +266,7 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
                 }
             },
             _ = interval.tick() => {
-                let stage = state.current_stage.map(|id| id.to_string()).unwrap_or("None".to_string());
+                let stage = state.current_stage.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string());
                 info!(target: "reth::cli", connected_peers = state.connected_peers, %stage, checkpoint = state.current_checkpoint, "Status");
             }
         }

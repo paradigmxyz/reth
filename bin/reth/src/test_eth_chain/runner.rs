@@ -205,9 +205,10 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                 tracing::trace!("Our storage:{:?}", storage);
                 for (address, test_account) in state.iter() {
                     // check account
-                    let our_account = tx.get::<tables::PlainAccountState>(*address)?.ok_or(
-                        eyre!("Account is missing: {address} expected: {:?}", test_account),
-                    )?;
+                    let our_account =
+                        tx.get::<tables::PlainAccountState>(*address)?.ok_or_else(|| {
+                            eyre!("Account is missing: {address} expected: {:?}", test_account)
+                        })?;
                     if test_account.balance.0 != our_account.balance {
                         return Err(eyre!(
                             "Account {address} balance diff, expected {} got {}",
@@ -244,15 +245,19 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<()> {
                         for (JsonU256(key), JsonU256(value)) in test_account.storage.iter() {
                             let our_value = storage
                                 .get(address)
-                                .ok_or(eyre!(
-                                    "Missing storage from test {storage:?} got {:?}",
-                                    test_account.storage
-                                ))?
+                                .ok_or_else(|| {
+                                    eyre!(
+                                        "Missing storage from test {storage:?} got {:?}",
+                                        test_account.storage
+                                    )
+                                })?
                                 .get(key)
-                                .ok_or(eyre!(
-                                    "Slot is missing from table {storage:?} got:{:?}",
-                                    test_account.storage
-                                ))?;
+                                .ok_or_else(|| {
+                                    eyre!(
+                                        "Slot is missing from table {storage:?} got:{:?}",
+                                        test_account.storage
+                                    )
+                                })?;
                             if value != our_value {
                                 return Err(eyre!(
                                     "Storage diff we got {address}: {storage:?} but expect: {:?}",
