@@ -62,7 +62,7 @@ impl Deref for SealedBlock {
 }
 
 /// Either a block hash _or_ a block number
-#[derive_arbitrary]
+#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockHashOrNumber {
     /// A block hash

@@ -1,7 +1,8 @@
-use proc_macro::{self, TokenStream};
+use proc_macro::{self, TokenStream, TokenTree};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
 
+mod arbitrary;
 mod compact;
 
 #[proc_macro_derive(Compact, attributes(maybe_zero))]
@@ -78,59 +79,23 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
     }
     .into();
 
-    if args.to_string() == "no_arbitrary" {
-        return compact
-    }
-    derive_compact_arbitrary(args, compact)
-}
-
-/// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum. It
-/// also adds roundtrip tests for the `Compact` type.
-#[proc_macro_attribute]
-pub fn derive_compact_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as DeriveInput);
-
-    // Avoid duplicate names
-    let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
-    let arb_import = format_ident!("{}Arbitratry", ast.ident);
-    let mod_tests = format_ident!("{}Tests", ast.ident);
-    let type_ident = ast.ident.clone();
-
-    quote! {
-        #[cfg(any(test, feature = "arbitrary"))]
-        use proptest_derive::Arbitrary as #prop_import;
-
-        #[cfg(any(test, feature = "arbitrary"))]
-        use arbitrary::Arbitrary as #arb_import;
-
-        #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
-        #ast
-
-        #[allow(non_snake_case)]
-        #[cfg(test)]
-        mod #mod_tests {
-            use super::Compact;
-
-            #[test]
-            fn proptest() {
-                proptest::proptest!(|(field: super::#type_ident)| {
-                    let mut buf = vec![];
-
-                    let len = field.clone().to_compact(&mut buf);
-                    let (decoded, _) = super::#type_ident::from_compact(&buf, len);
-
-                    assert!(field == decoded);
-                });
-            }
+    if let Some(first_arg) = args.clone().into_iter().next() {
+        if first_arg.to_string() == "no_arbitrary" {
+            return compact
         }
     }
-    .into()
+
+    let mut args = args.into_iter().collect::<Vec<_>>();
+    args.push(TokenTree::Ident(proc_macro::Ident::new("compact", proc_macro::Span::call_site())));
+
+    derive_arbitrary(TokenStream::from_iter(args.into_iter()), compact)
 }
 
 /// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.
 #[proc_macro_attribute]
-pub fn derive_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
+    let compact_tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names
     let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
@@ -145,6 +110,8 @@ pub fn derive_arbitrary(_args: TokenStream, input: TokenStream) -> TokenStream {
 
         #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
         #ast
+
+        #compact_tests
     }
     .into()
 }

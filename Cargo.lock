@@ -4060,6 +4060,7 @@ dependencies = [
  "enr 0.7.0",
  "ethereum-types",
  "ethnum",
+ "hex",
  "hex-literal",
  "rand 0.8.5",
  "reth-rlp",
