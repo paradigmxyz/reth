@@ -415,10 +415,9 @@ pub fn dao_fork_changeset<DB: StateProvider>(
         .map(|&address| {
             let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
             let old = to_reth_acc(&db_account.info);
-            let mut new = old;
-            drained_balance += core::mem::take(&mut new.balance);
             // drain balance
-            db_account.info.balance = U256::ZERO;
+            drained_balance += core::mem::take(&mut db_account.info.balance);
+            let new = to_reth_acc(&db_account.info);
             // assume it is changeset as it is irregular state change
             Ok((address, AccountInfoChangeSet::Changed { new, old }))
         })
@@ -760,6 +759,67 @@ mod tests {
             Some(&(U256::ZERO, U256::from(2))),
             "Storage change from 0 to 2 on slot 1"
         );
+    }
+
+    #[test]
+    fn dao_hardfork_irregular_state_change() {
+        let mut header = Header::default();
+        header.number = 1;
+
+        let mut db = StateProviderTest::default();
+
+        let mut beneficiary_balance = 0;
+        for (i, dao_address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
+            db.insert_account(
+                *dao_address,
+                Account { balance: U256::from(i), nonce: 0x00, bytecode_hash: None },
+                None,
+                HashMap::new(),
+            );
+            beneficiary_balance += i;
+        }
+
+        let mut config = Config::new_ethereum();
+        config.spec_upgrades = SpecUpgrades::new_homestead_activated();
+        // hardcode it to first block to match our mock data.
+        config.spec_upgrades.dao_fork = 1;
+
+        let mut db = SubState::new(State::new(db));
+        // execute chain and verify receipts
+        let out = execute_and_verify_receipt(&header, &[], &[], &config, &mut db).unwrap();
+        assert_eq!(out.changesets.len(), 0, "No tx");
+
+        // Check if cache is set
+        // beneficiary
+        let dao_beneficiary =
+            db.accounts.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+
+        assert_eq!(dao_beneficiary.info.balance, U256::from(beneficiary_balance));
+        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+            let account = db.accounts.get(address).unwrap();
+            assert_eq!(account.info.balance, U256::ZERO);
+        }
+
+        // check changesets
+        let block_reward = out.block_reward.unwrap();
+        let change_set = block_reward.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+        assert_eq!(
+            *change_set,
+            AccountInfoChangeSet::Changed {
+                new: Account { balance: U256::from(beneficiary_balance), ..Default::default() },
+                old: Account { balance: U256::ZERO, ..Default::default() }
+            }
+        );
+        for (i, address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
+            let change_set = block_reward.get(address).unwrap();
+            assert_eq!(
+                *change_set,
+                AccountInfoChangeSet::Changed {
+                    new: Account { balance: U256::ZERO, ..Default::default() },
+                    old: Account { balance: U256::from(i), ..Default::default() }
+                }
+            );
+        }
     }
 
     #[test]
