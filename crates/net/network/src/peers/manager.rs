@@ -426,10 +426,7 @@ impl PeersManager {
     ///
     /// If the peer already exists, then the address, kind and fork_id will be updated.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: SocketAddr, fork_id: Option<ForkId>) {
-        self.add_peer_kind(peer_id, PeerKind::Basic, addr);
-        if let Some(fork_id) = fork_id {
-            self.set_discovered_fork_id(peer_id, fork_id);
-        }
+        self.add_peer_kind(peer_id, PeerKind::Basic, addr, fork_id)
     }
 
     /// Called for a newly discovered trusted peer.
@@ -437,13 +434,19 @@ impl PeersManager {
     /// If the peer already exists, then the address and kind will be updated.
     #[allow(dead_code)]
     pub(crate) fn add_trusted_peer(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer_id, PeerKind::Trusted, addr)
+        self.add_peer_kind(peer_id, PeerKind::Trusted, addr, None)
     }
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address and kind will be updated.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    pub(crate) fn add_peer_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: PeerKind,
+        addr: SocketAddr,
+        fork_id: Option<ForkId>,
+    ) {
         if self.ban_list.is_banned(&peer_id, &addr.ip()) {
             return
         }
@@ -453,11 +456,14 @@ impl PeersManager {
                 let node = entry.get_mut();
                 node.kind = kind;
                 node.addr = addr;
+                node.fork_id = fork_id;
                 return
             }
             Entry::Vacant(entry) => {
                 trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
-                entry.insert(Peer::with_kind(addr, kind));
+                let mut peer = Peer::with_kind(addr, kind);
+                peer.fork_id = fork_id;
+                entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }

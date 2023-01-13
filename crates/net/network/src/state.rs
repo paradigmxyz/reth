@@ -255,7 +255,7 @@ where
 
     /// Adds a peer and its address with the given kind to the peerset.
     pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
-        self.peers_manager.add_peer_kind(peer_id, kind, addr)
+        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
