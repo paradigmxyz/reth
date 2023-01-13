@@ -41,17 +41,6 @@ macro_rules! fuzz_type_and_name {
         fn $fuzzname(thing: $x) {
             crate::roundtrip_fuzz::<$x>(thing)
         }
-
-        mod $fuzzname {
-            use super::*;
-
-            #[test]
-            fn proptest() {
-                proptest::proptest!(|(thing: $x)| {
-                    crate::roundtrip_fuzz::<$x>(thing)
-                });
-            }
-        }
     };
 }
 
