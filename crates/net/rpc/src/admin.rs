@@ -3,6 +3,7 @@ use reth_network::{peers::PeerKind, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
+use reth_rpc_types::NodeInfo;
 
 /// `admin` API implementation.
 ///
@@ -40,8 +41,10 @@ impl AdminApiServer for AdminApi {
         todo!()
     }
 
-    fn node_info(&self) -> RpcResult<NodeRecord> {
-        Ok(self.network.local_node_record())
+    fn node_info(&self) -> RpcResult<NodeInfo> {
+        let enr = self.network.local_node_record();
+
+        Ok(NodeInfo::new(enr))
     }
 }
 
