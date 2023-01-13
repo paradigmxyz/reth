@@ -9,8 +9,8 @@
 //!
 //! Provides abstractions for the reth-network crate.
 
-use std::net::SocketAddr;
 use reth_primitives::NodeRecord;
+use std::net::SocketAddr;
 
 /// Provides general purpose information about the network.
 pub trait NetworkInfo: Send + Sync {
