@@ -101,12 +101,7 @@ impl Command {
             confy::load_path(&self.config).wrap_err("Could not load config")?;
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
 
-        // overrides the bootnodes with --bootnodes flag
-        if let Some(bootnodes) = &self.bootnodes {
-            bootnodes.iter().for_each(|peer| {
-                config.peers.trusted_nodes.insert(*peer);
-            })
-        } else if !self.network.trusted_peers.is_empty() {
+        if !self.network.trusted_peers.is_empty() {
             self.network.trusted_peers.iter().for_each(|peer| {
                 config.peers.trusted_nodes.insert(*peer);
             });
@@ -128,8 +123,16 @@ impl Command {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
+        let envs = &self.bootnodes;
+
         let network = config
-            .network_config(db.clone(), chain_id, genesis_hash, self.network.disable_discovery)
+            .network_config(
+                db.clone(),
+                chain_id,
+                genesis_hash,
+                self.network.disable_discovery,
+                &envs,
+            )
             .start_network()
             .await?;
 
