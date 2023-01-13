@@ -10,6 +10,7 @@
 //! Provides abstractions for the reth-network crate.
 
 use std::net::SocketAddr;
+use reth_primitives::NodeRecord;
 
 /// Provides general purpose information about the network.
 pub trait NetworkInfo: Send + Sync {
@@ -23,4 +24,7 @@ pub trait PeersInfo: Send + Sync {
     ///
     /// Note: this should only include established connections and _not_ ongoing attempts.
     fn num_connected_peers(&self) -> usize;
+
+    /// Returns the Ethereum Node Record of the node.
+    fn node_record(&self) -> NodeRecord;
 }
