@@ -249,18 +249,10 @@ impl PeersManager {
     }
 
     /// Temporarily puts the peer in timeout
-    fn backoff_peer(&mut self, peer_id: PeerId, kind: BackoffKind) {
+    fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
         trace!(target: "net::peers", ?peer_id, "backing off");
 
-        // Get mutable reference to peer.
-        // TODO: Unwrap should never fail but we should probably add some safety mechanism
-        let peer = self.peers.get_mut(&peer_id).unwrap();
-
-        // Calculates the backoff time and multiplies it with number of times the peer was already
-        // backed off
-        let duration = self.backoff_durations.backoff_until(kind, peer.backoff_counter);
-        self.ban_list.ban_peer_until(peer_id, duration);
-        peer.backoff_counter += 1;
+        self.ban_list.ban_peer_until(peer_id, until);
     }
 
     /// Unbans the peer
@@ -387,19 +379,32 @@ impl PeersManager {
                 })
             }
         } else {
-            let reputation_change = if let Some(kind) = err.should_backoff() {
-                // The peer has signaled that it is currently unable to process any more
-                // connections, so we will hold off on attempting any new connections for a while
-                self.backoff_peer(*peer_id, kind);
-                BACKOFF_REPUTATION_CHANGE.into()
-            } else {
-                self.reputation_weights.change(reputation_change)
-            };
+            let mut backoff_until: Option<std::time::Instant> = None;
 
             if let Some(mut peer) = self.peers.get_mut(peer_id) {
+                let reputation_change = if let Some(kind) = err.should_backoff() {
+                    let backoff_time =
+                        self.backoff_durations.backoff_until(kind, peer.backoff_counter);
+
+                    backoff_until = Some(backoff_time);
+
+                    // Increment peer.backoff_counter
+                    peer.backoff_counter += 1;
+
+                    // The peer has signaled that it is currently unable to process any more
+                    // connections, so we will hold off on attempting any new connections for a
+                    // while
+                    BACKOFF_REPUTATION_CHANGE.into()
+                } else {
+                    self.reputation_weights.change(reputation_change)
+                };
+
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
                 peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
+            }
+            if let Some(backoff_until) = backoff_until {
+                self.backoff_peer_until(*peer_id, backoff_until);
             }
         }
 
@@ -736,7 +741,7 @@ impl Peer {
             fork_id: None,
             remove_after_disconnect: false,
             kind: Default::default(),
-            backoff_counter: 1,
+            backoff_counter: 0,
         }
     }
 
@@ -1012,7 +1017,7 @@ impl PeerBackoffDurations {
 
     /// Returns the timestamp until which we should backoff
     pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u32) -> std::time::Instant {
-        let backoff_time = self.backoff(kind) * backoff_counter;
+        let backoff_time = self.backoff(kind) * (backoff_counter + 1);
         let now = std::time::Instant::now();
         now + backoff_time
     }
