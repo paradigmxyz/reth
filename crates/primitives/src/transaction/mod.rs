@@ -2,7 +2,7 @@ use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
-use reth_codecs::{main_codec, main_codec_no_arbitrary, Compact};
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 pub use tx_type::TxType;
@@ -534,7 +534,7 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[main_codec_no_arbitrary]
+#[main_codec(no_arbitrary)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSigned {
     /// Transaction hash
