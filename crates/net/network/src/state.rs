@@ -270,7 +270,11 @@ where
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::Discovered { peer_id, socket_addr, fork_id } => {
-                self.peers_manager.add_peer(peer_id, socket_addr, fork_id);
+                self.queued_messages.push_back(StateAction::DiscoveredNode {
+                    peer_id,
+                    socket_addr,
+                    fork_id,
+                });
             }
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
                 self.queued_messages
@@ -482,6 +486,8 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
+    /// A new node was found through the discovery, possibly with a ForkId
+    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
