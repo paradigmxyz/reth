@@ -257,7 +257,7 @@ pub enum Discv4Event {
 
 If there is not a `Discv4Event` immediately ready, the function continues triggering self lookup, and removing any nodes that have not sent a ping request in the allowable time elapsed (`now.duration_since(enr_request.sent_at) < Discv4Service.config.ping_expiration`). Additionally, the node re-pings all nodes whose endpoint proofs are considered expired. If the node fails to respond to the "ping" with a "pong", the node will be removed from the `KbucketsTable`.
 
-To prevent traffic amplification attacks (ie. DNS attacks), implementations must verify that the sender of a query participates in the discovery protocol. The sender of a packet is considered verified if it has sent a valid Pong response with matching ping hash within the last 12 hours.
+To prevent traffic amplification attacks (ie. DNS attacks), implementations must verify that the sender of a query participates in the discovery protocol. The sender of a packet is considered verified if it has sent a valid Pong response with matching ping hash within the last 12 hours. This is called the ["endpoint proof"](https://github.com/ethereum/devp2p/blob/master/discv4.md#endpoint-proof).
 
 Next, the Discv4Service handles all incoming [`Discv4Command`](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1527)s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
 
