@@ -20,6 +20,9 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
+use crate::stream::HasRemoteAddr;
+use metrics::Counter;
+use reth_metrics_derive::Metrics;
 use std::{
     convert::TryFrom as _,
     io,
@@ -29,15 +32,12 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    task::{ready, Context, Poll}, time::Duration,
+    task::{ready, Context, Poll},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
-use metrics::Gauge;
-use reth_metrics_derive::Metrics;
-use crate::stream::HasRemoteAddr;
 
 /// Meters bandwidth usage of streams
 #[derive(Debug)]
@@ -83,6 +83,24 @@ impl Default for BandwidthMeter {
     }
 }
 
+/// Exposes metrics for the inbound and outbound bandwidth for a given
+/// bandwidth meter
+#[derive(Metrics)]
+#[metrics(dynamic = true)]
+// #[metrics(scope = "test")]
+struct BandwidthMeterMetricsInner {
+    /// Counts inbound bandwidth
+    inbound_bandwidth: Counter,
+    /// Counts outbound bandwidth
+    outbound_bandwidth: Counter,
+}
+
+/// Public shareable struct used for exposing bandwidth metrics
+#[derive(Debug)]
+pub struct BandwidthMeterMetrics {
+    inner: Arc<BandwidthMeterMetricsInner>,
+}
+
 /// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and meters the
 /// bandwidth through it
 #[derive(Debug)]
@@ -93,19 +111,28 @@ pub struct MeteredStream<S> {
     inner: S,
     /// The [`BandwidthMeter`] struct this uses to monitor bandwidth
     meter: BandwidthMeter,
+    /// An optional [`BandwidthMeterMetrics`] struct expose metrics over the
+    /// [`BandwidthMeter`].
+    metrics: Option<BandwidthMeterMetrics>,
 }
 
 impl<S> MeteredStream<S> {
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// along with a new [`BandwidthMeter`]
     pub fn new(inner: S) -> Self {
-        Self { inner, meter: BandwidthMeter::default() }
+        Self { inner, meter: BandwidthMeter::default(), metrics: None }
     }
 
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// attaching the provided [`BandwidthMeter`]
     pub fn new_with_meter(inner: S, meter: BandwidthMeter) -> Self {
-        Self { inner, meter }
+        Self { inner, meter, metrics: None }
+    }
+
+    /// Creates a new [`MeteredStream`] wrapping around the provided stream,
+    /// attaching the provided [`BandwidthMeter`] & instantiating a [`BandwidthMeterMetrics`]
+    pub fn new_with_meter_and_metrics(inner: S, meter: BandwidthMeter) -> Self {
+        Self { inner, meter, metrics: Some(BandwidthMeterMetrics::default()) }
     }
 
     /// Provides a reference to the [`BandwidthMeter`] attached to this [`MeteredStream`]
@@ -121,15 +148,17 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.project();
-        let num_bytes = {
+        let num_bytes_u64 = {
             let init_num_bytes = buf.filled().len();
             ready!(this.inner.poll_read(cx, buf))?;
-            buf.filled().len() - init_num_bytes
+            u64::try_from(buf.filled().len() - init_num_bytes).unwrap_or(u64::max_value())
         };
-        this.meter
-            .inner
-            .inbound
-            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
+        this.meter.inner.inbound.fetch_add(num_bytes_u64, Ordering::Relaxed);
+
+        if let Some(bandwidth_meter_metrics) = &self.metrics {
+            bandwidth_meter_metrics.inner.inbound_bandwidth.increment(num_bytes_u64);
+        }
+
         Poll::Ready(Ok(()))
     }
 }
@@ -142,10 +171,13 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
     ) -> Poll<io::Result<usize>> {
         let this = self.project();
         let num_bytes = ready!(this.inner.poll_write(cx, buf))?;
-        this.meter
-            .inner
-            .outbound
-            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
+        let num_bytes_u64 = { u64::try_from(num_bytes).unwrap_or(u64::max_value()) };
+        this.meter.inner.outbound.fetch_add(num_bytes_u64, Ordering::Relaxed);
+
+        if let Some(bandwidth_meter_metrics) = &self.metrics {
+            bandwidth_meter_metrics.inner.outbound_bandwidth.increment(num_bytes_u64);
+        }
+
         Poll::Ready(Ok(num_bytes))
     }
 
@@ -163,36 +195,6 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
 impl HasRemoteAddr for MeteredStream<TcpStream> {
     fn remote_addr(&self) -> Option<SocketAddr> {
         self.inner.remote_addr()
-    }
-}
-
-// TODO: Use [`Counter`]s instead?
-/// Gauges the inbound and outbound bandwidth for a given
-/// bandwidth meter
-#[derive(Metrics)]
-#[metrics(dynamic = true)]
-pub struct BandwidthMeterMetricsInner {
-    /// Gauges inbound bandwidth
-    inbound_bandwidth: Gauge,
-    /// Gauges outbound bandwidth
-    outbound_bandwidth: Gauge,
-}
-
-/// Used to update bandwidth gauges with data from
-/// the nested [`BandwidthMeter`] on the given `interval`
-pub struct BandwidthMeterMetrics {
-    /// The [`BandwidthMeter`] from which bandwidth amounts are queried
-    bandwidth_meter: BandwidthMeter,
-    /// The metrics struct containing the gauges to update
-    metrics: BandwidthMeterMetricsInner,
-}
-
-impl BandwidthMeterMetrics {
-    pub fn new(bandwidth_meter: BandwidthMeter) -> Self {
-        Self {
-            bandwidth_meter,
-            metrics: BandwidthMeterMetricsInner::default(),
-        }
     }
 }
 
