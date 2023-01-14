@@ -379,7 +379,7 @@ impl PeersManager {
                 })
             }
         } else {
-            let mut backoff_until: Option<std::time::Instant> = None;
+            let mut backoff_until = None;
 
             if let Some(mut peer) = self.peers.get_mut(peer_id) {
                 let reputation_change = if let Some(kind) = err.should_backoff() {
