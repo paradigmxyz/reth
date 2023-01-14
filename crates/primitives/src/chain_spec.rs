@@ -30,7 +30,6 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     ]),
     paris_block: Some(15537394),
     paris_ttd: Some(U256::from(58750000000000000000000_u128)),
-    shanghai_block: Some(u64::MAX),
 });
 
 /// The Ethereum chain spec
@@ -42,7 +41,6 @@ pub struct ChainSpec {
     hardforks: BTreeMap<Hardfork, BlockNumber>,
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
-    shanghai_block: Option<u64>,
 }
 
 impl ChainSpec {
@@ -133,7 +131,6 @@ pub struct ChainSpecBuilder {
     hardforks: BTreeMap<Hardfork, BlockNumber>,
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
-    shanghai_block: Option<u64>,
 }
 
 impl ChainSpecBuilder {
@@ -146,7 +143,6 @@ impl ChainSpecBuilder {
             hardforks: MAINNET.hardforks.clone(),
             paris_block: MAINNET.paris_block,
             paris_ttd: MAINNET.paris_ttd,
-            shanghai_block: MAINNET.shanghai_block,
         }
     }
 
@@ -240,7 +236,6 @@ impl ChainSpecBuilder {
             hardforks: self.hardforks,
             paris_block: self.paris_block,
             paris_ttd: self.paris_ttd,
-            shanghai_block: self.shanghai_block,
         }
     }
 }
