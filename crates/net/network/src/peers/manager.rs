@@ -249,9 +249,10 @@ impl PeersManager {
     }
 
     /// Temporarily puts the peer in timeout
-    fn backoff_peer(&mut self, peer_id: PeerId, kind: BackoffKind) {
+    fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
         trace!(target: "net::peers", ?peer_id, "backing off");
-        self.ban_list.ban_peer_until(peer_id, self.backoff_durations.backoff_until(kind));
+
+        self.ban_list.ban_peer_until(peer_id, until);
     }
 
     /// Unbans the peer
@@ -378,19 +379,32 @@ impl PeersManager {
                 })
             }
         } else {
-            let reputation_change = if let Some(kind) = err.should_backoff() {
-                // The peer has signaled that it is currently unable to process any more
-                // connections, so we will hold off on attempting any new connections for a while
-                self.backoff_peer(*peer_id, kind);
-                BACKOFF_REPUTATION_CHANGE.into()
-            } else {
-                self.reputation_weights.change(reputation_change)
-            };
+            let mut backoff_until = None;
 
             if let Some(mut peer) = self.peers.get_mut(peer_id) {
+                let reputation_change = if let Some(kind) = err.should_backoff() {
+                    // Increment peer.backoff_counter
+                    peer.backoff_counter += 1;
+
+                    let backoff_time =
+                        self.backoff_durations.backoff_until(kind, peer.backoff_counter);
+
+                    backoff_until = Some(backoff_time);
+
+                    // The peer has signaled that it is currently unable to process any more
+                    // connections, so we will hold off on attempting any new connections for a
+                    // while
+                    BACKOFF_REPUTATION_CHANGE.into()
+                } else {
+                    self.reputation_weights.change(reputation_change)
+                };
+
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
                 peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
+            }
+            if let Some(backoff_until) = backoff_until {
+                self.backoff_peer_until(*peer_id, backoff_until);
             }
         }
 
@@ -713,6 +727,8 @@ pub struct Peer {
     remove_after_disconnect: bool,
     /// The kind of peer
     kind: PeerKind,
+    /// Counts number of times the peer was backed off   
+    backoff_counter: u32,
 }
 
 // === impl Peer ===
@@ -734,6 +750,7 @@ impl Peer {
             fork_id: None,
             remove_after_disconnect: false,
             kind: Default::default(),
+            backoff_counter: 0,
         }
     }
 
@@ -1008,9 +1025,10 @@ impl PeerBackoffDurations {
     }
 
     /// Returns the timestamp until which we should backoff
-    pub fn backoff_until(&self, kind: BackoffKind) -> std::time::Instant {
+    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u32) -> std::time::Instant {
+        let backoff_time = self.backoff(kind) * backoff_counter;
         let now = std::time::Instant::now();
-        now + self.backoff(kind)
+        now + backoff_time
     }
 }
 
@@ -1042,6 +1060,7 @@ impl Display for InboundConnectionError {
 mod test {
     use super::PeersManager;
     use crate::{
+        error::BackoffKind,
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
             PeerAction, ReputationChangeKind,
@@ -1254,6 +1273,34 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_backoff_calculations() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let config = PeersConfig::default();
+        let mut peers = PeersManager::new(config);
+        peers.add_peer(peer, socket_addr, None);
+        let peer_struct = peers.peers.get_mut(&peer).unwrap();
+
+        // Simulate a peer that was already backed off once
+        peer_struct.backoff_counter = 1;
+
+        let now = std::time::Instant::now();
+
+        // Simulate the increment that happens in on_connection_failure
+        peer_struct.backoff_counter += 1;
+        // Get official backoff time
+        let backoff_time =
+            peers.backoff_durations.backoff_until(BackoffKind::High, peer_struct.backoff_counter);
+
+        // Duration of the backoff should be 2 * 15 minutes = 30 minutes
+        let backoff_duration = std::time::Duration::new(30 * 60, 0);
+
+        // We can't use assert_eq! since there is a very small diff in the nano secs
+        // Usually it is 1800s != 1799.9999996s
+        assert!(backoff_time.duration_since(now) > backoff_duration);
     }
 
     #[tokio::test]
