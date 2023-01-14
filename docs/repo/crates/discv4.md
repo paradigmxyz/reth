@@ -192,7 +192,7 @@ Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()
 ## Polling the Discv4Service and Discovery Events
 In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html#) is responsible for advancing the computation by polling the future. This is done by calling `Future::poll`.
 
-Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections. If you would like to check out the function in it's entirety, you can [click here](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1302).
+Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections.
 
 [File: ]()
 ```rust ignore
