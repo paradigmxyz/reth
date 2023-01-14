@@ -438,9 +438,9 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address and kind will be updated.
-    pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer_id, PeerKind::Basic, addr)
+    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: SocketAddr, fork_id: Option<ForkId>) {
+        self.add_peer_kind(peer_id, PeerKind::Basic, addr, fork_id)
     }
 
     /// Called for a newly discovered trusted peer.
@@ -448,13 +448,19 @@ impl PeersManager {
     /// If the peer already exists, then the address and kind will be updated.
     #[allow(dead_code)]
     pub(crate) fn add_trusted_peer(&mut self, peer_id: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer_id, PeerKind::Trusted, addr)
+        self.add_peer_kind(peer_id, PeerKind::Trusted, addr, None)
     }
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address and kind will be updated.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    pub(crate) fn add_peer_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: PeerKind,
+        addr: SocketAddr,
+        fork_id: Option<ForkId>,
+    ) {
         if self.ban_list.is_banned(&peer_id, &addr.ip()) {
             return
         }
@@ -464,11 +470,14 @@ impl PeersManager {
                 let node = entry.get_mut();
                 node.kind = kind;
                 node.addr = addr;
+                node.fork_id = fork_id;
                 return
             }
             Entry::Vacant(entry) => {
                 trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
-                entry.insert(Peer::with_kind(addr, kind));
+                let mut peer = Peer::with_kind(addr, kind);
+                peer.fork_id = fork_id;
+                entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }
@@ -601,7 +610,7 @@ impl PeersManager {
             while let Poll::Ready(Some(cmd)) = self.handle_rx.poll_next_unpin(cx) {
                 match cmd {
                     PeerCommand::Add(peer_id, addr) => {
-                        self.add_peer(peer_id, addr);
+                        self.add_peer(peer_id, addr, None);
                     }
                     PeerCommand::Remove(peer) => self.remove_peer(peer),
                     PeerCommand::ReputationChange(peer_id, rep) => {
@@ -1099,7 +1108,7 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1122,7 +1131,7 @@ mod test {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
         peers.ban_peer(peer);
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::BanPeer { peer_id } => {
@@ -1147,7 +1156,7 @@ mod test {
             PeerBackoffDurations { low: Duration::from_secs(3), ..Default::default() };
         let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1211,7 +1220,7 @@ mod test {
             PeerBackoffDurations { high: Duration::from_secs(3), ..Default::default() };
         let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1297,7 +1306,7 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1353,7 +1362,7 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1465,7 +1474,7 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1509,7 +1518,7 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1546,7 +1555,7 @@ mod test {
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
 
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
 
@@ -1559,7 +1568,7 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1596,7 +1605,7 @@ mod test {
         let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
-        peer_manager.add_peer(H512::default(), socket_addr);
+        peer_manager.add_peer(H512::default(), socket_addr, None);
 
         assert!(peer_manager.peers.is_empty());
     }
@@ -1688,7 +1697,7 @@ mod test {
 
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
-        peers.add_peer(basic_peer, basic_sock);
+        peers.add_peer(basic_peer, basic_sock, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {
@@ -1728,7 +1737,7 @@ mod test {
 
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
-        peers.add_peer(basic_peer, basic_sock);
+        peers.add_peer(basic_peer, basic_sock, None);
 
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => {

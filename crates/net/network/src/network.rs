@@ -13,7 +13,8 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
+use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -57,16 +58,6 @@ impl NetworkHandle {
             is_syncing: Arc::new(Default::default()),
         };
         Self { inner: Arc::new(inner) }
-    }
-
-    /// How many peers we're currently connected to.
-    pub fn num_connected_peers(&self) -> usize {
-        self.inner.num_active_peers.load(Ordering::Relaxed)
-    }
-
-    /// Returns the [`SocketAddr`] that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
-        *self.inner.listener_address.lock()
     }
 
     /// Returns the [`PeerId`] used in the network.
@@ -207,6 +198,26 @@ impl NetworkHandle {
     /// Provides a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
+    }
+}
+
+// === API Implementations ===
+
+impl PeersInfo for NetworkHandle {
+    fn num_connected_peers(&self) -> usize {
+        self.inner.num_active_peers.load(Ordering::Relaxed)
+    }
+
+    fn local_node_record(&self) -> NodeRecord {
+        let id = *self.peer_id();
+        let socket_addr = *self.inner.listener_address.lock();
+        NodeRecord::new(socket_addr, id)
+    }
+}
+
+impl NetworkInfo for NetworkHandle {
+    fn local_addr(&self) -> SocketAddr {
+        *self.inner.listener_address.lock()
     }
 }
 

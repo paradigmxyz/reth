@@ -1,6 +1,7 @@
 //! Possible errors when interacting with the network.
 
 use crate::session::PendingSessionHandshakeError;
+use reth_dns_discovery::resolver::ResolveError;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
@@ -12,10 +13,15 @@ use std::{fmt, io, io::ErrorKind};
 pub enum NetworkError {
     /// General IO error.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     /// IO error when creating the discovery service
     #[error("Failed to launch discovery service: {0}")]
-    Discovery(std::io::Error),
+    Discovery(io::Error),
+    /// Error when setting up the DNS resolver failed
+    ///
+    /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
+    #[error("Failed to configure DNS resolver: {0}")]
+    DnsResolver(#[from] ResolveError),
 }
 
 /// Abstraction over errors that can lead to a failed session
