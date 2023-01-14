@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
+use reth_net_common::bandwidth_meter::{BandwidthMeter, BandwidthMeterMetrics, MeteredStream};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -44,7 +44,7 @@ mod handle;
 pub use config::SessionsConfig;
 
 /// Internal identifier for active sessions.
-#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
+#[derive(Debug, Display, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
 
 /// Manages a set of sessions.
@@ -191,7 +191,16 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
+        // Instantiating a new [`BandwidthMeterMetrics`] struct here to get per-stream metrics.
+        // NOTE: This means the metric values will be <= the in/outbound values in the
+        // [`BandwidthMeter`], as it is shared by all streams.
+        let bandwidth_metrics =
+            BandwidthMeterMetrics::new(format!("bandwidth_session_{}", session_id).into());
+        let metered_stream = MeteredStream::new_with_meter_and_metrics(
+            stream,
+            self.bandwidth_meter.clone(),
+            metrics,
+        );
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -652,7 +661,14 @@ async fn start_pending_outbound_session(
     bandwidth_meter: BandwidthMeter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => MeteredStream::new_with_meter(stream, bandwidth_meter),
+        Ok(stream) => {
+            // Instantiating a new [`BandwidthMeterMetrics`] struct here to get per-stream metrics.
+            // NOTE: This means the metric values will be <= the in/outbound values in the
+            // [`BandwidthMeter`], as it is shared by all streams.
+            let bandwidth_metrics =
+                BandwidthMeterMetrics::new(format!("bandwidth_session_{}", session_id).into());
+            MeteredStream::new_with_meter_and_metrics(stream, bandwidth_meter, metrics)
+        }
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {

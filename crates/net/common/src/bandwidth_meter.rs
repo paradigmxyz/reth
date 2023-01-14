@@ -101,6 +101,12 @@ pub struct BandwidthMeterMetrics {
     inner: Arc<BandwidthMeterMetricsInner>,
 }
 
+impl BandwidthMeterMetrics {
+    pub fn new(scope: &'static str) -> Self {
+        Self { inner: Arc::new(BandwidthMeterMetricsInner::new(scope)) }
+    }
+}
+
 /// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and meters the
 /// bandwidth through it
 #[derive(Debug)]
@@ -131,8 +137,12 @@ impl<S> MeteredStream<S> {
 
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// attaching the provided [`BandwidthMeter`] & instantiating a [`BandwidthMeterMetrics`]
-    pub fn new_with_meter_and_metrics(inner: S, meter: BandwidthMeter) -> Self {
-        Self { inner, meter, metrics: Some(BandwidthMeterMetrics::default()) }
+    pub fn new_with_meter_and_metrics(
+        inner: S,
+        meter: BandwidthMeter,
+        metrics: BandwidthMeterMetrics,
+    ) -> Self {
+        Self { inner, meter, metrics: Some(metrics) }
     }
 
     /// Provides a reference to the [`BandwidthMeter`] attached to this [`MeteredStream`]
