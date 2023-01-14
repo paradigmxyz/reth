@@ -123,15 +123,13 @@ impl Command {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
-        let envs = &self.bootnodes;
-
         let network = config
             .network_config(
                 db.clone(),
                 chain_id,
                 genesis_hash,
                 self.network.disable_discovery,
-                &envs,
+                &self.bootnodes,
             )
             .start_network()
             .await?;
