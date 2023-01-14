@@ -13,3 +13,4 @@ pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
 pub use config::{Config, SpecUpgrades};
+pub mod eth_dao_fork;
