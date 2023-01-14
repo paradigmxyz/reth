@@ -1051,6 +1051,7 @@ impl Display for InboundConnectionError {
 mod test {
     use super::PeersManager;
     use crate::{
+        error::BackoffKind,
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
             PeerAction, ReputationChangeKind,
@@ -1263,6 +1264,32 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_backoff_calculations() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let config = PeersConfig::default();
+        let mut peers = PeersManager::new(config);
+        peers.add_peer(peer, socket_addr);
+        let peer_struct = peers.peers.get_mut(&peer).unwrap();
+
+        // Simulate peer getting backed off once before
+        peer_struct.backoff_counter = 1;
+
+        let now = std::time::Instant::now();
+
+        // Get official backoff time
+        let backoff_time =
+            peers.backoff_durations.backoff_until(BackoffKind::High, peer_struct.backoff_counter);
+
+        // Duration of the backoff should be 2 * 15 minutes = 30 minutes
+        let backoff_duration = std::time::Duration::new(30 * 60, 0);
+
+        // We can't use assert_eq! since there is a very small diff in the nano secs
+        // Usually it is 1800s != 1799.9999996s
+        assert!(backoff_time.duration_since(now) > backoff_duration);
     }
 
     #[tokio::test]
