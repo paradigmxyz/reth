@@ -259,7 +259,7 @@ If there is not a `Discv4Event` immediately ready, the function continues trigge
 
 To prevent traffic amplification attacks (ie. DNS attacks), implementations must verify that the sender of a query participates in the discovery protocol. The sender of a packet is considered verified if it has sent a valid Pong response with matching ping hash within the last 12 hours. This is called the ["endpoint proof"](https://github.com/ethereum/devp2p/blob/master/discv4.md#endpoint-proof).
 
-Next, the Discv4Service handles all incoming [`Discv4Command`](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1527)s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
+Next, the Discv4Service handles all incoming `Discv4Command`s until there are no more commands to be processed. Following this, All `IngressEvent`s are handled, which represent all incoming datagrams related to the discv4 protocol. After all events are handled, the node pings to active nodes in it's network. This process is repeated until all of the `Discv4Event`s in `queued_events` are processed. 
 
 In Reth, once a new `NetworkState` is initialized as the node starts up and a new task is spawned to handle the network, the `poll()` function is used to advance the state of the network.
 
