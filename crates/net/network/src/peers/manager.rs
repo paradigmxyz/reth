@@ -1281,7 +1281,7 @@ mod test {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let config = PeersConfig::default();
         let mut peers = PeersManager::new(config);
-        peers.add_peer(peer, socket_addr);
+        peers.add_peer(peer, socket_addr, None);
         let peer_struct = peers.peers.get_mut(&peer).unwrap();
 
         // Simulate peer getting backed off once before
