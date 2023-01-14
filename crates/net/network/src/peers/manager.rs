@@ -383,13 +383,13 @@ impl PeersManager {
 
             if let Some(mut peer) = self.peers.get_mut(peer_id) {
                 let reputation_change = if let Some(kind) = err.should_backoff() {
+                    // Increment peer.backoff_counter
+                    peer.backoff_counter += 1;
+
                     let backoff_time =
                         self.backoff_durations.backoff_until(kind, peer.backoff_counter);
 
                     backoff_until = Some(backoff_time);
-
-                    // Increment peer.backoff_counter
-                    peer.backoff_counter += 1;
 
                     // The peer has signaled that it is currently unable to process any more
                     // connections, so we will hold off on attempting any new connections for a
@@ -1026,7 +1026,7 @@ impl PeerBackoffDurations {
 
     /// Returns the timestamp until which we should backoff
     pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u32) -> std::time::Instant {
-        let backoff_time = self.backoff(kind) * (backoff_counter + 1);
+        let backoff_time = self.backoff(kind) * backoff_counter;
         let now = std::time::Instant::now();
         now + backoff_time
     }
@@ -1284,11 +1284,13 @@ mod test {
         peers.add_peer(peer, socket_addr, None);
         let peer_struct = peers.peers.get_mut(&peer).unwrap();
 
-        // Simulate peer getting backed off once before
+        // Simulate a peer that was already backed off once
         peer_struct.backoff_counter = 1;
 
         let now = std::time::Instant::now();
 
+        // Simulate the increment that happens in on_connection_failure
+        peer_struct.backoff_counter += 1;
         // Get official backoff time
         let backoff_time =
             peers.backoff_durations.backoff_until(BackoffKind::High, peer_struct.backoff_counter);
