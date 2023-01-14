@@ -1,11 +1,11 @@
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, MAINNET};
 use std::path::PathBuf;
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpec, eyre::Error> {
     Ok(match s {
-        "mainnet" => ChainSpec::mainnet(),
+        "mainnet" => MAINNET.clone(),
         "goerli" => todo!(),
         "sepolia" => todo!(),
         _ => {

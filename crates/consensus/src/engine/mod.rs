@@ -342,7 +342,7 @@ mod tests {
         use super::*;
         use bytes::{Bytes, BytesMut};
         use reth_interfaces::test_utils::generators::random_header;
-        use reth_primitives::Block;
+        use reth_primitives::{Block, MAINNET};
         use reth_rlp::DecodeError;
 
         fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> SealedBlock {
@@ -365,7 +365,7 @@ mod tests {
             let (_tx, rx) = unbounded_channel();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                chain_spec: ChainSpec::mainnet(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -454,7 +454,7 @@ mod tests {
             let client = Arc::new(MockEthProvider::default());
             let engine = EthConsensusEngine {
                 client: client.clone(),
-                chain_spec: ChainSpec::mainnet(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -482,7 +482,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                chain_spec: ChainSpec::mainnet(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -503,7 +503,7 @@ mod tests {
         #[tokio::test]
         async fn payload_pre_merge() {
             let (tx, rx) = unbounded_channel();
-            let chain_spec = ChainSpec::mainnet();
+            let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
             let engine = EthConsensusEngine {
                 client: client.clone(),
@@ -516,7 +516,8 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
-                b.header.difficulty = chain_spec.paris_status().terminal_total_difficulty().unwrap();
+                b.header.difficulty =
+                    chain_spec.paris_status().terminal_total_difficulty().unwrap();
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
@@ -537,7 +538,7 @@ mod tests {
         #[tokio::test]
         async fn invalid_payload_timestamp() {
             let (tx, rx) = unbounded_channel();
-            let chain_spec = ChainSpec::mainnet();
+            let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
             let engine = EthConsensusEngine {
                 client: client.clone(),
@@ -586,6 +587,8 @@ mod tests {
     // non exhaustive tests for engine_getPayload
     // TODO: amend when block building is implemented
     mod get_payload {
+        use reth_primitives::MAINNET;
+
         use super::*;
 
         #[tokio::test]
@@ -593,7 +596,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                chain_spec: ChainSpec::mainnet(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -612,12 +615,14 @@ mod tests {
 
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
+        use reth_primitives::MAINNET;
+
         use super::*;
 
         #[tokio::test]
         async fn terminal_td_mismatch() {
             let (tx, rx) = unbounded_channel();
-            let chain_spec = ChainSpec::mainnet();
+            let chain_spec = MAINNET.clone();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: chain_spec.clone(),
@@ -628,7 +633,10 @@ mod tests {
             tokio::spawn(engine);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.paris_status().terminal_total_difficulty().unwrap() +
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
@@ -652,7 +660,7 @@ mod tests {
         async fn terminal_block_hash_mismatch() {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
-            let chain_spec = ChainSpec::mainnet();
+            let chain_spec = MAINNET.clone();
             let engine = EthConsensusEngine {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
@@ -667,7 +675,10 @@ mod tests {
             let execution_terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.paris_status().terminal_total_difficulty().unwrap(),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
@@ -712,7 +723,7 @@ mod tests {
         async fn configurations_match() {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
-            let chain_spec = ChainSpec::mainnet();
+            let chain_spec = MAINNET.clone();
             let engine = EthConsensusEngine {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
@@ -726,7 +737,10 @@ mod tests {
             let terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.paris_status().terminal_total_difficulty().unwrap(),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };

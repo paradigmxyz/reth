@@ -1,9 +1,37 @@
 use hex_literal::hex;
+use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{BlockNumber, ChainId, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, H256, U256};
+
+/// The Etereum mainnet spec
+pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain_id: 1,
+    genesis: Genesis::default(),
+    genesis_hash: H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, 0),
+        (Hardfork::Homestead, 1150000),
+        (Hardfork::Dao, 1920000),
+        (Hardfork::Tangerine, 2463000),
+        (Hardfork::SpuriousDragon, 2675000),
+        (Hardfork::Byzantium, 4370000),
+        (Hardfork::Constantinople, 7280000),
+        (Hardfork::Petersburg, 7280000),
+        (Hardfork::Istanbul, 9069000),
+        (Hardfork::Muirglacier, 9200000),
+        (Hardfork::Berlin, 12244000),
+        (Hardfork::London, 12965000),
+        (Hardfork::ArrowGlacier, 13773000),
+        (Hardfork::GrayGlacier, 15050000),
+        (Hardfork::Latest, 15050000),
+    ]),
+    paris_block: Some(15537394),
+    paris_ttd: Some(U256::from(58750000000000000000000_u128)),
+    shanghai_block: Some(u64::MAX),
+});
 
 /// The Ethereum chain spec
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -18,37 +46,6 @@ pub struct ChainSpec {
 }
 
 impl ChainSpec {
-    /// Returns the Etereum mainnet spec
-    pub fn mainnet() -> Self {
-        Self {
-            chain_id: 1,
-            genesis: Genesis::default(),
-            genesis_hash: H256(hex!(
-                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-            )),
-            hardforks: BTreeMap::from([
-                (Hardfork::Frontier, 0),
-                (Hardfork::Homestead, 1150000),
-                (Hardfork::Dao, 1920000),
-                (Hardfork::Tangerine, 2463000),
-                (Hardfork::SpuriousDragon, 2675000),
-                (Hardfork::Byzantium, 4370000),
-                (Hardfork::Constantinople, 7280000),
-                (Hardfork::Petersburg, 7280000),
-                (Hardfork::Istanbul, 9069000),
-                (Hardfork::Muirglacier, 9200000),
-                (Hardfork::Berlin, 12244000),
-                (Hardfork::London, 12965000),
-                (Hardfork::ArrowGlacier, 13773000),
-                (Hardfork::GrayGlacier, 15050000),
-                (Hardfork::Latest, 15050000),
-            ]),
-            paris_block: Some(15537394),
-            paris_ttd: Some(U256::from(58750000000000000000000_u128)),
-            shanghai_block: Some(u64::MAX),
-        }
-    }
-
     /// Returns the chain id
     pub fn chain_id(&self) -> ChainId {
         self.chain_id
@@ -142,16 +139,14 @@ pub struct ChainSpecBuilder {
 impl ChainSpecBuilder {
     /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
     pub fn mainnet() -> Self {
-        let mainnet = ChainSpec::mainnet();
-
         Self {
-            chain_id: Some(mainnet.chain_id),
-            genesis: Some(mainnet.genesis),
-            genesis_hash: Some(mainnet.genesis_hash),
-            hardforks: mainnet.hardforks,
-            paris_block: mainnet.paris_block,
-            paris_ttd: mainnet.paris_ttd,
-            shanghai_block: mainnet.shanghai_block,
+            chain_id: Some(MAINNET.chain_id),
+            genesis: Some(MAINNET.genesis.clone()),
+            genesis_hash: Some(MAINNET.genesis_hash),
+            hardforks: MAINNET.hardforks.clone(),
+            paris_block: MAINNET.paris_block,
+            paris_ttd: MAINNET.paris_ttd,
+            shanghai_block: MAINNET.shanghai_block,
         }
     }
 
@@ -288,22 +283,20 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ChainSpec, Hardfork};
+    use crate::{Hardfork, MAINNET};
 
     #[test]
     // this test checks that the forkid computation is accurate
     fn test_forkid_from_hardfork() {
-        let mainnet = ChainSpec::mainnet();
-
-        let frontier_forkid = mainnet.fork_id(Hardfork::Frontier).unwrap();
+        let frontier_forkid = MAINNET.fork_id(Hardfork::Frontier).unwrap();
         assert_eq!([0xfc, 0x64, 0xec, 0x04], frontier_forkid.hash.0);
         assert_eq!(1150000, frontier_forkid.next);
 
-        let berlin_forkid = mainnet.fork_id(Hardfork::Berlin).unwrap();
+        let berlin_forkid = MAINNET.fork_id(Hardfork::Berlin).unwrap();
         assert_eq!([0x0e, 0xb4, 0x40, 0xf6], berlin_forkid.hash.0);
         assert_eq!(12965000, berlin_forkid.next);
 
-        let latest_forkid = mainnet.fork_id(Hardfork::Latest).unwrap();
+        let latest_forkid = MAINNET.fork_id(Hardfork::Latest).unwrap();
         assert_eq!(0, latest_forkid.next);
     }
 }

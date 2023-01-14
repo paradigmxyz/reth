@@ -14,7 +14,7 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, ChainSpec, Header, StorageEntry, TransactionSignedEcRecovered, H256, U256,
+    Address, ChainSpec, Header, StorageEntry, TransactionSignedEcRecovered, H256, MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
@@ -59,7 +59,7 @@ pub struct ExecutionStage {
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self { chain_spec: ChainSpec::mainnet(), commit_threshold: 1000 }
+        Self { chain_spec: MAINNET.clone(), commit_threshold: 1000 }
     }
 }
 

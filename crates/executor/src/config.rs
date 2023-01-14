@@ -30,7 +30,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, for_block: BlockNumber) -> revm::SpecId
 #[cfg(test)]
 mod tests {
     use crate::config::revm_spec;
-    use reth_primitives::{ChainSpec, ChainSpecBuilder};
+    use reth_primitives::{ChainSpecBuilder, MAINNET};
     #[test]
     fn test_to_revm_spec() {
         assert_eq!(
@@ -77,16 +77,15 @@ mod tests {
 
     #[test]
     fn test_eth_spec() {
-        let spec = ChainSpec::mainnet();
-        assert_eq!(revm_spec(&spec, 15537394 + 10), revm::MERGE);
-        assert_eq!(revm_spec(&spec, 15537394 - 10), revm::LONDON);
-        assert_eq!(revm_spec(&spec, 12244000 + 10), revm::BERLIN);
-        assert_eq!(revm_spec(&spec, 12244000 - 10), revm::ISTANBUL);
-        assert_eq!(revm_spec(&spec, 7280000 + 10), revm::PETERSBURG);
-        assert_eq!(revm_spec(&spec, 7280000 - 10), revm::BYZANTIUM);
-        assert_eq!(revm_spec(&spec, 2675000 + 10), revm::SPURIOUS_DRAGON);
-        assert_eq!(revm_spec(&spec, 2675000 - 10), revm::TANGERINE);
-        assert_eq!(revm_spec(&spec, 1150000 + 10), revm::HOMESTEAD);
-        assert_eq!(revm_spec(&spec, 1150000 - 10), revm::FRONTIER);
+        assert_eq!(revm_spec(&MAINNET, 15537394 + 10), revm::MERGE);
+        assert_eq!(revm_spec(&MAINNET, 15537394 - 10), revm::LONDON);
+        assert_eq!(revm_spec(&MAINNET, 12244000 + 10), revm::BERLIN);
+        assert_eq!(revm_spec(&MAINNET, 12244000 - 10), revm::ISTANBUL);
+        assert_eq!(revm_spec(&MAINNET, 7280000 + 10), revm::PETERSBURG);
+        assert_eq!(revm_spec(&MAINNET, 7280000 - 10), revm::BYZANTIUM);
+        assert_eq!(revm_spec(&MAINNET, 2675000 + 10), revm::SPURIOUS_DRAGON);
+        assert_eq!(revm_spec(&MAINNET, 2675000 - 10), revm::TANGERINE);
+        assert_eq!(revm_spec(&MAINNET, 1150000 + 10), revm::HOMESTEAD);
+        assert_eq!(revm_spec(&MAINNET, 1150000 - 10), revm::FRONTIER);
     }
 }

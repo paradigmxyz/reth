@@ -367,7 +367,7 @@ mod tests {
     use reth_interfaces::Result;
     use reth_primitives::{
         hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned,
+        TransactionSigned, MAINNET,
     };
 
     use super::*;
@@ -500,11 +500,7 @@ mod tests {
         let (block, parent) = mock_block();
         let provider = Provider::new(Some(parent));
 
-        assert_eq!(
-            full_validation(&block, provider, &ChainSpec::mainnet()),
-            Ok(()),
-            "Validation should pass"
-        );
+        assert_eq!(full_validation(&block, provider, &MAINNET), Ok(()), "Validation should pass");
     }
 
     #[test]
@@ -513,7 +509,7 @@ mod tests {
         let provider = Provider::new_known();
 
         assert_eq!(
-            full_validation(&block, provider, &ChainSpec::mainnet()),
+            full_validation(&block, provider, &MAINNET),
             Err(Error::BlockKnown { hash: block.hash(), number: block.number }.into()),
             "Should fail with error"
         );
@@ -531,7 +527,7 @@ mod tests {
             txs.iter(),
             &block.header,
             provider,
-            &ChainSpec::mainnet(),
+            &MAINNET,
         )
         .expect("To Pass");
     }
@@ -548,7 +544,7 @@ mod tests {
                 txs.iter(),
                 &block.header,
                 provider,
-                &ChainSpec::mainnet(),
+                &MAINNET,
             ),
             Err(Error::TransactionNonceNotConsistent.into())
         )
@@ -567,7 +563,7 @@ mod tests {
                 txs.iter(),
                 &block.header,
                 provider,
-                &ChainSpec::mainnet(),
+                &MAINNET,
             ),
             Err(Error::TransactionNonceNotConsistent.into())
         );

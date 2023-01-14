@@ -8,7 +8,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId};
+use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
@@ -166,7 +166,7 @@ impl<C> NetworkConfigBuilder<C> {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain_spec: ChainSpec::mainnet(),
+            chain_spec: MAINNET.clone(),
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,

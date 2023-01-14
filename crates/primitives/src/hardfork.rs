@@ -98,11 +98,11 @@ impl From<(&ChainSpec, BlockNumber)> for Hardfork {
 
 #[cfg(test)]
 mod tests {
-    use crate::{hardfork::Hardfork, ChainSpec};
+    use crate::{hardfork::Hardfork, MAINNET};
 
     #[test]
     fn test_hardfork_blocks() {
-        let mainnet = ChainSpec::mainnet();
+        let mainnet = MAINNET.clone();
 
         let hf: Hardfork = (&mainnet, 12_965_000u64).into();
         assert_eq!(hf, Hardfork::London);
