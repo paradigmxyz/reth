@@ -2,8 +2,8 @@ use once_cell::sync::Lazy;
 use quote::{quote, ToTokens};
 use regex::Regex;
 use syn::{
-    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Lit, LitStr, MetaNameValue,
-    Result, Token,
+    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Lit, LitBool, LitStr,
+    MetaNameValue, Result, Token,
 };
 
 use crate::{metric::Metric, with_attrs::WithAttrs};
@@ -15,63 +15,141 @@ static METRIC_NAME_RE: Lazy<Regex> =
 
 pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let ty = &node.ident;
+    let vis = &node.vis;
     let ident_name = ty.to_string();
 
     let metrics_attr = parse_metrics_attr(node)?;
     let metric_fields = parse_metric_fields(node)?;
 
-    let default_fields = metric_fields
-        .iter()
-        .map(|metric| {
-            let field_name = &metric.field.ident;
-            let register_stmt = metric.register_stmt(&metrics_attr)?;
-            Ok(quote! {
-                #field_name: #register_stmt,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let describe_doc = quote! {
+        /// Describe all exposed metrics. Internally calls `describe_*` macros from
+        /// the metrics crate according to the metric type.
+        /// Ref: https://docs.rs/metrics/0.20.1/metrics/index.html#macros
+    };
+    let register_and_describe = match &metrics_attr.scope {
+        MetricsScope::Static(scope) => {
+            let (defaults, describes): (Vec<_>, Vec<_>) = metric_fields
+                .iter()
+                .map(|metric| {
+                    let field_name = &metric.field.ident;
+                    let metric_name =
+                        format!("{}{}{}", scope.value(), metrics_attr.separator(), metric.name());
+                    let registrar = metric.register_stmt()?;
+                    let describe = metric.describe_stmt()?;
+                    let description = &metric.description;
+                    Ok((
+                        quote! {
+                            #field_name: #registrar(#metric_name),
+                        },
+                        quote! {
+                            #describe(#metric_name, #description);
+                        },
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .unzip();
 
-    let describe_stmts = metric_fields
-        .iter()
-        .map(|metric| metric.describe_stmt(&metrics_attr))
-        .collect::<Result<Vec<_>>>()?;
+            quote! {
+                impl Default for #ty {
+                    fn default() -> Self {
+                        Self {
+                            #(#defaults)*
+                        }
+                    }
+                }
 
-    Ok(quote! {
-        impl Default for #ty {
-            fn default() -> Self {
-                Self {
-                    #(#default_fields)*
+                impl #ty {
+                    #describe_doc
+                    #vis fn describe() {
+                        #(#describes)*
+                    }
                 }
             }
         }
+        MetricsScope::Dynamic => {
+            let (defaults, describes): (Vec<_>, Vec<_>) = metric_fields
+                .iter()
+                .map(|metric| {
+                    let name = metric.name();
+                    let separator = metrics_attr.separator();
+                    let metric_name = quote! {
+                        format!("{}{}{}", scope, #separator, #name)
+                    };
+                    let field_name = &metric.field.ident;
+
+                    let registrar = metric.register_stmt()?;
+                    let describe = metric.describe_stmt()?;
+                    let description = &metric.description;
+
+                    Ok((
+                        quote! {
+                            #field_name: #registrar(#metric_name),
+                        },
+                        quote! {
+                            #describe(#metric_name, #description);
+                        },
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .unzip();
+
+            quote! {
+                impl #ty {
+                    /// Create new instance of metrics with provided scope.
+                    #vis fn new(scope: &str) -> Self {
+                        Self {
+                            #(#defaults)*
+                        }
+                    }
+
+                    #describe_doc
+                    #vis fn describe(scope: &str) {
+                        #(#describes)*
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(quote! {
+        #register_and_describe
 
         impl std::fmt::Debug for #ty {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.debug_struct(#ident_name).finish()
             }
         }
-
-        impl #ty {
-            /// Describe all exposed metrics. Internally calls `describe_*` macros from
-            /// the metrics crate according to the metric type.
-            /// Ref: https://docs.rs/metrics/0.20.1/metrics/index.html#macros
-            pub fn describe() {
-                #(#describe_stmts;)*
-            }
-        }
     })
 }
 
 pub(crate) struct MetricsAttr {
-    pub(crate) scope: LitStr,
+    pub(crate) scope: MetricsScope,
     pub(crate) separator: Option<LitStr>,
+}
+
+impl MetricsAttr {
+    const DEFAULT_SEPARATOR: &str = "_";
+
+    fn separator(&self) -> String {
+        match &self.separator {
+            Some(sep) => sep.value(),
+            None => MetricsAttr::DEFAULT_SEPARATOR.to_owned(),
+        }
+    }
+}
+
+pub(crate) enum MetricsScope {
+    Static(LitStr),
+    Dynamic,
 }
 
 fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
     let metrics_attr = parse_single_required_attr(node, "metrics")?;
     let parsed =
         metrics_attr.parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
-    let (mut scope, mut separator) = (None, None);
+    let (mut scope, mut separator, mut dynamic) = (None, None, None);
     for kv in parsed {
         if kv.path.is_ident("scope") {
             if scope.is_some() {
@@ -92,12 +170,30 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
                 ))
             }
             separator = Some(separator_lit);
+        } else if kv.path.is_ident("dynamic") {
+            if dynamic.is_some() {
+                return Err(Error::new_spanned(kv, "Duplicate `dynamic` flag provided."))
+            }
+            dynamic = Some(parse_bool_lit(&kv.lit)?.value);
         } else {
             return Err(Error::new_spanned(kv, "Unsupported attribute entry."))
         }
     }
 
-    let scope = scope.ok_or_else(|| Error::new_spanned(node, "`scope = ..` must be set."))?;
+    let scope = match (scope, dynamic) {
+        (Some(scope), None) | (Some(scope), Some(false)) => MetricsScope::Static(scope),
+        (None, Some(true)) => MetricsScope::Dynamic,
+        (Some(_), Some(_)) => {
+            return Err(Error::new_spanned(node, "`scope = ..` conflicts with `dynamic = true`."))
+        }
+        _ => {
+            return Err(Error::new_spanned(
+                node,
+                "Either `scope = ..` or `dynamic = true` must be set.",
+            ))
+        }
+    };
+
     Ok(MetricsAttr { scope, separator })
 }
 
@@ -210,6 +306,13 @@ fn parse_docs_to_string<T: WithAttrs>(token: &T) -> Result<Option<String>> {
 fn parse_str_lit(lit: &Lit) -> Result<LitStr> {
     match lit {
         Lit::Str(lit_str) => Ok(lit_str.to_owned()),
+        _ => Err(Error::new_spanned(lit, "Value **must** be a string literal.")),
+    }
+}
+
+fn parse_bool_lit(lit: &Lit) -> Result<LitBool> {
+    match lit {
+        Lit::Bool(lit_bool) => Ok(lit_bool.to_owned()),
         _ => Err(Error::new_spanned(lit, "Value **must** be a string literal.")),
     }
 }
