@@ -9,7 +9,8 @@ use crate::{BlockNumber, ChainId, ForkFilter, ForkHash, ForkId, Genesis, Hardfor
 /// The Etereum mainnet spec
 pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain_id: 1,
-    genesis: Genesis::default(),
+    genesis: serde_json::from_str(include_str!("../../../bin/reth/res/genesis/mainnet.json"))
+        .expect("Can't deserialize Mainnet genesis json"),
     genesis_hash: H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, 0),
@@ -30,6 +31,33 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     ]),
     paris_block: Some(15537394),
     paris_ttd: Some(U256::from(58750000000000000000000_u128)),
+});
+
+/// The Goerli spec
+pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain_id: 5,
+    genesis: serde_json::from_str(include_str!("../../../bin/reth/res/genesis/goerli.json"))
+        .expect("Can't deserialize Goerli genesis json"),
+    genesis_hash: H256(hex!("bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, 0),
+        (Hardfork::Istanbul, 1561651),
+        (Hardfork::Berlin, 4460644),
+        (Hardfork::London, 5062605),
+    ]),
+    paris_block: Some(7382818),
+    paris_ttd: Some(U256::from(10790000)),
+});
+
+/// The Sepolia spec
+pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain_id: 11155111,
+    genesis: serde_json::from_str(include_str!("../../../bin/reth/res/genesis/sepolia.json"))
+        .expect("Can't deserialize Sepolia genesis json"),
+    genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
+    hardforks: BTreeMap::new(),
+    paris_block: Some(1450408),
+    paris_ttd: Some(U256::from(17000000000000000_u64)),
 });
 
 /// The Ethereum chain spec
