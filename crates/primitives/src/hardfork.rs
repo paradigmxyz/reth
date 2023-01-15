@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BlockNumber, ChainSpec};
-use std::{fmt::Display, iter::once, str::FromStr};
+use std::{fmt::Display, str::FromStr};
 
 #[allow(missing_docs)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -81,36 +80,5 @@ impl Default for Hardfork {
 impl Display for Hardfork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
-    }
-}
-
-impl From<(&ChainSpec, BlockNumber)> for Hardfork {
-    fn from((chain_spec, num): (&ChainSpec, BlockNumber)) -> Self {
-        if let Some((fork, _)) =
-            once((Hardfork::Frontier, 0)).chain(chain_spec.forks_iter()).find(|(_, b)| *b < num)
-        {
-            fork
-        } else {
-            Hardfork::Latest
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{hardfork::Hardfork, MAINNET};
-
-    #[test]
-    fn test_hardfork_blocks() {
-        let mainnet = MAINNET.clone();
-
-        let hf: Hardfork = (&mainnet, 12_965_000u64).into();
-        assert_eq!(hf, Hardfork::London);
-
-        let hf: Hardfork = (&mainnet, 4370000u64).into();
-        assert_eq!(hf, Hardfork::Byzantium);
-
-        let hf: Hardfork = (&mainnet, 12244000u64).into();
-        assert_eq!(hf, Hardfork::Berlin);
     }
 }
