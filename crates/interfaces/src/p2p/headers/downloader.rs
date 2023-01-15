@@ -5,6 +5,7 @@ use crate::{
         error::{DownloadError, DownloadResult},
     },
 };
+use std::task::{Context, Poll};
 
 use reth_primitives::{SealedHeader, H256};
 
@@ -16,6 +17,23 @@ use reth_primitives::{SealedHeader, H256};
 pub trait HeaderDownloader: Downloader {
     /// Stream the headers
     fn stream(&self, head: SealedHeader, tip: H256) -> DownloadStream<'_, SealedHeader>;
+
+    /// Validate whether the header is valid in relation to it's parent
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(self.consensus(), header, parent)?;
+        Ok(())
+    }
+}
+
+/// A downloader capable of fetching block headers.
+///
+/// A downloader represents a distinct strategy for submitting requests to download block headers,
+/// while a [HeadersClient] represents a client capable of fulfilling these requests.
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait HeaderDownloader2: Downloader {
+    // /// Attempt to resolve `batch_size` of headers.
+    // fn poll_batch(&mut self, cx: &mut Context<'_>, batch_size: usize) ->
+    // Poll<Result<Vec<SealedHeader>, DownloadError>>;
 
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
