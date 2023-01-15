@@ -154,8 +154,8 @@ impl ChainSpec {
     }
 
     /// Returns a [ChainSpecBuilder] to help build custom specs
-    pub fn builder() -> ChainSpecBuilder {
-        ChainSpecBuilder::default()
+    pub fn builder(&self) -> ChainSpecBuilder {
+        ChainSpecBuilder::from(self)
     }
 }
 
@@ -172,6 +172,17 @@ pub struct ChainSpecBuilder {
 }
 
 impl ChainSpecBuilder {
+    pub fn from(chain_spec: &ChainSpec) -> Self {
+        Self {
+            chain: Some(chain_spec.chain),
+            genesis: Some(chain_spec.genesis.clone()),
+            genesis_hash: Some(chain_spec.genesis_hash),
+            hardforks: chain_spec.hardforks.clone(),
+            dao_fork_support: chain_spec.dao_fork_support,
+            paris_block: chain_spec.paris_block,
+            paris_ttd: chain_spec.paris_ttd,
+        }
+    }
     /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
     pub fn mainnet() -> Self {
         Self {
@@ -194,6 +205,12 @@ impl ChainSpecBuilder {
     /// Sets the genesis
     pub fn genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
+        self
+    }
+
+    /// Insert the given fork at the given block number
+    pub fn with_fork(mut self, fork: Hardfork, block: BlockNumber) -> Self {
+        self.hardforks.insert(fork, block);
         self
     }
 

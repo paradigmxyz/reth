@@ -539,7 +539,7 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
-        StorageKey, H160, H256, U256,
+        StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -774,14 +774,12 @@ mod tests {
             beneficiary_balance += i;
         }
 
-        let mut config = Config::new_ethereum();
-        config.spec_upgrades = SpecUpgrades::new_homestead_activated();
-        // hardcode it to first block to match our mock data.
-        config.spec_upgrades.dao_fork = 1;
+        let chain_spec =
+            MAINNET.builder().homestead_activated().with_fork(Hardfork::Dao, 1).build();
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&header, &[], &[], &config, &mut db).unwrap();
+        let out = execute_and_verify_receipt(&header, &[], &[], &chain_spec, &mut db).unwrap();
         assert_eq!(out.changesets.len(), 0, "No tx");
 
         // Check if cache is set
