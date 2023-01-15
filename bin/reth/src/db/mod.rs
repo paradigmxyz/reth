@@ -239,13 +239,28 @@ impl<'a, E: EnvironmentKind> DbTool<'a, Env<E>> {
                         let map = self.list::<tables::$table>($start, $len)?;
                         let mut table = ComfyTable::new();
                         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-                        table.set_header(["Key", "Value"]);
                         for (key, value) in map.into_iter() {
                             let mut row = Row::new();
-                            // TODO: Cleanly format key / value types
-                            // For tables with longer decompressed values, i.e. `Headers`, formatting
-                            // the value via the `Debug` trait breaks the table's formatting.
-                            row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(format!("{value:?}")));
+                            match serde_json::to_value(&value)? {
+                                serde_json::Value::Object(map) => {
+                                    if table.header().is_none() {
+                                        table.set_header([vec![&"Key".to_owned()], map.keys().collect()].concat());
+                                    }
+
+                                    row.add_cell(Cell::new(format!("{key:?}")));
+                                    map.values().for_each(|v| {
+                                        row.add_cell(Cell::new(v));
+                                    });
+                                }
+                                v => {
+                                    if table.header().is_none() {
+                                        table.set_header(["Key", "Value"]);
+                                    }
+
+                                    row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(v));
+                                }
+                            }
+
                             table.add_row(row);
                         }
 
