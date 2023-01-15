@@ -243,9 +243,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
 name = "base64ct"
@@ -1103,7 +1103,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru",
+ "lru 0.7.8",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/gakonst/ethers-rs#2eb56e69b777b093ae8c2937d7b3c764f1347280"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1406,11 +1406,11 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/gakonst/ethers-rs#2eb56e69b777b093ae8c2937d7b3c764f1347280"
 dependencies = [
  "async-trait",
  "auto_impl",
- "base64 0.20.0",
+ "base64 0.21.0",
  "enr 0.7.0",
  "ethers-core",
  "futures-core",
@@ -2557,6 +2557,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e7d46de488603ffdd5f30afbc64fbba2378214a2c3a2fb83abf3d33126df17"
+dependencies = [
+ "hashbrown 0.13.1",
+]
+
+[[package]]
 name = "lru-cache"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3598,6 +3607,7 @@ dependencies = [
  "reth-executor",
  "reth-interfaces",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3607,7 +3617,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
- "strum",
  "tempfile",
  "thiserror",
  "tokio",
@@ -3734,7 +3743,13 @@ dependencies = [
  "bytes",
  "data-encoding",
  "enr 0.7.0",
+ "linked_hash_set",
+ "lru 0.9.0",
+ "parking_lot 0.12.1",
+ "reth-net-common",
  "reth-primitives",
+ "reth-rlp",
+ "reth-tracing",
  "secp256k1 0.24.2",
  "thiserror",
  "tokio",
@@ -3949,6 +3964,7 @@ dependencies = [
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -3975,11 +3991,13 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-discv4",
+ "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-net-common",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3998,12 +4016,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network-api"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
  "bytes",
  "crc",
+ "criterion",
  "derive_more",
  "ethers-core",
  "fixed-hash",
@@ -4102,6 +4128,7 @@ dependencies = [
  "reth-consensus",
  "reth-interfaces",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-api",
@@ -4191,7 +4218,6 @@ version = "0.1.0"
 dependencies = [
  "tracing",
  "tracing-appender",
- "tracing-futures",
  "tracing-journald",
  "tracing-subscriber",
 ]

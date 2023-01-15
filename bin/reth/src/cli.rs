@@ -34,9 +34,6 @@ pub enum Commands {
     /// Start the node
     #[command(name = "node")]
     Node(node::Command),
-    /// Run Ethereum blockchain tests
-    #[command(name = "test-chain")]
-    TestEthChain(test_eth_chain::Command),
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
@@ -51,6 +48,9 @@ pub enum Commands {
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
+    /// Run Ethereum blockchain tests
+    #[command(name = "test-chain")]
+    TestEthChain(test_eth_chain::Command),
 }
 
 #[derive(Parser)]

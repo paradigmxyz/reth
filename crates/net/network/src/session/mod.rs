@@ -27,7 +27,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -374,6 +374,8 @@ impl SessionManager {
 
                 let messages = PeerRequestSender::new(peer_id, to_session_tx);
 
+                let timeout = Arc::new(AtomicU64::new(self.request_timeout.as_millis() as u64));
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -388,7 +390,7 @@ impl SessionManager {
                     queued_outgoing: Default::default(),
                     received_requests: Default::default(),
                     timeout_interval: tokio::time::interval(self.request_timeout),
-                    request_timeout: self.request_timeout,
+                    request_timeout: Arc::clone(&timeout),
                 };
 
                 self.spawn(session);
@@ -414,6 +416,7 @@ impl SessionManager {
                     status,
                     messages,
                     direction,
+                    timeout,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -528,6 +531,7 @@ pub(crate) enum SessionEvent {
         status: Status,
         messages: PeerRequestSender,
         direction: Direction,
+        timeout: Arc<AtomicU64>,
     },
     AlreadyConnected {
         peer_id: PeerId,

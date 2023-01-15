@@ -1,6 +1,7 @@
 use crate::eth::EthApiSpec;
 use jsonrpsee::core::RpcResult as Result;
 use reth_network::NetworkHandle;
+use reth_network_api::PeersInfo;
 use reth_rpc_api::NetApiServer;
 use reth_rpc_types::PeerCount;
 
