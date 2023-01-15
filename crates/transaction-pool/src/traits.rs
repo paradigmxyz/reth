@@ -1,5 +1,8 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
-use reth_primitives::{Address, FromRecoveredTransaction, PeerId, TxHash, H256, U256};
+use reth_primitives::{
+    Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
+    TransactionSignedEcRecovered, TxHash, H256, U256,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -270,6 +273,116 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
+}
+
+/// The default [PoolTransaction] for the [Pool](crate::Pool).
+///
+/// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
+/// derived from the transaction that are frequently used by the pools for ordering.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PooledTransaction {
+    /// EcRecovered transaction info
+    pub(crate) transaction: TransactionSignedEcRecovered,
+
+    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value
+    pub(crate) cost: U256,
+
+    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
+    pub(crate) effective_gas_price: U256,
+}
+
+impl PoolTransaction for PooledTransaction {
+    /// Returns hash of the transaction.
+    fn hash(&self) -> &TxHash {
+        &self.transaction.hash
+    }
+
+    /// Returns the Sender of the transaction.
+    fn sender(&self) -> Address {
+        self.transaction.signer()
+    }
+
+    /// Returns the nonce for this transaction.
+    fn nonce(&self) -> u64 {
+        self.transaction.nonce()
+    }
+
+    /// Calculates the cost that this transaction is allowed to consume:
+    ///
+    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
+    fn cost(&self) -> U256 {
+        self.cost
+    }
+
+    /// Returns the effective gas price for this transaction.
+    ///
+    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
+    fn effective_gas_price(&self) -> U256 {
+        self.effective_gas_price
+    }
+
+    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
+    fn gas_limit(&self) -> u64 {
+        self.transaction.gas_limit()
+    }
+
+    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    ///
+    /// This will return `None` for non-EIP1559 transactions
+    fn max_fee_per_gas(&self) -> Option<U256> {
+        match &self.transaction.transaction {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(tx) => Some(U256::from(tx.max_fee_per_gas)),
+        }
+    }
+
+    /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
+    ///
+    /// This will return `None` for non-EIP1559 transactions
+    fn max_priority_fee_per_gas(&self) -> Option<U256> {
+        match &self.transaction.transaction {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(tx) => Some(U256::from(tx.max_priority_fee_per_gas)),
+        }
+    }
+
+    /// Returns a measurement of the heap usage of this type and all its internals.
+    fn size(&self) -> usize {
+        self.transaction.transaction.input().len()
+    }
+}
+
+impl FromRecoveredTransaction for PooledTransaction {
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+        let (cost, effective_gas_price) = match &tx.transaction {
+            Transaction::Legacy(t) => {
+                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = U256::from(t.gas_price);
+                (cost, effective_gas_price)
+            }
+            Transaction::Eip2930(t) => {
+                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = U256::from(t.gas_price);
+                (cost, effective_gas_price)
+            }
+            Transaction::Eip1559(t) => {
+                let cost =
+                    U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = U256::from(t.max_priority_fee_per_gas);
+                (cost, effective_gas_price)
+            }
+        };
+
+        PooledTransaction { transaction: tx, cost, effective_gas_price }
+    }
+}
+
+impl IntoRecoveredTransaction for PooledTransaction {
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.transaction.clone()
+    }
 }
 
 /// Represents the current status of the pool.

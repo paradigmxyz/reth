@@ -113,7 +113,7 @@ pub fn validate_transaction_regarding_header(
         }
     };
     if let Some(chain_id) = chain_id {
-        if chain_id != chain_spec.chain_id() {
+        if chain_id != chain_spec.chain().id() {
             return Err(Error::TransactionChainId)
         }
     }

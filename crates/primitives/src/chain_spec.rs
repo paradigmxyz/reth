@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BlockNumber, ChainId, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, H256, U256};
+use crate::{BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, H256, U256};
 
 /// The Etereum mainnet spec
 pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain_id: 1,
+    chain: Chain::mainnet(),
     genesis: serde_json::from_str(include_str!("../../../bin/reth/res/genesis/mainnet.json"))
         .expect("Can't deserialize Mainnet genesis json"),
     genesis_hash: H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")),
@@ -29,13 +29,14 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::GrayGlacier, 15050000),
         (Hardfork::Latest, 15050000),
     ]),
+    dao_fork_support: true,
     paris_block: Some(15537394),
     paris_ttd: Some(U256::from(58750000000000000000000_u128)),
 });
 
 /// The Goerli spec
 pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain_id: 5,
+    chain: Chain::goerli(),
     genesis: serde_json::from_str(include_str!("../../../bin/reth/res/genesis/goerli.json"))
         .expect("Can't deserialize Goerli genesis json"),
     genesis_hash: H256(hex!("bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")),
@@ -45,17 +46,19 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::Berlin, 4460644),
         (Hardfork::London, 5062605),
     ]),
+    dao_fork_support: true,
     paris_block: Some(7382818),
     paris_ttd: Some(U256::from(10790000)),
 });
 
 /// The Sepolia spec
 pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain_id: 11155111,
+    chain: Chain::sepolia(),
     genesis: serde_json::from_str(include_str!("../../../bin/reth/res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
     genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
     hardforks: BTreeMap::new(),
+    dao_fork_support: true,
     paris_block: Some(1450408),
     paris_ttd: Some(U256::from(17000000000000000_u64)),
 });
@@ -63,18 +66,19 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
 /// The Ethereum chain spec
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChainSpec {
-    chain_id: ChainId,
+    chain: Chain,
     genesis: Genesis,
     genesis_hash: H256,
     hardforks: BTreeMap<Hardfork, BlockNumber>,
+    dao_fork_support: bool,
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
 }
 
 impl ChainSpec {
     /// Returns the chain id
-    pub fn chain_id(&self) -> ChainId {
-        self.chain_id
+    pub fn chain(&self) -> Chain {
+        self.chain
     }
 
     /// Returns the chain genesis hash
@@ -90,6 +94,11 @@ impl ChainSpec {
     /// Returns `true` if the given fork is active on the given block
     pub fn fork_active(&self, fork: Hardfork, current_block: BlockNumber) -> bool {
         self.fork_block(fork).map(|target| target <= current_block).unwrap_or_default()
+    }
+
+    /// Returns `true` if the DAO fork is supported
+    pub fn dao_fork_support(&self) -> bool {
+        self.dao_fork_support
     }
 
     /// Get the Paris status
@@ -153,10 +162,11 @@ impl ChainSpec {
 /// A helper to build custom chain specs
 #[derive(Debug, Default)]
 pub struct ChainSpecBuilder {
-    chain_id: Option<ChainId>,
+    chain: Option<Chain>,
     genesis: Option<Genesis>,
     genesis_hash: Option<H256>,
     hardforks: BTreeMap<Hardfork, BlockNumber>,
+    dao_fork_support: bool,
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
 }
@@ -165,18 +175,19 @@ impl ChainSpecBuilder {
     /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
     pub fn mainnet() -> Self {
         Self {
-            chain_id: Some(MAINNET.chain_id),
+            chain: Some(MAINNET.chain),
             genesis: Some(MAINNET.genesis.clone()),
             genesis_hash: Some(MAINNET.genesis_hash),
             hardforks: MAINNET.hardforks.clone(),
+            dao_fork_support: MAINNET.dao_fork_support,
             paris_block: MAINNET.paris_block,
             paris_ttd: MAINNET.paris_ttd,
         }
     }
 
     /// Sets the chain id
-    pub fn chain_id(mut self, chain_id: ChainId) -> Self {
-        self.chain_id = Some(chain_id);
+    pub fn chain(mut self, chain: Chain) -> Self {
+        self.chain = Some(chain);
         self
     }
 
@@ -248,6 +259,12 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Sets the DAO fork as supported
+    pub fn dao_fork_supported(mut self) -> Self {
+        self.dao_fork_support = true;
+        self
+    }
+
     /// Enables Paris
     pub fn paris_activated(mut self) -> Self {
         self = self.berlin_activated();
@@ -258,10 +275,11 @@ impl ChainSpecBuilder {
     /// Build a [ChainSpec]
     pub fn build(self) -> ChainSpec {
         ChainSpec {
-            chain_id: self.chain_id.expect("The chain id is required"),
+            chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: self.genesis_hash.expect("The genesis hash is required"),
             hardforks: self.hardforks,
+            dao_fork_support: self.dao_fork_support,
             paris_block: self.paris_block,
             paris_ttd: self.paris_ttd,
         }

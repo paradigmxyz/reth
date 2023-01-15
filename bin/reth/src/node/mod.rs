@@ -16,6 +16,7 @@ use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::NetworkEvent;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
@@ -232,7 +233,7 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
                     },
                     NodeEvent::Network(NetworkEvent::SessionClosed { peer_id, reason }) => {
                         state.connected_peers -= 1;
-                        let reason = reason.map(|s| s.to_string()).unwrap_or("None".to_string());
+                        let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
                         warn!(target: "reth::cli", connected_peers = state.connected_peers, peer_id = %peer_id, %reason, "Peer disconnected.");
                     },
                     NodeEvent::Pipeline(PipelineEvent::Running { stage_id, stage_progress }) => {
@@ -258,7 +259,7 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
                 }
             },
             _ = interval.tick() => {
-                let stage = state.current_stage.map(|id| id.to_string()).unwrap_or("None".to_string());
+                let stage = state.current_stage.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string());
                 info!(target: "reth::cli", connected_peers = state.connected_peers, %stage, checkpoint = state.current_checkpoint, "Status");
             }
         }

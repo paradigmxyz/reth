@@ -8,6 +8,7 @@ use crate::{
         SessionId,
     },
 };
+use core::sync::atomic::Ordering;
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
@@ -25,7 +26,7 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
@@ -71,7 +72,7 @@ pub(crate) struct ActiveSession {
     /// Buffered messages that should be handled and sent to the peer.
     pub(crate) queued_outgoing: VecDeque<OutgoingMessage>,
     /// The maximum time we wait for a response from a peer.
-    pub(crate) request_timeout: Duration,
+    pub(crate) request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
     pub(crate) timeout_interval: Interval,
 }
@@ -242,7 +243,7 @@ impl ActiveSession {
 
     /// Returns the deadline timestamp at which the request times out
     fn request_deadline(&self) -> Instant {
-        Instant::now() + self.request_timeout
+        Instant::now() + Duration::from_millis(self.request_timeout.load(Ordering::Relaxed))
     }
 
     /// Handle a Response to the peer
@@ -356,8 +357,10 @@ impl ActiveSession {
     fn update_request_timeout(&mut self, sent: Instant, received: Instant) {
         let elapsed = received.saturating_duration_since(sent);
 
-        self.request_timeout = calculate_new_timeout(self.request_timeout, elapsed);
-        self.timeout_interval = tokio::time::interval(self.request_timeout);
+        let current = Duration::from_millis(self.request_timeout.load(Ordering::Relaxed));
+        let request_timeout = calculate_new_timeout(current, elapsed);
+        self.request_timeout.store(request_timeout.as_millis() as u64, Ordering::Relaxed);
+        self.timeout_interval = tokio::time::interval(request_timeout);
     }
 }
 
@@ -682,7 +685,9 @@ mod tests {
                         queued_outgoing: Default::default(),
                         received_requests: Default::default(),
                         timeout_interval: tokio::time::interval(INITIAL_REQUEST_TIMEOUT),
-                        request_timeout: INITIAL_REQUEST_TIMEOUT,
+                        request_timeout: Arc::new(AtomicU64::new(
+                            INITIAL_REQUEST_TIMEOUT.as_millis() as u64,
+                        )),
                     }
                 }
                 _ => {

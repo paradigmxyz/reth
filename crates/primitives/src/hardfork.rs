@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 
 #[allow(missing_docs)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub enum Hardfork {
     Frontier,
     Homestead,
@@ -20,6 +22,7 @@ pub enum Hardfork {
     ArrowGlacier,
     GrayGlacier,
     Shanghai,
+    #[default]
     Latest,
 }
 
@@ -68,12 +71,6 @@ impl FromStr for Hardfork {
             _ => return Err(format!("Unknown hardfork {s}")),
         };
         Ok(hardfork)
-    }
-}
-
-impl Default for Hardfork {
-    fn default() -> Self {
-        Hardfork::Latest
     }
 }
 

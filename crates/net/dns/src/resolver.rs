@@ -4,10 +4,8 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use tracing::trace;
-pub use trust_dns_resolver::TokioAsyncResolver;
-use trust_dns_resolver::{
-    error::ResolveError, proto::DnsHandle, AsyncResolver, ConnectionProvider,
-};
+pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
+use trust_dns_resolver::{proto::DnsHandle, AsyncResolver, ConnectionProvider};
 
 /// A type that can lookup DNS entries
 #[async_trait]

@@ -108,16 +108,16 @@ where
         let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..]) {
             Ok(P2PMessage::Hello(hello)) => Ok(hello),
             Ok(P2PMessage::Disconnect(reason)) => {
-                tracing::error!("Disconnected by peer during handshake: {}", reason);
+                tracing::debug!("Disconnected by peer during handshake: {}", reason);
                 counter!("p2pstream.disconnected_errors", 1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
-                tracing::warn!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                tracing::debug!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
                 Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {
-                tracing::error!("expected hello message but received: {:?}", msg);
+                tracing::debug!("expected hello message but received: {:?}", msg);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
             }
         }?;
@@ -348,7 +348,7 @@ where
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
-                        tracing::warn!(
+                        tracing::debug!(
                             ?err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
                         );
                         err
@@ -559,7 +559,7 @@ pub fn set_capability_offsets(
         match shared_capability {
             SharedCapability::UnknownCapability { .. } => {
                 // Capabilities which are not shared are ignored
-                tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
+                tracing::debug!("unknown capability: name={:?}, version={}", name, version,);
             }
             SharedCapability::Eth { .. } => {
                 // increment the offset if the capability is known
@@ -715,11 +715,12 @@ impl TryFrom<u8> for P2PMessageID {
 }
 
 /// RLPx `p2p` protocol version
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,
     /// `p2p` version 5
+    #[default]
     V5 = 5,
 }
 
@@ -741,12 +742,6 @@ impl Decodable for ProtocolVersion {
             5 => Ok(ProtocolVersion::V5),
             _ => Err(DecodeError::Custom("unknown p2p protocol version")),
         }
-    }
-}
-
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        ProtocolVersion::V5
     }
 }
 

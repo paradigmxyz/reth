@@ -20,7 +20,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -117,13 +117,14 @@ where
         capabilities: Arc<Capabilities>,
         status: Status,
         request_tx: PeerRequestSender,
+        timeout: Arc<AtomicU64>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
         let block_number =
             self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number);
+        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
 
         self.active_peers.insert(
             peer,
@@ -255,7 +256,7 @@ where
 
     /// Adds a peer and its address with the given kind to the peerset.
     pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
-        self.peers_manager.add_peer_kind(peer_id, kind, addr)
+        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
@@ -268,8 +269,12 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::Discovered(peer, addr) => {
-                self.peers_manager.add_peer(peer, addr);
+            DiscoveryEvent::Discovered { peer_id, socket_addr, fork_id } => {
+                self.queued_messages.push_back(StateAction::DiscoveredNode {
+                    peer_id,
+                    socket_addr,
+                    fork_id,
+                });
             }
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
                 self.queued_messages
@@ -481,6 +486,8 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
+    /// A new node was found through the discovery, possibly with a ForkId
+    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
@@ -500,7 +507,10 @@ mod tests {
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_primitives::{Header, PeerId, H256};
     use reth_provider::test_utils::NoopProvider;
-    use std::{future::poll_fn, sync::Arc};
+    use std::{
+        future::poll_fn,
+        sync::{atomic::AtomicU64, Arc},
+    };
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
@@ -534,7 +544,13 @@ mod tests {
         let (tx, session_rx) = mpsc::channel(1);
         let peer_tx = PeerRequestSender::new(peer_id, tx);
 
-        state.on_session_activated(peer_id, capabilities(), Status::default(), peer_tx);
+        state.on_session_activated(
+            peer_id,
+            capabilities(),
+            Status::default(),
+            peer_tx,
+            Arc::new(AtomicU64::new(1)),
+        );
 
         assert!(state.active_peers.contains_key(&peer_id));
 
