@@ -202,7 +202,7 @@ impl SessionManager {
         // NOTE: This means the metric values will be <= the in/outbound values in the
         // [`BandwidthMeter`], as it is shared by all streams.
         let bandwidth_metrics =
-            BandwidthMeterMetrics::new(&format!("bandwidth_session_{}", session_id));
+            BandwidthMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
         let metered_stream = MeteredStream::new_with_meter_and_metrics(
             stream,
             self.bandwidth_meter.clone(),
@@ -677,7 +677,7 @@ async fn start_pending_outbound_session(
             // NOTE: This means the metric values will be <= the in/outbound values in the
             // [`BandwidthMeter`], as it is shared by all streams.
             let bandwidth_metrics =
-                BandwidthMeterMetrics::new(&format!("bandwidth_session_{}", session_id));
+                BandwidthMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
             MeteredStream::new_with_meter_and_metrics(stream, bandwidth_meter, bandwidth_metrics)
         }
         Err(error) => {
