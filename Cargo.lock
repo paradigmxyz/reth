@@ -4154,6 +4154,7 @@ version = "0.1.0"
 dependencies = [
  "jsonrpsee",
  "reth-ipc",
+ "reth-network-api",
  "reth-provider",
  "reth-rpc",
  "reth-transaction-pool",
