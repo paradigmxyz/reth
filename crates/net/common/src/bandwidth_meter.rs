@@ -87,7 +87,6 @@ impl Default for BandwidthMeter {
 /// bandwidth meter
 #[derive(Metrics)]
 #[metrics(dynamic = true)]
-// #[metrics(scope = "test")]
 struct BandwidthMeterMetricsInner {
     /// Counts inbound bandwidth
     inbound_bandwidth: Counter,
@@ -102,7 +101,8 @@ pub struct BandwidthMeterMetrics {
 }
 
 impl BandwidthMeterMetrics {
-    pub fn new(scope: &'static str) -> Self {
+    /// Creates an instance of [`BandwidthMeterMetrics`] with the given scope
+    pub fn new(scope: &str) -> Self {
         Self { inner: Arc::new(BandwidthMeterMetricsInner::new(scope)) }
     }
 }
@@ -165,7 +165,7 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
         };
         this.meter.inner.inbound.fetch_add(num_bytes_u64, Ordering::Relaxed);
 
-        if let Some(bandwidth_meter_metrics) = &self.metrics {
+        if let Some(bandwidth_meter_metrics) = &this.metrics {
             bandwidth_meter_metrics.inner.inbound_bandwidth.increment(num_bytes_u64);
         }
 
@@ -184,7 +184,7 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
         let num_bytes_u64 = { u64::try_from(num_bytes).unwrap_or(u64::max_value()) };
         this.meter.inner.outbound.fetch_add(num_bytes_u64, Ordering::Relaxed);
 
-        if let Some(bandwidth_meter_metrics) = &self.metrics {
+        if let Some(bandwidth_meter_metrics) = &this.metrics {
             bandwidth_meter_metrics.inner.outbound_bandwidth.increment(num_bytes_u64);
         }
 

@@ -25,6 +25,7 @@ use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
+    fmt::{Display, Formatter, Result as FmtResult},
     future::Future,
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},
@@ -44,8 +45,14 @@ mod handle;
 pub use config::SessionsConfig;
 
 /// Internal identifier for active sessions.
-#[derive(Debug, Display, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
+
+impl Display for SessionId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
@@ -195,11 +202,11 @@ impl SessionManager {
         // NOTE: This means the metric values will be <= the in/outbound values in the
         // [`BandwidthMeter`], as it is shared by all streams.
         let bandwidth_metrics =
-            BandwidthMeterMetrics::new(format!("bandwidth_session_{}", session_id).into());
+            BandwidthMeterMetrics::new(&format!("bandwidth_session_{}", session_id));
         let metered_stream = MeteredStream::new_with_meter_and_metrics(
             stream,
             self.bandwidth_meter.clone(),
-            metrics,
+            bandwidth_metrics,
         );
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
@@ -670,8 +677,8 @@ async fn start_pending_outbound_session(
             // NOTE: This means the metric values will be <= the in/outbound values in the
             // [`BandwidthMeter`], as it is shared by all streams.
             let bandwidth_metrics =
-                BandwidthMeterMetrics::new(format!("bandwidth_session_{}", session_id).into());
-            MeteredStream::new_with_meter_and_metrics(stream, bandwidth_meter, metrics)
+                BandwidthMeterMetrics::new(&format!("bandwidth_session_{}", session_id));
+            MeteredStream::new_with_meter_and_metrics(stream, bandwidth_meter, bandwidth_metrics)
         }
         Err(error) => {
             let _ = events

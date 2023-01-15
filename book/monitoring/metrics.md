@@ -13,3 +13,7 @@ Reth integrated with Prometheus allows users to measure various metrics to gain 
 - **inserted_transactions**: Number of transactions inserted in the pool
 - **invalid_transactions**: Number of invalid transactions
 - **removed_transactions**: Number of removed transactions from the pool
+
+## P2P
+- **bandwidth_session_{SESSION ID}_inbound_bandwidth**: Inbound bandwidth (# of bytes received) for the given P2P session
+- **bandwidth_session_{SESSION ID}_outbound_bandwidth**: Outbound bandwidth (# of bytes sent) for the given P2P session
