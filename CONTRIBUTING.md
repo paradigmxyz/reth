@@ -90,6 +90,14 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
 ```json
 "editor.formatOnSave": true,
 "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
+"rust-analyzer.checkOnSave.overrideCommand": [
+  "cargo",
+  "+nightly",
+  "clippy",
+  "--all",
+  "--all-features",
+  "--message-format=json"
+],
 "[rust]": {
   "editor.defaultFormatter": "rust-lang.rust-analyzer"
 }
@@ -171,14 +179,6 @@ Be aware that _how_ you communicate requests and reviews in your feedback can ha
 If a pull request appears to be abandoned or stalled, it is polite to first check with the contributor to see if they intend to continue the work before checking if they would mind if you took it over (especially if it just has nits left). When doing so, it is courteous to give the original contributor credit for the work they started, either by preserving their name and e-mail address in the commit log, or by using the `Author: ` or `Co-authored-by: ` metadata tag in the commits.
 
 _Adapted from the [Foundry contributing guide][foundry-contributing]_.
-
-### Releasing
-
-Releases are automatically done by the release workflow when a tag is pushed, however, these steps still need to be taken:
-
-1. Ensure that the versions in the relevant `Cargo.toml` files are up-to-date.
-2. Update documentation links.
-3. Perform a final audit for breaking changes.
 
 [rust-coc]: https://github.com/rust-lang/rust/blob/master/CODE_OF_CONDUCT.md
 [coc-header]: #code-of-conduct

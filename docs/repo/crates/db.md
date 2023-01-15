@@ -178,10 +178,10 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error>;
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), Error>;
-    /// Cursor mut
-    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
-    /// DupCursor mut.
-    fn cursor_dup_mut<T: DupSort>(
+    /// Cursor for writing 
+    fn cursor_write<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
+    /// DupCursor for writing 
+    fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error>;
 }
@@ -247,15 +247,15 @@ This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Curso
 [File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L93-L101)
 ```rust ignore 
 // Get next canonical block hashes to execute.
-    let mut canonicals = db_tx.cursor::<tables::CanonicalHeaders>()?;
+    let mut canonicals = db_tx.cursor_read::<tables::CanonicalHeaders>()?;
     // Get header with canonical hashes.
-    let mut headers = db_tx.cursor::<tables::Headers>()?;
+    let mut headers = db_tx.cursor_read::<tables::Headers>()?;
     // Get bodies (to get tx index) with canonical hashes.
-    let mut cumulative_tx_count = db_tx.cursor::<tables::CumulativeTxCount>()?;
+    let mut cumulative_tx_count = db_tx.cursor_read::<tables::CumulativeTxCount>()?;
     // Get transaction of the block that we are executing.
-    let mut tx = db_tx.cursor::<tables::Transactions>()?;
+    let mut tx = db_tx.cursor_read::<tables::Transactions>()?;
     // Skip sender recovery and load signer from database.
-    let mut tx_sender = db_tx.cursor::<tables::TxSenders>()?;
+    let mut tx_sender = db_tx.cursor_read::<tables::TxSenders>()?;
 
 ```
 
@@ -281,9 +281,9 @@ Lets look at an examples of how cursors are used. The code snippet below contain
         db: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let mut tx_count_cursor = db.cursor_mut::<tables::CumulativeTxCount>()?;
-        let mut block_ommers_cursor = db.cursor_mut::<tables::BlockOmmers>()?;
-        let mut transaction_cursor = db.cursor_mut::<tables::Transactions>()?;
+        let mut tx_count_cursor = db.cursor_write::<tables::CumulativeTxCount>()?;
+        let mut block_ommers_cursor = db.cursor_write::<tables::BlockOmmers>()?;
+        let mut transaction_cursor = db.cursor_write::<tables::Transactions>()?;
 
         let mut entry = tx_count_cursor.last()?;
         while let Some((key, count)) = entry {

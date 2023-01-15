@@ -21,7 +21,7 @@ mod with_attrs;
 /// creates a [Default] implementation for the struct registering all of
 /// the metrics.
 ///
-/// Additionally, it creates a `describe()` method on the struct, which
+/// Additionally, it creates a `describe` method on the struct, which
 /// internally calls the describe statements for all metric fields.
 ///
 /// Sample usage:
@@ -31,13 +31,13 @@ mod with_attrs;
 ///
 /// #[derive(Metrics)]
 /// #[metrics(scope = "metrics_custom")]
-/// struct CustomMetrics {
+/// pub struct CustomMetrics {
 ///     /// A gauge with doc comment description.
 ///     gauge: Gauge,
 ///     #[metric(rename = "second_gauge", describe = "A gauge with metric attribute description.")]
 ///     gauge2: Gauge,
 ///     /// Some doc comment
-///     #[metric(describe = "Metric attribute description will be preffered over doc comment.")]
+///     #[metric(describe = "Metric attribute description will be preferred over doc comment.")]
 ///     counter: Counter,
 ///     /// A renamed histogram.
 ///     #[metric(rename = "histogram")]
@@ -47,7 +47,7 @@ mod with_attrs;
 ///
 /// The example above will be expanded to:
 /// ```
-/// struct CustomMetrics {
+/// pub struct CustomMetrics {
 ///     /// A gauge with doc comment description.
 ///     gauge: metrics::Gauge,
 ///     gauge2: metrics::Gauge,
@@ -68,19 +68,59 @@ mod with_attrs;
 ///     }
 /// }
 ///
-/// impl std::fmt::Debug for CustomMetrics {
-///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-///         f.debug_struct("CustomMetrics").finish()
-///     }
-/// }
-///
 /// impl CustomMetrics {
 ///     /// Describe all exposed metrics
 ///     pub fn describe() {
 ///         metrics::describe_gauge!("metrics_custom_gauge", "A gauge with doc comment description.");
 ///         metrics::describe_gauge!("metrics_custom_second_gauge", "A gauge with metric attribute description.");
-///         metrics::describe_counter!("metrics_custom_counter", "Metric attribute description will be preffered over doc comment.");
+///         metrics::describe_counter!("metrics_custom_counter", "Metric attribute description will be preferred over doc comment.");
 ///         metrics::describe_histogram!("metrics_custom_histogram", "A renamed histogram.");
+///     }
+/// }
+///
+/// impl std::fmt::Debug for CustomMetrics {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         f.debug_struct("CustomMetrics").finish()
+///     }
+/// }
+/// ```
+///
+/// Similarly, you can derive metrics with "dynamic" scope,
+/// meaning their scope can be set at the time of instantiation.
+/// For example:
+/// ```
+/// use reth_metrics_derive::Metrics;
+///
+/// #[derive(Metrics)]
+/// #[metrics(dynamic = true)]
+/// pub struct DynamicScopeMetrics {
+///     /// A gauge with doc comment description.
+///     gauge: metrics::Gauge,
+/// }
+/// ```
+///
+/// The example with dynamic scope will expand to
+/// ```
+/// pub struct DynamicScopeMetrics {
+///     /// A gauge with doc comment description.
+///     gauge: metrics::Gauge,
+/// }
+///
+/// impl DynamicScopeMetrics {
+///     pub fn new(scope: &str) -> Self {
+///         Self {
+///             gauge: metrics::register_gauge!(format!("{}{}{}", scope, "_", "gauge"))
+///         }
+///     }
+///
+///     pub fn describe(scope: &str) {
+///         metrics::describe_gauge!(format!("{}{}{}", scope, "_", "gauge"), "A gauge with doc comment description.");
+///     }
+/// }
+///
+/// impl std::fmt::Debug for DynamicScopeMetrics {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         f.debug_struct("DynamicScopeMetrics").finish()
 ///     }
 /// }
 /// ```

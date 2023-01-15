@@ -1,7 +1,7 @@
 use crate::{
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumber, Bloom, H160, H256, U256,
+    BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
 use bytes::{BufMut, BytesMut};
 use ethers_core::types::H64;
@@ -66,7 +66,7 @@ pub struct Header {
     pub base_fee_per_gas: Option<u64>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
-    pub extra_data: bytes::Bytes,
+    pub extra_data: Bytes,
 }
 
 impl Default for Header {
@@ -281,17 +281,21 @@ impl SealedHeader {
 }
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
+/// > The response must contain a number of block headers, of rising number when reverse is 0,
+/// > falling when 1
 ///
-/// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-/// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+/// Ref: <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+///
+/// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
+/// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.
-    #[default]
     Falling,
     /// Rising block number.
+    #[default]
     Rising,
 }
 
@@ -310,13 +314,13 @@ impl HeadersDirection {
     ///
     /// Returns:
     ///
-    /// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-    /// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+    /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
+    /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
     pub fn new(reverse: bool) -> Self {
         if reverse {
-            HeadersDirection::Rising
-        } else {
             HeadersDirection::Falling
+        } else {
+            HeadersDirection::Rising
         }
     }
 }
@@ -347,21 +351,17 @@ impl From<bool> for HeadersDirection {
 impl From<HeadersDirection> for bool {
     fn from(value: HeadersDirection) -> Self {
         match value {
-            HeadersDirection::Rising => true,
-            HeadersDirection::Falling => false,
+            HeadersDirection::Rising => false,
+            HeadersDirection::Falling => true,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Decodable, Encodable, Header, H256};
-    use crate::{Address, U256};
-    use ethers_core::{
-        types::Bytes,
-        utils::hex::{self, FromHex},
-    };
-
+    use super::{Bytes, Decodable, Encodable, Header, H256};
+    use crate::{Address, HeadersDirection, U256};
+    use ethers_core::utils::hex::{self, FromHex};
     use std::str::FromStr;
 
     #[test]
@@ -374,7 +374,7 @@ mod tests {
             gas_limit: 0x115c_u64,
             gas_used: 0x15b3_u64,
             timestamp: 0x1a0a_u64,
-            extra_data: Bytes::from_str("7788").unwrap().0,
+            extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: H256::zero(),
             state_root: H256::zero(),
             transactions_root: H256::zero(),
@@ -406,7 +406,7 @@ mod tests {
             gas_limit: 0x016345785d8a0000_u64,
             gas_used: 0x015534_u64,
             timestamp: 0x079e,
-            extra_data: Bytes::from_str("42").unwrap().0,
+            extra_data: Bytes::from_str("42").unwrap(),
             mix_hash: H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
@@ -424,7 +424,7 @@ mod tests {
             gas_limit: 0x115cu64,
             gas_used: 0x15b3u64,
             timestamp: 0x1a0au64,
-            extra_data: Bytes::from_str("7788").unwrap().0,
+            extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: H256::zero(),
             state_root: H256::zero(),
             transactions_root: H256::zero(),
@@ -433,5 +433,26 @@ mod tests {
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
         assert_eq!(header, expected);
+    }
+
+    #[test]
+    fn sanity_direction() {
+        let reverse = true;
+        assert_eq!(HeadersDirection::Falling, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Falling));
+
+        let reverse = false;
+        assert_eq!(HeadersDirection::Rising, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Rising));
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Falling;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Rising;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
     }
 }

@@ -13,7 +13,8 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_primitives::{PeerId, TransactionSigned, TxHash, H256, U256};
+use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -57,16 +58,6 @@ impl NetworkHandle {
             is_syncing: Arc::new(Default::default()),
         };
         Self { inner: Arc::new(inner) }
-    }
-
-    /// How many peers we're currently connected to.
-    pub fn num_connected_peers(&self) -> usize {
-        self.inner.num_active_peers.load(Ordering::Relaxed)
-    }
-
-    /// Returns the [`SocketAddr`] that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
-        *self.inner.listener_address.lock()
     }
 
     /// Returns the [`PeerId`] used in the network.
@@ -210,6 +201,26 @@ impl NetworkHandle {
     }
 }
 
+// === API Implementations ===
+
+impl PeersInfo for NetworkHandle {
+    fn num_connected_peers(&self) -> usize {
+        self.inner.num_active_peers.load(Ordering::Relaxed)
+    }
+
+    fn local_node_record(&self) -> NodeRecord {
+        let id = *self.peer_id();
+        let socket_addr = *self.inner.listener_address.lock();
+        NodeRecord::new(socket_addr, id)
+    }
+}
+
+impl NetworkInfo for NetworkHandle {
+    fn local_addr(&self) -> SocketAddr {
+        *self.inner.listener_address.lock()
+    }
+}
+
 impl StatusUpdater for NetworkHandle {
     /// Update the status of the node.
     fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
@@ -255,7 +266,7 @@ struct NetworkInner {
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
-    /// Removes a peer from the peerset correponding to the given kind.
+    /// Removes a peer from the peerset corresponding to the given kind.
     RemovePeer(PeerId, PeerKind),
     /// Disconnect a connection to a peer if it exists.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
@@ -280,7 +291,7 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
-    /// Get PeerInfo fro all the peers
+    /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),

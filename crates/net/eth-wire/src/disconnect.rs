@@ -7,9 +7,10 @@ use std::fmt::Display;
 use thiserror::Error;
 
 /// RLPx disconnect reason.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
+    #[default]
     DisconnectRequested = 0x00,
     /// TCP related error
     TcpSubsystemError = 0x01,
@@ -62,12 +63,6 @@ impl Display for DisconnectReason {
         };
 
         write!(f, "{message}")
-    }
-}
-
-impl Default for DisconnectReason {
-    fn default() -> Self {
-        DisconnectReason::DisconnectRequested
     }
 }
 

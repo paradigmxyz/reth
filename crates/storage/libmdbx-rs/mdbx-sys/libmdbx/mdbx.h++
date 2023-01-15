@@ -3450,7 +3450,7 @@ public:
                               /// transactions since the current read
                               /// transaction started.
     size_t bytes_used; ///< The number of last used page in the MVCC-snapshot
-                       ///< which being read, i.e. database file can't shrinked
+                       ///< which being read, i.e. database file can't be shrunk
                        ///< beyond this.
     size_t bytes_retained; ///< The total size of the database pages that
                            ///< were retired by committed write transactions

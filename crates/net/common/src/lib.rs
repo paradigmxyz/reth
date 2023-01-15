@@ -9,4 +9,7 @@
 
 pub mod ban_list;
 pub mod bandwidth_meter;
-pub mod metered_sender;
+/// Traits related to tokio streams
+pub mod stream;
+
+pub mod ratelimit;

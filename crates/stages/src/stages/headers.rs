@@ -107,7 +107,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
                 if self.is_stage_done(tx, current_progress).await? {
                     let stage_progress = current_progress.max(
-                        tx.cursor::<tables::CanonicalHeaders>()?
+                        tx.cursor_read::<tables::CanonicalHeaders>()?
                             .last()?
                             .map(|(num, _)| num)
                             .unwrap_or_default(),
@@ -176,7 +176,7 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
     ) -> Result<bool, StageError> {
-        let mut header_cursor = tx.cursor::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let (head_num, _) = header_cursor
             .seek_exact(stage_progress)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
@@ -191,8 +191,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         stage_progress: u64,
     ) -> Result<(SealedHeader, H256), StageError> {
         // Create a cursor over canonical header hashes
-        let mut cursor = tx.cursor::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
@@ -259,8 +259,8 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = tx.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = tx.cursor_mut::<tables::CanonicalHeaders>()?;
+        let mut cursor_header = tx.cursor_write::<tables::Headers>()?;
+        let mut cursor_canonical = tx.cursor_write::<tables::CanonicalHeaders>()?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -408,7 +408,7 @@ mod tests {
 
         // Checkpoint and no gap
         tx.put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
@@ -418,7 +418,7 @@ mod tests {
 
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
@@ -428,13 +428,44 @@ mod tests {
 
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("falied to write canonical");
+            .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
             stage.get_head_and_tip(&tx, stage_progress).await,
             Err(StageError::StageProgress(progress)) if progress == stage_progress
         );
+    }
+
+    /// Execute the stage in two steps
+    #[tokio::test]
+    async fn execute_from_previous_progress() {
+        let mut runner = HeadersTestRunner::with_linear_downloader();
+        let (stage_progress, previous_stage) = (600, 1200);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+
+        // skip `after_execution` hook for linear downloader
+        let tip = headers.last().unwrap();
+        runner.consensus.update_tip(tip.hash());
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);
+
+        let rx = runner.execute(input);
+
+        runner.client.clear().await;
+        runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
     mod test_runner {

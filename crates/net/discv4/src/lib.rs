@@ -93,6 +93,7 @@ const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 /// fit in one datagram. The safe number of nodes that always fit in a datagram is 12, with worst
 /// case all of them being IPv6 nodes. This is calculated by `(MAX_PACKET_SIZE - (header + expire +
 /// rlp overhead) / size(rlp(Node_IPv6))`
+/// Even in the best case where all nodes are IPv4, only 14 nodes fit into one packet.
 const SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS: usize = (MAX_PACKET_SIZE - 109) / 91;
 
 /// The timeout used to identify expired nodes, 24h
@@ -832,22 +833,14 @@ impl Discv4Service {
 
     /// Message handler for an incoming `Ping`
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
-        let mut address = remote_addr.ip();
-
-        // convert IPv4 mapped IPv6 address
-        if let IpAddr::V6(v6) = address {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                address = v4.into()
-            }
-        }
-
         // create the record
         let record = NodeRecord {
-            address,
+            address: remote_addr.ip(),
             udp_port: remote_addr.port(),
             tcp_port: ping.from.tcp_port,
             id: remote_id,
-        };
+        }
+        .into_ipv4_mapped();
 
         let key = kad_key(record.id);
 
@@ -1016,7 +1009,8 @@ impl Discv4Service {
                     tcp_port: remote_addr.port(),
                     udp_port: remote_addr.port(),
                     id: node_id,
-                };
+                }
+                .into_ipv4_mapped();
                 let val = NodeEntry::new(node);
                 let _ = entry.insert(
                     val,
@@ -1126,7 +1120,7 @@ impl Discv4Service {
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
         // that where discovered.
-        for node in msg.nodes {
+        for node in msg.nodes.into_iter().map(NodeRecord::into_ipv4_mapped) {
             // prevent banned peers from being added to the context
             if self.config.ban_list.is_banned(&node.id, &node.address) {
                 trace!(target: "discv4", peer_id=?node.id, ip=?node.address, "ignoring banned record");
@@ -1891,10 +1885,10 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_lookup() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
         let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
 
         let all_nodes = mainnet_nodes();
@@ -1927,9 +1921,9 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_mapped_ipv4() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
         let mut rng = thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1959,9 +1953,9 @@ mod tests {
         };
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_single_lookups() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -1993,9 +1987,9 @@ mod tests {
         .await
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_no_local_in_closest() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2026,9 +2020,9 @@ mod tests {
         assert!(!closest.iter().any(|r| r.id == *service.local_peer_id()));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_random_lookup() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2060,9 +2054,9 @@ mod tests {
         assert_eq!(ctx.inner.closest_nodes.borrow().len(), 1);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_service_commands() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (discv4, mut service) = create_discv4_with_config(config).await;

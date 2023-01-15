@@ -58,7 +58,7 @@
 
 /** Disables using GNU/Linux libc extensions.
  * \ingroup build_option
- * \note This option couldn't be moved to the options.h since dependant
+ * \note This option couldn't be moved to the options.h since dependent
  * control macros/defined should be prepared before include the options.h */
 #ifndef MDBX_DISABLE_GNU_SOURCE
 #define MDBX_DISABLE_GNU_SOURCE 0
@@ -1676,7 +1676,7 @@ MDBX_INTERNAL_FUNC int osal_lck_destroy(MDBX_env *env,
 MDBX_INTERNAL_FUNC int osal_lck_seize(MDBX_env *env);
 
 /// \brief Downgrades the level of initially acquired lock to
-///   operational level specified by argument. The reson for such downgrade:
+///   operational level specified by argument. The reason for such downgrade:
 ///    - unblocking of other processes that are waiting for access, i.e.
 ///      if (env->me_flags & MDBX_EXCLUSIVE) != 0, then other processes
 ///      should be made aware that access is unavailable rather than
@@ -2059,7 +2059,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 
 /** Controls sort order of internal page number lists.
  * This mostly experimental/advanced option with not for regular MDBX users.
- * \warning The database format depend on this option and libmdbx builded with
+ * \warning The database format depend on this option and libmdbx built with
  * different option value are incompatible. */
 #ifndef MDBX_PNL_ASCENDING
 #define MDBX_PNL_ASCENDING 0
@@ -2929,7 +2929,7 @@ typedef struct MDBX_lockinfo {
 
   /* Paired counter of processes that have mlock()ed part of mmapped DB.
    * The (mti_mlcnt[0] - mti_mlcnt[1]) > 0 means at least one process
-   * lock at leat one page, so therefore madvise() could return EINVAL. */
+   * lock at least one page, so therefore madvise() could return EINVAL. */
   MDBX_atomic_uint32_t mti_mlcnt[2];
 
   MDBX_ALIGNAS(MDBX_CACHELINE_SIZE) /* cacheline ----------------------------*/

@@ -13,7 +13,7 @@ pub enum Error {
     /// Failed to get a value into a table.
     #[error("Database read error code: {0:?}")]
     Read(u32),
-    /// Failed to delete a `(key, vakue)` pair into a table.
+    /// Failed to delete a `(key, value)` pair into a table.
     #[error("Database delete error code: {0:?}")]
     Delete(u32),
     /// Failed to commit transaction changes into the database.

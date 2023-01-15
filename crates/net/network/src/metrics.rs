@@ -32,3 +32,11 @@ pub struct NetworkMetrics {
     /// Number of invalid/malformed messages received from peers
     pub(crate) invalid_messages_received: Counter,
 }
+
+/// Metrics for the TransactionManager
+#[derive(Metrics)]
+#[metrics(scope = "network")]
+pub struct TransactionsManagerMetrics {
+    /// Total number of propagated transactions
+    pub(crate) propagated_transactions: Counter,
+}

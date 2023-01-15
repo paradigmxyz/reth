@@ -12,7 +12,7 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-
 COPY . reth
 
 # Build reth
-RUN cd reth && cargo build --all --profile release
+RUN cd reth && cargo build --all --locked --profile $BUILD_PROFILE
 
 # Use alpine as the release image
 FROM frolvlad/alpine-glibc

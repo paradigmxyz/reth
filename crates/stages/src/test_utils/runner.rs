@@ -7,9 +7,9 @@ use crate::{db::Transaction, ExecInput, ExecOutput, Stage, StageError, UnwindInp
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
-    #[error("Database error occured.")]
+    #[error("Database error occurred.")]
     Database(#[from] reth_interfaces::db::Error),
-    #[error("Internal runner error occured.")]
+    #[error("Internal runner error occurred.")]
     Internal(#[from] Box<dyn std::error::Error>),
 }
 

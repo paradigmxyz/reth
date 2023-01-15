@@ -21,6 +21,10 @@ pub enum PoolError {
     /// respect the size limits of the pool.
     #[error("[{0:?}] Transaction discarded outright due to pool size constraints.")]
     DiscardedOnInsert(TxHash),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the size limits of the pool.
+    #[error("[{0:?}] Transaction's gas limit {1} exceeds block's gas limit {2}.")]
+    TxExceedsGasLimit(TxHash, u64, u64),
 }
 
 // === impl PoolError ===
@@ -33,6 +37,7 @@ impl PoolError {
             PoolError::ProtocolFeeCapTooLow(hash, _) => hash,
             PoolError::SpammerExceededCapacity(_, hash) => hash,
             PoolError::DiscardedOnInsert(hash) => hash,
+            PoolError::TxExceedsGasLimit(hash, _, _) => hash,
         }
     }
 }
