@@ -172,6 +172,7 @@ pub struct ChainSpecBuilder {
 }
 
 impl ChainSpecBuilder {
+    /// Returns a builder initialized with the given [ChainSpec]
     pub fn from(chain_spec: &ChainSpec) -> Self {
         Self {
             chain: Some(chain_spec.chain),
