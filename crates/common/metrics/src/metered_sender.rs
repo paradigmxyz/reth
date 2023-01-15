@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{
 
 /// Network throughput metrics
 #[derive(Metrics)]
-#[metrics(scope = "metered_sender")]
+#[metrics(dynamic = true)]
 struct MeteredSenderMetrics {
     /// Number of messages sent
     messages_sent: Counter,
@@ -28,8 +28,8 @@ pub struct MeteredSender<T> {
 
 impl<T> MeteredSender<T> {
     /// Creates a new [`MeteredSender`] wrapping around the provided [`Sender`]
-    pub fn new(sender: Sender<T>) -> Self {
-        Self { sender, metrics: MeteredSenderMetrics::default() }
+    pub fn new(sender: Sender<T>, scope: &'static str) -> Self {
+        Self { sender, metrics: MeteredSenderMetrics::new(scope) }
     }
 
     /// Calls the underlying [`Sender`]'s `try_send`, incrementing the appropriate

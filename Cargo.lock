@@ -3932,6 +3932,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-metrics-common"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "reth-metrics-derive",
+ "tokio",
+]
+
+[[package]]
 name = "reth-metrics-derive"
 version = "0.1.0"
 dependencies = [
@@ -3949,7 +3958,6 @@ dependencies = [
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
- "metrics",
  "pin-project",
  "reth-primitives",
  "tokio",
