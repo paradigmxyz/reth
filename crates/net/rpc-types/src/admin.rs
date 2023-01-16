@@ -1,6 +1,10 @@
-use reth_primitives::{rpc::H256, NodeRecord, H512, U256};
+use crate::EthProtocolInfo;
+use reth_primitives::{NodeRecord, PeerId};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, SocketAddr},
+};
 
 /// Represents the `admin_nodeInfo` response, which can be queried for all the information
 /// known about the running node at the networking granularity.
@@ -10,9 +14,9 @@ use std::net::{IpAddr, SocketAddr};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeInfo {
     /// Enode in URL format.
-    pub enode: String,
+    pub enode: NodeRecord,
     /// ID of the local node.
-    pub id: H512,
+    pub id: PeerId,
     /// IP of the local node.
     pub ip: IpAddr,
     /// Address exposed for listening for the local node.
@@ -23,22 +27,32 @@ pub struct NodeInfo {
     /// Ports exposed by the node for discovery and listening.
     pub ports: Ports,
     /// Networking protocols being run by the local node.
-    pub protocols: Protocols,
+    pub protocols: BTreeMap<String, ProtocolInfo>,
 }
 
 impl NodeInfo {
     /// Creates a new instance of `NodeInfo`.
     pub fn new(enr: NodeRecord) -> NodeInfo {
+        let mut protocol_info = BTreeMap::from([(
+            "eth".into(),
+            ProtocolInfo::Eth(EthInfo {
+                eth_protocol_info: EthProtocolInfo {
+                    version: todo!(),
+                    difficulty: todo!(),
+                    head: todo!(),
+                },
+                network: todo!(),
+            }),
+        )]);
+
         NodeInfo {
-            enode: enr.to_string(),
+            enode: enr,
             id: enr.id,
             ip: enr.address,
             listen_addr: enr.tcp_addr(),
             name: "Reth".to_owned(),
-            ports: Ports { discovery: enr.tcp_port.into(), listener: enr.tcp_port.into() },
-            protocols: Protocols {
-                eth: Eth { difficulty: todo!(), genesis: todo!(), head: todo!(), network: todo!() },
-            },
+            ports: Ports { discovery: enr.udp_port.into(), listener: enr.tcp_port.into() },
+            protocols: protocol_info,
         }
     }
 }
@@ -52,22 +66,17 @@ pub struct Ports {
     pub listener: u16,
 }
 
-/// Networking protocols being run by the node.
+/// Information about the different protocols that can be run by the node (ETH, )
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Protocols {
-    /// Information about the Ethereum Wire Protocol (ETH)
-    pub eth: Eth,
+pub enum ProtocolInfo {
+    Eth(EthInfo),
 }
-
 /// Information about the Ethereum Wire Protocol (ETH)
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Eth {
-    /// Total difficulty of the best chain.
-    pub difficulty: U256,
-    /// The hash of the genesis block.
-    pub genesis: H256,
-    /// Hash of the latest block of the best chain.
-    pub head: H256,
+pub struct EthInfo {
+    /// Base information about the Ethereum Wire Protocol.
+    #[serde(flatten)]
+    pub eth_protocol_info: EthProtocolInfo,
     /// Network ID in base 10.
     pub network: u64,
 }
