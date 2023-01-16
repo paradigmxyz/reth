@@ -22,7 +22,7 @@ use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{BlockNumber, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -84,6 +84,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, value_delimiter = ',')]
+    bootnodes: Option<Vec<NodeRecord>>,
 }
 
 impl Command {
@@ -97,6 +100,7 @@ impl Command {
         let mut config: Config =
             confy::load_path(&self.config).wrap_err("Could not load config")?;
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+
         if !self.network.trusted_peers.is_empty() {
             self.network.trusted_peers.iter().for_each(|peer| {
                 config.peers.trusted_nodes.insert(*peer);
@@ -120,7 +124,13 @@ impl Command {
         let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
 
         let network = config
-            .network_config(db.clone(), chain_id, genesis_hash, self.network.disable_discovery)
+            .network_config(
+                db.clone(),
+                chain_id,
+                genesis_hash,
+                self.network.disable_discovery,
+                &self.bootnodes,
+            )
             .start_network()
             .await?;
 
