@@ -3603,6 +3603,7 @@ dependencies = [
  "reth-cli-utils",
  "reth-consensus",
  "reth-db",
+ "reth-discv4",
  "reth-downloaders",
  "reth-executor",
  "reth-interfaces",

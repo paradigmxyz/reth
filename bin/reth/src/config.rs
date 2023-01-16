@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use reth_db::database::Database;
+use reth_discv4::Discv4Config;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
