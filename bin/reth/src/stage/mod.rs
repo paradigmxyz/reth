@@ -144,7 +144,7 @@ impl Command {
                         chain_id,
                         genesis_hash,
                         self.network.disable_discovery,
-                        &None,
+                        None,
                     )
                     .start_network()
                     .await?;
