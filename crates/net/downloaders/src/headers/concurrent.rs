@@ -381,6 +381,7 @@ where
         // all requests are handled, stream is finished
         if this.in_progress_queue.is_empty() {
             if this.queued_validated_headers.is_empty() {
+                this.terminate();
                 return Poll::Ready(None)
             }
 
