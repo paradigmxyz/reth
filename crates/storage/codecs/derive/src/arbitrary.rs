@@ -5,9 +5,13 @@ use syn::DeriveInput;
 
 /// If `compact` or `rlp` is passed to `derive_arbitrary`, this function will generate the
 /// corresponding proptest roundtrip tests.
+///
+/// It accepts an optional integer number for the number of proptest cases. Otherwise, it will set
+/// it at 1000.
 pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream2 {
     let type_ident = ast.ident.clone();
 
+    let mut default_cases = 1000;
     let mut traits = vec![];
     let mut roundtrips = vec![];
 
@@ -36,6 +40,8 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     assert!(field == decoded);
                 }
             });
+        } else if let Ok(num) = arg.to_string().parse() {
+            default_cases = num;
         }
     }
 
@@ -51,7 +57,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                 #[test]
                 fn proptest() {
-                    proptest::proptest!(proptest::prelude::ProptestConfig::with_cases(1000), |(field: super::#type_ident)| {
+                    proptest::proptest!(proptest::prelude::ProptestConfig::with_cases(#default_cases as u32), |(field: super::#type_ident)| {
                         #(#roundtrips)*
                     });
                 }
