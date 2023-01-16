@@ -30,7 +30,7 @@ impl Config {
         genesis_hash: H256,
         disable_discovery: bool,
         bootnodes: &Option<Vec<NodeRecord>>,
-        nat_resolution_method: NatResolver,
+        nat_resolution_method: reth_net_nat::NatResolver,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
