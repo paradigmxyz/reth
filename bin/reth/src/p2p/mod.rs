@@ -101,7 +101,7 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         let network = config
-            .network_config(noop_db, chain_id, genesis_hash, self.disable_discovery)
+            .network_config(noop_db, chain_id, genesis_hash, self.disable_discovery, None)
             .start_network()
             .await?;
 
