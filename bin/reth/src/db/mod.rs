@@ -205,7 +205,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 
     fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
-        println!("Removing {}", path);
+        info!(target: "reth::cli", "Dropping db at {}", path);
         std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }
