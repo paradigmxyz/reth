@@ -164,7 +164,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         let mut hashed_storage = tx.cursor_dup_write::<tables::HashedStorage>()?;
 
-        // Aggregate all transition changesets and and make list of account that have been changed.
+        // Aggregate all transition changesets and make list of accounts that have been changed.
         tx.cursor_read::<tables::StorageChangeSet>()?
             .walk((from_transition_rev, H160::zero()).into())?
             .take_while(|res| {
