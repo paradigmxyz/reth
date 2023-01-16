@@ -16,7 +16,7 @@ use reth_interfaces::{
         error::DownloadError,
         headers::{
             client::{HeadersClient, StatusUpdater},
-            downloader::{ensure_parent, HeaderDownloader},
+            downloader::{ensure_parent, HeaderDownloader2},
         },
     },
 };
@@ -40,7 +40,7 @@ pub(crate) const HEADERS: StageId = StageId("Headers");
 /// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
 /// the stage progress is not updated unless this stage is done.
 #[derive(Debug)]
-pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> {
+pub struct HeaderStage<D: HeaderDownloader2, C: Consensus, H: HeadersClient, S: StatusUpdater> {
     /// Strategy for downloading the headers
     pub downloader: D,
     /// Consensus client implementation
@@ -56,7 +56,7 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> Stage<DB>
+impl<DB: Database, D: HeaderDownloader2, C: Consensus, H: HeadersClient, S: StatusUpdater> Stage<DB>
     for HeaderStage<D, C, H, S>
 {
     /// Return the id of the stage
@@ -87,12 +87,10 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
 
         // The downloader returns the headers in descending order starting from the tip
         // down to the local head (latest block in db)
-        let downloaded_headers: Result<Vec<SealedHeader>, DownloadError> = self
-            .downloader
-            .stream(head.clone(), tip)
-            .take(self.commit_threshold as usize) // Only stream [self.commit_threshold] headers
-            .try_collect()
-            .await;
+        let downloaded_headers = match self.downloader.next().await {
+            Some(downloaded_headers) => downloaded_headers,
+            None => return Ok(ExecOutput { stage_progress: current_progress, done: true }),
+        };
 
         match downloaded_headers {
             Ok(res) => {
@@ -154,7 +152,7 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
     }
 }
 
-impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
+impl<D: HeaderDownloader2, C: Consensus, H: HeadersClient, S: StatusUpdater>
     HeaderStage<D, C, H, S>
 {
     async fn update_head<DB: Database>(
