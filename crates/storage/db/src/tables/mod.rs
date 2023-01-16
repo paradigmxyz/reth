@@ -33,7 +33,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 23] = [
+pub const TABLES: [(TableType, &str); 25] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -54,6 +54,8 @@ pub const TABLES: [(TableType, &str); 23] = [
     (TableType::Table, StorageHistory::const_name()),
     (TableType::DupSort, AccountChangeSet::const_name()),
     (TableType::DupSort, StorageChangeSet::const_name()),
+    (TableType::Table, HashedAccount::const_name()),
+    (TableType::DupSort, HashedStorage::const_name()),
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, Config::const_name()),
     (TableType::Table, SyncStage::const_name()),
@@ -162,11 +164,6 @@ table!(
 );
 
 table!(
-    /// Stores the current state of an [`Account`].
-    ( PlainAccountState ) Address | Account
-);
-
-table!(
     /// Stores all smart contract bytecodes.
     /// There will be multiple accounts that have same bytecode
     /// So we would need to introduce reference counter.
@@ -186,6 +183,11 @@ table!(
 table!(
     /// Stores the mapping of transaction number to state transition id.
     ( TxTransitionIndex ) TxNumber | TransitionId
+);
+
+table!(
+    /// Stores the current state of an [`Account`].
+    ( PlainAccountState ) Address | Account
 );
 
 dupsort!(
@@ -256,6 +258,22 @@ dupsort!(
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
     ( StorageChangeSet ) TransitionIdAddress | [H256] StorageEntry
+);
+
+table!(
+    /// Stores the current state of an [`Account`] indexed with `keccak256(Address)`
+    /// This table is in preparation for merkelization and calculation of state root.
+    /// We are saving whole account data as it is needed for partial update when
+    /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
+    ( HashedAccount ) H256 | Account
+);
+
+dupsort!(
+    /// Stores the current storage values indexed with `keccak256(Address)` and
+    /// hash of storage key `keccak256(key)`.
+    /// This table is in preparation for merkelization and calculation of state root.
+    /// Benefit for merklization is that hashed addresses/keys are sorted.
+    ( HashedStorage ) H256 | [H256] StorageEntry
 );
 
 table!(
