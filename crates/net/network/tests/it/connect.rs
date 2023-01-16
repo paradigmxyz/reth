@@ -13,7 +13,7 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateUpdater},
 };
 use reth_net_common::ban_list::BanList;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
+use reth_network::{NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
@@ -214,9 +214,9 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+    let config = NetworkConfigBuilder::new(secret_key)
         .discovery(discv4)
-        .build();
+        .build(Arc::new(NoopProvider::default()));
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -237,7 +237,7 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = Arc::new(NoopProvider::default());
-    let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
+    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(Arc::clone(&client));
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -273,7 +273,7 @@ async fn test_connect_to_trusted_peer() {
     let discv4 = Discv4Config::builder();
 
     let client = Arc::new(NoopProvider::default());
-    let config = NetworkConfig::builder(Arc::clone(&client), secret_key).discovery(discv4).build();
+    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(Arc::clone(&client));
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -339,11 +339,11 @@ async fn test_incoming_node_id_blacklist() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30303);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30304);
-        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
             .peer_config(peer_config)
-            .build();
+            .build(Arc::new(NoopProvider::default()));
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -389,10 +389,10 @@ async fn test_incoming_connect_with_single_geth() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30306);
-        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
-            .build();
+            .build(Arc::new(NoopProvider::default()));
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -424,10 +424,10 @@ async fn test_outgoing_connect_with_single_geth() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30307);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30308);
-        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
-            .build();
+            .build(Arc::new(NoopProvider::default()));
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();
@@ -471,10 +471,10 @@ async fn test_geth_disconnect() {
 
         let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30309);
         let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30310);
-        let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p_socket)
             .discovery_addr(reth_disc_socket)
-            .build();
+            .build(Arc::new(NoopProvider::default()));
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();

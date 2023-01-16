@@ -4,7 +4,7 @@ use std::sync::Arc;
 use reth_db::database::Database;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig, PeersConfig,
+    NetworkConfig, NetworkConfigBuilder, PeersConfig,
 };
 use reth_primitives::H256;
 use reth_provider::ProviderImpl;
@@ -33,13 +33,13 @@ impl Config {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
             .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
-        NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
+        NetworkConfigBuilder::new(rng_secret_key())
             .boot_nodes(mainnet_nodes())
             .peer_config(peer_config)
             .genesis_hash(genesis_hash)
             .chain_id(chain_id)
             .set_discovery(disable_discovery)
-            .build()
+            .build(Arc::new(ProviderImpl::new(db)))
     }
 }
 

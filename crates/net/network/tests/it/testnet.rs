@@ -4,8 +4,8 @@ use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::DisconnectReason;
 use reth_network::{
-    error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
-    NetworkHandle, NetworkManager,
+    error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkConfigBuilder,
+    NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_primitives::PeerId;
 use reth_provider::{test_utils::NoopProvider, BlockProvider, HeaderProvider};
@@ -271,10 +271,10 @@ where
     }
 
     pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
-        let config = NetworkConfig::builder(Arc::clone(&client), secret_key)
+        let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
-            .build();
+            .build(Arc::clone(&client));
         Self { config, client, secret_key }
     }
 }
