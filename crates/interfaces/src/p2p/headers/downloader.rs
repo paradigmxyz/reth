@@ -5,8 +5,6 @@ use crate::{
         error::{DownloadError, DownloadResult},
     },
 };
-use std::task::{Context, Poll};
-
 use reth_primitives::{SealedHeader, H256};
 
 /// A downloader capable of fetching block headers.
