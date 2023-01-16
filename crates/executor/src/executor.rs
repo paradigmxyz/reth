@@ -774,8 +774,10 @@ mod tests {
             beneficiary_balance += i;
         }
 
-        let chain_spec =
-            MAINNET.builder().homestead_activated().with_fork(Hardfork::Dao, 1).build();
+        let chain_spec = ChainSpecBuilder::from(&*MAINNET)
+            .homestead_activated()
+            .with_fork(Hardfork::Dao, 1)
+            .build();
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts

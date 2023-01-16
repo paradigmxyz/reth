@@ -154,8 +154,8 @@ impl ChainSpec {
     }
 
     /// Returns a [ChainSpecBuilder] to help build custom specs
-    pub fn builder(&self) -> ChainSpecBuilder {
-        ChainSpecBuilder::from(self)
+    pub fn builder() -> ChainSpecBuilder {
+        ChainSpecBuilder::default()
     }
 }
 
@@ -172,18 +172,6 @@ pub struct ChainSpecBuilder {
 }
 
 impl ChainSpecBuilder {
-    /// Returns a builder initialized with the given [ChainSpec]
-    pub fn from(chain_spec: &ChainSpec) -> Self {
-        Self {
-            chain: Some(chain_spec.chain),
-            genesis: Some(chain_spec.genesis.clone()),
-            genesis_hash: Some(chain_spec.genesis_hash),
-            hardforks: chain_spec.hardforks.clone(),
-            dao_fork_support: chain_spec.dao_fork_support,
-            paris_block: chain_spec.paris_block,
-            paris_ttd: chain_spec.paris_ttd,
-        }
-    }
     /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
     pub fn mainnet() -> Self {
         Self {
@@ -300,6 +288,20 @@ impl ChainSpecBuilder {
             dao_fork_support: self.dao_fork_support,
             paris_block: self.paris_block,
             paris_ttd: self.paris_ttd,
+        }
+    }
+}
+
+impl From<&ChainSpec> for ChainSpecBuilder {
+    fn from(value: &ChainSpec) -> Self {
+        Self {
+            chain: Some(value.chain),
+            genesis: Some(value.genesis.clone()),
+            genesis_hash: Some(value.genesis_hash),
+            hardforks: value.hardforks.clone(),
+            dao_fork_support: value.dao_fork_support,
+            paris_block: value.paris_block,
+            paris_ttd: value.paris_ttd,
         }
     }
 }
