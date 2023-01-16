@@ -161,7 +161,7 @@ where
         let last_transition = self
             .get::<tables::BlockTransitionIndex>(prev_key.number())?
             .ok_or(DatabaseIntegrityError::BlockTransition { number: prev_key.number() })?;
-        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition + 1))
+        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
     /// Unwind table by some number key

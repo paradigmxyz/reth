@@ -166,8 +166,8 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         let rec_tx = transaction.clone().into_ecrecovered().unwrap();
         tx.put::<tables::TxSenders>(current_tx_id, rec_tx.signer())?;
         tx.put::<tables::Transactions>(current_tx_id, rec_tx.into())?;
-        transition_id += 1;
         tx.put::<tables::TxTransitionIndex>(current_tx_id, transition_id)?;
+        transition_id += 1;
         current_tx_id += 1;
     }
 
