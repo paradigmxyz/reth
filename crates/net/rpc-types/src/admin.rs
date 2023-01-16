@@ -51,7 +51,7 @@ impl NodeInfo {
             ip: enr.address,
             listen_addr: enr.tcp_addr(),
             name: "Reth".to_owned(),
-            ports: Ports { discovery: enr.udp_port.into(), listener: enr.tcp_port.into() },
+            ports: Ports { discovery: enr.udp_port, listener: enr.tcp_port },
             protocols: protocol_info,
         }
     }
@@ -69,6 +69,7 @@ pub struct Ports {
 /// Information about the different protocols that can be run by the node (ETH, )
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ProtocolInfo {
+    // Information about the Ethereum Wire Protocol.
     Eth(EthInfo),
 }
 /// Information about the Ethereum Wire Protocol (ETH)
