@@ -11,7 +11,9 @@ use syn::DeriveInput;
 pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream2 {
     let type_ident = ast.ident.clone();
 
-    let mut default_cases = 1000;
+    // Same as proptest
+    let mut default_cases = 256;
+
     let mut traits = vec![];
     let mut roundtrips = vec![];
 
@@ -57,7 +59,9 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                 #[test]
                 fn proptest() {
-                    proptest::proptest!(proptest::prelude::ProptestConfig::with_cases(#default_cases as u32), |(field: super::#type_ident)| {
+                    let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
+
+                    proptest::proptest!(config, |(field: super::#type_ident)| {
                         #(#roundtrips)*
                     });
                 }
