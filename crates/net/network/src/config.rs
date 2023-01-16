@@ -328,11 +328,7 @@ impl<C> NetworkConfigBuilder<C> {
         // get the fork filter
         let fork_filter = fork_filter.unwrap_or_else(|| {
             let head = head.unwrap_or_default();
-            ForkFilter::new(
-                head,
-                chain_spec.genesis_hash(),
-                chain_spec.forks_iter().map(|(_, b)| b),
-            )
+            chain_spec.fork_filter(head)
         });
 
         // If default DNS config is used then we add the known dns network to bootstrap from

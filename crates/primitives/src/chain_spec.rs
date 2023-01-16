@@ -116,41 +116,31 @@ impl ChainSpec {
         self.hardforks.iter().map(|(f, b)| (*f, *b))
     }
 
-    /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
-    ///
-    /// **CAUTION**: This assumes the current hardfork's block number is the current head and uses
-    /// all known future hardforks to initialize the filter.
-    pub fn fork_filter(&self, fork: Hardfork) -> Option<ForkFilter> {
-        if let Some(fork_block) = self.fork_block(fork) {
-            let future_forks =
-                self.forks_iter().map(|(_, b)| b).filter(|b| *b > fork_block).collect::<Vec<_>>();
+    /// Creates a [`ForkFilter`](crate::ForkFilter) for the given [BlockNumber].
 
-            Some(ForkFilter::new(fork_block, self.genesis_hash(), future_forks))
-        } else {
-            None
-        }
+    pub fn fork_filter(&self, block: BlockNumber) -> ForkFilter {
+        let future_forks =
+            self.forks_iter().map(|(_, b)| b).filter(|b| *b > block).collect::<Vec<_>>();
+
+        ForkFilter::new(block, self.genesis_hash(), future_forks)
     }
 
-    /// Compute the forkid for the given [Hardfork]
-    pub fn fork_id(&self, fork: Hardfork) -> Option<ForkId> {
-        if let Some(fork_block) = self.fork_block(fork) {
-            let mut curr_forkhash = ForkHash::from(self.genesis_hash());
-            let mut curr_block_number = 0;
+    /// Compute the forkid for the given [BlockNumber]
+    pub fn fork_id(&self, block: BlockNumber) -> ForkId {
+        let mut curr_forkhash = ForkHash::from(self.genesis_hash());
+        let mut curr_block_number = 0;
 
-            for (_, b) in self.forks_iter() {
-                if fork_block >= b {
-                    if b != curr_block_number {
-                        curr_forkhash += b;
-                        curr_block_number = b;
-                    }
-                } else {
-                    return Some(ForkId { hash: curr_forkhash, next: b })
+        for (_, b) in self.forks_iter() {
+            if block >= b {
+                if b != curr_block_number {
+                    curr_forkhash += b;
+                    curr_block_number = b;
                 }
+            } else {
+                return ForkId { hash: curr_forkhash, next: b }
             }
-            Some(ForkId { hash: curr_forkhash, next: 0 })
-        } else {
-            None
         }
+        ForkId { hash: curr_forkhash, next: 0 }
     }
 
     /// Returns a [ChainSpecBuilder] to help build custom specs
@@ -349,15 +339,15 @@ mod tests {
     #[test]
     // this test checks that the forkid computation is accurate
     fn test_forkid_from_hardfork() {
-        let frontier_forkid = MAINNET.fork_id(Hardfork::Frontier).unwrap();
+        let frontier_forkid = MAINNET.fork_id(0);
         assert_eq!([0xfc, 0x64, 0xec, 0x04], frontier_forkid.hash.0);
         assert_eq!(1150000, frontier_forkid.next);
 
-        let berlin_forkid = MAINNET.fork_id(Hardfork::Berlin).unwrap();
+        let berlin_forkid = MAINNET.fork_id(12244000);
         assert_eq!([0x0e, 0xb4, 0x40, 0xf6], berlin_forkid.hash.0);
         assert_eq!(12965000, berlin_forkid.next);
 
-        let latest_forkid = MAINNET.fork_id(Hardfork::Latest).unwrap();
+        let latest_forkid = MAINNET.fork_id(15050000);
         assert_eq!(0, latest_forkid.next);
     }
 }

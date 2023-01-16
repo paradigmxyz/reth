@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use std::{fmt::Display, str::FromStr};
 
+use crate::{BlockNumber, ChainSpec, ForkFilter, ForkHash, ForkId};
+
 #[allow(missing_docs)]
 #[derive(
     Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize,
@@ -44,6 +46,45 @@ impl Hardfork {
             Hardfork::ArrowGlacier,
             Hardfork::GrayGlacier,
         ]
+    }
+
+    /// Compute the forkid for the given [ChainSpec]
+    pub fn fork_id(&self, chain_spec: &ChainSpec) -> Option<ForkId> {
+        if let Some(fork_block) = chain_spec.fork_block(*self) {
+            let mut curr_forkhash = ForkHash::from(chain_spec.genesis_hash());
+            let mut curr_block_number = 0;
+
+            for (_, b) in chain_spec.forks_iter() {
+                if fork_block >= b {
+                    if b != curr_block_number {
+                        curr_forkhash += b;
+                        curr_block_number = b;
+                    }
+                } else {
+                    return Some(ForkId { hash: curr_forkhash, next: b })
+                }
+            }
+            Some(ForkId { hash: curr_forkhash, next: 0 })
+        } else {
+            None
+        }
+    }
+
+    /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
+    ///
+    /// **CAUTION**: This assumes the current hardfork's block number is the current head and uses
+    /// all known future hardforks to initialize the filter.
+    pub fn fork_filter(&self, chain_spec: &ChainSpec) -> Option<ForkFilter> {
+        if let Some(fork_block) = chain_spec.fork_block(*self) {
+            let future_forks: Vec<BlockNumber> =
+                chain_spec.forks_iter().filter(|(_, b)| b > &fork_block).map(|(_, b)| b).collect();
+
+            // this data structure is not chain-agnostic, so we can pass in the constant mainnet
+            // genesis
+            Some(ForkFilter::new(fork_block, chain_spec.genesis_hash(), future_forks))
+        } else {
+            None
+        }
     }
 }
 

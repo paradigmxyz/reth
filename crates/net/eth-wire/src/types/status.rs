@@ -100,8 +100,8 @@ impl Default for Status {
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: MAINNET.genesis_hash(),
             genesis: MAINNET.genesis_hash(),
-            forkid: MAINNET
-                .fork_id(Hardfork::Frontier)
+            forkid: Hardfork::Frontier
+                .fork_id(&MAINNET)
                 .expect("The Frontier hardfork should always exist"),
         }
     }

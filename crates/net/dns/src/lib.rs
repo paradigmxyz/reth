@@ -452,7 +452,7 @@ mod tests {
 
         let mut builder = EnrBuilder::new("v4");
         let mut buf = Vec::new();
-        let fork_id = MAINNET.fork_id(Hardfork::Frontier).unwrap();
+        let fork_id = Hardfork::Frontier.fork_id(&MAINNET).unwrap();
         fork_id.encode(&mut buf);
         builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &buf);
         let enr = builder.build(&secret_key).unwrap();
