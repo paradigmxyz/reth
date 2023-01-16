@@ -24,7 +24,7 @@ pub struct GetReceipts(
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 1)]
 #[derive(
     Clone,
     Debug,

@@ -86,7 +86,7 @@ impl From<Vec<H256>> for GetBlockBodies {
 
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
 )]
@@ -110,7 +110,7 @@ impl BlockBody {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 1)]
 #[derive(
     Clone,
     Debug,

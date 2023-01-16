@@ -63,7 +63,7 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 }
 
 /// A block body, including transactions and uncle headers.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
@@ -78,7 +78,7 @@ pub struct RawBlockBody {
 
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 25)]
 #[derive(
     Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
 )]
@@ -91,7 +91,7 @@ pub struct NewBlock {
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Clone,
     Debug,
@@ -124,7 +124,7 @@ impl From<Transactions> for Vec<TransactionSigned> {
 ///
 /// The list of transactions is constructed on per-peers basis, but the underlying transaction
 /// objects are shared.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 20)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct SharedTransactions(
     /// New transactions for the peer to include in its mempool.
