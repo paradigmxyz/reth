@@ -55,8 +55,6 @@ pub struct ConcurrentDownloader<C, H> {
     next_chain_tip_hash: H256,
     /// The batch size per one request
     request_batch_size: u64,
-    /// The number of retries for downloading
-    request_retries: usize,
     /// Maximum amount of requests to handle concurrently.
     max_concurrent_requests: usize,
     /// The number of block headers to return at once
@@ -144,7 +142,6 @@ where
         request: HeadersRequest,
         headers: Vec<Header>,
         peer_id: PeerId,
-        retries: usize,
     ) -> Result<(), HeadersResponseError> {
         for parent in headers {
             let parent = parent.seal();
@@ -152,17 +149,11 @@ where
             // Validate the headers
             if let Some(validated_header) = self.lowest_validated_header() {
                 if let Err(error) = self.validate(validated_header, &parent) {
-                    return Err(HeadersResponseError {
-                        request,
-                        retries,
-                        peer_id: Some(peer_id),
-                        error,
-                    })
+                    return Err(HeadersResponseError { request, peer_id: Some(peer_id), error })
                 }
             } else if parent.hash() != self.next_chain_tip_hash {
                 return Err(HeadersResponseError {
                     request,
-                    retries,
                     peer_id: Some(peer_id),
                     error: DownloadError::InvalidTip {
                         received: parent.hash(),
@@ -187,7 +178,7 @@ where
         response: HeadersRequestOutcome,
     ) -> Result<(), HeadersResponseError> {
         let requested_block_number = response.block_number();
-        let HeadersRequestOutcome { request, retries, outcome } = response;
+        let HeadersRequestOutcome { request, outcome } = response;
 
         match outcome {
             Ok(res) => {
@@ -200,7 +191,6 @@ where
                 if headers.is_empty() {
                     return Err(HeadersResponseError {
                         request,
-                        retries,
                         peer_id: Some(peer_id),
                         error: DownloadError::EmptyResponse,
                     })
@@ -212,7 +202,6 @@ where
                 if highest.number != requested_block_number {
                     return Err(HeadersResponseError {
                         request,
-                        retries,
                         peer_id: Some(peer_id),
                         error: DownloadError::HeadersResponseStartBlockMismatch {
                             received: highest.number,
@@ -223,7 +212,6 @@ where
 
                 if (headers.len() as u64) != request.limit {
                     return Err(HeadersResponseError {
-                        retries,
                         peer_id: Some(peer_id),
                         error: DownloadError::HeadersResponseTooShort {
                             received: headers.len() as u64,
@@ -236,7 +224,7 @@ where
                 // check if the response is the next expected
                 if highest.number == self.next_chain_tip_block_number {
                     // is next response, validate it
-                    self.process_next_headers(request, headers, peer_id, retries)?;
+                    self.process_next_headers(request, headers, peer_id)?;
                     // try to validate all buffered responses blocked by this successful response
                     self.try_validate_buffered()
                         .map(Err::<(), HeadersResponseError>)
@@ -246,7 +234,6 @@ where
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
                         request,
-                        retries,
                         peer_id,
                     })
                 }
@@ -255,17 +242,15 @@ where
             }
             // most likely a noop, because this error
             // would've been handled by the fetcher internally
-            Err(err) => {
-                Err(HeadersResponseError { request, retries, peer_id: None, error: err.into() })
-            }
+            Err(err) => Err(HeadersResponseError { request, peer_id: None, error: err.into() }),
         }
     }
 
     /// Handles the error of a bad response
     ///
-    /// Returns the error if the request ran out if retries.
-    fn on_headers_error(&mut self, err: HeadersResponseError) -> Option<DownloadError> {
-        let HeadersResponseError { request, retries, peer_id, error } = err;
+    /// This will re-submit the request.
+    fn on_headers_error(&mut self, err: HeadersResponseError) {
+        let HeadersResponseError { request, peer_id, error } = err;
 
         // Penalize the peer for bad response
         if let Some(peer_id) = peer_id {
@@ -273,17 +258,8 @@ where
             self.client.report_bad_message(peer_id);
         }
 
-        if retries < self.request_retries {
-            // re-submit the request
-            self.submit_request(request, retries + 1);
-            None
-        } else {
-            tracing::trace!(
-                target: "downloaders::headers",
-                "Ran out of retries"
-            );
-            Some(error)
-        }
+        // re-submit the request
+        self.submit_request(request);
     }
 
     /// Attempts to validate the buffered responses
@@ -294,9 +270,9 @@ where
             // Check to see if we've already received the next value
             let next_response = self.buffered_responses.peek_mut()?;
             if next_response.block_number() == self.next_request_block_number {
-                let OrderedHeadersResponse { headers, request, retries, peer_id } =
+                let OrderedHeadersResponse { headers, request, peer_id } =
                     PeekMut::pop(next_response);
-                if let Err(err) = self.process_next_headers(request, headers, peer_id, retries) {
+                if let Err(err) = self.process_next_headers(request, headers, peer_id) {
                     return Some(err)
                 }
             } else {
@@ -306,12 +282,11 @@ where
     }
 
     /// Starts a request future
-    fn submit_request(&mut self, request: HeadersRequest, retries: usize) {
+    fn submit_request(&mut self, request: HeadersRequest) {
         let client = Arc::clone(&self.client);
         let fut = HeadersRequestFuture {
             request: Some(request.clone()),
             fut: Box::pin(async move { client.get_headers(request).await }),
-            retries,
         };
         self.in_progress_queue.push(fut);
     }
@@ -404,7 +379,7 @@ where
                         target: "downloaders::headers",
                         "Requesting headers {request:?}"
                     );
-                    this.submit_request(request, 0);
+                    this.submit_request(request);
                 } else {
                     // no more requests
                     break
@@ -415,11 +390,7 @@ where
             if let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
                 // handle response
                 if let Err(err) = this.on_headers_outcome(outcome) {
-                    if let Some(fatal) = this.on_headers_error(err) {
-                        // encountered fatal error: terminate the stream
-                        this.terminate();
-                        return Poll::Ready(Some(Err(fatal)))
-                    }
+                    this.on_headers_error(err);
                 }
             } else {
                 break
@@ -463,7 +434,6 @@ type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> +
 struct HeadersRequestFuture {
     request: Option<HeadersRequest>,
     fut: HeadersFut,
-    retries: usize,
 }
 
 impl Future for HeadersRequestFuture {
@@ -473,14 +443,13 @@ impl Future for HeadersRequestFuture {
         let this = self.get_mut();
         let outcome = ready!(this.fut.poll_unpin(cx));
         let request = this.request.take().unwrap();
-        Poll::Ready(HeadersRequestOutcome { request, retries: this.retries, outcome })
+        Poll::Ready(HeadersRequestOutcome { request, outcome })
     }
 }
 
 /// The outcome of the [HeadersRequestFuture]
 struct HeadersRequestOutcome {
     request: HeadersRequest,
-    retries: usize,
     outcome: PeerRequestResult<BlockHeaders>,
 }
 
@@ -496,7 +465,6 @@ impl HeadersRequestOutcome {
 struct OrderedHeadersResponse {
     headers: Vec<Header>,
     request: HeadersRequest,
-    retries: usize,
     peer_id: PeerId,
 }
 
@@ -531,7 +499,6 @@ impl Ord for OrderedHeadersResponse {
 /// Type returned if a bad response was processed
 struct HeadersResponseError {
     request: HeadersRequest,
-    retries: usize,
     peer_id: Option<PeerId>,
     error: DownloadError,
 }
@@ -542,8 +509,6 @@ struct HeadersResponseError {
 pub struct ConcurrentDownloadBuilder {
     /// The batch size per one request
     request_batch_size: u64,
-    /// The number of retries for downloading
-    request_retries: usize,
     /// Batch size for headers
     stream_batch_size: usize,
     /// Batch size for headers
@@ -556,7 +521,6 @@ impl Default for ConcurrentDownloadBuilder {
     fn default() -> Self {
         Self {
             request_batch_size: 1_000,
-            request_retries: 5,
             stream_batch_size: 10_000,
             max_concurrent_requests: 100,
             max_buffered_responses: 500,
@@ -577,15 +541,9 @@ impl ConcurrentDownloadBuilder {
         self
     }
 
-    /// Set the number of retries per request
-    pub fn retries(mut self, retries: usize) -> Self {
-        self.request_retries = retries;
-        self
-    }
-
     /// Set the max amount of concurrent requests.
-    pub fn max_concurrent_requests(mut self, retries: usize) -> Self {
-        self.request_retries = retries;
+    pub fn max_concurrent_requests(mut self, max_concurrent_requests: usize) -> Self {
+        self.max_concurrent_requests = max_concurrent_requests;
         self
     }
 
@@ -607,7 +565,6 @@ impl ConcurrentDownloadBuilder {
     ) -> ConcurrentDownloader<C, H> {
         let Self {
             request_batch_size,
-            request_retries,
             stream_batch_size,
             max_concurrent_requests,
             max_buffered_responses,
@@ -621,7 +578,6 @@ impl ConcurrentDownloadBuilder {
             next_chain_tip_block_number,
             next_chain_tip_hash,
             request_batch_size,
-            request_retries,
             max_concurrent_requests,
             stream_batch_size,
             max_buffered_responses,
@@ -717,7 +673,6 @@ mod tests {
         heap.push(OrderedHeadersResponse {
             headers: vec![],
             request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
-            retries: 0,
             peer_id: Default::default(),
         });
 
@@ -725,29 +680,11 @@ mod tests {
         heap.push(OrderedHeadersResponse {
             headers: vec![],
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
-            retries: 0,
             peer_id: Default::default(),
         });
 
         assert_eq!(heap.pop().unwrap().block_number(), hi);
         assert_eq!(heap.pop().unwrap().block_number(), lo);
-    }
-
-    #[tokio::test]
-    async fn stream_empty() {
-        let local = SealedHeader::default();
-
-        let client = Arc::new(TestHeadersClient::default());
-        let mut downloader = ConcurrentDownloadBuilder::default().build(
-            CONSENSUS.clone(),
-            Arc::clone(&client),
-            local,
-            H256::random(),
-            100,
-        );
-
-        let result = downloader.next().await.unwrap();
-        assert!(result.is_err());
     }
 
     #[tokio::test]
