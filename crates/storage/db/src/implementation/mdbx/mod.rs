@@ -144,7 +144,7 @@ pub mod test_utils {
 mod tests {
     use super::{test_utils, Env, EnvKind};
     use crate::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, ReverseWalker, Walker},
         database::Database,
         models::ShardedKey,
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
@@ -211,6 +211,66 @@ mod tests {
         let walk = cursor.walk(key.into()).unwrap();
         let first = walk.into_iter().next().unwrap().unwrap();
         assert_eq!(first.1, value, "First next should be put value");
+    }
+
+    #[test]
+    fn db_walker() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        let mut walker = Walker::new(&mut cursor, None);
+
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), None);
+
+        // transform to ReverseWalker
+        let mut reverse_walker = walker.rev();
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+    }
+
+    #[test]
+    fn db_reverse_walker() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        let mut reverse_walker = ReverseWalker::new(&mut cursor, None);
+
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+
+        // transform to Walker
+        let mut walker = reverse_walker.forward();
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
