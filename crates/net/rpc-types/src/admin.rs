@@ -1,5 +1,4 @@
-use crate::EthProtocolInfo;
-use reth_primitives::{NodeRecord, PeerId, H256};
+use reth_primitives::{NodeRecord, PeerId, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -35,13 +34,10 @@ impl NodeInfo {
     pub fn new(enr: NodeRecord) -> NodeInfo {
         let mut protocol_info = BTreeMap::from([(
             "eth".into(),
-            ProtocolInfo::Eth(EthInfo {
-                eth_protocol_info: EthProtocolInfo {
-                    version: todo!(),
-                    difficulty: todo!(),
-                    head: todo!(),
-                },
-                network: todo!(),
+            ProtocolInfo::Eth(EthProtocolInfo {
+                difficulty: todo!(),
+                head: todo!(),
+                network: 0,
                 genesis: todo!(),
             }),
         )]);
@@ -71,14 +67,15 @@ pub struct Ports {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ProtocolInfo {
     /// Information about the Ethereum Wire Protocol.
-    Eth(EthInfo),
+    Eth(EthProtocolInfo),
 }
 /// Information about the Ethereum Wire Protocol (ETH)
 #[derive(Serialize, Deserialize, Debug)]
-pub struct EthInfo {
-    /// Base information about the Ethereum Wire Protocol.
-    #[serde(flatten)]
-    pub eth_protocol_info: EthProtocolInfo,
+pub struct EthProtocolInfo {
+    /// The current difficulty at the head of the chain.
+    pub difficulty: U256,
+    /// The block hash of the head of the chain.
+    pub head: H256,
     /// Network ID in base 10.
     pub network: u64,
     /// Genesis block of the current chain.
