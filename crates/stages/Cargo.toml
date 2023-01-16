@@ -35,6 +35,16 @@ futures-util = "0.3.25"
 itertools = "0.10.5"
 rayon = "1.6.0"
 
+# trie
+# TODO: move to another crate?
+trie-db = "0.24.0"
+hash-db = "0.15.2"
+hash256-std-hasher = "0.15.1"
+reference-trie = "0.26.0"
+memory-db = "0.31.0"
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+bytes = "1.2.1"
+
 [dev-dependencies]
 # reth
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
