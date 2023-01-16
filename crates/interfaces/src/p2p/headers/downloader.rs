@@ -32,10 +32,6 @@ pub trait HeaderDownloader: Downloader {
 pub trait HeaderDownloader2:
     Downloader + TryStream<Ok = Vec<SealedHeader>, Error = DownloadError>
 {
-    // /// Attempt to resolve `batch_size` of headers.
-    // fn poll_batch(&mut self, cx: &mut Context<'_>, batch_size: usize) ->
-    // Poll<Result<Vec<SealedHeader>, DownloadError>>;
-
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(self.consensus(), header, parent)?;

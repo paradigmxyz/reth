@@ -24,7 +24,16 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-/// Download headers concurrently
+/// Download headers concurrently.
+///
+/// This [Downloader] downloads headers using the configured [HeadersClient].
+/// Headers can be requested by hash or block number and take a `limit` parameter. This downloader
+/// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
+/// requests at a time but yielding them in batches on [Stream::poll_next].
+///
+/// **Note:** This downloader downloads in reverse, see also [HeadersDirection::Falling], this means
+/// the batches of headers that this downloader yields will start at the chain tip and move towards
+/// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
 pub struct ConcurrentDownloader<C, H> {
     /// Consensus client used to validate headers
