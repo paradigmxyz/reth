@@ -49,6 +49,25 @@ mod test {
     use reth_rlp::{Decodable, Encodable};
 
     #[test]
+    fn roundtrip_eip1559() {
+        let receipts = Receipts(vec![vec![Receipt {
+            tx_type: TxType::EIP1559,
+            success: false,
+            cumulative_gas_used: 0,
+            bloom: Default::default(),
+            logs: vec![],
+        }]]);
+
+        let mut out = vec![];
+        receipts.encode(&mut out);
+
+        let mut out = out.as_slice();
+        let decoded = Receipts::decode(&mut out).unwrap();
+
+        assert!(receipts == decoded);
+    }
+
+    #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     fn encode_get_receipts() {
         let expected = hex!("f847820457f842a000000000000000000000000000000000000000000000000000000000deadc0dea000000000000000000000000000000000000000000000000000000000feedbeef");
