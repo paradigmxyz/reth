@@ -334,7 +334,7 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Hardfork, MAINNET};
+    use crate::MAINNET;
 
     #[test]
     // this test checks that the forkid computation is accurate
