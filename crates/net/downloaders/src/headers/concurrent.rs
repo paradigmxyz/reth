@@ -44,8 +44,11 @@ pub struct ConcurrentDownloader<C, H> {
     local_head: SealedHeader,
     /// The block number to use for requests.
     next_request_block_number: u64,
-    /// The header to validate against.
-    earliest_header: Option<SealedHeader>,
+    /// A buffered header to validate against.
+    ///
+    /// This is only used to guarantee that we always have the lowest validated header, even if
+    /// `Stream::poll_next` drained all `queued_validated_headers`.
+    lowest_validated_header: Option<SealedHeader>,
     /// Tip block number to start validating from (in reverse)
     next_chain_tip_block_number: u64,
     /// Tip hash start syncing from (in reverse)
@@ -64,7 +67,9 @@ pub struct ConcurrentDownloader<C, H> {
     in_progress_queue: FuturesUnordered<HeadersRequestFuture>,
     /// Buffered, unvalidated responses
     buffered_responses: BinaryHeap<OrderedHeadersResponse>,
-    /// Buffered, validated headers ready to be returned
+    /// Buffered, _sorted_ and validated headers ready to be returned.
+    ///
+    /// Note: headers are sorted from high to low
     queued_validated_headers: Vec<SealedHeader>,
     /// Whether this stream is terminated
     is_terminated: bool,
@@ -78,11 +83,13 @@ where
     H: HeadersClient + 'static,
 {
     /// Returns the block number the local node is at.
+    #[inline]
     fn local_block_number(&self) -> u64 {
         self.local_head.number
     }
 
     /// Max requests to handle at the same time
+    #[inline]
     fn max_concurrent_requests(&self) -> usize {
         self.max_concurrent_requests
     }
@@ -95,32 +102,42 @@ where
     fn next_request(&mut self) -> Option<HeadersRequest> {
         let local_head = self.local_block_number();
         if self.next_request_block_number > local_head {
-            // downloading is in reverse
-            let diff = self.next_request_block_number - local_head;
-            let limit = diff.min(self.request_batch_size);
-            let start = self.next_request_block_number;
-            self.next_request_block_number -= limit;
+            let request = calc_next_request(
+                local_head,
+                self.next_request_block_number,
+                self.request_batch_size,
+            );
 
-            return Some(HeadersRequest {
-                start: start.into(),
-                limit,
-                direction: HeadersDirection::Falling,
-            })
+            // need to shift the tracked request block number based on the number of requested
+            // headers so follow-up requests will use that as start.
+            self.next_request_block_number -= request.limit;
+
+            return Some(request)
         }
 
         None
     }
 
-    /// Returns the first header to use for validation.
-    fn earliest_header(&self) -> Option<&SealedHeader> {
-        self.queued_validated_headers.last().or(self.earliest_header.as_ref())
+    /// Returns the next header to use for validation.
+    ///
+    /// Since this downloader downloads blocks with falling block number, this will return the
+    /// lowest (in terms of block number) validated header.
+    ///
+    /// This is either the last `queued_validated_headers`, or if has been drained entirely the
+    /// `lowest_validated_header`.
+    ///
+    /// This only returns `None` if we haven't fetched the initial chain tip yet.
+    fn lowest_validated_header(&self) -> Option<&SealedHeader> {
+        self.queued_validated_headers.last().or(self.lowest_validated_header.as_ref())
     }
 
     /// Processes the next headers in line.
     ///
     /// This will validate all headers and insert them into the validated buffer.
     ///
-    /// Returns an error if the given headers are invalid
+    /// Returns an error if the given headers are invalid.
+    ///
+    /// Caution: this expects the `headers` to be sorted.
     #[allow(clippy::result_large_err)]
     fn process_next_headers(
         &mut self,
@@ -133,8 +150,8 @@ where
             let parent = parent.seal();
 
             // Validate the headers
-            if let Some(header) = self.earliest_header() {
-                if let Err(error) = self.validate(header, &parent) {
+            if let Some(validated_header) = self.lowest_validated_header() {
+                if let Err(error) = self.validate(validated_header, &parent) {
                     return Err(HeadersResponseError {
                         request,
                         retries,
@@ -193,11 +210,27 @@ where
                 let highest = &headers[0];
 
                 if highest.number != requested_block_number {
-                    // TODO return error, invalid response
+                    return Err(HeadersResponseError {
+                        request,
+                        retries,
+                        peer_id: Some(peer_id),
+                        error: DownloadError::HeadersResponseStartBlockMismatch {
+                            received: highest.number,
+                            expected: requested_block_number,
+                        },
+                    })
                 }
 
                 if (headers.len() as u64) != request.limit {
-                    // TODO decide how to treat this
+                    return Err(HeadersResponseError {
+                        retries,
+                        peer_id: Some(peer_id),
+                        error: DownloadError::HeadersResponseTooShort {
+                            received: headers.len() as u64,
+                            expected: request.limit,
+                        },
+                        request,
+                    })
                 }
 
                 // check if the response is the next expected
@@ -255,7 +288,7 @@ where
 
     /// Attempts to validate the buffered responses
     ///
-    /// Returns an error if the next expected response was popped, but failed validation
+    /// Returns an error if the next expected response was popped, but failed validation.
     fn try_validate_buffered(&mut self) -> Option<HeadersResponseError> {
         loop {
             // Check to see if we've already received the next value
@@ -285,20 +318,22 @@ where
 
     /// Clears all requests/responses.
     fn clear(&mut self) {
-        self.earliest_header.take();
+        self.lowest_validated_header.take();
         self.queued_validated_headers.clear();
         self.buffered_responses.clear();
         self.in_progress_queue.clear();
     }
 
+    /// Marks the stream as terminated
     fn terminate(&mut self) {
         self.is_terminated = true;
         self.clear();
     }
 
-    /// Splits of the next batch
+    /// Splits off the next batch
     ///
     /// # Panics
+    ///
     /// if `len(queued_validated_headers) < stream_batch_size`
     fn split_next_batch(&mut self) -> Vec<SealedHeader> {
         let mut rem = self.queued_validated_headers.split_off(self.stream_batch_size);
@@ -348,9 +383,13 @@ where
         // yield next batch
         if this.queued_validated_headers.len() > this.stream_batch_size {
             let next_batch = this.split_next_batch();
+
+            // Note: if this would drain all headers, we need to keep the lowest (last index) around
+            // so we can continue validating headers responses.
             if this.queued_validated_headers.is_empty() {
-                this.earliest_header = next_batch.last().cloned();
+                this.lowest_validated_header = next_batch.last().cloned();
             }
+
             return Poll::Ready(Some(Ok(next_batch)))
         }
 
@@ -578,7 +617,7 @@ impl ConcurrentDownloadBuilder {
             client,
             local_head,
             next_request_block_number: next_chain_tip_block_number,
-            earliest_header: None,
+            lowest_validated_header: None,
             next_chain_tip_block_number,
             next_chain_tip_hash,
             request_batch_size,
@@ -594,10 +633,28 @@ impl ConcurrentDownloadBuilder {
     }
 }
 
+/// Configures and returns the next [HeadersRequest] based on the given parameters
+///
+/// The request wil start at the given `next_request_block_number` block.
+/// The `limit` of the request will either be the targeted `request_batch_size` or the difference of
+/// `next_request_block_number` and the `local_head` in case this is smaller than the targeted
+/// `request_batch_size`.
+#[inline]
+fn calc_next_request(
+    local_head: u64,
+    next_request_block_number: u64,
+    request_batch_size: u64,
+) -> HeadersRequest {
+    // downloading is in reverse
+    let diff = next_request_block_number - local_head;
+    let limit = diff.min(request_batch_size);
+    let start = next_request_block_number;
+    HeadersRequest { start: start.into(), limit, direction: HeadersDirection::Falling }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use once_cell::sync::Lazy;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
@@ -610,6 +667,47 @@ mod tests {
         child.parent_hash = parent.hash_slow();
         let hash = child.hash_slow();
         SealedHeader::new(child, hash)
+    }
+
+    #[test]
+    fn test_request_calc() {
+        // request an entire batch
+        let local = 0;
+        let next = 1000;
+        let batch_size = 2;
+        let request = calc_next_request(local, next, batch_size);
+        assert_eq!(request.start, next.into());
+        assert_eq!(request.limit, batch_size);
+
+        // only request 1
+        let local = 999;
+        let next = 1000;
+        let batch_size = 2;
+        let request = calc_next_request(local, next, batch_size);
+        assert_eq!(request.start, next.into());
+        assert_eq!(request.limit, 1);
+    }
+
+    /// Tests that request calc works
+    #[test]
+    fn test_next_request() {
+        let client = Arc::new(TestHeadersClient::default());
+
+        let genesis = SealedHeader::default();
+
+        let batch_size = 99;
+        let start = 1000;
+        let mut downloader = ConcurrentDownloadBuilder::default()
+            .request_batch_size(batch_size)
+            .build(CONSENSUS.clone(), Arc::clone(&client), genesis, H256::random(), start);
+
+        let mut total = 0;
+        while let Some(req) = downloader.next_request() {
+            assert_eq!(req.start, (start - total).into());
+            total += req.limit;
+        }
+        assert_eq!(total, start);
+        assert_eq!(downloader.next_request_block_number, downloader.local_block_number());
     }
 
     #[test]
