@@ -1,5 +1,4 @@
 //! Database debugging tool
-
 use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
