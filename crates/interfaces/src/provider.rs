@@ -10,6 +10,11 @@ pub enum Error {
     BlockHash { block_hash: BlockHash },
     #[error("Block body not exists #{block_number} ({block_hash:?})")]
     BlockBody { block_number: BlockNumber, block_hash: BlockHash },
-    #[error("Block transition does not exist for block #{block_number} ({block_hash:?})")]
-    BlockTransition { block_number: BlockNumber, block_hash: BlockHash },
+    #[error("Block transition id does not exist for block #{block_number}")]
+    BlockTransition { block_number: BlockNumber },
+
+    #[error("Block number {block_number} does not exist in canonical chain")]
+    BlockCanonical { block_number: BlockNumber },
+    #[error("Block #{block_hash:?} is not canonical block")]
+    BlockIsntCanonical { block_hash: BlockHash },
 }
