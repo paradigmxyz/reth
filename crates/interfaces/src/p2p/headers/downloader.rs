@@ -5,6 +5,7 @@ use crate::{
         error::{DownloadError, DownloadResult},
     },
 };
+use futures::TryStream;
 use reth_primitives::{SealedHeader, H256};
 
 /// A downloader capable of fetching block headers.
@@ -28,7 +29,9 @@ pub trait HeaderDownloader: Downloader {
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeaderDownloader2: Downloader {
+pub trait HeaderDownloader2:
+    Downloader + TryStream<Ok = Vec<SealedHeader>, Error = DownloadError>
+{
     // /// Attempt to resolve `batch_size` of headers.
     // fn poll_batch(&mut self, cx: &mut Context<'_>, batch_size: usize) ->
     // Poll<Result<Vec<SealedHeader>, DownloadError>>;

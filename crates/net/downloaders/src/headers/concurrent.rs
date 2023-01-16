@@ -317,8 +317,8 @@ where
 
 impl<C, H> HeaderDownloader2 for ConcurrentDownloader<C, H>
 where
-    C: Consensus,
-    H: HeadersClient,
+    C: Consensus + 'static,
+    H: HeadersClient + 'static,
 {
 }
 
