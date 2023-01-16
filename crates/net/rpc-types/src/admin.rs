@@ -1,5 +1,5 @@
 use crate::EthProtocolInfo;
-use reth_primitives::{NodeRecord, PeerId};
+use reth_primitives::{NodeRecord, PeerId, H256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -42,6 +42,7 @@ impl NodeInfo {
                     head: todo!(),
                 },
                 network: todo!(),
+                genesis: todo!(),
             }),
         )]);
 
@@ -69,7 +70,7 @@ pub struct Ports {
 /// Information about the different protocols that can be run by the node (ETH, )
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ProtocolInfo {
-    // Information about the Ethereum Wire Protocol.
+    /// Information about the Ethereum Wire Protocol.
     Eth(EthInfo),
 }
 /// Information about the Ethereum Wire Protocol (ETH)
@@ -80,4 +81,6 @@ pub struct EthInfo {
     pub eth_protocol_info: EthProtocolInfo,
     /// Network ID in base 10.
     pub network: u64,
+    /// Genesis block of the current chain.
+    pub genesis: H256,
 }
