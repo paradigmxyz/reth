@@ -3606,6 +3606,7 @@ dependencies = [
  "reth-downloaders",
  "reth-executor",
  "reth-interfaces",
+ "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-primitives",

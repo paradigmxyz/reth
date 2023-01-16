@@ -22,7 +22,7 @@ use tracing::warn;
 
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
-pub(crate) enum NatResolver {
+pub enum NatResolver {
     /// Resolve with any available resolver.
     #[default]
     Any,

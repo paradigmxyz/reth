@@ -24,6 +24,7 @@ reth-network-api = {path = "../../crates/net/network-api" }
 reth-downloaders = {path = "../../crates/net/downloaders" }
 reth-cli-utils = { path = "../../crates/cli/utils" }
 reth-tracing = { path = "../../crates/tracing" }
+reth-net-nat = { path = "../../crates/net/nat" }
 
 # tracing
 tracing = "0.1"
