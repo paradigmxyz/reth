@@ -47,13 +47,14 @@ macro_rules! fuzz_type_and_name {
 #[allow(non_snake_case)]
 #[cfg(any(test, feature = "bench"))]
 pub mod fuzz_rlp {
+    use reth_codecs::derive_arbitrary;
     use reth_eth_wire::{
         BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
         GetPooledTransactions, GetReceipts, HelloMessage, NewBlock, NewBlockHashes,
         NewPooledTransactionHashes, NodeData, P2PMessage, PooledTransactions, Receipts, Status,
         Transactions,
     };
-    use reth_primitives::BlockHashOrNumber;
+    use reth_primitives::{BlockHashOrNumber, TransactionSigned};
     use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
@@ -64,6 +65,7 @@ pub mod fuzz_rlp {
 
     // see message below for why wrapper types are necessary for fuzzing types that do not have a
     // Default impl
+    #[derive_arbitrary(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -105,6 +107,7 @@ pub mod fuzz_rlp {
     //
     // We just provide a default value here so test-fuzz can auto-generate a corpus file for the
     // type.
+    #[derive_arbitrary(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -141,6 +144,7 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(NodeData, fuzz_NodeData);
     fuzz_type_and_name!(GetReceipts, fuzz_GetReceipts);
     fuzz_type_and_name!(Receipts, fuzz_Receipts);
+    fuzz_type_and_name!(TransactionSigned, fuzz_TransactionSigned);
 
     // manually test Ping and Pong which are not covered by the above
 

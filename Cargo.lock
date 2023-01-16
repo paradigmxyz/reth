@@ -3812,6 +3812,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "bytes",
  "ethers-core",
  "futures",
@@ -3819,7 +3820,10 @@ dependencies = [
  "hex-literal",
  "metrics",
  "pin-project",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
+ "reth-codecs",
  "reth-ecies",
  "reth-primitives",
  "reth-rlp",
@@ -4049,6 +4053,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
  "sucds",
  "test-fuzz",
  "thiserror",

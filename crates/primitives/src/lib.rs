@@ -10,6 +10,7 @@
 //! This crate contains Ethereum primitive types and helper functions.
 
 mod account;
+mod bits;
 mod block;
 pub mod bloom;
 mod chain;
@@ -32,6 +33,7 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
+pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::Chain;
@@ -77,9 +79,9 @@ pub type TransitionId = u64;
 
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, H128, H512, H64, U128, U64},
+    types::{BigEndianHash, H128, H64, U64},
 };
-pub use revm_interpreter::{B160 as H160, B256 as H256, U256};
+pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 
 #[doc(hidden)]
 mod __reexport {
