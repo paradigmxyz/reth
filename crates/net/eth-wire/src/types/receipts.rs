@@ -1,9 +1,11 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
+use reth_codecs::derive_arbitrary;
 use reth_primitives::{Receipt, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
 /// A request for transaction receipts from the given block hashes.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,
@@ -22,6 +24,7 @@ pub struct GetReceipts(
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
+#[derive_arbitrary(rlp, 1)]
 #[derive(
     Clone,
     Debug,

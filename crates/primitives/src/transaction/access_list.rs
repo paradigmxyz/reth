@@ -5,7 +5,7 @@ use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrap
 
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
-#[main_codec]
+#[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
@@ -15,6 +15,6 @@ pub struct AccessListItem {
 }
 
 /// AccessList as defined in EIP-2930
-#[main_codec]
+#[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper)]
 pub struct AccessList(pub Vec<AccessListItem>);

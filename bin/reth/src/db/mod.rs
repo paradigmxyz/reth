@@ -7,7 +7,7 @@ use reth_db::{
     database::Database,
     table::Table,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTx,
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
@@ -115,7 +115,7 @@ impl Command {
                 tool.list(args)?;
             }
             Subcommands::Drop => {
-                tool.drop()?;
+                tool.drop(&self.db)?;
             }
         }
 
@@ -203,41 +203,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 
-    fn drop(&mut self) -> Result<()> {
-        macro_rules! drop_tables {
-            ([$($table:ident,)*]) => {
-                let _tx = self.db.tx_mut()?;
-                $(_tx.clear::<tables::$table>()?;)*
-                _tx.commit()?;
-            };
-        }
-
-        drop_tables!([
-            CanonicalHeaders,
-            HeaderTD,
-            HeaderNumbers,
-            Headers,
-            BlockBodies,
-            BlockOmmers,
-            NonCanonicalTransactions,
-            Transactions,
-            TxHashNumber,
-            Receipts,
-            Logs,
-            PlainAccountState,
-            PlainStorageState,
-            Bytecodes,
-            BlockTransitionIndex,
-            TxTransitionIndex,
-            AccountHistory,
-            StorageHistory,
-            AccountChangeSet,
-            StorageChangeSet,
-            TxSenders,
-            Config,
-            SyncStage,
-        ]);
-
+    fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
+        info!(target: "reth::cli", "Dropping db at {}", path);
+        std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }
 }

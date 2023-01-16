@@ -1,4 +1,5 @@
 use crate::{Header, SealedHeader, TransactionSigned, H256};
+use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -61,6 +62,7 @@ impl Deref for SealedBlock {
 }
 
 /// Either a block hash _or_ a block number
+#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockHashOrNumber {
     /// A block hash
