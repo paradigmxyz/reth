@@ -5,7 +5,7 @@ use crate::{
         error::{DownloadError, DownloadResult},
     },
 };
-use futures::TryStream;
+use futures::Stream;
 use reth_primitives::{SealedHeader, H256};
 
 /// A downloader capable of fetching block headers.
@@ -29,9 +29,7 @@ pub trait HeaderDownloader: Downloader {
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeaderDownloader2:
-    Downloader + TryStream<Ok = Vec<SealedHeader>, Error = DownloadError>
-{
+pub trait HeaderDownloader2: Downloader + Stream<Item = Vec<SealedHeader>> {
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(self.consensus(), header, parent)?;

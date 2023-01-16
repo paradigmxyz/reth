@@ -6,7 +6,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{
         downloader::Downloader,
-        error::{DownloadError, DownloadResult, PeerRequestResult},
+        error::{DownloadError, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::HeaderDownloader2,
@@ -346,7 +346,7 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    type Item = DownloadResult<Vec<SealedHeader>>;
+    type Item = Vec<SealedHeader>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -365,7 +365,7 @@ where
                 this.lowest_validated_header = next_batch.last().cloned();
             }
 
-            return Poll::Ready(Some(Ok(next_batch)))
+            return Poll::Ready(Some(next_batch))
         }
 
         // this will submit new requests and poll them
@@ -406,10 +406,10 @@ where
 
             if this.queued_validated_headers.len() > this.stream_batch_size {
                 let next_batch = this.split_next_batch();
-                return Poll::Ready(Some(Ok(next_batch)))
+                return Poll::Ready(Some(next_batch))
             }
             // return the last validated headers
-            return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_validated_headers))))
+            return Poll::Ready(Some(std::mem::take(&mut this.queued_validated_headers)))
         }
 
         Poll::Pending
@@ -712,7 +712,7 @@ mod tests {
             ])
             .await;
 
-        let headers = downloader.next().await.unwrap().unwrap();
+        let headers = downloader.next().await.unwrap();
         assert_eq!(headers, vec![p0, p1, p2,]);
         assert!(downloader.buffered_responses.is_empty());
         assert!(downloader.next().await.is_none());
@@ -742,12 +742,12 @@ mod tests {
             ])
             .await;
 
-        let headers = downloader.next().await.unwrap().unwrap();
+        let headers = downloader.next().await.unwrap();
         assert_eq!(headers, vec![p0]);
 
-        let headers = downloader.next().await.unwrap().unwrap();
+        let headers = downloader.next().await.unwrap();
         assert_eq!(headers, vec![p1]);
-        let headers = downloader.next().await.unwrap().unwrap();
+        let headers = downloader.next().await.unwrap();
         assert_eq!(headers, vec![p2]);
         assert!(downloader.next().await.is_none());
     }
