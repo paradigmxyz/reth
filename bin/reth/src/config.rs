@@ -6,7 +6,7 @@ use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
 };
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, NodeRecord};
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -28,12 +28,13 @@ impl Config {
         db: Arc<DB>,
         chain_spec: ChainSpec,
         disable_discovery: bool,
+        bootnodes: Option<Vec<NodeRecord>>,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
             .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
         NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
-            .boot_nodes(mainnet_nodes())
+            .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
             .peer_config(peer_config)
             .chain_spec(chain_spec)
             .set_discovery(disable_discovery)

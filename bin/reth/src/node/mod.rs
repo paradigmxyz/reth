@@ -17,7 +17,7 @@ use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, H256};
+use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -79,6 +79,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, value_delimiter = ',')]
+    bootnodes: Option<Vec<NodeRecord>>,
 }
 
 impl Command {
@@ -92,6 +95,7 @@ impl Command {
         let mut config: Config =
             confy::load_path(&self.config).wrap_err("Could not load config")?;
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+
         if !self.network.trusted_peers.is_empty() {
             self.network.trusted_peers.iter().for_each(|peer| {
                 config.peers.trusted_nodes.insert(*peer);
@@ -113,7 +117,12 @@ impl Command {
         let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
         let network = config
-            .network_config(db.clone(), self.chain.clone(), self.network.disable_discovery)
+            .network_config(
+                db.clone(),
+                self.chain.clone(),
+                self.network.disable_discovery,
+                self.bootnodes.clone(),
+            )
             .start_network()
             .await?;
 

@@ -136,7 +136,12 @@ impl Command {
                 }
 
                 let network = config
-                    .network_config(db.clone(), self.chain.clone(), self.network.disable_discovery)
+                    .network_config(
+                        db.clone(),
+                        self.chain.clone(),
+                        self.network.disable_discovery,
+                        None,
+                    )
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);

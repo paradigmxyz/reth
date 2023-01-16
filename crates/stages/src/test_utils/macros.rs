@@ -97,7 +97,7 @@ macro_rules! stage_test_suite {
 
             // Run stage unwind
             let unwind_input = crate::stage::UnwindInput {
-                unwind_to: stage_progress, stage_progress, bad_block: None,
+                unwind_to: stage_progress, stage_progress: previous_stage, bad_block: None,
             };
             let rx = runner.unwind(unwind_input).await;
 

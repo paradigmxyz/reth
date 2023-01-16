@@ -1,9 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+use reth_codecs::derive_arbitrary;
 use reth_primitives::{TransactionSigned, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,
@@ -36,6 +38,7 @@ where
 /// as the request's hashes. Hashes may be skipped, and the client should ensure that each body
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Clone,
     Debug,

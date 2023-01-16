@@ -220,7 +220,7 @@ impl proptest::prelude::Arbitrary for Bytes {
     type Strategy = proptest::prelude::BoxedStrategy<Bytes>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), 0..1000)
+        proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), 0..80)
             .prop_map(move |vec| bytes::Bytes::from(vec).into())
             .boxed()
     }
@@ -229,7 +229,7 @@ impl proptest::prelude::Arbitrary for Bytes {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Bytes {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let size = u.int_in_range(0..=1000)?;
+        let size = u.int_in_range(0..=80)?;
         Ok(Self(bytes::Bytes::copy_from_slice(u.bytes(size)?)))
     }
 }
