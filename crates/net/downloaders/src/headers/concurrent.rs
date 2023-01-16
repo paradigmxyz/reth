@@ -50,7 +50,7 @@ pub struct ConcurrentDownloader<C, H> {
     /// The number of block headers to return at once
     stream_batch_size: usize,
     /// Maximum amount of received headers to buffer internally.
-    max_buffer_size: usize,
+    max_buffered_responses: usize,
     /// requests in progress
     in_progress_queue: FuturesUnordered<HeadersRequestFuture>,
     /// Buffered, unvalidated responses
@@ -146,8 +146,8 @@ where
             }
 
             // update tracked block info
-            self.next_chain_tip_hash = parent.hash();
-            self.next_chain_tip_block_number = parent.number;
+            self.next_chain_tip_hash = parent.parent_hash;
+            self.next_chain_tip_block_number = parent.number - 1;
             self.queued_validated_headers.push(parent);
         }
 
@@ -195,7 +195,6 @@ where
                 if highest.number == self.next_chain_tip_block_number {
                     // is next response, validate it
                     self.process_next_headers(request, headers, peer_id, retries)?;
-
                     // try to validate all buffered responses blocked by this successful response
                     self.try_validate_buffered()
                         .map(Err::<(), HeadersResponseError>)
@@ -277,6 +276,7 @@ where
 
     /// Clears all requests/responses.
     fn clear(&mut self) {
+        self.earliest_header.take();
         self.queued_validated_headers.clear();
         self.buffered_responses.clear();
         self.in_progress_queue.clear();
@@ -285,6 +285,16 @@ where
     fn terminate(&mut self) {
         self.is_terminated = true;
         self.clear();
+    }
+
+    /// Splits of the next batch
+    ///
+    /// # Panics
+    /// if `len(queued_validated_headers) < stream_batch_size`
+    fn split_next_batch(&mut self) -> Vec<SealedHeader> {
+        let mut rem = self.queued_validated_headers.split_off(self.stream_batch_size);
+        std::mem::swap(&mut rem, &mut self.queued_validated_headers);
+        rem
     }
 }
 
@@ -328,7 +338,10 @@ where
 
         // yield next batch
         if this.queued_validated_headers.len() > this.stream_batch_size {
-            let next_batch = this.queued_validated_headers.split_off(this.stream_batch_size);
+            let next_batch = this.split_next_batch();
+            if this.queued_validated_headers.is_empty() {
+                this.earliest_header = next_batch.last().cloned();
+            }
             return Poll::Ready(Some(Ok(next_batch)))
         }
 
@@ -336,7 +349,7 @@ where
         loop {
             // populate requests
             while this.in_progress_queue.len() < this.max_concurrent_requests() &&
-                this.buffered_responses.len() < this.max_buffer_size
+                this.buffered_responses.len() < this.max_buffered_responses
             {
                 if let Some(request) = this.next_request() {
                     tracing::trace!(
@@ -371,6 +384,10 @@ where
                 return Poll::Ready(None)
             }
 
+            if this.queued_validated_headers.len() > this.stream_batch_size {
+                let next_batch = this.split_next_batch();
+                return Poll::Ready(Some(Ok(next_batch)))
+            }
             // return the last validated headers
             return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_validated_headers))))
         }
@@ -458,8 +475,7 @@ impl PartialOrd for OrderedHeadersResponse {
 
 impl Ord for OrderedHeadersResponse {
     fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is a max heap, so compare backwards here.
-        other.block_number().cmp(&self.block_number())
+        self.block_number().cmp(&other.block_number())
     }
 }
 
@@ -476,21 +492,39 @@ struct HeadersResponseError {
 #[derive(Debug)]
 pub struct ConcurrentDownloadBuilder {
     /// The batch size per one request
-    batch_size: u64,
+    request_batch_size: u64,
     /// The number of retries for downloading
     request_retries: usize,
+    /// Batch size for headers
+    stream_batch_size: usize,
+    /// Batch size for headers
+    max_concurrent_requests: usize,
+    /// How many responses to buffer
+    max_buffered_responses: usize,
 }
 
 impl Default for ConcurrentDownloadBuilder {
     fn default() -> Self {
-        Self { batch_size: 1_000, request_retries: 5 }
+        Self {
+            request_batch_size: 1_000,
+            request_retries: 5,
+            stream_batch_size: 10_000,
+            max_concurrent_requests: 100,
+            max_buffered_responses: 500,
+        }
     }
 }
 
 impl ConcurrentDownloadBuilder {
     /// Set the request batch size
-    pub fn batch_size(mut self, size: u64) -> Self {
-        self.batch_size = size;
+    pub fn request_batch_size(mut self, size: u64) -> Self {
+        self.request_batch_size = size;
+        self
+    }
+
+    /// Set the request batch size
+    pub fn stream_batch_size(mut self, size: usize) -> Self {
+        self.stream_batch_size = size;
         self
     }
 
@@ -500,100 +534,176 @@ impl ConcurrentDownloadBuilder {
         self
     }
 
+    /// Set the max amount of concurrent requests.
+    pub fn max_concurrent_requests(mut self, retries: usize) -> Self {
+        self.request_retries = retries;
+        self
+    }
+
+    /// How many responses to buffer internally
+    pub fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
+        self.max_buffered_responses = max_buffered_responses;
+        self
+    }
+
     /// Build [ConcurrentDownloader] with provided consensus
     /// and header client implementations
     pub fn build<C: Consensus, H: HeadersClient>(
         self,
-        _consensus: Arc<C>,
-        _client: Arc<H>,
+        consensus: Arc<C>,
+        client: Arc<H>,
+        local_head: SealedHeader,
+        next_chain_tip_hash: H256,
+        next_chain_tip_block_number: u64,
     ) -> ConcurrentDownloader<C, H> {
-        todo!()
+        let Self {
+            request_batch_size,
+            request_retries,
+            stream_batch_size,
+            max_concurrent_requests,
+            max_buffered_responses,
+        } = self;
+        ConcurrentDownloader {
+            consensus,
+            client,
+            local_head,
+            next_request_block_number: next_chain_tip_block_number,
+            earliest_header: None,
+            next_chain_tip_block_number,
+            next_chain_tip_hash,
+            request_batch_size,
+            request_retries,
+            max_concurrent_requests,
+            stream_batch_size,
+            max_buffered_responses,
+            in_progress_queue: Default::default(),
+            buffered_responses: Default::default(),
+            queued_validated_headers: Default::default(),
+            is_terminated: false,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
-    // static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(||
-    // Arc::new(TestConsensus::default()));
-    //
-    // fn child_header(parent: &SealedHeader) -> SealedHeader {
-    //     let mut child = parent.as_ref().clone();
-    //     child.number += 1;
-    //     child.parent_hash = parent.hash_slow();
-    //     let hash = child.hash_slow();
-    //     SealedHeader::new(child, hash)
-    // }
-    //
-    // #[tokio::test]
-    // async fn stream_empty() {
-    //     let client = Arc::new(TestHeadersClient::default());
-    //     let downloader =
-    //         ConcurrentDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
-    //
-    //     let result = downloader
-    //         .stream(SealedHeader::default(), H256::default())
-    //         .try_collect::<Vec<_>>()
-    //         .await;
-    //     assert!(result.is_err());
-    //     assert_eq!(client.request_attempts(), downloader.request_retries as u64);
-    // }
-    //
-    // #[tokio::test]
-    // async fn download_at_fork_head() {
-    //     let client = Arc::new(TestHeadersClient::default());
-    //     let downloader = ConcurrentDownloadBuilder::default()
-    //         .batch_size(3)
-    //         .build(CONSENSUS.clone(), Arc::clone(&client));
-    //
-    //     let p3 = SealedHeader::default();
-    //     let p2 = child_header(&p3);
-    //     let p1 = child_header(&p2);
-    //     let p0 = child_header(&p1);
-    //
-    //     client
-    //         .extend(vec![
-    //             p0.as_ref().clone(),
-    //             p1.as_ref().clone(),
-    //             p2.as_ref().clone(),
-    //             p3.as_ref().clone(),
-    //         ])
-    //         .await;
-    //
-    //     let result = downloader.stream(p0.clone(), p0.hash_slow()).try_collect::<Vec<_>>().await;
-    //     let headers = result.unwrap();
-    //     assert!(headers.is_empty());
-    //     assert_eq!(client.request_attempts(), 1);
-    // }
-    //
-    // #[tokio::test]
-    // async fn download_exact() {
-    //     let client = Arc::new(TestHeadersClient::default());
-    //     let downloader = ConcurrentDownloadBuilder::default()
-    //         .batch_size(3)
-    //         .build(CONSENSUS.clone(), Arc::clone(&client));
-    //
-    //     let p3 = SealedHeader::default();
-    //     let p2 = child_header(&p3);
-    //     let p1 = child_header(&p2);
-    //     let p0 = child_header(&p1);
-    //
-    //     client
-    //         .extend(vec![
-    //             p0.as_ref().clone(),
-    //             p1.as_ref().clone(),
-    //             p2.as_ref().clone(),
-    //             p3.as_ref().clone(),
-    //         ])
-    //         .await;
-    //
-    //     let result = downloader.stream(p3, p0.hash_slow()).try_collect::<Vec<_>>().await;
-    //     let headers = result.unwrap();
-    //     assert_eq!(headers.len(), 3);
-    //     assert_eq!(headers[0], p0);
-    //     assert_eq!(headers[1], p1);
-    //     assert_eq!(headers[2], p2);
-    //     // stream has to poll twice because of the batch size
-    //     assert_eq!(client.request_attempts(), 2);
-    // }
+    use once_cell::sync::Lazy;
+    use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
+    use reth_primitives::SealedHeader;
+
+    static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
+
+    fn child_header(parent: &SealedHeader) -> SealedHeader {
+        let mut child = parent.as_ref().clone();
+        child.number += 1;
+        child.parent_hash = parent.hash_slow();
+        let hash = child.hash_slow();
+        SealedHeader::new(child, hash)
+    }
+
+    #[test]
+    fn test_resp_order() {
+        let mut heap = BinaryHeap::new();
+        let lo = 0u64;
+        heap.push(OrderedHeadersResponse {
+            headers: vec![],
+            request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
+            retries: 0,
+            peer_id: Default::default(),
+        });
+
+        let hi = 1u64;
+        heap.push(OrderedHeadersResponse {
+            headers: vec![],
+            request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
+            retries: 0,
+            peer_id: Default::default(),
+        });
+
+        assert_eq!(heap.pop().unwrap().block_number(), hi);
+        assert_eq!(heap.pop().unwrap().block_number(), lo);
+    }
+
+    #[tokio::test]
+    async fn stream_empty() {
+        let local = SealedHeader::default();
+
+        let client = Arc::new(TestHeadersClient::default());
+        let mut downloader = ConcurrentDownloadBuilder::default().build(
+            CONSENSUS.clone(),
+            Arc::clone(&client),
+            local,
+            H256::random(),
+            100,
+        );
+
+        let result = downloader.next().await.unwrap();
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn download_at_fork_head() {
+        reth_tracing::init_test_tracing();
+
+        let client = Arc::new(TestHeadersClient::default());
+
+        let p3 = SealedHeader::default();
+        let p2 = child_header(&p3);
+        let p1 = child_header(&p2);
+        let p0 = child_header(&p1);
+
+        let mut downloader = ConcurrentDownloadBuilder::default()
+            .stream_batch_size(3)
+            .request_batch_size(3)
+            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash(), p0.number);
+
+        client
+            .extend(vec![
+                p0.as_ref().clone(),
+                p1.as_ref().clone(),
+                p2.as_ref().clone(),
+                p3.as_ref().clone(),
+            ])
+            .await;
+
+        let headers = downloader.next().await.unwrap().unwrap();
+        assert_eq!(headers, vec![p0, p1, p2,]);
+        assert!(downloader.buffered_responses.is_empty());
+        assert!(downloader.next().await.is_none());
+        assert!(downloader.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn download_one_by_one() {
+        reth_tracing::init_test_tracing();
+        let p3 = SealedHeader::default();
+        let p2 = child_header(&p3);
+        let p1 = child_header(&p2);
+        let p0 = child_header(&p1);
+
+        let client = Arc::new(TestHeadersClient::default());
+        let mut downloader = ConcurrentDownloadBuilder::default()
+            .stream_batch_size(1)
+            .request_batch_size(1)
+            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash(), p0.number);
+
+        client
+            .extend(vec![
+                p0.as_ref().clone(),
+                p1.as_ref().clone(),
+                p2.as_ref().clone(),
+                p3.as_ref().clone(),
+            ])
+            .await;
+
+        let headers = downloader.next().await.unwrap().unwrap();
+        assert_eq!(headers, vec![p0]);
+
+        let headers = downloader.next().await.unwrap().unwrap();
+        assert_eq!(headers, vec![p1]);
+        let headers = downloader.next().await.unwrap().unwrap();
+        assert_eq!(headers, vec![p2]);
+        assert!(downloader.next().await.is_none());
+    }
 }
