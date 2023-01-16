@@ -2,12 +2,15 @@
 
 use clap::Parser;
 use eyre::eyre;
+use futures::{stream::FuturesUnordered, StreamExt};
 use std::path::PathBuf;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 /// Models for parsing JSON blockchain tests
 pub mod models;
 /// Ethereum blockhain test runner
 pub mod runner;
+
+use runner::TestOutcome;
 
 /// Execute Ethereum blockchain tests by specifying path to json files
 #[derive(Debug, Parser)]
@@ -19,34 +22,37 @@ pub struct Command {
 impl Command {
     /// Execute the command
     pub async fn execute(self) -> eyre::Result<()> {
-        // note the use of `into_iter()` to consume `items`
-        let futs: Vec<_> = self
+        let mut futs: FuturesUnordered<_> = self
             .path
             .iter()
             .flat_map(|item| reth_cli_utils::find_all_files_with_postfix(item, ".json"))
             .map(|file| async { (runner::run_test(file.clone()).await, file) })
             .collect();
 
-        let results = futures::future::join_all(futs).await;
-        // await the tasks for resolve's to complete and give back our test results
-        let mut num_of_failed = 0;
-        let mut num_of_passed = 0;
-        for (result, file) in results {
-            match result {
-                Ok(_) => {
-                    num_of_passed += 1;
+        let mut failed = 0;
+        let mut passed = 0;
+        let mut skipped = 0;
+        while let Some((result, file)) = futs.next().await {
+            match TestOutcome::from(result) {
+                TestOutcome::Passed => {
+                    info!(target: "reth::cli", "[+] Test {file:?} passed.");
+                    passed += 1;
                 }
-                Err(error) => {
-                    num_of_failed += 1;
+                TestOutcome::Skipped => {
+                    warn!(target: "reth::cli", "[=] Test {file:?} skipped.");
+                    skipped += 1;
+                }
+                TestOutcome::Failed(error) => {
                     error!(target: "reth::cli", "Test {file:?} failed:\n{error}");
+                    failed += 1;
                 }
             }
         }
 
-        info!(target: "reth::cli", "{num_of_passed}/{} tests passed\n", num_of_passed + num_of_failed);
+        info!(target: "reth::cli", "{passed}/{0} tests passed, {skipped}/{0} skipped, {failed}/{0} failed.\n", failed + passed + skipped);
 
-        if num_of_failed != 0 {
-            Err(eyre!("Failed {num_of_failed} tests"))
+        if failed != 0 {
+            Err(eyre!("Failed {failed} tests"))
         } else {
             Ok(())
         }

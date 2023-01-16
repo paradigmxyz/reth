@@ -173,7 +173,7 @@ where
         HeadersRequest {
             start: self.request_start().into(),
             limit: self.batch_size,
-            direction: HeadersDirection::Rising,
+            direction: HeadersDirection::Falling,
         }
     }
 

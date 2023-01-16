@@ -140,8 +140,8 @@ mod test {
     };
     use hex_literal::hex;
     use reth_primitives::{
-        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned,
-        TxLegacy, U256,
+        BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
+        TransactionSigned, TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
@@ -213,7 +213,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         }
         .encode(&mut data);
@@ -234,7 +234,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -252,7 +252,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         }
         .encode(&mut data);
@@ -269,7 +269,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         };
         let result = RequestPair::decode(&mut &data[..]);

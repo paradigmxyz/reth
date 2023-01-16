@@ -5,35 +5,35 @@ use reth_primitives::{
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
 
-/// Blockchain test deserializer.
+/// An Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 pub struct Test(pub BTreeMap<String, BlockchainTestData>);
 
-/// Ethereum blockchain test data
+/// Ethereum test data.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockchainTestData {
     /// Genesis block header.
     pub genesis_block_header: Header,
-    /// Genesis rlp.
+    /// RLP encoded genesis block.
     #[serde(rename = "genesisRLP")]
     pub genesis_rlp: Option<Bytes>,
-    /// Blocks.
+    /// Block data.
     pub blocks: Vec<Block>,
-    /// Post state.
+    /// The expected post state.
     pub post_state: Option<RootOrState>,
-    /// Pre state.
+    /// The test pre-state.
     pub pre: State,
-    /// Hash of best block.
+    /// Hash of the best block.
     pub lastblockhash: H256,
-    /// Network.
+    /// Network spec.
     pub network: ForkSpec,
     #[serde(default)]
-    /// Engine
+    /// Engine spec.
     pub self_engine: SealEngine,
 }
 
-/// Ethereum blockchain test data Header.
+/// A block header in an Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
@@ -99,14 +99,14 @@ impl From<Header> for SealedHeader {
     }
 }
 
-/// Ethereum blockchain test data Block.
+/// A block in an Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Block header.
     pub block_header: Option<Header>,
-    /// Rlp block bytes
+    /// RLP encoded block bytes
     pub rlp: Bytes,
     /// Transactions
     pub transactions: Option<Vec<Transaction>>,
@@ -126,11 +126,7 @@ pub struct TransactionSequence {
     valid: String,
 }
 
-/// Ethereum blockchain test data State.
-//#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-//#[serde(deny_unknown_fields)]
-//pub struct State(pub RootOrState);
-
+/// Ethereum blockchain test data state.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 pub struct State(pub BTreeMap<Address, Account>);
 
@@ -144,7 +140,7 @@ pub enum RootOrState {
     State(BTreeMap<Address, Account>),
 }
 
-/// Spec account
+/// An account.
 #[derive(Debug, PartialEq, Eq, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Account {
@@ -158,7 +154,7 @@ pub struct Account {
     pub storage: BTreeMap<JsonU256, JsonU256>,
 }
 
-/// Fork Spec
+/// Fork specification.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
@@ -248,7 +244,7 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
     }
 }
 
-/// Json Block test possible engine kind.
+/// Possible seal engines.
 #[derive(Debug, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SealEngine {

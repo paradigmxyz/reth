@@ -55,8 +55,9 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           flags: unit-tests
+
   eth-blockchain:
-    name: Ethereum blockchain Tests (Stable)
+    name: ethereum blockchain tests (stable)
     runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error 

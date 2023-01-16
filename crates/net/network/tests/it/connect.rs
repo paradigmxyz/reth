@@ -14,7 +14,7 @@ use reth_interfaces::{
 };
 use reth_net_common::ban_list::BanList;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
@@ -308,7 +308,7 @@ async fn test_connect_to_trusted_peer() {
         .get_headers(HeadersRequest {
             start: 73174u64.into(),
             limit: 10,
-            direction: HeadersDirection::Rising,
+            direction: HeadersDirection::Falling,
         })
         .await;
 

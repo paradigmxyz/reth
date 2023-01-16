@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 /// Ethereum mainnet hardforks
 #[allow(missing_docs)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub enum Hardfork {
     Frontier,
     Homestead,

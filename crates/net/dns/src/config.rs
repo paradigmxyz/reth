@@ -1,4 +1,5 @@
-use std::{num::NonZeroUsize, time::Duration};
+use crate::tree::LinkEntry;
+use std::{collections::HashSet, num::NonZeroUsize, time::Duration};
 
 /// Settings for the [DnsDiscoveryClient](crate::DnsDiscoveryClient).
 #[derive(Debug, Clone)]
@@ -17,6 +18,8 @@ pub struct DnsDiscoveryConfig {
     pub recheck_interval: Duration,
     /// Maximum number of cached DNS records.
     pub dns_record_cache_limit: NonZeroUsize,
+    /// Links to the DNS networks to bootstrap.
+    pub bootstrap_dns_networks: Option<HashSet<LinkEntry>>,
 }
 
 impl Default for DnsDiscoveryConfig {
@@ -26,6 +29,7 @@ impl Default for DnsDiscoveryConfig {
             max_requests_per_sec: NonZeroUsize::new(3).unwrap(),
             recheck_interval: Duration::from_secs(60 * 30),
             dns_record_cache_limit: NonZeroUsize::new(1_000).unwrap(),
+            bootstrap_dns_networks: Some(Default::default()),
         }
     }
 }

@@ -289,7 +289,7 @@ mod tests {
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific
     /// messages and we check the actual service receives answers
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn can_mock_discovery() {
         reth_tracing::init_test_tracing();
 
