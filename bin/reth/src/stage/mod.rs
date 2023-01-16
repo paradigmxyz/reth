@@ -20,10 +20,8 @@ use reth_stages::{
     ExecInput, Stage, StageId, Transaction, UnwindInput,
 };
 
-use clap::Parser;
-use serde::Deserialize;
+use clap::{Parser, ValueEnum};
 use std::{net::SocketAddr, sync::Arc};
-use strum::{AsRefStr, EnumString, EnumVariantNames};
 use tracing::*;
 
 /// `reth stage` command
@@ -67,6 +65,7 @@ pub struct Command {
     metrics: Option<SocketAddr>,
 
     /// The name of the stage to run
+    #[arg(value_enum)]
     stage: StageEnum,
 
     /// The height to start at
@@ -89,11 +88,7 @@ pub struct Command {
     network: NetworkOpts,
 }
 
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, AsRefStr, EnumVariantNames, EnumString, Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
 enum StageEnum {
     Headers,
     Bodies,

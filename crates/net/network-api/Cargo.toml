@@ -8,3 +8,4 @@ readme = "README.md"
 description = "Network interfaces"
 
 [dependencies]
+reth-primitives = { path = "../../primitives" }

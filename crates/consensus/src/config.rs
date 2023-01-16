@@ -84,6 +84,7 @@ impl From<&Config> for ExecutorConfig {
             spec_upgrades: SpecUpgrades {
                 frontier: 0,
                 homestead: value.homestead_block,
+                dao_fork: value.dao_fork_block,
                 tangerine_whistle: value.eip_150_block,
                 spurious_dragon: value.eip_158_block,
                 byzantium: value.byzantium_block,

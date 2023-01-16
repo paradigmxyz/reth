@@ -281,17 +281,21 @@ impl SealedHeader {
 }
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
+/// > The response must contain a number of block headers, of rising number when reverse is 0,
+/// > falling when 1
 ///
-/// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-/// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+/// Ref: <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+///
+/// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
+/// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.
-    #[default]
     Falling,
     /// Rising block number.
+    #[default]
     Rising,
 }
 
@@ -310,13 +314,13 @@ impl HeadersDirection {
     ///
     /// Returns:
     ///
-    /// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-    /// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+    /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
+    /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
     pub fn new(reverse: bool) -> Self {
         if reverse {
-            HeadersDirection::Rising
-        } else {
             HeadersDirection::Falling
+        } else {
+            HeadersDirection::Rising
         }
     }
 }
@@ -347,8 +351,8 @@ impl From<bool> for HeadersDirection {
 impl From<HeadersDirection> for bool {
     fn from(value: HeadersDirection) -> Self {
         match value {
-            HeadersDirection::Rising => true,
-            HeadersDirection::Falling => false,
+            HeadersDirection::Rising => false,
+            HeadersDirection::Falling => true,
         }
     }
 }
@@ -356,9 +360,8 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::{Bytes, Decodable, Encodable, Header, H256};
-    use crate::{Address, U256};
+    use crate::{Address, HeadersDirection, U256};
     use ethers_core::utils::hex::{self, FromHex};
-
     use std::str::FromStr;
 
     #[test]
@@ -430,5 +433,26 @@ mod tests {
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
         assert_eq!(header, expected);
+    }
+
+    #[test]
+    fn sanity_direction() {
+        let reverse = true;
+        assert_eq!(HeadersDirection::Falling, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Falling));
+
+        let reverse = false;
+        assert_eq!(HeadersDirection::Rising, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Rising));
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Falling;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Rising;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
     }
 }

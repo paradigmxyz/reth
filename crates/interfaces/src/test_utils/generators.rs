@@ -109,12 +109,12 @@ pub fn random_block(
     let mut rng = thread_rng();
 
     // Generate transactions
-    let tx_count = tx_count.unwrap_or(rng.gen::<u8>());
+    let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
     let transactions: Vec<TransactionSigned> = (0..tx_count).map(|_| random_signed_tx()).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
-    let ommers_count = ommers_count.unwrap_or(rng.gen_range(0..2));
+    let ommers_count = ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
     let ommers =
         (0..ommers_count).map(|_| random_header(number, parent).unseal()).collect::<Vec<_>>();
 
