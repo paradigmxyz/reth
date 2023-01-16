@@ -8,6 +8,7 @@ use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
     TransactionSigned, TxEip2930, H256, U256,
@@ -34,7 +35,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
-    reth_tracing::init_tracing();
+    reth_tracing::init_test_tracing();
     let mut rng = rand::thread_rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 
@@ -77,7 +78,7 @@ async fn test_get_body() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_header() {
-    reth_tracing::init_tracing();
+    reth_tracing::init_test_tracing();
     let mut rng = rand::thread_rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 
@@ -110,7 +111,7 @@ async fn test_get_header() {
         mock_provider.add_header(hash, header.clone());
 
         let req =
-            HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Rising };
+            HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Falling };
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok());

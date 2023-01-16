@@ -566,7 +566,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_syncing() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
 
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 

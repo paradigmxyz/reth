@@ -1,10 +1,12 @@
 use crate::U256;
 use ethers_core::types::U64;
+use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
 /// Either a named or chain id or the actual id value
+#[add_arbitrary_tests(rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Chain {
     /// Contains a known chain
@@ -14,6 +16,21 @@ pub enum Chain {
 }
 
 impl Chain {
+    /// Returns the mainnet chain.
+    pub const fn mainnet() -> Self {
+        Chain::Named(ethers_core::types::Chain::Mainnet)
+    }
+
+    /// Returns the goerli chain.
+    pub const fn goerli() -> Self {
+        Chain::Named(ethers_core::types::Chain::Goerli)
+    }
+
+    /// Returns the sepolia chain.
+    pub const fn sepolia() -> Self {
+        Chain::Named(ethers_core::types::Chain::Sepolia)
+    }
+
     /// The id of the chain
     pub fn id(&self) -> u64 {
         match self {
@@ -29,6 +46,21 @@ impl Chain {
             Chain::Named(c) => c.is_legacy(),
             Chain::Id(_) => false,
         }
+    }
+
+    /// Returns the address of the public DNS node list for the given chain.
+    ///
+    /// See also <https://github.com/ethereum/discv4-dns-lists>
+    pub fn public_dns_network_protocol(self) -> Option<String> {
+        use ethers_core::types::Chain::*;
+        const DNS_PREFIX: &str = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@";
+
+        let named: ethers_core::types::Chain = self.try_into().ok()?;
+
+        if matches!(named, Mainnet | Goerli | Sepolia | Ropsten | Rinkeby) {
+            return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
+        }
+        None
     }
 }
 
@@ -135,6 +167,43 @@ impl Decodable for Chain {
 impl Default for Chain {
     fn default() -> Self {
         ethers_core::types::Chain::Mainnet.into()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Chain {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        if u.ratio(1, 2)? {
+            let chain = u.int_in_range(0..=(ethers_core::types::Chain::COUNT - 1))?;
+
+            return Ok(Chain::Named(ethers_core::types::Chain::iter().nth(chain).expect("in range")))
+        }
+
+        Ok(Self::Id(u64::arbitrary(u)?))
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+use strum::{EnumCount, IntoEnumIterator};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    arbitrary::ParamsFor,
+    prelude::{any, Strategy},
+    sample::Selector,
+    strategy::BoxedStrategy,
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Chain {
+    type Parameters = ParamsFor<u32>;
+    type Strategy = BoxedStrategy<Chain>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        let named = any::<Selector>()
+            .prop_map(move |sel| Chain::Named(sel.select(ethers_core::types::Chain::iter())));
+        let id = any::<u64>().prop_map(Chain::from);
+        proptest::strategy::Union::new_weighted(vec![(50, named.boxed()), (50, id.boxed())]).boxed()
     }
 }
 
@@ -250,5 +319,12 @@ mod tests {
         let chain = Chain::Id(1234);
 
         assert_eq!(chain.length(), 3);
+    }
+
+    #[test]
+    fn test_dns_network() {
+        let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
+        let chain: Chain = ethers_core::types::Chain::Mainnet.into();
+        assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 }

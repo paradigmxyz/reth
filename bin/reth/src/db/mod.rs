@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::dirs::DbPath;
+use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -24,7 +24,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: DbPath,
+    db: PlatformPath<DbPath>,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -45,6 +45,8 @@ pub enum Subcommands {
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
         len: u64,
     },
+    /// Deletes all database entries
+    Drop,
 }
 
 #[derive(Parser, Debug)]
@@ -96,6 +98,7 @@ impl Command {
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
                         info!(
+                            target: "reth::cli",
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -110,6 +113,9 @@ impl Command {
             }
             Subcommands::List(args) => {
                 tool.list(args)?;
+            }
+            Subcommands::Drop => {
+                tool.drop(&self.db)?;
             }
         }
 
@@ -130,7 +136,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        info!("Generating random block range from 0 to {len}");
+        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
         let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
@@ -140,20 +146,20 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database seeded with {len} blocks");
+        info!(target: "reth::cli", "Database seeded with {len} blocks");
         Ok(())
     }
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
         macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr  => [$($table:ident),*]) => {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident,)*]) => {
                 match $arg {
                     $(stringify!($table) => {
                         self.list_table::<tables::$table>($start, $len)?
                     },)*
                     _ => {
-                        tracing::error!("Unknown table.");
+                        tracing::error!(target: "reth::cli", "Unknown table.");
                         return Ok(())
                     }
                 }
@@ -172,7 +178,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             BlockTransitionIndex,
             TxTransitionIndex,
             SyncStage,
-            Transactions
+            Transactions,
         ]);
 
         Ok(())
@@ -180,20 +186,22 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
         let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
+            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
             // TODO: Upstream this in the DB trait.
             let start_walker = cursor.current().transpose();
-            let walker = Walker {
-                cursor: &mut cursor,
-                start: start_walker,
-                _tx_phantom: std::marker::PhantomData,
-            };
+            let walker = Walker::new(&mut cursor, start_walker);
 
             walker.skip(start).take(len).collect::<Vec<_>>()
         })?;
 
         println!("{data:?}");
+        Ok(())
+    }
+
+    fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
+        info!(target: "reth::cli", "Dropping db at {}", path);
+        std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }
 }

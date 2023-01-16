@@ -9,10 +9,11 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
+use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -108,16 +109,16 @@ where
         let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..]) {
             Ok(P2PMessage::Hello(hello)) => Ok(hello),
             Ok(P2PMessage::Disconnect(reason)) => {
-                tracing::error!("Disconnected by peer during handshake: {}", reason);
+                tracing::debug!("Disconnected by peer during handshake: {}", reason);
                 counter!("p2pstream.disconnected_errors", 1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
-                tracing::warn!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                tracing::debug!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
                 Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {
-                tracing::error!("expected hello message but received: {:?}", msg);
+                tracing::debug!("expected hello message but received: {:?}", msg);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
             }
         }?;
@@ -348,7 +349,7 @@ where
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
-                        tracing::warn!(
+                        tracing::debug!(
                             ?err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
                         );
                         err
@@ -493,13 +494,14 @@ where
 /// capabilities and the input list of locally supported capabilities.
 ///
 /// Currently only `eth` versions 66 and 67 are supported.
+/// Additionally, the `p2p` capability version 5 is supported, but is
+/// expected _not_ to be in neither `local_capabilities` or `peer_capabilities`.
 pub fn set_capability_offsets(
     local_capabilities: Vec<Capability>,
     peer_capabilities: Vec<Capability>,
 ) -> Result<SharedCapability, P2PStreamError> {
     // find intersection of capabilities
-    let our_capabilities_map =
-        local_capabilities.into_iter().map(|c| (c.name, c.version)).collect::<HashMap<_, _>>();
+    let our_capabilities = local_capabilities.into_iter().collect::<HashSet<_>>();
 
     // map of capability name to version
     let mut shared_capabilities = HashMap::new();
@@ -519,14 +521,18 @@ pub fn set_capability_offsets(
     let mut shared_capability_names = BTreeSet::new();
 
     // find highest shared version of each shared capability
-    for capability in peer_capabilities {
+    for peer_capability in peer_capabilities {
         // if this is Some, we share this capability
-        if let Some(version) = our_capabilities_map.get(&capability.name) {
+        if our_capabilities.contains(&peer_capability) {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
-            if capability.version <= *version {
-                shared_capabilities.insert(capability.name.clone(), capability.version);
-                shared_capability_names.insert(capability.name);
+
+            let version = shared_capabilities.get(&peer_capability.name);
+            if version.is_none() ||
+                (version.is_some() && peer_capability.version > *version.expect("is some; qed"))
+            {
+                shared_capabilities.insert(peer_capability.name.clone(), peer_capability.version);
+                shared_capability_names.insert(peer_capability.name);
             }
         }
     }
@@ -554,13 +560,13 @@ pub fn set_capability_offsets(
         match shared_capability {
             SharedCapability::UnknownCapability { .. } => {
                 // Capabilities which are not shared are ignored
-                tracing::warn!("unknown capability: name={:?}, version={}", name, version,);
+                tracing::debug!("unknown capability: name={:?}, version={}", name, version,);
             }
             SharedCapability::Eth { .. } => {
-                shared_with_offsets.push(shared_capability.clone());
-
                 // increment the offset if the capability is known
                 offset += shared_capability.num_messages()?;
+
+                shared_with_offsets.push(shared_capability);
             }
         }
     }
@@ -579,6 +585,7 @@ pub fn set_capability_offsets(
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
+#[derive_arbitrary(rlp)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
@@ -710,11 +717,13 @@ impl TryFrom<u8> for P2PMessageID {
 }
 
 /// RLPx `p2p` protocol version
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive_arbitrary(rlp)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,
     /// `p2p` version 5
+    #[default]
     V5 = 5,
 }
 
@@ -736,12 +745,6 @@ impl Decodable for ProtocolVersion {
             5 => Ok(ProtocolVersion::V5),
             _ => Err(DecodeError::Custom("unknown p2p protocol version")),
         }
-    }
-}
-
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        ProtocolVersion::V5
     }
 }
 
@@ -769,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_can_disconnect() {
-        reth_tracing::init_tracing();
+        reth_tracing::init_test_tracing();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
@@ -849,6 +852,50 @@ mod tests {
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();
+    }
+
+    #[test]
+    fn test_peer_lower_capability_version() {
+        let local_capabilities: Vec<Capability> =
+            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
+
+        let shared_capability =
+            set_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+
+        assert_eq!(
+            shared_capability,
+            SharedCapability::Eth {
+                version: EthVersion::Eth66,
+                offset: MAX_RESERVED_MESSAGE_ID + 1
+            }
+        )
+    }
+
+    #[test]
+    fn test_peer_capability_version_too_low() {
+        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth67.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
+
+        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities);
+
+        assert!(matches!(
+            shared_capability,
+            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+        ))
+    }
+
+    #[test]
+    fn test_peer_capability_version_too_high() {
+        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth67.into()];
+
+        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities);
+
+        assert!(matches!(
+            shared_capability,
+            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+        ))
     }
 
     #[test]

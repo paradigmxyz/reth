@@ -1,4 +1,5 @@
 use crate::{capability::Capability, EthVersion, ProtocolVersion};
+use reth_codecs::derive_arbitrary;
 use reth_primitives::PeerId;
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,7 @@ pub(crate) const DEFAULT_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PK
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.

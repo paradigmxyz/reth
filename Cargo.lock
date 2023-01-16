@@ -243,9 +243,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
 name = "base64ct"
@@ -1103,7 +1103,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru",
+ "lru 0.7.8",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/gakonst/ethers-rs#2eb56e69b777b093ae8c2937d7b3c764f1347280"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1406,11 +1406,11 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#799f752e55e80aa8d6357321d4f5f7ebf66daa8a"
+source = "git+https://github.com/gakonst/ethers-rs#2eb56e69b777b093ae8c2937d7b3c764f1347280"
 dependencies = [
  "async-trait",
  "auto_impl",
- "base64 0.20.0",
+ "base64 0.21.0",
  "enr 0.7.0",
  "ethers-core",
  "futures-core",
@@ -1973,6 +1973,22 @@ name = "httpdate"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
+
+[[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
+]
 
 [[package]]
 name = "hyper"
@@ -2538,6 +2554,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
 dependencies = [
  "hashbrown 0.12.3",
+]
+
+[[package]]
+name = "lru"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e7d46de488603ffdd5f30afbc64fbba2378214a2c3a2fb83abf3d33126df17"
+dependencies = [
+ "hashbrown 0.13.1",
 ]
 
 [[package]]
@@ -3582,21 +3607,21 @@ dependencies = [
  "reth-executor",
  "reth-interfaces",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
  "reth-stages",
+ "reth-tracing",
  "reth-transaction-pool",
  "serde",
  "serde_json",
  "shellexpand",
- "strum",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
- "tracing-futures",
- "tracing-subscriber",
  "walkdir",
 ]
 
@@ -3612,7 +3637,6 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tracing",
- "tracing-subscriber",
  "walkdir",
 ]
 
@@ -3620,9 +3644,12 @@ dependencies = [
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "bytes",
  "codecs-derive",
  "modular-bitfield",
+ "proptest",
+ "proptest-derive",
  "revm-interpreter",
  "serde",
  "test-fuzz",
@@ -3668,6 +3695,8 @@ dependencies = [
  "page_size",
  "parity-scale-codec",
  "postcard",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
  "reth-db",
@@ -3714,7 +3743,13 @@ dependencies = [
  "bytes",
  "data-encoding",
  "enr 0.7.0",
+ "linked_hash_set",
+ "lru 0.9.0",
+ "parking_lot 0.12.1",
+ "reth-net-common",
  "reth-primitives",
+ "reth-rlp",
+ "reth-tracing",
  "secp256k1 0.24.2",
  "thiserror",
  "tokio",
@@ -3777,6 +3812,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "bytes",
  "ethers-core",
  "futures",
@@ -3784,7 +3820,10 @@ dependencies = [
  "hex-literal",
  "metrics",
  "pin-project",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
+ "reth-codecs",
  "reth-ecies",
  "reth-primitives",
  "reth-rlp",
@@ -3927,6 +3966,7 @@ dependencies = [
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -3945,6 +3985,7 @@ dependencies = [
  "fnv",
  "futures",
  "hex",
+ "humantime-serde",
  "linked-hash-map",
  "linked_hash_set",
  "metrics",
@@ -3952,11 +3993,13 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-discv4",
+ "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-net-common",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -3975,12 +4018,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network-api"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-primitives"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
  "bytes",
  "crc",
+ "criterion",
  "derive_more",
  "ethers-core",
  "fixed-hash",
@@ -3992,6 +4043,7 @@ dependencies = [
  "parity-scale-codec",
  "plain_hasher",
  "proptest",
+ "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
  "reth-rlp",
@@ -4001,6 +4053,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
  "sucds",
  "test-fuzz",
  "thiserror",
@@ -4078,6 +4131,7 @@ dependencies = [
  "reth-consensus",
  "reth-interfaces",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-api",
@@ -4105,6 +4159,7 @@ version = "0.1.0"
 dependencies = [
  "jsonrpsee",
  "reth-ipc",
+ "reth-network-api",
  "reth-provider",
  "reth-rpc",
  "reth-transaction-pool",
@@ -4166,6 +4221,8 @@ name = "reth-tracing"
 version = "0.1.0"
 dependencies = [
  "tracing",
+ "tracing-appender",
+ "tracing-journald",
  "tracing-subscriber",
 ]
 
@@ -5319,6 +5376,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-appender"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09d48f71a791638519505cefafe162606f706c25592e4bde4d97600c0195312e"
+dependencies = [
+ "crossbeam-channel",
+ "time",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-attributes"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5349,6 +5417,17 @@ dependencies = [
  "futures-task",
  "pin-project",
  "tracing",
+]
+
+[[package]]
+name = "tracing-journald"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba316a74e8fc3c3896a850dba2375928a9fa171b085ecddfc7c054d39970f3fd"
+dependencies = [
+ "libc",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]

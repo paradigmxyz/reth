@@ -43,8 +43,8 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
 
         // Acquire cursor over total difficulty and headers tables
-        let mut cursor_td = tx.cursor_mut::<tables::HeaderTD>()?;
-        let mut cursor_headers = tx.cursor_mut::<tables::Headers>()?;
+        let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
+        let mut cursor_headers = tx.cursor_write::<tables::Headers>()?;
 
         // Get latest total difficulty
         let last_header_key = tx.get_block_numhash(input.stage_progress.unwrap_or_default())?;
@@ -92,14 +92,60 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
     stage_test_suite_ext!(TotalDifficultyTestRunner);
 
-    #[derive(Default)]
+    #[tokio::test]
+    async fn execute_with_intermediate_commit() {
+        let threshold = 50;
+        let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
+
+        let mut runner = TotalDifficultyTestRunner::default();
+        runner.set_threshold(threshold);
+
+        let first_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        // Seed only once with full input range
+        runner.seed_execution(first_input).expect("failed to seed execution");
+
+        // Execute first time
+        let result = runner.execute(first_input).await.unwrap();
+        let expected_progress = stage_progress + threshold;
+        assert!(matches!(
+            result,
+            Ok(ExecOutput { done: false, stage_progress })
+                if stage_progress == expected_progress
+        ));
+
+        // Execute second time
+        let second_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(expected_progress),
+        };
+        let result = runner.execute(second_input).await.unwrap();
+        assert!(matches!(
+            result,
+            Ok(ExecOutput { done: true, stage_progress })
+                if stage_progress == previous_stage
+        ));
+
+        assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
+    }
+
     struct TotalDifficultyTestRunner {
         tx: TestTransaction,
+        commit_threshold: u64,
+    }
+
+    impl Default for TotalDifficultyTestRunner {
+        fn default() -> Self {
+            Self { tx: Default::default(), commit_threshold: 500 }
+        }
     }
 
     impl StageTestRunner for TotalDifficultyTestRunner {
@@ -110,7 +156,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TotalDifficultyStage { commit_threshold: 500 }
+            TotalDifficultyStage { commit_threshold: self.commit_threshold }
         }
     }
 
@@ -124,7 +170,7 @@ mod tests {
             self.tx.insert_headers(std::iter::once(&head))?;
             self.tx.commit(|tx| {
                 let td: U256 = tx
-                    .cursor::<tables::HeaderTD>()?
+                    .cursor_read::<tables::HeaderTD>()?
                     .last()?
                     .map(|(_, v)| v)
                     .unwrap_or_default()
@@ -159,7 +205,7 @@ mod tests {
                             .get::<tables::CanonicalHeaders>(initial_stage_progress)?
                             .expect("no initial header hash");
                         let start_key = (initial_stage_progress, start_hash).into();
-                        let mut header_cursor = tx.cursor::<tables::Headers>()?;
+                        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
                         let (_, mut current_header) =
                             header_cursor.seek_exact(start_key)?.expect("no initial header");
                         let mut td: U256 =
@@ -193,6 +239,10 @@ mod tests {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             self.tx.check_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
             Ok(())
+        }
+
+        fn set_threshold(&mut self, new_threshold: u64) {
+            self.commit_threshold = new_threshold;
         }
     }
 }

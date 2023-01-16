@@ -1,6 +1,7 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 use super::RawBlockBody;
+use reth_codecs::derive_arbitrary;
 use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
+#[derive_arbitrary(rlp)]
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
@@ -35,6 +37,7 @@ pub struct GetBlockHeaders {
 }
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,
@@ -58,6 +61,7 @@ impl From<Vec<Header>> for BlockHeaders {
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,
@@ -82,6 +86,7 @@ impl From<Vec<H256>> for GetBlockBodies {
 
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
 )]
@@ -105,6 +110,7 @@ impl BlockBody {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
+#[derive_arbitrary(rlp, 1)]
 #[derive(
     Clone,
     Debug,
@@ -134,8 +140,8 @@ mod test {
     };
     use hex_literal::hex;
     use reth_primitives::{
-        BlockHashOrNumber, Header, Signature, Transaction, TransactionKind, TransactionSigned,
-        TxLegacy, U256,
+        BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
+        TransactionSigned, TxLegacy, U256,
     };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
@@ -207,7 +213,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         }
         .encode(&mut data);
@@ -228,7 +234,7 @@ mod test {
                 ),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -246,7 +252,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         }
         .encode(&mut data);
@@ -263,7 +269,7 @@ mod test {
                 start_block: BlockHashOrNumber::Number(9999),
                 limit: 5,
                 skip: 5,
-                direction: Default::default(),
+                direction: HeadersDirection::Rising,
             },
         };
         let result = RequestPair::decode(&mut &data[..]);
