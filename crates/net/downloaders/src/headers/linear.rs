@@ -272,6 +272,7 @@ where
             if next_response.block_number() == self.next_request_block_number {
                 let OrderedHeadersResponse { headers, request, peer_id } =
                     PeekMut::pop(next_response);
+
                 if let Err(err) = self.process_next_headers(request, headers, peer_id) {
                     return Some(err)
                 }
@@ -305,13 +306,21 @@ where
         self.clear();
     }
 
-    /// Splits off the next batch
-    ///
-    /// # Panics
-    ///
-    /// if `len(queued_validated_headers) < stream_batch_size`
+    /// Splits off the next batch of headers
     fn split_next_batch(&mut self) -> Vec<SealedHeader> {
-        let mut rem = self.queued_validated_headers.split_off(self.stream_batch_size);
+        // ensure we're only yielding headers that are in range and follow the current local head.
+        while self
+            .queued_validated_headers
+            .last()
+            .map(|last| last.number <= self.local_head.number)
+            .unwrap_or_default()
+        {
+            // headers are sorted high to low
+            self.queued_validated_headers.pop();
+        }
+
+        let batch_size = self.stream_batch_size.min(self.queued_validated_headers.len());
+        let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
         rem
     }
@@ -339,8 +348,12 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    fn set_batch_size(&self, batch_size: usize) {
-        // self.stream_batch_size = batch_size;
+    fn update_local_head(&mut self, head: SealedHeader) {
+        self.local_head = head;
+    }
+
+    fn set_batch_size(&mut self, batch_size: usize) {
+        self.stream_batch_size = batch_size;
     }
 }
 
@@ -407,12 +420,8 @@ where
                 return Poll::Ready(None)
             }
 
-            if this.queued_validated_headers.len() > this.stream_batch_size {
-                let next_batch = this.split_next_batch();
-                return Poll::Ready(Some(next_batch))
-            }
-            // return the last validated headers
-            return Poll::Ready(Some(std::mem::take(&mut this.queued_validated_headers)))
+            let next_batch = this.split_next_batch();
+            return Poll::Ready(Some(next_batch))
         }
 
         Poll::Pending

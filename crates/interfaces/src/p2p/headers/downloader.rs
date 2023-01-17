@@ -15,8 +15,12 @@ use reth_primitives::SealedHeader;
 ///
 /// A [HeaderDownloader] is a [Stream] that returns batches for headers.
 pub trait HeaderDownloader: Downloader + Stream<Item = Vec<SealedHeader>> {
+
+    /// Updates the block number of the local database
+    fn update_local_head(&mut self, head: SealedHeader);
+
     /// Sets the headers batch size that the Stream should return.
-    fn set_batch_size(&self, _limit: usize) {}
+    fn set_batch_size(&mut self, _limit: usize);
 
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {

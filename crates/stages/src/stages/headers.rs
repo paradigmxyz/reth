@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -12,12 +12,9 @@ use reth_db::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::{
-        error::DownloadError,
-        headers::{
-            client::{HeadersClient, StatusUpdater},
-            downloader::{ensure_parent, HeaderDownloader},
-        },
+    p2p::headers::{
+        client::{HeadersClient, StatusUpdater},
+        downloader::{ensure_parent, HeaderDownloader},
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
@@ -452,7 +449,6 @@ mod tests {
 
     mod test_runner {
         use crate::{
-            metrics::HeaderMetrics,
             stages::headers::HeaderStage,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
@@ -465,7 +461,7 @@ mod tests {
             tables,
             transaction::{DbTx, DbTxMut},
         };
-        use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
+        use reth_downloaders::headers::linear::LinearDownloader;
         use reth_interfaces::{
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
@@ -498,7 +494,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + Unpin + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<D, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
             fn tx(&self) -> &TestTransaction {
@@ -506,19 +502,20 @@ mod tests {
             }
 
             fn stage(&self) -> Self::S {
-                HeaderStage {
-                    consensus: self.consensus.clone(),
-                    client: self.client.clone(),
-                    downloader: self.downloader.clone(),
-                    network_handle: self.network_handle.clone(),
-                    commit_threshold: 500,
-                    metrics: HeaderMetrics::default(),
-                }
+                todo!()
+                // HeaderStage {
+                //     consensus: self.consensus.clone(),
+                //     client: self.client.clone(),
+                //     downloader: self.downloader.clone(),
+                //     network_handle: self.network_handle.clone(),
+                //     commit_threshold: 500,
+                //     metrics: HeaderMetrics::default(),
+                // }
             }
         }
 
         #[async_trait::async_trait]
-        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + Unpin + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -590,7 +587,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + Unpin + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.check_no_header_entry_above(input.unwind_to)
             }
