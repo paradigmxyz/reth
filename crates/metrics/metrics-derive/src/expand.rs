@@ -45,7 +45,7 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                             #field_name: #registrar(#metric_name),
                         },
                         quote! {
-                            #field_name: #registrar(#metric_name, labels),
+                            #field_name: #registrar(#metric_name, labels.clone()),
                         },
                         quote! {
                             #describe(#metric_name, #description);
@@ -67,8 +67,10 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
 
                 impl #ty {
                     /// Create new instance of metrics with provided labels.
-                    #vis fn new_with_labels(labels: &Vec<(&str, &str)>) -> Self {
-                        #(#labeled_defaults)*
+                    #vis fn new_with_labels(labels: impl metrics::IntoLabels + Clone) -> Self {
+                        Self {
+                            #(#labeled_defaults)*
+                        }
                     }
 
                     #describe_doc
@@ -98,7 +100,7 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                             #field_name: #registrar(#metric_name),
                         },
                         quote! {
-                            #field_name: #registrar(#metric_name, labels),
+                            #field_name: #registrar(#metric_name, labels.clone()),
                         },
                         quote! {
                             #describe(#metric_name, #description);
@@ -119,8 +121,10 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                     }
 
                     /// Create new instance of metrics with provided labels.
-                    #vis fn new_with_labels(scope: &str, labels: &Vec<(&str, &str)>) -> Self {
-                        #(#labeled_defaults)*
+                    #vis fn new_with_labels(scope: &str, labels: impl metrics::IntoLabels + Clone) -> Self {
+                        Self {
+                            #(#labeled_defaults)*
+                        }
                     }
 
                     #describe_doc
