@@ -56,8 +56,13 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> Stage<DB>
-    for HeaderStage<D, C, H, S>
+impl<DB, D, C, H, S> Stage<DB> for HeaderStage<D, C, H, S>
+where
+    DB: Database,
+    D: HeaderDownloader + Unpin,
+    C: Consensus,
+    H: HeadersClient,
+    S: StatusUpdater,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -92,46 +97,25 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
             None => return Ok(ExecOutput { stage_progress: current_progress, done: true }),
         };
 
-        match downloaded_headers {
-            Ok(res) => {
-                info!(target: "sync::stages::headers", len = res.len(), "Received headers");
-                self.metrics.headers_counter.increment(res.len() as u64);
+        info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
+        self.metrics.headers_counter.increment(downloaded_headers.len() as u64);
 
-                // Perform basic response validation
-                self.validate_header_response(&res)?;
+        // Perform basic response validation
+        self.validate_header_response(&downloaded_headers)?;
 
-                // Write the headers to db
-                self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
+        // Write the headers to db
+        self.write_headers::<DB>(tx, downloaded_headers).await?.unwrap_or_default();
 
-                if self.is_stage_done(tx, current_progress).await? {
-                    let stage_progress = current_progress.max(
-                        tx.cursor_read::<tables::CanonicalHeaders>()?
-                            .last()?
-                            .map(|(num, _)| num)
-                            .unwrap_or_default(),
-                    );
-                    Ok(ExecOutput { stage_progress, done: true })
-                } else {
-                    Ok(ExecOutput { stage_progress: current_progress, done: false })
-                }
-            }
-            Err(e) => {
-                self.metrics.update_headers_error_metrics(&e);
-                match e {
-                    DownloadError::Timeout => {
-                        warn!(target: "sync::stages::headers", "No response for header request");
-                        return Err(StageError::Recoverable(DownloadError::Timeout.into()))
-                    }
-                    DownloadError::HeaderValidation { hash, error } => {
-                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
-                        return Err(StageError::Validation { block: current_progress, error })
-                    }
-                    error => {
-                        error!(target: "sync::stages::headers", ?error, "Unexpected error");
-                        return Err(StageError::Recoverable(error.into()))
-                    }
-                }
-            }
+        if self.is_stage_done(tx, current_progress).await? {
+            let stage_progress = current_progress.max(
+                tx.cursor_read::<tables::CanonicalHeaders>()?
+                    .last()?
+                    .map(|(num, _)| num)
+                    .unwrap_or_default(),
+            );
+            Ok(ExecOutput { stage_progress, done: true })
+        } else {
+            Ok(ExecOutput { stage_progress: current_progress, done: false })
         }
     }
 
@@ -495,7 +479,7 @@ mod tests {
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
-            downloader: Arc<D>,
+            downloader: D,
             network_handle: TestStatusUpdater,
             tx: TestTransaction,
         }
@@ -507,7 +491,7 @@ mod tests {
                 Self {
                     client: client.clone(),
                     consensus: consensus.clone(),
-                    downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
+                    downloader: TestHeaderDownloader::new(client, consensus, 1000),
                     network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
                 }
@@ -515,7 +499,7 @@ mod tests {
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient, TestStatusUpdater>;
+            type S = HeaderStage<D, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
             fn tx(&self) -> &TestTransaction {
                 &self.tx
@@ -615,18 +599,19 @@ mod tests {
         impl HeadersTestRunner<LinearDownloader<TestConsensus, TestHeadersClient>> {
             #[allow(unused)]
             pub(crate) fn with_linear_downloader() -> Self {
-                let client = Arc::new(TestHeadersClient::default());
-                let consensus = Arc::new(TestConsensus::default());
-                let downloader = Arc::new(
-                    LinearDownloadBuilder::default().build(consensus.clone(), client.clone()),
-                );
-                Self {
-                    client,
-                    consensus,
-                    downloader,
-                    network_handle: TestStatusUpdater::default(),
-                    tx: TestTransaction::default(),
-                }
+                todo!()
+                // let client = Arc::new(TestHeadersClient::default());
+                // let consensus = Arc::new(TestConsensus::default());
+                // let downloader =
+                //     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()
+                // );
+                // Self {
+                //     client,
+                //     consensus,
+                //     downloader,
+                //     network_handle: TestStatusUpdater::default(),
+                //     tx: TestTransaction::default(),
+                // }
             }
         }
 

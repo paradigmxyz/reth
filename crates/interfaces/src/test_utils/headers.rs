@@ -68,9 +68,7 @@ impl Downloader for TestHeaderDownloader {
 }
 
 #[async_trait::async_trait]
-impl HeaderDownloader for TestHeaderDownloader {
-}
-
+impl HeaderDownloader for TestHeaderDownloader {}
 
 impl Stream for TestHeaderDownloader {
     type Item = Vec<SealedHeader>;

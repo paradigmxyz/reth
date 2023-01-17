@@ -1,12 +1,12 @@
 use crate::{
     consensus::Consensus,
     p2p::{
-        downloader::{Downloader},
+        downloader::Downloader,
         error::{DownloadError, DownloadResult},
     },
 };
 use futures::Stream;
-use reth_primitives::{SealedHeader};
+use reth_primitives::SealedHeader;
 
 /// A downloader capable of fetching and yielding block headers.
 ///
@@ -14,9 +14,7 @@ use reth_primitives::{SealedHeader};
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
 ///
 /// A [HeaderDownloader] is a [Stream] that returns batches for headers.
-#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeaderDownloader: Downloader + Stream<Item = Vec<SealedHeader>> {
-
     /// Sets the headers batch size that the Stream should return.
     fn set_batch_size(&self, _limit: usize) {}
 

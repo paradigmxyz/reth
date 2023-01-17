@@ -656,9 +656,13 @@ mod tests {
 
         let batch_size = 99;
         let start = 1000;
-        let mut downloader = LinearDownloadBuilder::default()
-            .request_batch_size(batch_size)
-            .build(CONSENSUS.clone(), Arc::clone(&client), genesis, H256::random(), start);
+        let mut downloader = LinearDownloadBuilder::default().request_batch_size(batch_size).build(
+            CONSENSUS.clone(),
+            Arc::clone(&client),
+            genesis,
+            H256::random(),
+            start,
+        );
 
         let mut total = 0;
         while let Some(req) = downloader.next_request() {
