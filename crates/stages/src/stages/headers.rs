@@ -150,7 +150,8 @@ where
         while let Some(header) = headers_iter.next() {
             if let Some(parent) = headers_iter.peek() {
                 ensure_parent(header, parent)
-                    .map_err(|err| StageError::Download(err.to_string()))?;
+                    .map_err(|err| StageError::Download(err.to_string()))
+                    .unwrap();
             }
         }
 
@@ -163,6 +164,8 @@ where
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
+        trace!(target: "sync::stages::headers", len = headers.len(), "writing headers");
+
         let mut cursor_header = tx.cursor_write::<tables::Headers>()?;
         let mut cursor_canonical = tx.cursor_write::<tables::CanonicalHeaders>()?;
 
@@ -230,7 +233,10 @@ where
         // down to the local head (latest block in db)
         let downloaded_headers = match self.downloader.next().await {
             Some(downloaded_headers) => downloaded_headers,
-            None => return Ok(ExecOutput { stage_progress: current_progress, done: true }),
+            None => {
+                info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Download stream exhausted");
+                return Ok(ExecOutput { stage_progress: current_progress, done: true })
+            }
         };
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");

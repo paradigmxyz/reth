@@ -163,12 +163,17 @@ where
         headers: Vec<Header>,
         peer_id: PeerId,
     ) -> Result<(), HeadersResponseError> {
+        let mut validated = Vec::with_capacity(headers.len());
+
         for parent in headers {
             let parent = parent.seal();
 
             // Validate that the header is the parent header of the last validated header.
-            if let Some(validated_header) = self.lowest_validated_header() {
+            if let Some(validated_header) =
+                validated.last().or_else(|| self.lowest_validated_header())
+            {
                 if let Err(error) = self.validate(validated_header, &parent) {
+                    trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
                     return Err(HeadersResponseError { request, peer_id: Some(peer_id), error })
                 }
             } else if parent.hash() != self.sync_target.hash {
@@ -182,10 +187,13 @@ where
                 })
             }
 
-            // update tracked block info (falling block number)
-            self.next_chain_tip_block_number = parent.number.saturating_sub(1);
-            self.queued_validated_headers.push(parent);
+            validated.push(parent);
         }
+
+        // update tracked block info (falling block number)
+        self.next_chain_tip_block_number =
+            validated.last().expect("exists").number.saturating_sub(1);
+        self.queued_validated_headers.extend(validated);
 
         Ok(())
     }
@@ -225,7 +233,7 @@ where
                     })
                 }
 
-                trace!(target: "downloaders::headers", hash=?target.hash(), "Received sync target");
+                trace!(target: "downloaders::headers", head=%self.local_head.number, hash=?target.hash(), number=%target.number, "Received sync target");
 
                 // Update the trackers
                 if let Some(old_target) = self.sync_target.number.replace(target.number) {
@@ -245,6 +253,9 @@ where
 
                 // try to validate all buffered responses blocked by this successful response
                 self.try_validate_buffered().map(Err::<(), HeadersResponseError>).transpose()?;
+
+                // enforce new sync bounds
+                self.enforce_sync_gap_bounds();
 
                 // TODO(mattsse): perf: could handle remaining headers in the request
 
@@ -362,7 +373,7 @@ where
             // Check to see if we've already received the next value
             let next_response = self.buffered_responses.peek_mut()?;
             let next_block_number = next_response.block_number();
-            match next_block_number.cmp(&self.next_request_block_number) {
+            match next_block_number.cmp(&self.next_chain_tip_block_number) {
                 Ordering::Less => return None,
                 Ordering::Equal => {
                     let OrderedHeadersResponse { headers, request, peer_id } =
@@ -415,8 +426,8 @@ where
         self.clear();
     }
 
-    /// Splits off the next batch of headers
-    fn split_next_batch(&mut self) -> Vec<SealedHeader> {
+    /// Ensures all validated headers are within the sync gap [local head..target]
+    fn enforce_sync_gap_bounds(&mut self) {
         // ensure we're only yielding headers that are in range and follow the current local head.
         while self
             .queued_validated_headers
@@ -432,11 +443,16 @@ where
             let skip = self
                 .queued_validated_headers
                 .iter()
-                .filter(|last| last.number > target_num)
+                .take_while(|last| last.number > target_num)
                 .count();
             // removes all headers that are larger than then current target
             self.queued_validated_headers.drain(0..skip);
         }
+    }
+
+    /// Splits off the next batch of headers
+    fn split_next_batch(&mut self) -> Vec<SealedHeader> {
+        self.enforce_sync_gap_bounds();
 
         let batch_size = self.stream_batch_size.min(self.queued_validated_headers.len());
         let mut rem = self.queued_validated_headers.split_off(batch_size);
