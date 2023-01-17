@@ -43,7 +43,7 @@ proptest-derive = { version = "0.3", optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { path = "../../primitives", features = ["arbitrary"]}
-reth-codecs = { path = "../codecs",features = ["arbitrary"] }
+reth-codecs = { path = "../codecs", features = ["arbitrary"] }
 reth-interfaces = { path = "../../interfaces", features = ["bench"] }
 
 tempfile = "3.3.0"

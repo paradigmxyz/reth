@@ -112,7 +112,7 @@ impl Encodable for Receipt {
         if matches!(self.tx_type, TxType::EIP1559 | TxType::EIP2930) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
-            payload_len = length_of_length(payload_len);
+            payload_len += length_of_length(payload_len);
         }
 
         payload_len
