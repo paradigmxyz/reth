@@ -66,7 +66,7 @@ proptest-derive = "0.3"
 
 [features]
 default = ["mdbx"]
-test-utils = ["tempfile"]
+test-utils = ["tempfile", "arbitrary"]
 bench-postcard = ["bench"]
 mdbx = ["reth-libmdbx"]
 bench = []
