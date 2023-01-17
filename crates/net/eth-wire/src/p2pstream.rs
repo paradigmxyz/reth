@@ -77,10 +77,7 @@ where
         mut self,
         hello: HelloMessage,
     ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
-        tracing::trace!(
-            ?hello,
-            "sending p2p hello to peer"
-        );
+        tracing::trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
         let mut raw_hello_bytes = BytesMut::new();
@@ -228,14 +225,15 @@ impl<S> P2PStream<S> {
         disconnect.encode(&mut buf);
 
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(buf.len() - 1));
-        let compressed_size = self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
-            tracing::debug!(
-                ?err,
-                msg=%hex::encode(&buf[1..]),
-                "error compressing disconnect"
-            );
-            err
-        })?;
+        let compressed_size =
+            self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
+                tracing::debug!(
+                    ?err,
+                    msg=%hex::encode(&buf[1..]),
+                    "error compressing disconnect"
+                );
+                err
+            })?;
 
         // truncate the compressed buffer to the actual compressed size (plus one for the message
         // id)
@@ -446,14 +444,15 @@ where
         }
 
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
-        let compressed_size = this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
-            tracing::debug!(
-                ?err,
-                msg=%hex::encode(&item[1..]),
-                "error compressing p2p message"
-            );
-            err
-        })?;
+        let compressed_size =
+            this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
+                tracing::debug!(
+                    ?err,
+                    msg=%hex::encode(&item[1..]),
+                    "error compressing p2p message"
+                );
+                err
+            })?;
 
         // truncate the compressed buffer to the actual compressed size (plus one for the message
         // id)
