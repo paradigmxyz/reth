@@ -56,7 +56,7 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
 impl<DB, D, C, H, S> Stage<DB> for HeaderStage<D, C, H, S>
 where
     DB: Database,
-    D: HeaderDownloader + Unpin,
+    D: HeaderDownloader,
     C: Consensus,
     H: HeadersClient,
     S: StatusUpdater,
@@ -66,8 +66,8 @@ where
         HEADERS
     }
 
-    /// Download the headers in reverse order
-    /// starting from the tip
+    /// Download the headers in reverse order (falling block numbers)
+    /// starting from the tip of the chain
     async fn execute(
         &mut self,
         tx: &mut Transaction<'_, DB>,
@@ -494,7 +494,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + Unpin + 'static> StageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<D, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
             fn tx(&self) -> &TestTransaction {
@@ -515,7 +515,7 @@ mod tests {
         }
 
         #[async_trait::async_trait]
-        impl<D: HeaderDownloader + Unpin + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -587,7 +587,7 @@ mod tests {
             }
         }
 
-        impl<D: HeaderDownloader + Unpin + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
+        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.check_no_header_entry_above(input.unwind_to)
             }

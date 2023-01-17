@@ -14,7 +14,7 @@ use reth_primitives::SealedHeader;
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
 ///
 /// A [HeaderDownloader] is a [Stream] that returns batches for headers.
-pub trait HeaderDownloader: Downloader + Stream<Item = Vec<SealedHeader>> {
+pub trait HeaderDownloader: Downloader + Stream<Item = Vec<SealedHeader>> + Unpin {
 
     /// Updates the block number of the local database
     fn update_local_head(&mut self, head: SealedHeader);
