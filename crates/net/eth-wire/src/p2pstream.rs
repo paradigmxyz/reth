@@ -228,7 +228,14 @@ impl<S> P2PStream<S> {
         disconnect.encode(&mut buf);
 
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(buf.len() - 1));
-        let compressed_size = self.encoder.compress(&buf[1..], &mut compressed[1..])?;
+        let compressed_size = self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
+            tracing::debug!(
+                ?err,
+                msg=%hex::encode(&buf[1..]),
+                "error compressing disconnect"
+            );
+            err
+        })?;
 
         // truncate the compressed buffer to the actual compressed size (plus one for the message
         // id)
@@ -324,7 +331,14 @@ where
 
             // each message following a successful handshake is compressed with snappy, so we need
             // to decompress the message before we can decode it.
-            this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
+            this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..]).map_err(|err| {
+                tracing::debug!(
+                    ?err,
+                    msg=%hex::encode(&bytes[1..]),
+                    "error decompressing p2p message"
+                );
+                err
+            })?;
 
             let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             match id {
@@ -432,7 +446,14 @@ where
         }
 
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
-        let compressed_size = this.encoder.compress(&item[1..], &mut compressed[1..])?;
+        let compressed_size = this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
+            tracing::debug!(
+                ?err,
+                msg=%hex::encode(&item[1..]),
+                "error compressing p2p message"
+            );
+            err
+        })?;
 
         // truncate the compressed buffer to the actual compressed size (plus one for the message
         // id)
