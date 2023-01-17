@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use futures::Stream;
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockHash, SealedHeader};
 
 /// A downloader capable of fetching and yielding block headers.
 ///
@@ -15,9 +15,19 @@ use reth_primitives::SealedHeader;
 ///
 /// A [HeaderDownloader] is a [Stream] that returns batches for headers.
 pub trait HeaderDownloader: Downloader + Stream<Item = Vec<SealedHeader>> + Unpin {
+    /// Updates the gap to sync which ranges from local head to the sync target
+    ///
+    /// See also [HeaderDownloader::update_sync_target] and [HeaderDownloader::update_local_head]
+    fn update_sync_gap(&mut self, head: SealedHeader, target: BlockHash) {
+        self.update_local_head(head);
+        self.update_sync_target(target);
+    }
 
     /// Updates the block number of the local database
     fn update_local_head(&mut self, head: SealedHeader);
+
+    /// Updates the target we want to sync to
+    fn update_sync_target(&mut self, target: BlockHash);
 
     /// Sets the headers batch size that the Stream should return.
     fn set_batch_size(&mut self, _limit: usize);

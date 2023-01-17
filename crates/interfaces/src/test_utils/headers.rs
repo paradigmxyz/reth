@@ -13,7 +13,7 @@ use crate::{
 use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
+    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -68,11 +68,11 @@ impl Downloader for TestHeaderDownloader {
 }
 
 impl HeaderDownloader for TestHeaderDownloader {
-    fn update_local_head(&mut self, _head: SealedHeader) {
-    }
+    fn update_local_head(&mut self, _head: SealedHeader) {}
 
-    fn set_batch_size(&mut self, _limit: usize) {
-    }
+    fn update_sync_target(&mut self, _target: BlockHash) {}
+
+    fn set_batch_size(&mut self, _limit: usize) {}
 }
 
 impl Stream for TestHeaderDownloader {

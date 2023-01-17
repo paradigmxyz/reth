@@ -52,89 +52,14 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
     pub metrics: HeaderMetrics,
 }
 
-#[async_trait::async_trait]
-impl<DB, D, C, H, S> Stage<DB> for HeaderStage<D, C, H, S>
+// === impl HeaderStage ===
+
+impl<D, C, H, S> HeaderStage<D, C, H, S>
 where
-    DB: Database,
     D: HeaderDownloader,
     C: Consensus,
     H: HeadersClient,
     S: StatusUpdater,
-{
-    /// Return the id of the stage
-    fn id(&self) -> StageId {
-        HEADERS
-    }
-
-    /// Download the headers in reverse order (falling block numbers)
-    /// starting from the tip of the chain
-    async fn execute(
-        &mut self,
-        tx: &mut Transaction<'_, DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
-        let current_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(tx, current_progress).await?;
-
-        // Lookup the head and tip of the sync range
-        let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
-
-        // Nothing to sync
-        if head.hash() == tip {
-            info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { stage_progress: current_progress, done: true })
-        }
-
-        debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
-
-        // The downloader returns the headers in descending order starting from the tip
-        // down to the local head (latest block in db)
-        let downloaded_headers = match self.downloader.next().await {
-            Some(downloaded_headers) => downloaded_headers,
-            None => return Ok(ExecOutput { stage_progress: current_progress, done: true }),
-        };
-
-        info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
-        self.metrics.headers_counter.increment(downloaded_headers.len() as u64);
-
-        // Perform basic response validation
-        self.validate_header_response(&downloaded_headers)?;
-
-        // Write the headers to db
-        self.write_headers::<DB>(tx, downloaded_headers).await?.unwrap_or_default();
-
-        if self.is_stage_done(tx, current_progress).await? {
-            let stage_progress = current_progress.max(
-                tx.cursor_read::<tables::CanonicalHeaders>()?
-                    .last()?
-                    .map(|(num, _)| num)
-                    .unwrap_or_default(),
-            );
-            Ok(ExecOutput { stage_progress, done: true })
-        } else {
-            Ok(ExecOutput { stage_progress: current_progress, done: false })
-        }
-    }
-
-    /// Unwind the stage.
-    async fn unwind(
-        &mut self,
-        tx: &mut Transaction<'_, DB>,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
-        // TODO: handle bad block
-        info!(target: "sync::stages::headers", to_block = input.unwind_to, "Unwinding");
-        tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to + 1,
-        )?;
-        tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        tx.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
-    }
-}
-
-impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
-    HeaderStage<D, C, H, S>
 {
     async fn update_head<DB: Database>(
         &self,
@@ -260,6 +185,90 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
             cursor_canonical.insert(key.number(), key.hash())?;
         }
         Ok(latest)
+    }
+}
+
+#[async_trait::async_trait]
+impl<DB, D, C, H, S> Stage<DB> for HeaderStage<D, C, H, S>
+where
+    DB: Database,
+    D: HeaderDownloader,
+    C: Consensus,
+    H: HeadersClient,
+    S: StatusUpdater,
+{
+    /// Return the id of the stage
+    fn id(&self) -> StageId {
+        HEADERS
+    }
+
+    /// Download the headers in reverse order (falling block numbers)
+    /// starting from the tip of the chain
+    async fn execute(
+        &mut self,
+        tx: &mut Transaction<'_, DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        let current_progress = input.stage_progress.unwrap_or_default();
+        self.update_head::<DB>(tx, current_progress).await?;
+
+        // Lookup the head and tip of the sync range
+        let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
+
+        // Nothing to sync
+        if head.hash() == tip {
+            info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
+            return Ok(ExecOutput { stage_progress: current_progress, done: true })
+        }
+
+        debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
+
+        // let the downloader know what to sync
+        self.downloader.update_sync_gap(head, tip);
+
+        // The downloader returns the headers in descending order starting from the tip
+        // down to the local head (latest block in db)
+        let downloaded_headers = match self.downloader.next().await {
+            Some(downloaded_headers) => downloaded_headers,
+            None => return Ok(ExecOutput { stage_progress: current_progress, done: true }),
+        };
+
+        info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
+        self.metrics.headers_counter.increment(downloaded_headers.len() as u64);
+
+        // Perform basic response validation
+        self.validate_header_response(&downloaded_headers)?;
+
+        // Write the headers to db
+        self.write_headers::<DB>(tx, downloaded_headers).await?.unwrap_or_default();
+
+        if self.is_stage_done(tx, current_progress).await? {
+            let stage_progress = current_progress.max(
+                tx.cursor_read::<tables::CanonicalHeaders>()?
+                    .last()?
+                    .map(|(num, _)| num)
+                    .unwrap_or_default(),
+            );
+            Ok(ExecOutput { stage_progress, done: true })
+        } else {
+            Ok(ExecOutput { stage_progress: current_progress, done: false })
+        }
+    }
+
+    /// Unwind the stage.
+    async fn unwind(
+        &mut self,
+        tx: &mut Transaction<'_, DB>,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        // TODO: handle bad block
+        info!(target: "sync::stages::headers", to_block = input.unwind_to, "Unwinding");
+        tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+            input.unwind_to + 1,
+        )?;
+        tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        tx.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
+        Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
 
