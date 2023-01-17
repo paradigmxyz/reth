@@ -6,7 +6,6 @@ use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
     database::Database,
-    mdbx::{Env, EnvironmentKind},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -15,6 +14,9 @@ use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
 use std::collections::HashMap;
 use tracing::{error, info};
+
+/// DB List TUI
+mod tui;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
@@ -130,7 +132,50 @@ impl Command {
                 tool.seed(*len)?;
             }
             Subcommands::List(args) => {
-                tool.list_table(args)?;
+                macro_rules! table_tui {
+                    ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
+                        match $arg {
+                            $(stringify!($table) => {
+                                tool.db.view(|tx| {
+                                    let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
+                                    let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+                                    let total_entries = stats.entries();
+                                    if $start > total_entries - 1 {
+                                        error!(
+                                            target: "reth::cli",
+                                            "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
+                                            start = $start,
+                                            final_entry_idx = total_entries - 1,
+                                            table = stringify!($table)
+                                        );
+                                        return Ok(());
+                                    }
+                                    let map = tool.list::<tables::$table>($start, $len)?;
+                                    tui::DbListTUI::<tables::$table>::show_tui(map, $start, total_entries)
+                                })??
+                            },)*
+                            _ => {
+                                error!(target: "reth::cli", "Unknown table.");
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+
+                table_tui!(args.table.as_str(), args.start, args.len => [
+                    CanonicalHeaders,
+                    HeaderTD,
+                    HeaderNumbers,
+                    Headers,
+                    BlockBodies,
+                    BlockOmmers,
+                    TxHashNumber,
+                    PlainAccountState,
+                    BlockTransitionIndex,
+                    TxTransitionIndex,
+                    SyncStage,
+                    Transactions
+                ]);
             }
             Subcommands::Drop => {
                 tool.drop()?;
@@ -223,96 +268,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             TxSenders,
             Config,
             SyncStage,
-        ]);
-
-        Ok(())
-    }
-}
-
-impl<'a, E: EnvironmentKind> DbTool<'a, Env<E>> {
-    /// Lists the contents of a db table in a human-readable format and print to stdout.
-    fn list_table(&mut self, args: &ListArgs) -> Result<()> {
-        macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
-                match $arg {
-                    $(stringify!($table) => {
-                        let map = self.list::<tables::$table>($start, $len)?;
-                        let mut table = ComfyTable::new();
-                        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-                        for (key, value) in map.into_iter() {
-                            let mut row = Row::new();
-                            match serde_json::to_value(&value)? {
-                                serde_json::Value::Object(map) => {
-                                    if table.header().is_none() {
-                                        table.set_header([vec![&"Key".to_owned()], map.keys().collect()].concat());
-                                    }
-
-                                    row.add_cell(Cell::new(format!("{key:?}")));
-                                    map.values().for_each(|v| {
-                                        row.add_cell(Cell::new(v));
-                                    });
-                                }
-                                v => {
-                                    if table.header().is_none() {
-                                        table.set_header(["Key", "Value"]);
-                                    }
-
-                                    row.add_cell(Cell::new(format!("{key:?}"))).add_cell(Cell::new(v));
-                                }
-                            }
-
-                            table.add_row(row);
-                        }
-
-                        self.db.view(|tx| {
-                            let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
-                            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
-                            let final_entry_idx = stats.entries() - 1;
-                            if $start > final_entry_idx {
-                                error!(
-                                    "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
-                                    start = $start,
-                                    table = stringify!($table)
-                                );
-                                return Ok(())
-                            }
-
-                            println!("{table}");
-                            println!(
-                                "-> Showing {len} entries in range [{start}, {end}] out of {num_entries} entries.",
-                                len = $len,
-                                start = $start,
-                                end = if ($start + $len) > final_entry_idx {
-                                    final_entry_idx
-                                } else {
-                                    $start + $len - 1
-                                },
-                                num_entries = final_entry_idx + 1
-                            );
-                            Ok::<(), eyre::Report>(())
-                        })?
-                    },)*
-                    _ => {
-                        error!("Unknown table.");
-                        Ok(())
-                    }
-                }?
-            };
-        }
-
-        list_tables!(args.table.as_str(), args.start, args.len => [
-            CanonicalHeaders,
-            HeaderTD,
-            HeaderNumbers,
-            Headers,
-            BlockBodies,
-            BlockOmmers,
-            TxHashNumber,
-            PlainAccountState,
-            BlockTransitionIndex,
-            TxTransitionIndex,
-            SyncStage,
-            Transactions
         ]);
 
         Ok(())
