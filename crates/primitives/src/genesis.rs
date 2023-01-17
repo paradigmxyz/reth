@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
-use bytes::BytesMut;
-use reth_rlp::{Header as RlpHeader, length_of_length, Encodable};
-use serde::{Deserialize, Serialize};
-use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
 use crate::{
-    utils::serde_helpers::deserialize_stringified_u64, Address, Bytes, Header, H256, U256, proofs::{EMPTY_ROOT, KeccakHasher}, KECCAK_EMPTY, keccak256,
+    keccak256,
+    proofs::{KeccakHasher, EMPTY_ROOT},
+    utils::serde_helpers::deserialize_stringified_u64,
+    Address, Bytes, Header, H256, KECCAK_EMPTY, U256,
 };
+use bytes::BytesMut;
+use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
+use reth_rlp::{length_of_length, Encodable, Header as RlpHeader};
+use serde::{Deserialize, Serialize};
 use triehash::sec_trie_root;
 
 /// The genesis block specification.
