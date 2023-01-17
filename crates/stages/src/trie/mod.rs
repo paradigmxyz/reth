@@ -1,49 +1,28 @@
 #![allow(missing_docs, dead_code, unused_variables, unused_imports)]
 use std::{collections::HashMap, marker::PhantomData};
 
+use crate::Transaction;
 use bytes::BytesMut;
 use hash256_std_hasher::Hash256StdHasher;
 use hash_db::{AsHashDB, Prefix};
 use memory_db::{HashKey, MemoryDB};
 use reference_trie::ReferenceNodeCodec;
 use reth_db::{
+    cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     models::AccountBeforeTx,
     table::{Decode, Encode, Table},
+    tables,
+    transaction::DbTx,
 };
-use reth_primitives::{keccak256, rpc::H160, Account, Address, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{
+    keccak256, proofs::KeccakHasher, rpc::H160, Account, Address, StorageEntry, H256, KECCAK_EMPTY,
+    U256,
+};
 use reth_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use trie_db::{
     CError, HashDB, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout, TrieMut,
 };
-
-// pub struct DBTrie<'this, DB, T>
-// where
-//     DB: Database,
-//     T: Table,
-//     T::Key: Encode + Decode,
-// {
-//     trie: TrieDBMut<'this, DBTrieLayout>,
-//     _t: PhantomData<(DB, T)>,
-// }
-
-// impl<'this, 'db, DB: Database + 'this, T: Table> DBTrie<'this, DB, T>
-// where
-//     DB: Database,
-//     T: Table,
-//     T::Key: Encode + Decode,
-//     T::Value: From<Vec<u8>>,
-// {
-//     pub fn new(hash_db: &'this mut HashDatabase<DB>, root: &'this mut H256) -> Self {
-//         let builder = TrieDBMutBuilder::new(hash_db, root);
-//         Self { trie: builder.build(), _t: Default::default() }
-//     }
-
-//     pub fn get(self, key: T::Key) -> Result<Option<T::Value>, TrieError> {
-//         let value = self.trie.get(key.encode().as_ref())?;
-//         Ok(value.map(|v| T::Value::from(v)))
-//     }
-// }
 
 // #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 // pub enum TrieError {
@@ -65,20 +44,6 @@ impl TrieLayout for DBTrieLayout {
 
     type Hash = KeccakHasher;
     type Codec = ReferenceNodeCodec<Self::Hash>;
-}
-
-struct KeccakHasher;
-
-impl Hasher for KeccakHasher {
-    type Out = H256;
-
-    type StdHasher = Hash256StdHasher;
-
-    const LENGTH: usize = 256 / 8;
-
-    fn hash(x: &[u8]) -> Self::Out {
-        keccak256(x)
-    }
 }
 
 // pub struct HashDatabase<DB: Database> {
@@ -130,8 +95,8 @@ struct EthAccount {
     code_hash: H256,
 }
 
-impl From<&Account> for EthAccount {
-    fn from(acc: &Account) -> Self {
+impl From<Account> for EthAccount {
+    fn from(acc: Account) -> Self {
         EthAccount {
             nonce: acc.nonce,
             balance: acc.balance,
@@ -145,34 +110,54 @@ pub(crate) struct DBTrieLoader;
 
 impl DBTrieLoader {
     // Result<H256>
-    pub(crate) fn calculate_root(&mut self) -> H256 {
-        let account_changes = vec![AccountBeforeTx { address: Address::zero(), info: None }];
-        let accounts = HashMap::from([(
-            Address::zero(),
-            Account { nonce: 0, balance: U256::from(100), bytecode_hash: None },
-        )]);
+    pub(crate) fn calculate_root<DB: Database>(&mut self, tx: &Transaction<'_, DB>) -> H256 {
+        let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>().unwrap();
+        let mut walker = accounts_cursor.walk(Address::zero()).unwrap();
+        // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
+
         let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::default();
         let mut root = H256::zero();
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
-        for AccountBeforeTx { address, info } in account_changes {
-            let Account { nonce, balance, bytecode_hash } = accounts.get(&address).unwrap();
-            let mut account = EthAccount::from(accounts.get(&address).unwrap());
+        while let Some((address, account)) = walker.next().transpose().unwrap() {
+            let mut key = EthAccount::from(account);
 
             // storage_root
-            account.storage_root = self.calculate_storage_root(&address);
+            key.storage_root = self.calculate_storage_root(tx, address);
 
             let mut bytes = BytesMut::new();
-            account.encode(&mut bytes);
+            Encodable::encode(&key, &mut bytes);
             trie.insert(address.as_bytes(), &bytes).unwrap();
         }
+
         *trie.root()
     }
 
     // Result<H256>
-    fn calculate_storage_root(&mut self, address: &Address) -> H256 {
-        H256::zero()
+    fn calculate_storage_root<DB: Database>(
+        &mut self,
+        tx: &Transaction<'_, DB>,
+        address: Address,
+    ) -> H256 {
+        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::default();
+        let mut root = H256::zero();
+        let mut trie: TrieDBMut<'_, DBTrieLayout> =
+            TrieDBMutBuilder::new(&mut db, &mut root).build();
+
+        let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>().unwrap();
+        let mut walker = storage_cursor.walk_dup(address, H256::zero()).unwrap();
+
+        while let Some((_, StorageEntry { key: storage_key, value })) =
+            walker.next().transpose().unwrap()
+        {
+            let mut bytes = BytesMut::new();
+            let location = [H256::from(address).as_bytes(), storage_key.as_bytes()].concat();
+            Encodable::encode(&value, &mut bytes);
+            trie.insert(location.as_slice(), &bytes).unwrap();
+        }
+
+        *trie.root()
     }
 }
 
@@ -183,18 +168,19 @@ pub(crate) fn gather_account_changes() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::tables;
-    use reth_primitives::{hex_literal::hex, Address, KECCAK_EMPTY};
+    use reth_db::{
+        mdbx::{test_utils::create_test_rw_db, WriteMap},
+        tables,
+    };
+    use reth_primitives::{hex_literal::hex, proofs::EMPTY_ROOT, Address, KECCAK_EMPTY};
     use std::str::FromStr;
     use trie_db::TrieDBMutBuilder;
 
     #[test]
     fn empty_trie() {
         let mut trie = DBTrieLoader {};
-        // assert_eq!(
-        //     trie.calculate_root(),
-        //     H256::from_str("bc36789e7a1e281436464229828f817d6612f7b477d66591ff96a9e064bcc98a")
-        //         .unwrap()
-        // );
+        let db = create_test_rw_db::<WriteMap>();
+        let tx = Transaction::new(db.as_ref()).unwrap();
+        assert_eq!(trie.calculate_root(&tx), EMPTY_ROOT);
     }
 }
