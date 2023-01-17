@@ -69,8 +69,8 @@ impl Downloader for TestHeaderDownloader {
 
 #[async_trait::async_trait]
 impl HeaderDownloader for TestHeaderDownloader {
-    fn set_batch_size(&mut self, _limit: usize) {}
 }
+
 
 impl Stream for TestHeaderDownloader {
     type Item = Vec<SealedHeader>;
@@ -93,6 +93,9 @@ struct TestDownload {
     buffer: Vec<SealedHeader>,
     done: bool,
 }
+
+/// SAFETY: All the mutations are performed through an exclusive reference on `poll`
+unsafe impl Sync for TestDownload {}
 
 impl TestDownload {
     fn get_or_init_fut(&mut self) -> &mut TestHeadersFut {

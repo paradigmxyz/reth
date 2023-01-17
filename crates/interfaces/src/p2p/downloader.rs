@@ -21,7 +21,7 @@ pub trait DownloadClient: Send + Sync + Debug {
 /// The generic trait for requesting and verifying data
 /// over p2p network client
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait Downloader: Send {
+pub trait Downloader: Send + Sync {
     /// The client used to fetch necessary data
     type Client: DownloadClient;
 

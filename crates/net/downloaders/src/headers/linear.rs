@@ -339,8 +339,8 @@ where
     C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
-    fn set_batch_size(&mut self, batch_size: usize) {
-        self.stream_batch_size = batch_size;
+    fn set_batch_size(&self, batch_size: usize) {
+        // self.stream_batch_size = batch_size;
     }
 }
 
@@ -509,7 +509,7 @@ struct HeadersResponseError {
 /// The builder for [LinearDownloader] with
 /// some default settings
 #[derive(Debug)]
-pub struct ConcurrentDownloadBuilder {
+pub struct LinearDownloadBuilder {
     /// The batch size per one request
     request_batch_size: u64,
     /// Batch size for headers
@@ -520,7 +520,7 @@ pub struct ConcurrentDownloadBuilder {
     max_buffered_responses: usize,
 }
 
-impl Default for ConcurrentDownloadBuilder {
+impl Default for LinearDownloadBuilder {
     fn default() -> Self {
         Self {
             request_batch_size: 1_000,
@@ -531,7 +531,7 @@ impl Default for ConcurrentDownloadBuilder {
     }
 }
 
-impl ConcurrentDownloadBuilder {
+impl LinearDownloadBuilder {
     /// Set the request batch size
     pub fn request_batch_size(mut self, size: u64) -> Self {
         self.request_batch_size = size;
@@ -656,7 +656,7 @@ mod tests {
 
         let batch_size = 99;
         let start = 1000;
-        let mut downloader = ConcurrentDownloadBuilder::default()
+        let mut downloader = LinearDownloadBuilder::default()
             .request_batch_size(batch_size)
             .build(CONSENSUS.clone(), Arc::clone(&client), genesis, H256::random(), start);
 
@@ -701,7 +701,7 @@ mod tests {
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
 
-        let mut downloader = ConcurrentDownloadBuilder::default()
+        let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(3)
             .request_batch_size(3)
             .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash(), p0.number);
@@ -731,7 +731,7 @@ mod tests {
         let p0 = child_header(&p1);
 
         let client = Arc::new(TestHeadersClient::default());
-        let mut downloader = ConcurrentDownloadBuilder::default()
+        let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_batch_size(1)
             .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash(), p0.number);
