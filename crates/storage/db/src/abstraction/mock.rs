@@ -60,11 +60,11 @@ impl<'a> DbTx<'a> for TxMock {
         todo!()
     }
 
-    fn cursor<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
+    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
         todo!()
     }
 
-    fn cursor_dup<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error> {
         todo!()
     }
 }
@@ -78,11 +78,11 @@ impl<'a> DbTxMut<'a> for TxMock {
         todo!()
     }
 
-    fn cursor_mut<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error> {
+    fn cursor_write<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error> {
         todo!()
     }
 
-    fn cursor_dup_mut<T: DupSort>(
+    fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error> {
         todo!()
@@ -148,6 +148,14 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
     }
 
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
+        todo!()
+    }
+
+    fn seek_by_key_subkey(
+        &mut self,
+        _key: <T as Table>::Key,
+        _subkey: <T as DupSort>::SubKey,
+    ) -> ValueOnlyResult<T> {
         todo!()
     }
 

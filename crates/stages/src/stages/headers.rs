@@ -1,8 +1,8 @@
 use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -24,7 +24,7 @@ use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
-const HEADERS: StageId = StageId("Headers");
+pub(crate) const HEADERS: StageId = StageId("Headers");
 
 /// The headers stage.
 ///
@@ -36,11 +36,9 @@ const HEADERS: StageId = StageId("Headers");
 /// - [`HeaderNumbers`][reth_interfaces::db::tables::HeaderNumbers]
 /// - [`Headers`][reth_interfaces::db::tables::Headers]
 /// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
-/// - [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
 ///
-/// NOTE: This stage commits the header changes to the database (everything except the changes to
-/// [`HeaderTD`][reth_interfaces::db::tables::HeaderTD] table). The stage does not return the
-/// control flow to the pipeline in order to preserve the context of the chain tip.
+/// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
+/// the stage progress is not updated unless this stage is done.
 #[derive(Debug)]
 pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater> {
     /// Strategy for downloading the headers
@@ -52,7 +50,9 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
     /// Network handle for updating status
     pub network_handle: S,
     /// The number of block headers to commit at once
-    pub commit_threshold: usize,
+    pub commit_threshold: u64,
+    /// Header metrics
+    pub metrics: HeaderMetrics,
 }
 
 #[async_trait::async_trait]
@@ -68,82 +68,88 @@ impl<DB: Database, D: HeaderDownloader, C: Consensus, H: HeadersClient, S: Statu
     /// starting from the tip
     async fn execute(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(db, stage_progress).await?;
+        let current_progress = input.stage_progress.unwrap_or_default();
+        self.update_head::<DB>(tx, current_progress).await?;
 
         // Lookup the head and tip of the sync range
-        let (head, tip) = self.get_head_and_tip(db, stage_progress).await?;
-        trace!(
-            target = "sync::stages::headers",
-            "Syncing from tip {:?} to head {:?}",
-            tip,
-            head.hash()
-        );
+        let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
 
-        let mut current_progress = stage_progress;
-        let mut stream = self.downloader.stream(head.clone(), tip).chunks(self.commit_threshold);
+        // Nothing to sync
+        if head.hash() == tip {
+            info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
+            return Ok(ExecOutput { stage_progress: current_progress, done: true })
+        }
 
-        // The stage relies on the downloader to return the headers
-        // in descending order starting from the tip down to
-        // the local head (latest block in db)
-        while let Some(headers) = stream.next().await {
-            match headers.into_iter().collect::<Result<Vec<_>, _>>() {
-                Ok(res) => {
-                    info!(len = res.len(), "Received headers");
+        debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
 
-                    // Perform basic response validation
-                    self.validate_header_response(&res)?;
-                    let write_progress =
-                        self.write_headers::<DB>(db, res).await?.unwrap_or_default();
-                    db.commit()?;
-                    current_progress = current_progress.max(write_progress);
+        // The downloader returns the headers in descending order starting from the tip
+        // down to the local head (latest block in db)
+        let downloaded_headers: Result<Vec<SealedHeader>, DownloadError> = self
+            .downloader
+            .stream(head.clone(), tip)
+            .take(self.commit_threshold as usize) // Only stream [self.commit_threshold] headers
+            .try_collect()
+            .await;
+
+        match downloaded_headers {
+            Ok(res) => {
+                info!(target: "sync::stages::headers", len = res.len(), "Received headers");
+                self.metrics.headers_counter.increment(res.len() as u64);
+
+                // Perform basic response validation
+                self.validate_header_response(&res)?;
+
+                // Write the headers to db
+                self.write_headers::<DB>(tx, res).await?.unwrap_or_default();
+
+                if self.is_stage_done(tx, current_progress).await? {
+                    let stage_progress = current_progress.max(
+                        tx.cursor_read::<tables::CanonicalHeaders>()?
+                            .last()?
+                            .map(|(num, _)| num)
+                            .unwrap_or_default(),
+                    );
+                    Ok(ExecOutput { stage_progress, done: true })
+                } else {
+                    Ok(ExecOutput { stage_progress: current_progress, done: false })
                 }
-                Err(e) => match e {
+            }
+            Err(e) => {
+                self.metrics.update_headers_error_metrics(&e);
+                match e {
                     DownloadError::Timeout => {
-                        warn!("No response for header request");
+                        warn!(target: "sync::stages::headers", "No response for header request");
                         return Err(StageError::Recoverable(DownloadError::Timeout.into()))
                     }
                     DownloadError::HeaderValidation { hash, error } => {
-                        error!("Validation error for header {hash}: {error}");
-                        return Err(StageError::Validation { block: stage_progress, error })
+                        error!(target: "sync::stages::headers", ?error, ?hash, "Validation error");
+                        return Err(StageError::Validation { block: current_progress, error })
                     }
                     error => {
-                        error!(?error, "An unexpected error occurred");
+                        error!(target: "sync::stages::headers", ?error, "Unexpected error");
                         return Err(StageError::Recoverable(error.into()))
                     }
-                },
+                }
             }
         }
-
-        // Write total difficulty values after all headers have been inserted
-        self.write_td::<DB>(db, &head)?;
-
-        let stage_progress = current_progress.max(
-            db.cursor::<tables::CanonicalHeaders>()?
-                .last()?
-                .map(|(num, _)| num)
-                .unwrap_or_default(),
-        );
-
-        Ok(ExecOutput { stage_progress, reached_tip: true, done: true })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        db: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
-        db.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+        info!(target: "sync::stages::headers", to_block = input.unwind_to, "Unwinding");
+        tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;
-        db.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        db.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
-        db.unwind_table_by_num_hash::<tables::HeaderTD>(input.unwind_to)?;
+        tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        tx.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -153,32 +159,45 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
 {
     async fn update_head<DB: Database>(
         &self,
-        db: &Transaction<'_, DB>,
+        tx: &Transaction<'_, DB>,
         height: BlockNumber,
     ) -> Result<(), StageError> {
-        let block_key = db.get_block_numhash(height)?;
-        let td: U256 = *db
+        let block_key = tx.get_block_numhash(height)?;
+        let td: U256 = *tx
             .get::<tables::HeaderTD>(block_key)?
             .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
-        // self.client.update_status(height, block_key.hash(), td);
+        // TODO: This should happen in the last stage
         self.network_handle.update_status(height, block_key.hash(), td);
         Ok(())
+    }
+
+    async fn is_stage_done<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        stage_progress: u64,
+    ) -> Result<bool, StageError> {
+        let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+        let (head_num, _) = header_cursor
+            .seek_exact(stage_progress)?
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
+        // Check if the next entry is congruent
+        Ok(header_cursor.next()?.map(|(next_num, _)| head_num + 1 == next_num).unwrap_or_default())
     }
 
     /// Get the head and tip of the range we need to sync
     async fn get_head_and_tip<DB: Database>(
         &self,
-        db: &Transaction<'_, DB>,
+        tx: &Transaction<'_, DB>,
         stage_progress: u64,
     ) -> Result<(SealedHeader, H256), StageError> {
         // Create a cursor over canonical header hashes
-        let mut cursor = db.cursor::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = db.cursor::<tables::Headers>()?;
+        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
             .seek_exact(stage_progress)?
-            .ok_or(DatabaseIntegrityError::CanonicalHash { number: stage_progress })?;
+            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
 
         // Construct head
         let (_, head) = header_cursor
@@ -203,19 +222,19 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let tip = match next_header {
             Some(header) if stage_progress + 1 != header.number => header.parent_hash,
-            None => self.next_fork_choice_state(&head.hash()).await.head_block_hash,
+            None => self.next_fork_choice_state().await.head_block_hash,
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
+
         Ok((head, tip))
     }
 
-    async fn next_fork_choice_state(&self, head: &H256) -> ForkchoiceState {
+    async fn next_fork_choice_state(&self) -> ForkchoiceState {
         let mut state_rcv = self.consensus.fork_choice_state();
         loop {
             let _ = state_rcv.changed().await;
             let forkchoice = state_rcv.borrow();
-            debug!(?forkchoice, "Received fork choice state");
-            if !forkchoice.head_block_hash.is_zero() && forkchoice.head_block_hash != *head {
+            if !forkchoice.head_block_hash.is_zero() {
                 return forkchoice.clone()
             }
         }
@@ -237,11 +256,11 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
     /// Write downloaded headers to the database
     async fn write_headers<DB: Database>(
         &self,
-        db: &Transaction<'_, DB>,
+        tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
-        let mut cursor_header = db.cursor_mut::<tables::Headers>()?;
-        let mut cursor_canonical = db.cursor_mut::<tables::CanonicalHeaders>()?;
+        let mut cursor_header = tx.cursor_write::<tables::Headers>()?;
+        let mut cursor_canonical = tx.cursor_write::<tables::CanonicalHeaders>()?;
 
         let mut latest = None;
         // Since the headers were returned in descending order,
@@ -257,39 +276,11 @@ impl<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: StatusUpdater>
             latest = Some(header.number);
 
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
-            db.put::<tables::HeaderNumbers>(block_hash, header.number)?;
+            tx.put::<tables::HeaderNumbers>(block_hash, header.number)?;
             cursor_header.insert(key, header)?;
             cursor_canonical.insert(key.number(), key.hash())?;
         }
-
         Ok(latest)
-    }
-
-    /// Iterate over inserted headers and write td entries
-    fn write_td<DB: Database>(
-        &self,
-        db: &Transaction<'_, DB>,
-        head: &SealedHeader,
-    ) -> Result<(), StageError> {
-        // Acquire cursor over total difficulty table
-        let mut cursor_td = db.cursor_mut::<tables::HeaderTD>()?;
-
-        // Get latest total difficulty
-        let last_entry = cursor_td
-            .seek_exact(head.num_hash().into())?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: head.number })?;
-        let mut td: U256 = last_entry.1.into();
-
-        // Start at first inserted block during this iteration
-        let start_key = db.get_block_numhash(head.number + 1)?;
-
-        // Walk over newly inserted headers, update & insert td
-        for entry in db.cursor::<tables::Headers>()?.walk(start_key)? {
-            let (key, header) = entry?;
-            td += header.difficulty;
-            cursor_td.append(key, td.into())?;
-        }
-        Ok(())
     }
 }
 
@@ -388,11 +379,7 @@ mod tests {
         runner.consensus.update_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { done: true, reached_tip: true, stage_progress })
-                if stage_progress == tip.number
-        );
+        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -400,7 +387,7 @@ mod tests {
     #[tokio::test]
     async fn head_and_tip_lookup() {
         let runner = HeadersTestRunner::default();
-        let db = runner.db().inner();
+        let tx = runner.tx().inner();
         let stage = runner.stage();
 
         let consensus_tip = H256::random();
@@ -414,44 +401,76 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            stage.get_head_and_tip(&db, stage_progress).await,
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHash { number }))
+            stage.get_head_and_tip(&tx, stage_progress).await,
+            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { number }))
                 if number == stage_progress
         );
 
         // Checkpoint and no gap
-        db.put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("falied to write canonical");
-        db.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
+        tx.put::<tables::CanonicalHeaders>(head.number, head.hash())
+            .expect("failed to write canonical");
+        tx.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
-            stage.get_head_and_tip(&db, stage_progress).await,
+            stage.get_head_and_tip(&tx, stage_progress).await,
             Ok((h, t)) if h == head && t == consensus_tip
         );
 
         // Checkpoint and gap
-        db.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("falied to write canonical");
-        db.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
+        tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
+            .expect("failed to write canonical");
+        tx.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
-            stage.get_head_and_tip(&db, stage_progress).await,
+            stage.get_head_and_tip(&tx, stage_progress).await,
             Ok((h, t)) if h == head && t == gap_tip.parent_hash
         );
 
         // Checkpoint and gap closed
-        db.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("falied to write canonical");
-        db.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
+        tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
+            .expect("failed to write canonical");
+        tx.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
             .expect("failed to write header");
         assert_matches!(
-            stage.get_head_and_tip(&db, stage_progress).await,
+            stage.get_head_and_tip(&tx, stage_progress).await,
             Err(StageError::StageProgress(progress)) if progress == stage_progress
         );
     }
 
+    /// Execute the stage in two steps
+    #[tokio::test]
+    async fn execute_from_previous_progress() {
+        let mut runner = HeadersTestRunner::with_linear_downloader();
+        let (stage_progress, previous_stage) = (600, 1200);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+
+        // skip `after_execution` hook for linear downloader
+        let tip = headers.last().unwrap();
+        runner.consensus.update_tip(tip.hash());
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);
+
+        let rx = runner.execute(input);
+
+        runner.client.clear().await;
+        runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
+
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+    }
+
     mod test_runner {
         use crate::{
+            metrics::HeaderMetrics,
             stages::headers::HeaderStage,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
@@ -459,7 +478,11 @@ mod tests {
             },
             ExecInput, ExecOutput, UnwindInput,
         };
-        use reth_db::{models::blocks::BlockNumHash, tables, transaction::DbTx};
+        use reth_db::{
+            models::blocks::BlockNumHash,
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
         use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
             p2p::headers::downloader::HeaderDownloader,
@@ -476,7 +499,7 @@ mod tests {
             pub(crate) client: Arc<TestHeadersClient>,
             downloader: Arc<D>,
             network_handle: TestStatusUpdater,
-            db: TestTransaction,
+            tx: TestTransaction,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -488,7 +511,7 @@ mod tests {
                     consensus: consensus.clone(),
                     downloader: Arc::new(TestHeaderDownloader::new(client, consensus, 1000)),
                     network_handle: TestStatusUpdater::default(),
-                    db: TestTransaction::default(),
+                    tx: TestTransaction::default(),
                 }
             }
         }
@@ -496,8 +519,8 @@ mod tests {
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<Arc<D>, TestConsensus, TestHeadersClient, TestStatusUpdater>;
 
-            fn db(&self) -> &TestTransaction {
-                &self.db
+            fn tx(&self) -> &TestTransaction {
+                &self.tx
             }
 
             fn stage(&self) -> Self::S {
@@ -506,7 +529,8 @@ mod tests {
                     client: self.client.clone(),
                     downloader: self.downloader.clone(),
                     network_handle: self.network_handle.clone(),
-                    commit_threshold: 100,
+                    commit_threshold: 500,
+                    metrics: HeaderMetrics::default(),
                 }
             }
         }
@@ -518,7 +542,11 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
                 let head = random_header(start, None);
-                self.db.insert_headers(std::iter::once(&head))?;
+                self.tx.insert_headers(std::iter::once(&head))?;
+                // patch td table for `update_head` call
+                self.tx.commit(|tx| {
+                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::ZERO.into())
+                })?;
 
                 // use previous progress as seed size
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
@@ -541,7 +569,7 @@ mod tests {
                 let initial_stage_progress = input.stage_progress.unwrap_or_default();
                 match output {
                     Some(output) if output.stage_progress > initial_stage_progress => {
-                        self.db.query(|tx| {
+                        self.tx.query(|tx| {
                             for block_num in (initial_stage_progress..output.stage_progress).rev() {
                                 // look up the header hash
                                 let hash = tx
@@ -557,18 +585,6 @@ mod tests {
                                 assert!(header.is_some());
                                 let header = header.unwrap().seal();
                                 assert_eq!(header.hash(), hash);
-
-                                // validate td consistency in the database
-                                if header.number > initial_stage_progress {
-                                    let parent_td = tx.get::<tables::HeaderTD>(
-                                        (header.number - 1, header.parent_hash).into(),
-                                    )?;
-                                    let td: U256 = *tx.get::<tables::HeaderTD>(key)?.unwrap();
-                                    assert_eq!(
-                                        parent_td.map(|td| *td + header.difficulty),
-                                        Some(td)
-                                    );
-                                }
                             }
                             Ok(())
                         })?;
@@ -584,7 +600,7 @@ mod tests {
                     headers.last().unwrap().hash()
                 } else {
                     let tip = random_header(0, None);
-                    self.db.insert_headers(std::iter::once(&tip))?;
+                    self.tx.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
                 };
                 self.consensus.update_tip(tip);
@@ -611,7 +627,7 @@ mod tests {
                     consensus,
                     downloader,
                     network_handle: TestStatusUpdater::default(),
-                    db: TestTransaction::default(),
+                    tx: TestTransaction::default(),
                 }
             }
         }
@@ -621,11 +637,10 @@ mod tests {
                 &self,
                 block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
-                self.db
+                self.tx
                     .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
-                self.db.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.db.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
-                self.db.check_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
+                self.tx.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.tx.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
                 Ok(())
             }
         }

@@ -62,8 +62,8 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..0x10000000),   // TODO: reevaluate
-                    growth_step: Some(0x100000), // TODO: reevaluate
+                    size: Some(0..(1024 * 1024 * 1024 * 1024 * 4)), // TODO: reevaluate (4 tb)
+                    growth_step: Some(1024 * 1024 * 256),           // TODO: reevaluate (256 mb)
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })
@@ -144,7 +144,7 @@ pub mod test_utils {
 mod tests {
     use super::{test_utils, Env, EnvKind};
     use crate::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, ReverseWalker, Walker},
         database::Database,
         models::ShardedKey,
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
@@ -202,7 +202,7 @@ mod tests {
 
         // Cursor
         let tx = env.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor::<Headers>().unwrap();
+        let mut cursor = tx.cursor_read::<Headers>().unwrap();
 
         let first = cursor.first().unwrap();
         assert!(first.is_some(), "First should be our put");
@@ -211,6 +211,66 @@ mod tests {
         let walk = cursor.walk(key.into()).unwrap();
         let first = walk.into_iter().next().unwrap().unwrap();
         assert_eq!(first.1, value, "First next should be put value");
+    }
+
+    #[test]
+    fn db_walker() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        let mut walker = Walker::new(&mut cursor, None);
+
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), None);
+
+        // transform to ReverseWalker
+        let mut reverse_walker = walker.rev();
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+    }
+
+    #[test]
+    fn db_reverse_walker() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        let mut reverse_walker = ReverseWalker::new(&mut cursor, None);
+
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+
+        // transform to Walker
+        let mut walker = reverse_walker.forward();
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
@@ -228,7 +288,7 @@ mod tests {
         // Cursor
         let missing_key = 2;
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor::<CanonicalHeaders>().unwrap();
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         assert_eq!(cursor.current(), Ok(None));
 
         // Seek exact
@@ -255,7 +315,7 @@ mod tests {
 
         let key_to_insert = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
         // INSERT
         cursor.seek_exact(1).unwrap();
@@ -282,7 +342,7 @@ mod tests {
         // APPEND
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_mut::<CanonicalHeaders>().unwrap();
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
         cursor.seek_exact(1).unwrap();
         assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(4294936878)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
@@ -295,7 +355,7 @@ mod tests {
         let value = Account {
             nonce: 18446744073709551615,
             bytecode_hash: Some(H256::random()),
-            balance: U256::max_value(),
+            balance: U256::MAX,
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
@@ -344,7 +404,7 @@ mod tests {
         // Iterate with cursor
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert!(Some(value00) == cursor.next_dup_val().unwrap());
@@ -355,7 +415,7 @@ mod tests {
         // Seek value with exact subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let mut walker = cursor.walk_dup(key, H256::from_low_u64_be(1)).unwrap();
             assert_eq!(
                 (key, value11),
@@ -364,6 +424,95 @@ mod tests {
                     .expect("element should exist.")
                     .expect("should be able to retrieve it.")
             );
+        }
+    }
+
+    #[test]
+    fn db_iterate_over_all_dup_values() {
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
+            .expect(ERROR_ETH_ADDRESS);
+        let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT key1 (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key1 (1,1)
+        let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value11.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key2 (2,2)
+        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        env.update(|tx| tx.put::<PlainStorageState>(key2, value22.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // Iterate with walk_dup
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk_dup(first.0, first.1.key).unwrap();
+
+            // Notice that value11 and value22 have been ordered in the DB.
+            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value11.clone()))), walker.next());
+            // NOTE: Dup cursor does NOT iterates on all values but only on duplicated values of the
+            // same key. assert_eq!(Ok(Some(value22.clone())), walker.next());
+            assert_eq!(None, walker.next());
+        }
+
+        // Iterate by using `walk`
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk(first.0).unwrap();
+            assert_eq!(Some(Ok((key1, value00))), walker.next());
+            assert_eq!(Some(Ok((key1, value11))), walker.next());
+            assert_eq!(Some(Ok((key2, value22))), walker.next());
+        }
+    }
+
+    #[test]
+    fn dup_value_with_same_subkey() {
+        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT key1 (0,1)
+        let value01 = StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value01.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // PUT key1 (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
+            .unwrap();
+
+        // Iterate with walk
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let first = cursor.first().unwrap().unwrap();
+            let mut walker = cursor.walk(first.0).unwrap();
+
+            // NOTE: Both values are present
+            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value01))), walker.next());
+            assert_eq!(None, walker.next());
+        }
+
+        // seek_by_key_subkey
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+
+            // NOTE: There are two values with same SubKey but only first one is shown
+            assert_eq!(Ok(Some(value00.clone())), cursor.seek_by_key_subkey(key1, value00.key));
         }
     }
 
@@ -382,7 +531,7 @@ mod tests {
         // Seek value with non existing key.
         {
             let tx = db.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor::<AccountHistory>().unwrap();
+            let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
 
             // It will seek the one greater or equal to the query. Since we have `Address | 100`,
             // `Address | 200` in the database and we're querying `Address | 150` it will return us

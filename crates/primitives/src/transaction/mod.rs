@@ -1,9 +1,8 @@
-use crate::{Address, Bytes, ChainId, TxHash, H256};
+use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
-use ethers_core::utils::keccak256;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 pub use tx_type::TxType;
@@ -185,7 +184,16 @@ impl Transaction {
     pub fn signature_hash(&self) -> H256 {
         let mut buf = BytesMut::new();
         self.encode(&mut buf);
-        keccak256(&buf).into()
+        keccak256(&buf)
+    }
+
+    /// Get chain_id.
+    pub fn chain_id(&self) -> Option<&u64> {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => chain_id.as_ref(),
+            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(chain_id),
+            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(chain_id),
+        }
     }
 
     /// Sets the transaction's chain id to the provided value.
@@ -526,7 +534,8 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[main_codec]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSigned {
     /// Transaction hash
@@ -537,6 +546,53 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    prelude::{any, Strategy},
+    strategy::BoxedStrategy,
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for TransactionSigned {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<TransactionSigned>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        any::<(Transaction, Signature)>()
+            .prop_map(move |(mut transaction, sig)| {
+                if let Some(chain_id) = transaction.chain_id().cloned() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+                let mut tx =
+                    TransactionSigned { hash: Default::default(), signature: sig, transaction };
+                tx.hash = tx.recalculate_hash();
+                tx
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut transaction = Transaction::arbitrary(u)?;
+        if let Some(chain_id) = transaction.chain_id().cloned() {
+            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        let mut tx = TransactionSigned {
+            hash: Default::default(),
+            signature: Signature::arbitrary(u)?,
+            transaction,
+        };
+        tx.hash = tx.recalculate_hash();
+
+        Ok(tx)
+    }
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
@@ -614,7 +670,7 @@ impl Decodable for TransactionSigned {
             };
 
             let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
-            signed.hash = keccak256(&original_encoding[..first_header.payload_length]).into();
+            signed.hash = keccak256(&original_encoding[..first_header.payload_length]);
             Ok(signed)
         } else {
             let mut transaction = Transaction::Legacy(TxLegacy {
@@ -633,7 +689,7 @@ impl Decodable for TransactionSigned {
 
             let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
             let tx_length = first_header.payload_length + first_header.length();
-            signed.hash = keccak256(&original_encoding[..tx_length]).into();
+            signed.hash = keccak256(&original_encoding[..tx_length]);
             Ok(signed)
         }
     }
@@ -717,7 +773,7 @@ impl TransactionSigned {
     pub fn recalculate_hash(&self) -> H256 {
         let mut buf = Vec::new();
         self.encode_inner(&mut buf, false);
-        keccak256(&buf).into()
+        keccak256(&buf)
     }
 
     /// Create a new signed transaction from a transaction and its signature.
@@ -928,9 +984,9 @@ mod tests {
         });
         let expected_signature = Signature {
             odd_y_parity: false,
-            r: U256::from_str("eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
+            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
                 .unwrap(),
-            s: U256::from_str("3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
+            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
                 .unwrap(),
         };
         let expected =
@@ -956,9 +1012,9 @@ mod tests {
         });
         let expected_signature = Signature {
             odd_y_parity: false,
-            r: U256::from_str("e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a")
+            r: U256::from_str("0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a")
                 .unwrap(),
-            s: U256::from_str("5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
+            s: U256::from_str("0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
                 .unwrap(),
         };
 
@@ -981,9 +1037,9 @@ mod tests {
 
         let expected_signature = Signature {
             odd_y_parity: false,
-            r: U256::from_str("ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071")
+            r: U256::from_str("0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071")
                 .unwrap(),
-            s: U256::from_str("3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
+            s: U256::from_str("0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
                 .unwrap(),
         };
 
@@ -1008,9 +1064,9 @@ mod tests {
 
         let expected_signature = Signature {
             odd_y_parity: true,
-            r: U256::from_str("59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd")
+            r: U256::from_str("0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd")
                 .unwrap(),
-            s: U256::from_str("016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")
+            s: U256::from_str("0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")
                 .unwrap(),
         };
 
@@ -1032,9 +1088,9 @@ mod tests {
         });
         let signature = Signature {
             odd_y_parity: true,
-            r: U256::from_str("35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981")
+            r: U256::from_str("0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981")
                 .unwrap(),
-            s: U256::from_str("612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
+            s: U256::from_str("0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
                 .unwrap(),
         };
 
@@ -1077,8 +1133,12 @@ mod tests {
         });
 
         let sig = Signature {
-            r: hex!("2a378831cf81d99a3f06a18ae1b6ca366817ab4d88a70053c41d7a8f0368e031").into(),
-            s: hex!("450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5").into(),
+            r: U256::from_be_bytes(hex!(
+                "2a378831cf81d99a3f06a18ae1b6ca366817ab4d88a70053c41d7a8f0368e031"
+            )),
+            s: U256::from_be_bytes(hex!(
+                "450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5"
+            )),
             odd_y_parity: false,
         };
 
@@ -1108,8 +1168,10 @@ mod tests {
         });
 
         let sig = Signature {
-            r: hex!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565").into(),
-            s: hex!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1").into(),
+            r: U256::from_str("0x840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")
+                .unwrap(),
+            s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
+                .unwrap(),
             odd_y_parity: false,
         };
 

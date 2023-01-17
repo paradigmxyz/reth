@@ -1,4 +1,4 @@
-use ethers_core::types::H512;
+use crate::H512;
 
 // TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to
 // prevent misuse
@@ -25,6 +25,11 @@ impl<T> WithPeerId<T> {
     /// Get the underlying data
     pub fn data(&self) -> &T {
         &self.1
+    }
+
+    /// Returns ownership of the underlying data.
+    pub fn into_data(self) -> T {
+        self.1
     }
 
     /// Transform the data

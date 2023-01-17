@@ -21,7 +21,7 @@ pub struct Config {
 impl Config {
     /// Create new config for ethereum.
     pub fn new_ethereum() -> Self {
-        Self { chain_id: 1.into(), spec_upgrades: SpecUpgrades::new_ethereum() }
+        Self { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() }
     }
 }
 
@@ -32,7 +32,7 @@ pub struct SpecUpgrades {
     pub frontier: BlockNumber,
     //pub frontier_thawing: BlockNumber,
     pub homestead: BlockNumber,
-    //pub dao_fork: BlockNumber,
+    pub dao_fork: BlockNumber,
     pub tangerine_whistle: BlockNumber,
     pub spurious_dragon: BlockNumber,
     pub byzantium: BlockNumber,
@@ -60,7 +60,7 @@ impl SpecUpgrades {
             frontier: 0,
             //frontier_thawing: 200000,
             homestead: 1150000,
-            //dao_fork: 1920000,
+            dao_fork: 1920000,
             tangerine_whistle: 2463000,
             spurious_dragon: 2675000,
             byzantium: 4370000,
@@ -77,11 +77,12 @@ impl SpecUpgrades {
         }
     }
 
-    /// New homestead enabled spec
-    pub fn new_homestead_activated() -> Self {
+    /// New frontier enabled spec
+    pub fn new_frontier_activated() -> Self {
         Self {
-            homestead: 0,
-            frontier: u64::MAX,
+            frontier: 0,
+            homestead: u64::MAX,
+            dao_fork: u64::MAX,
             tangerine_whistle: u64::MAX,
             spurious_dragon: u64::MAX,
             byzantium: u64::MAX,
@@ -95,8 +96,8 @@ impl SpecUpgrades {
     }
 
     /// New homestead enabled spec
-    pub fn new_frontier_activated() -> Self {
-        Self { frontier: 0, ..Self::new_ethereum() }
+    pub fn new_homestead_activated() -> Self {
+        Self { homestead: 0, ..Self::new_frontier_activated() }
     }
 
     /// New tangerine enabled spec

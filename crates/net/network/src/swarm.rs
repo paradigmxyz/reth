@@ -8,7 +8,7 @@ use crate::{
 use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    error::EthStreamError,
+    errors::EthStreamError,
     Status,
 };
 use reth_primitives::PeerId;
@@ -27,7 +27,7 @@ use tracing::{trace, warn};
 /// A swarm emits [`SwarmEvent`]s when polled.
 ///
 /// The manages the [`ConnectionListener`] and delegates new incoming connections to the
-/// [`SessionsManager`]. Outgoing connections are either initiated on demand or triggered by the
+/// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
 /// Following diagram gives displays the dataflow contained in the [`Swarm`]
@@ -121,12 +121,14 @@ where
                 status,
                 messages,
                 direction,
+                timeout,
             } => {
                 self.state.on_session_activated(
                     peer_id,
                     capabilities.clone(),
                     status,
                     messages.clone(),
+                    timeout,
                 );
                 Some(SwarmEvent::SessionEstablished {
                     peer_id,
@@ -136,6 +138,11 @@ where
                     status,
                     direction,
                 })
+            }
+            SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
+                trace!( target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
+                self.state.peers_mut().on_already_connected(direction);
+                None
             }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
@@ -174,8 +181,9 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
+                // ensure we can handle an incoming connection from this address
                 if let Err(err) =
-                    self.state_mut().peers_mut().on_inbound_pending_session(remote_addr.ip())
+                    self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
                 {
                     match err {
                         InboundConnectionError::IpBanned => {
@@ -197,6 +205,9 @@ where
                     }
                     Err(err) => {
                         warn!(target: "net", ?err, "Incoming connection rejected");
+                        self.state_mut()
+                            .peers_mut()
+                            .on_incoming_pending_session_rejected_internally();
                     }
                 }
             }
@@ -221,6 +232,21 @@ where
             StateAction::NewBlockHashes { peer_id, hashes } => {
                 let msg = PeerMessage::NewBlockHashes(hashes);
                 self.sessions.send_message(&peer_id, msg);
+            }
+            StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
+            StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
+            StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+                // Insert peer only if no fork id or a valid fork id
+                if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
+                    self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
+                }
+            }
+            StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
+                if self.sessions.is_valid_fork_id(fork_id) {
+                    self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
+                } else {
+                    self.state_mut().peers_mut().remove_peer(peer_id);
+                }
             }
         }
         None
@@ -336,6 +362,10 @@ pub(crate) enum SwarmEvent {
         /// Whether the session was closed due to an error
         error: Option<EthStreamError>,
     },
+    /// Admin rpc: new peer added
+    PeerAdded(PeerId),
+    /// Admin rpc: peer removed
+    PeerRemoved(PeerId),
     /// Closed an incoming pending session during authentication.
     IncomingPendingSessionClosed {
         remote_addr: SocketAddr,

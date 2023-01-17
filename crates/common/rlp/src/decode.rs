@@ -218,6 +218,33 @@ impl Decodable for bool {
     }
 }
 
+#[cfg(feature = "std")]
+impl Decodable for std::net::IpAddr {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        let h = Header::decode(buf)?;
+        if h.list {
+            return Err(DecodeError::UnexpectedList)
+        }
+        let o = match h.payload_length {
+            4 => {
+                let mut to = [0_u8; 4];
+                to.copy_from_slice(&buf[..4]);
+                IpAddr::V4(Ipv4Addr::from(to))
+            }
+            16 => {
+                let mut to = [0u8; 16];
+                to.copy_from_slice(&buf[..16]);
+                IpAddr::V6(Ipv6Addr::from(to))
+            }
+            _ => return Err(DecodeError::UnexpectedLength),
+        };
+        buf.advance(h.payload_length);
+        Ok(o)
+    }
+}
+
 #[cfg(feature = "ethnum")]
 decode_integer!(ethnum::U256);
 
@@ -225,6 +252,7 @@ decode_integer!(ethnum::U256);
 mod ethereum_types_support {
     use super::*;
     use ethereum_types::*;
+    use revm_interpreter::{ruint::aliases::U128 as RU128, B160, B256, U256 as RU256};
 
     macro_rules! fixed_hash_impl {
         ($t:ty) => {
@@ -236,13 +264,15 @@ mod ethereum_types_support {
         };
     }
 
+    fixed_hash_impl!(B160);
+    fixed_hash_impl!(B256);
+
     fixed_hash_impl!(H64);
     fixed_hash_impl!(H128);
     fixed_hash_impl!(H160);
     fixed_hash_impl!(H256);
     fixed_hash_impl!(H512);
     fixed_hash_impl!(H520);
-    fixed_hash_impl!(Bloom);
 
     macro_rules! fixed_uint_impl {
         ($t:ty, $n_bytes:tt) => {
@@ -274,6 +304,40 @@ mod ethereum_types_support {
             }
         };
     }
+
+    macro_rules! fixed_revm_uint_impl {
+        ($t:ty, $n_bytes:tt) => {
+            impl Decodable for $t {
+                fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+                    let h = Header::decode(buf)?;
+                    if h.list {
+                        return Err(DecodeError::UnexpectedList)
+                    }
+                    if h.payload_length > $n_bytes {
+                        return Err(DecodeError::Overflow)
+                    }
+                    if buf.remaining() < h.payload_length {
+                        return Err(DecodeError::InputTooShort)
+                    }
+                    // In the case of 0x80, the Header will be decoded, leaving h.payload_length to
+                    // be zero.
+                    // 0x80 is the canonical encoding of 0, so we return 0 here.
+                    if h.payload_length == 0 {
+                        return Ok(<$t>::from(0u8))
+                    }
+                    let n = <$t>::from_be_bytes(
+                        static_left_pad::<$n_bytes>(&buf[..h.payload_length])
+                            .ok_or(DecodeError::LeadingZero)?,
+                    );
+                    buf.advance(h.payload_length);
+                    Ok(n)
+                }
+            }
+        };
+    }
+
+    fixed_revm_uint_impl!(RU256, 32);
+    fixed_revm_uint_impl!(RU128, 16);
 
     fixed_uint_impl!(U64, 8);
     fixed_uint_impl!(U128, 16);
@@ -381,6 +445,39 @@ impl Decodable for smol_str::SmolStr {
         };
         from.advance(h.payload_length);
         s
+    }
+}
+
+#[cfg(feature = "enr")]
+impl<K> Decodable for enr::Enr<K>
+where
+    K: enr::EnrKey,
+{
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        // currently the only way to build an enr is to decode it using the rlp::Decodable trait
+        let enr = <Self as rlp::Decodable>::decode(&rlp::Rlp::new(buf)).map_err(|e| match e {
+            rlp::DecoderError::RlpIsTooShort => DecodeError::InputTooShort,
+            rlp::DecoderError::RlpInvalidLength => DecodeError::Overflow,
+            rlp::DecoderError::RlpExpectedToBeList => DecodeError::UnexpectedString,
+            rlp::DecoderError::RlpExpectedToBeData => DecodeError::UnexpectedList,
+            rlp::DecoderError::RlpDataLenWithZeroPrefix |
+            rlp::DecoderError::RlpListLenWithZeroPrefix => DecodeError::LeadingZero,
+            rlp::DecoderError::RlpInvalidIndirection => DecodeError::NonCanonicalSize,
+            rlp::DecoderError::RlpIncorrectListLen => {
+                DecodeError::Custom("incorrect list length when decoding rlp")
+            }
+            rlp::DecoderError::RlpIsTooBig => DecodeError::Custom("rlp is too big"),
+            rlp::DecoderError::RlpInconsistentLengthAndData => {
+                DecodeError::Custom("inconsistent length and data when decoding rlp")
+            }
+            rlp::DecoderError::Custom(s) => DecodeError::Custom(s),
+        });
+        if enr.is_ok() {
+            // Decode was successful, advance buffer
+            let header = Header::decode(buf)?;
+            buf.advance(header.payload_length);
+        }
+        enr
     }
 }
 
@@ -601,5 +698,69 @@ mod tests {
             (Ok(SmolStr::new("test smol str")), b.as_ref()),
             (Err(DecodeError::UnexpectedList), &hex!("C0")[..]),
         ])
+    }
+
+    // test vector from the enr library rlp encoding tests
+    // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#L1019>
+    #[cfg(feature = "enr")]
+    #[test]
+    fn decode_enr_rlp() {
+        use enr::{secp256k1::SecretKey, Enr, EnrPublicKey};
+        use std::net::Ipv4Addr;
+
+        let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
+        let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
+        let expected_pubkey =
+            hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
+
+        let mut valid_record_buf = valid_record.as_slice();
+        let enr = Enr::<SecretKey>::decode(&mut valid_record_buf).unwrap();
+        let pubkey = enr.public_key().encode();
+
+        // Byte array must be consumed after enr has finished decoding
+        assert!(valid_record_buf.is_empty());
+
+        assert_eq!(enr.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(enr.id(), Some(String::from("v4")));
+        assert_eq!(enr.udp4(), Some(30303));
+        assert_eq!(enr.tcp4(), None);
+        assert_eq!(enr.signature(), &signature[..]);
+        assert_eq!(pubkey.to_vec(), expected_pubkey);
+        assert!(enr.verify());
+    }
+
+    // test vector from the enr library rlp encoding tests
+    // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
+    #[cfg(feature = "enr")]
+    #[test]
+    fn encode_decode_enr_rlp() {
+        use enr::{secp256k1::SecretKey, Enr, EnrBuilder, EnrKey, EnrPublicKey};
+        use std::net::Ipv4Addr;
+
+        let key = SecretKey::new(&mut rand::rngs::OsRng);
+        let ip = Ipv4Addr::new(127, 0, 0, 1);
+        let tcp = 3000;
+
+        let enr = {
+            let mut builder = EnrBuilder::new("v4");
+            builder.ip(ip.into());
+            builder.tcp4(tcp);
+            builder.build(&key).unwrap()
+        };
+
+        let mut encoded = BytesMut::new();
+        enr.encode(&mut encoded);
+        let mut encoded_bytes = &encoded[..];
+        let decoded_enr = Enr::<SecretKey>::decode(&mut encoded_bytes).unwrap();
+
+        // Byte array must be consumed after enr has finished decoding
+        assert!(encoded_bytes.is_empty());
+
+        assert_eq!(decoded_enr, enr);
+        assert_eq!(decoded_enr.id(), Some("v4".into()));
+        assert_eq!(decoded_enr.ip4(), Some(ip));
+        assert_eq!(decoded_enr.tcp4(), Some(tcp));
+        assert_eq!(decoded_enr.public_key().encode(), key.public().encode());
+        assert!(decoded_enr.verify());
     }
 }

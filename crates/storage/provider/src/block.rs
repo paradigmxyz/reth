@@ -1,14 +1,22 @@
 use auto_impl::auto_impl;
 use reth_db::{
-    models::{BlockNumHash, StoredBlockOmmers},
+    models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{provider::Error as ProviderError, Result};
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, BlockHash, BlockHashOrNumber, BlockLocked, Header, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, Header, SealedBlock, H256, U256,
 };
+
+/// Client trait for fetching block hashes by number.
+#[auto_impl(&)]
+pub trait BlockHashProvider: Send + Sync {
+    /// Get the hash of the block with the given number. Returns `None` if no block with this number
+    /// exists.
+    fn block_hash(&self, number: U256) -> Result<Option<H256>>;
+}
 
 /// Client trait for fetching `Header` related data.
 #[auto_impl(&)]
@@ -31,10 +39,13 @@ pub trait HeaderProvider: Send + Sync {
             BlockHashOrNumber::Number(num) => self.header_by_number(num),
         }
     }
+
+    /// Get total difficulty by block hash.
+    fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
 }
 
 /// Api trait for fetching `Block` related data.
-pub trait BlockProvider: Send + Sync {
+pub trait BlockProvider: BlockHashProvider + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 
@@ -60,13 +71,13 @@ pub trait BlockProvider: Send + Sync {
     /// Get the hash of the block by matching the given id.
     fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
         match block_id {
-            BlockId::Hash(hash) => Ok(Some(hash)),
+            BlockId::Hash(hash) => Ok(Some(H256(hash.0))),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumber::Latest) {
                     return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
-                    .map(|num| self.block_hash(num.into()))
+                    .map(|num| self.block_hash(U256::from(num)))
                     .transpose()
                     .map(|maybe_hash| maybe_hash.flatten())
             }
@@ -79,17 +90,13 @@ pub trait BlockProvider: Send + Sync {
         block_id: BlockId,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         match block_id {
-            BlockId::Hash(hash) => self.block_number(hash),
+            BlockId::Hash(hash) => self.block_number(H256(hash.0)),
             BlockId::Number(num) => self.convert_block_number(num),
         }
     }
 
     /// Gets the `Block` for the given hash. Returns `None` if no block with this hash exists.
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>>;
-
-    /// Get the hash of the block with the given number. Returns `None` if no block with this number
-    /// exists.
-    fn block_hash(&self, number: U256) -> Result<Option<H256>>;
 }
 
 /// Current status of the blockchain's head.
@@ -105,28 +112,6 @@ pub struct ChainInfo {
     pub safe_finalized: Option<reth_primitives::BlockNumber>,
 }
 
-/// Get value from [tables::CumulativeTxCount] by block hash
-/// as the table is indexed by NumHash key we are obtaining number from
-/// [tables::HeaderNumbers]
-pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-    tx: &TX,
-    block_hash: H256,
-) -> Result<u64> {
-    let block_number = tx
-        .get::<tables::HeaderNumbers>(block_hash)?
-        .ok_or(ProviderError::BlockHashNotExist { block_hash })?;
-
-    let block_num_hash = BlockNumHash((block_number, block_hash));
-
-    tx.get::<tables::CumulativeTxCount>(block_num_hash)?.ok_or_else(|| {
-        ProviderError::BlockBodyNotExist {
-            block_number: block_num_hash.number(),
-            block_hash: block_num_hash.hash(),
-        }
-        .into()
-    })
-}
-
 /// Fill block to database. Useful for tests.
 /// Check parent dependency in [tables::HeaderNumbers] and in [tables::CumulativeTxCount] tables.
 /// Inserts blocks data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers],
@@ -134,7 +119,7 @@ pub fn get_cumulative_tx_count_by_hash<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 /// [tables::CumulativeTxCount] and [tables::BlockBodies]
 pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
-    block: &BlockLocked,
+    block: &SealedBlock,
     has_block_reward: bool,
 ) -> Result<()> {
     let block_num_hash = BlockNumHash((block.number, block.hash()));
@@ -149,22 +134,49 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
     )?;
 
-    if block.number == 0 {
-        tx.put::<tables::CumulativeTxCount>(block_num_hash, 0)?;
-    } else {
-        let mut tx_number = get_cumulative_tx_count_by_hash(tx, block.parent_hash)?;
-
-        for eth_tx in block.body.iter() {
-            let rec_tx = eth_tx.clone().into_ecrecovered().unwrap();
-            tx.put::<tables::TxSenders>(tx_number, rec_tx.signer())?;
-            tx.put::<tables::Transactions>(tx_number, rec_tx.into())?;
-            tx_number += 1;
+    let (mut current_tx_id, mut transition_id) = {
+        if block.number == 0 {
+            (0, 0)
+        } else {
+            let prev_block_num = block.number - 1;
+            let prev_block_hash = tx
+                .get::<tables::CanonicalHeaders>(prev_block_num)?
+                .ok_or(ProviderError::BlockNumber { block_number: prev_block_num })?;
+            let prev_body = tx
+                .get::<tables::BlockBodies>((prev_block_num, prev_block_hash).into())?
+                .ok_or(ProviderError::BlockBody {
+                    block_number: prev_block_num,
+                    block_hash: prev_block_hash,
+                })?;
+            let last_transition_id = tx
+                .get::<tables::BlockTransitionIndex>((prev_block_num, prev_block_hash).into())?
+                .ok_or(ProviderError::BlockTransition {
+                    block_number: prev_block_num,
+                    block_hash: prev_block_hash,
+                })?;
+            (prev_body.start_tx_id + prev_body.tx_count, last_transition_id + 1)
         }
-        tx.put::<tables::CumulativeTxCount>(
-            block_num_hash,
-            tx_number + if has_block_reward { 1 } else { 0 },
-        )?;
+    };
+
+    // insert body data
+    tx.put::<tables::BlockBodies>(
+        block_num_hash,
+        StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
+    )?;
+
+    for transaction in block.body.iter() {
+        let rec_tx = transaction.clone().into_ecrecovered().unwrap();
+        tx.put::<tables::TxSenders>(current_tx_id, rec_tx.signer())?;
+        tx.put::<tables::Transactions>(current_tx_id, rec_tx.into())?;
+        tx.put::<tables::TxTransitionIndex>(current_tx_id, transition_id)?;
+        current_tx_id += 1;
+        transition_id += 1;
     }
+
+    if has_block_reward {
+        transition_id += 1;
+    }
+    tx.put::<tables::BlockTransitionIndex>((block.number, block.hash()).into(), transition_id)?;
 
     Ok(())
 }

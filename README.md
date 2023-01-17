@@ -16,7 +16,7 @@
 
 # What is Reth? What are its goals?
 
-Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
+Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/tree/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
 
 As a full Ethereum node, Reth allows users to connect to the Ethereum network and interact with the Ethereum blockchain. This includes sending and receiving transactions/logs/traces, as well as accessing and interacting with smart contracts. Building a successful Ethereum node requires creating a high-quality implementation that is both secure and efficient, as well as being easy to use on consumer hardware. It also requires building a strong community of contributors who can help support and improve the software.
 
@@ -37,15 +37,24 @@ The project is not ready for use. We hope to have full sync implemented sometime
 
 # For Developers
 
+## Running Reth
+
+See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how to run Reth.
+
 ## Build & Test
 
 Rust minimum required version to build this project is 1.65.0 published 02.11.2022
+
+Prerequisites: libclang, `libclang-dev` on Debian
+
+To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/getting-started/installing-geth)
 
 ```sh
 git clone https://github.com/paradigmxyz/reth
 cd reth
 cargo test --all
 ```
+
 
 ## Contributing and Getting Help
 

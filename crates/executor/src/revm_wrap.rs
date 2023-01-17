@@ -9,14 +9,14 @@ use revm::{
     BlockEnv, TransactTo, TxEnv,
 };
 
-/// SubState of database. Uses revm internal cache with binding to reth DbExecutor trait.
+/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
 pub type SubState<DB> = CacheDB<State<DB>>;
 
-/// Wrapper around ExeuctorDb that implements revm database trait
+/// Wrapper around StateProvider that implements revm database trait
 pub struct State<DB: StateProvider>(pub DB);
 
 impl<DB: StateProvider> State<DB> {
-    /// Create new State with generic ExecutorDb.
+    /// Create new State with generic StateProvider.
     pub fn new(db: DB) -> Self {
         Self(db)
     }
@@ -31,7 +31,7 @@ impl<DB: StateProvider> State<DB> {
         &mut self.0
     }
 
-    /// Consume State and return inner DbExecutable.
+    /// Consume State and return inner StateProvider.
     pub fn into_inner(self) -> DB {
         self.0
     }
@@ -55,10 +55,9 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
     }
 
     fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
-        let mut h_index = H256::zero();
-        index.to_big_endian(h_index.as_bytes_mut());
-
-        Ok(self.0.storage(address, h_index)?.unwrap_or_default())
+        let index = H256(index.to_be_bytes());
+        let ret = self.0.storage(address, index)?.unwrap_or_default();
+        Ok(ret)
     }
 
     fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
@@ -67,13 +66,19 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
 }
 
 /// Fill block environment from Block.
-pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header) {
-    block_env.number = header.number.into();
+pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
+    block_env.number = U256::from(header.number);
     block_env.coinbase = header.beneficiary;
-    block_env.timestamp = header.timestamp.into();
-    block_env.difficulty = header.difficulty;
-    block_env.basefee = header.base_fee_per_gas.unwrap_or_default().into();
-    block_env.gas_limit = header.gas_limit.into();
+    block_env.timestamp = U256::from(header.timestamp);
+    if after_merge {
+        block_env.prevrandao = Some(header.mix_hash);
+        block_env.difficulty = U256::ZERO;
+    } else {
+        block_env.difficulty = header.difficulty;
+        block_env.prevrandao = None;
+    }
+    block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
+    block_env.gas_limit = U256::from(header.gas_limit);
 }
 
 /// Fill transaction environment from Transaction.
@@ -90,13 +95,13 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             input,
         }) => {
             tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = (*gas_price).into();
+            tx_env.gas_price = U256::from(*gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match to {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
+            tx_env.value = U256::from(*value);
             tx_env.data = input.0.clone();
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
@@ -112,13 +117,13 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             access_list,
         }) => {
             tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = (*gas_price).into();
+            tx_env.gas_price = U256::from(*gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match to {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
+            tx_env.value = U256::from(*value);
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -128,7 +133,10 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
                 .map(|l| {
                     (
                         l.address,
-                        l.storage_keys.iter().map(|k| U256::from_big_endian(k.as_ref())).collect(),
+                        l.storage_keys
+                            .iter()
+                            .map(|k| U256::from_be_bytes(k.to_fixed_bytes()))
+                            .collect(),
                     )
                 })
                 .collect();
@@ -145,13 +153,13 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
             access_list,
         }) => {
             tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = (*max_fee_per_gas).into();
-            tx_env.gas_priority_fee = Some((*max_priority_fee_per_gas).into());
+            tx_env.gas_price = U256::from(*max_fee_per_gas);
+            tx_env.gas_priority_fee = Some(U256::from(*max_priority_fee_per_gas));
             tx_env.transact_to = match to {
                 TransactionKind::Call(to) => TransactTo::Call(*to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
+            tx_env.value = U256::from(*value);
             tx_env.data = input.0.clone();
             tx_env.chain_id = Some(*chain_id);
             tx_env.nonce = Some(*nonce);
@@ -161,7 +169,10 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
                 .map(|l| {
                     (
                         l.address,
-                        l.storage_keys.iter().map(|k| U256::from_big_endian(k.as_ref())).collect(),
+                        l.storage_keys
+                            .iter()
+                            .map(|k| U256::from_be_bytes(k.to_fixed_bytes()))
+                            .collect(),
                     )
                 })
                 .collect();
@@ -172,25 +183,22 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovere
 /// Check equality between [`reth_primitives::Log`] and [`revm::Log`]
 pub fn is_log_equal(revm_log: &revm::Log, reth_log: &reth_primitives::Log) -> bool {
     revm_log.topics.len() == reth_log.topics.len() &&
-        revm_log.address == reth_log.address &&
-        revm_log.data == reth_log.data &&
+        revm_log.address.0 == reth_log.address.0 &&
+        revm_log.data == reth_log.data.0 &&
         !revm_log
             .topics
             .iter()
             .zip(reth_log.topics.iter())
-            .any(|(revm_topic, reth_topic)| revm_topic != reth_topic)
+            .any(|(revm_topic, reth_topic)| revm_topic.0 != reth_topic.0)
 }
 
 /// Create reth primitive [Account] from [revm::AccountInfo].
 /// Check if revm bytecode hash is [KECCAK_EMPTY] and put None to reth [Account]
 pub fn to_reth_acc(revm_acc: &revm::AccountInfo) -> Account {
+    let code_hash = revm_acc.code_hash;
     Account {
         balance: revm_acc.balance,
         nonce: revm_acc.nonce,
-        bytecode_hash: if revm_acc.code_hash == KECCAK_EMPTY {
-            None
-        } else {
-            Some(revm_acc.code_hash)
-        },
+        bytecode_hash: if code_hash == KECCAK_EMPTY { None } else { Some(code_hash) },
     }
 }

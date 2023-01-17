@@ -3,6 +3,7 @@ use crate::{
     config::MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::PoolError,
     identifier::{SenderId, TransactionId},
+    metrics::TxPoolMetrics,
     pool::{
         best::BestTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
@@ -17,6 +18,7 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use reth_primitives::{TxHash, H256};
+use ruint::uint;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -28,7 +30,7 @@ use std::{
 /// The minimal value the basefee can decrease to
 ///
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` (https://eips.ethereum.org/EIPS/eip-1559) is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
-pub(crate) const MIN_PROTOCOL_BASE_FEE: U256 = U256([7, 0, 0, 0]);
+pub(crate) const MIN_PROTOCOL_BASE_FEE: U256 = uint!(0x7_U256);
 
 /// A pool that manages transactions.
 ///
@@ -85,6 +87,8 @@ pub struct TxPool<T: TransactionOrdering> {
     basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
+    /// Transaction pool metrics
+    metrics: TxPoolMetrics,
 }
 
 // === impl TxPool ===
@@ -99,6 +103,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_pool: Default::default(),
             all_transactions: AllTransactions::new(config.max_account_slots),
             config,
+            metrics: Default::default(),
         }
     }
 
@@ -145,7 +150,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.by_hash.get(tx_hash).cloned()
     }
 
-    /// Returns all transaction for the hashes, if it exis.
+    /// Returns all transaction for the hashes, if it exists.
     pub(crate) fn get_all<'a>(
         &'a self,
         txs: impl IntoIterator<Item = TxHash> + 'a,
@@ -161,6 +166,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Remove all transaction that were included in the block
         for tx_hash in &event.mined_transactions {
             self.remove_transaction_by_hash(tx_hash);
+            // Update removed transactions metric
+            self.metrics.removed_transactions.increment(1);
         }
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
@@ -215,6 +222,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
+                // Update inserted transactions metric
+                self.metrics.inserted_transactions.increment(1);
                 let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
@@ -231,14 +240,32 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                 Ok(res)
             }
-            Err(InsertErr::Underpriced { existing, .. }) => {
-                Err(PoolError::ReplacementUnderpriced(existing))
-            }
-            Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap }) => {
-                Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
-            }
-            Err(InsertErr::ExceededSenderTransactionsCapacity { transaction }) => {
-                Err(PoolError::SpammerExceededCapacity(transaction.sender(), *transaction.hash()))
+            Err(e) => {
+                // Update invalid transactions metric
+                self.metrics.invalid_transactions.increment(1);
+                match e {
+                    InsertErr::Underpriced { existing, .. } => {
+                        Err(PoolError::ReplacementUnderpriced(existing))
+                    }
+                    InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap } => {
+                        Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
+                    }
+                    InsertErr::ExceededSenderTransactionsCapacity { transaction } => {
+                        Err(PoolError::SpammerExceededCapacity(
+                            transaction.sender(),
+                            *transaction.hash(),
+                        ))
+                    }
+                    InsertErr::TxGasLimitMoreThanAvailableBlockGas {
+                        transaction,
+                        block_gas_limit,
+                        tx_gas_limit,
+                    } => Err(PoolError::TxExceedsGasLimit(
+                        *transaction.hash(),
+                        block_gas_limit,
+                        tx_gas_limit,
+                    )),
+                }
             }
         }
     }
@@ -430,7 +457,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 }
 
 // Additional test impls
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 #[allow(missing_docs)]
 impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn pending(&self) -> &PendingPool<T> {
@@ -459,7 +486,7 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Expected base fee for the pending block.
     pending_basefee: U256,
-    /// Minimum base fee required by the protol.
+    /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
     minimal_protocol_basefee: U256,
@@ -752,6 +779,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// This will enforce all additional rules in the context of this pool, such as:
     ///   - Spam protection: reject new non-local transaction from a sender that exhausted its slot
     ///     capacity.
+    ///   - Gas limit: reject transactions if they exceed a block's maximum gas.
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
@@ -764,6 +792,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     transaction: Arc::new(transaction),
                 })
             }
+        }
+        if transaction.gas_limit() > self.block_gas_limit {
+            return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
+                block_gas_limit: self.block_gas_limit,
+                tx_gas_limit: transaction.gas_limit(),
+                transaction: Arc::new(transaction),
+            })
         }
         Ok(transaction)
     }
@@ -789,7 +824,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let transaction = Arc::new(self.ensure_valid(transaction)?);
         let tx_id = *transaction.id();
         let mut state = TxState::default();
-        let mut cumulative_cost = U256::zero();
+        let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
         let predecessor =
@@ -988,6 +1023,12 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     ///
     /// The sender can be considered a spammer at this point.
     ExceededSenderTransactionsCapacity { transaction: Arc<ValidPoolTransaction<T>> },
+    /// Transaction gas limit exceeds block's gas limit
+    TxGasLimitMoreThanAvailableBlockGas {
+        transaction: Arc<ValidPoolTransaction<T>>,
+        block_gas_limit: u64,
+        tx_gas_limit: u64,
+    },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -1103,13 +1144,13 @@ impl SenderInfo {
 mod tests {
     use super::*;
     use crate::{
-        test_util::{MockTransaction, MockTransactionFactory},
+        test_utils::{MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
 
     #[test]
     fn test_simple_insert() {
-        let on_chain_balance = U256::zero();
+        let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1152,7 +1193,7 @@ mod tests {
 
     #[test]
     fn insert_replace() {
-        let on_chain_balance = U256::zero();
+        let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1174,7 +1215,7 @@ mod tests {
     // insert nonce then nonce - 1
     #[test]
     fn insert_previous() {
-        let on_chain_balance = U256::zero();
+        let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1209,7 +1250,8 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        let tx = MockTransaction::eip1559().inc_nonce().set_gas_price(100u64.into()).inc_limit();
+        let tx =
+            MockTransaction::eip1559().inc_nonce().set_gas_price(U256::from(100u64)).inc_limit();
         let first = f.validated(tx.clone());
         let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
 
@@ -1240,7 +1282,7 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        pool.pending_basefee = pool.minimal_protocol_basefee + 1;
+        pool.pending_basefee = pool.minimal_protocol_basefee.checked_add(U256::from(1)).unwrap();
         let tx = MockTransaction::eip1559().inc_nonce().inc_limit();
         let first = f.validated(tx.clone());
 
@@ -1320,5 +1362,20 @@ mod tests {
             on_chain_nonce,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn reject_tx_over_gas_limit() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let tx = MockTransaction::eip1559().with_gas_limit(30_000_001);
+
+        assert!(matches!(
+            pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
+            Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
+        ));
     }
 }

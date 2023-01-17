@@ -366,14 +366,6 @@ impl<T> Encodable for RequestPair<T>
 where
     T: Encodable,
 {
-    fn length(&self) -> usize {
-        let mut length = 0;
-        length += self.request_id.length();
-        length += self.message.length();
-        length += length_of_length(length);
-        length
-    }
-
     fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         let header =
             Header { list: true, payload_length: self.request_id.length() + self.message.length() };
@@ -381,6 +373,14 @@ where
         header.encode(out);
         self.request_id.encode(out);
         self.message.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        let mut length = 0;
+        length += self.request_id.length();
+        length += self.message.length();
+        length += length_of_length(length);
+        length
     }
 }
 

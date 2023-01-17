@@ -79,7 +79,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             .map_err(|e| Error::Read(e.into()))?
             .map(decoder::<T>);
 
-        Ok(Walker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
+        Ok(Walker::new(self, start))
     }
 }
 
@@ -101,6 +101,18 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
         self.inner.next_dup().map_err(|e| Error::Read(e.into()))?.map(decode_value::<T>).transpose()
+    }
+
+    fn seek_by_key_subkey(
+        &mut self,
+        key: <T as Table>::Key,
+        subkey: <T as DupSort>::SubKey,
+    ) -> ValueOnlyResult<T> {
+        self.inner
+            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+            .map_err(|e| Error::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
     }
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.

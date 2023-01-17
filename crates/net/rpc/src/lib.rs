@@ -11,9 +11,13 @@
 //!
 //! Provides the implementation of all RPC interfaces.
 
+mod admin;
+mod engine;
 mod eth;
 mod net;
 
+pub use admin::AdminApi;
+pub use engine::EngineApi;
 pub use eth::{EthApi, EthApiSpec, EthPubSub};
 pub use net::NetApi;
 

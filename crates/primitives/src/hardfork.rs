@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 /// Ethereum mainnet hardforks
 #[allow(missing_docs)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub enum Hardfork {
     Frontier,
     Homestead,
@@ -19,6 +19,7 @@ pub enum Hardfork {
     London,
     ArrowGlacier,
     GrayGlacier,
+    #[default]
     Latest,
 }
 
@@ -111,8 +112,9 @@ impl Hardfork {
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
-    /// This assumes the current hardfork's block number is the current head and uses all known
-    /// future hardforks to initialize the filter.
+    ///
+    /// **CAUTION**: This assumes the current hardfork's block number is the current head and uses
+    /// all known future hardforks to initialize the filter.
     pub fn fork_filter(&self) -> ForkFilter {
         let all_forks = Hardfork::all_forks();
         let future_forks: Vec<BlockNumber> = all_forks
@@ -154,12 +156,6 @@ impl FromStr for Hardfork {
     }
 }
 
-impl Default for Hardfork {
-    fn default() -> Self {
-        Hardfork::Latest
-    }
-}
-
 impl From<BlockNumber> for Hardfork {
     fn from(num: BlockNumber) -> Hardfork {
         match num {
@@ -178,6 +174,12 @@ impl From<BlockNumber> for Hardfork {
 
             _ => Hardfork::Latest,
         }
+    }
+}
+
+impl From<Hardfork> for BlockNumber {
+    fn from(value: Hardfork) -> Self {
+        value.fork_block()
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::{
-    error::{EthStreamError, HandshakeError},
+    errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     types::{EthMessage, ProtocolMessage, Status},
 };
@@ -65,7 +65,7 @@ where
             .inner
             .next()
             .await
-            .ok_or(EthStreamError::HandshakeError(HandshakeError::NoResponse))??;
+            .ok_or(EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse))??;
 
         if their_msg.len() > MAX_MESSAGE_SIZE {
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
@@ -73,7 +73,10 @@ where
 
         let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
             Ok(m) => m,
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                tracing::debug!("rlp decode error in eth handshake: msg={their_msg:x}");
+                return Err(err.into())
+            }
         };
 
         // TODO: Add any missing checks
@@ -81,7 +84,7 @@ where
         match msg.message {
             EthMessage::Status(resp) => {
                 if status.genesis != resp.genesis {
-                    return Err(HandshakeError::MismatchedGenesis {
+                    return Err(EthHandshakeError::MismatchedGenesis {
                         expected: status.genesis,
                         got: resp.genesis,
                     }
@@ -89,7 +92,7 @@ where
                 }
 
                 if status.version != resp.version {
-                    return Err(HandshakeError::MismatchedProtocolVersion {
+                    return Err(EthHandshakeError::MismatchedProtocolVersion {
                         expected: status.version,
                         got: resp.version,
                     }
@@ -97,14 +100,14 @@ where
                 }
 
                 if status.chain != resp.chain {
-                    return Err(HandshakeError::MismatchedChain {
+                    return Err(EthHandshakeError::MismatchedChain {
                         expected: status.chain,
                         got: resp.chain,
                     }
                     .into())
                 }
 
-                fork_filter.validate(resp.forkid).map_err(HandshakeError::InvalidFork)?;
+                fork_filter.validate(resp.forkid).map_err(EthHandshakeError::InvalidFork)?;
 
                 // now we can create the `EthStream` because the peer has successfully completed
                 // the handshake
@@ -112,7 +115,9 @@ where
 
                 Ok((stream, resp))
             }
-            _ => Err(EthStreamError::HandshakeError(HandshakeError::NonStatusMessageInHandshake)),
+            _ => Err(EthStreamError::EthHandshakeError(
+                EthHandshakeError::NonStatusMessageInHandshake,
+            )),
         }
     }
 }
@@ -191,12 +196,15 @@ where
 
         let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
             Ok(m) => m,
-            Err(err) => return Poll::Ready(Some(Err(err.into()))),
+            Err(err) => {
+                tracing::debug!("rlp decode error: msg={bytes:x}");
+                return Poll::Ready(Some(Err(err.into())))
+            }
         };
 
         if matches!(msg.message, EthMessage::Status(_)) {
-            return Poll::Ready(Some(Err(EthStreamError::HandshakeError(
-                HandshakeError::StatusNotInHandshake,
+            return Poll::Ready(Some(Err(EthStreamError::EthHandshakeError(
+                EthHandshakeError::StatusNotInHandshake,
             ))))
         }
 
@@ -217,7 +225,7 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
         if matches!(item, EthMessage::Status(_)) {
-            return Err(EthStreamError::HandshakeError(HandshakeError::StatusNotInHandshake))
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
         let mut bytes = BytesMut::new();
@@ -259,12 +267,12 @@ mod tests {
     #[tokio::test]
     async fn can_handshake() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Mainnet.into(),
-            total_difficulty: U256::from(0),
+            total_difficulty: U256::ZERO,
             blockhash: H256::random(),
             genesis,
             // Pass the current fork id.
@@ -393,12 +401,12 @@ mod tests {
         );
 
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, vec![]);
+        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Mainnet.into(),
-            total_difficulty: U256::from(0),
+            total_difficulty: U256::ZERO,
             blockhash: H256::random(),
             genesis,
             // Pass the current fork id.

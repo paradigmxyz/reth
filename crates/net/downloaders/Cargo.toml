@@ -26,5 +26,5 @@ tracing = "0.1.37"
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 assert_matches = "1.5.0"
-once_cell = "1.15.0"
+once_cell = "1.17.0"
 tokio = { version = "1.21.2", features = ["full"] }

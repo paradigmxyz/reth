@@ -64,7 +64,7 @@ pub enum ECIESErrorImpl {
     /// Error when decoding RLP data
     #[error(transparent)]
     RLPDecoding(reth_rlp::DecodeError),
-    /// Error when convering to integer
+    /// Error when converting to integer
     #[error(transparent)]
     FromInt(std::num::TryFromIntError),
     /// Error when trying to split an array beyond its length
@@ -83,6 +83,14 @@ pub enum ECIESErrorImpl {
         /// The actual value returned from the peer
         msg: Option<IngressECIESValue>,
     },
+    /// Error when the stream was closed by the peer for being unreadable.
+    ///
+    /// This exact error case happens when the wrapped stream in
+    /// [`Framed`](tokio_util::codec::Framed) is closed by the peer, See
+    /// [ConnectionReset](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to decode
+    /// a message from the (partially filled) buffer.
+    #[error("Stream closed due to not being readable.")]
+    UnreadableStream,
 }
 
 impl From<ECIESErrorImpl> for ECIESError {

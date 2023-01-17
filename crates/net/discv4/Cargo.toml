@@ -6,15 +6,16 @@ license = "Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 description = """
-Ethereum network support
+Ethereum network discovery
 """
 
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../common/rlp" }
+reth-rlp = { path = "../../common/rlp", features = ["enr"] }
 reth-rlp-derive = { path = "../../common/rlp-derive" }
 reth-net-common = { path = "../common" }
+reth-net-nat = { path = "../nat" }
 
 # ethereum
 discv5 = { git = "https://github.com/sigp/discv5" }
@@ -23,25 +24,24 @@ secp256k1 = { version = "0.24", features = [
     "rand-std",
     "recovery",
 ] }
+enr = { version = "0.7.0",  default-features = false, features = ["rust-secp256k1"] }
 
 # async/futures
 tokio = { version = "1", features = ["io-util", "net", "time"] }
 tokio-stream = "0.1"
 
 # misc
-generic-array = "0.14"
-tracing = "0.1"
 bytes = "1.2"
+tracing = "0.1"
 thiserror = "1.0"
-url = "2.3"
 hex = "0.4"
-public-ip = "0.2"
 rand = { version = "0.8", optional = true }
+generic-array = "0.14"
 
 [dev-dependencies]
 rand = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros"] }
 reth-tracing = { path = "../../tracing" }
 
 [features]
-mock = ["rand"]
+test-utils = ["rand"]

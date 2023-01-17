@@ -1,15 +1,18 @@
-use backon::{ExponentialBackoff, Retryable};
+use backon::{ConstantBackoff, Retryable};
 use futures_util::{stream, StreamExt, TryStreamExt};
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
+        bodies::{
+            client::BodiesClient,
+            downloader::{BlockResponse, BodyDownloader},
+        },
         downloader::{DownloadStream, Downloader},
-        error::{DownloadError, DownloadResult},
+        error::{DownloadError, DownloadResult, RequestError},
     },
 };
-use reth_primitives::{BlockLocked, SealedHeader};
-use std::{borrow::Borrow, sync::Arc};
+use reth_primitives::{SealedBlock, SealedHeader};
+use std::{borrow::Borrow, sync::Arc, time::Duration};
 
 /// Downloads bodies in batches.
 ///
@@ -50,7 +53,7 @@ where
     Client: BodiesClient,
     Consensus: ConsensusTrait,
 {
-    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockLocked>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockResponse>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,
@@ -61,7 +64,14 @@ where
                 .chunks(self.batch_size)
                 .map(move |headers| {
                     (move || self.fetch_bodies(headers.clone()))
-                        .retry(ExponentialBackoff::default().with_max_times(self.retries))
+                        // We should not backoff from requests since the downloader does
+                        // not know what peer the request is being delivered to.
+                        // See: https://github.com/paradigmxyz/reth/issues/809
+                        .retry(
+                            ConstantBackoff::default()
+                                .with_delay(Duration::from_secs(0))
+                                .with_max_times(self.retries),
+                        )
                 })
                 .buffered(self.concurrency)
                 .map_ok(|blocks| stream::iter(blocks.into_iter()).map(Ok))
@@ -104,33 +114,89 @@ where
         self
     }
 
-    /// Fetch a batch of block bodies.
-    async fn fetch_bodies(&self, headers: Vec<&SealedHeader>) -> DownloadResult<Vec<BlockLocked>> {
-        let (peer_id, response) = self
-            .client
-            .get_block_body(headers.iter().map(|header| header.hash()).collect())
-            .await?
-            .split();
+    /// Given a batch of headers, this function proceeds to:
+    /// 1. Filter for all the non-empty headers
+    /// 2. Return early with the header values, if there were no non-empty headers, else..
+    /// 3. Request the bodies for the non-empty headers from a peer chosen by the network client
+    /// 4. For any non-empty headers, it proceeds to validate the corresponding body from the peer
+    /// and return it as part of the response via the [`BlockResponse::Full`] variant.
+    ///
+    /// NB: This assumes that peers respond with bodies in the order that they were requested.
+    /// This is a reasonable assumption to make as that's [what Geth
+    /// does](https://github.com/ethereum/go-ethereum/blob/f53ff0ff4a68ffc56004ab1d5cc244bcb64d3277/les/server_requests.go#L245).
+    /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
+    /// that try to give us bodies that do not match the requested order are going to be penalized
+    /// and eventually disconnected.
+    async fn fetch_bodies(
+        &self,
+        headers: Vec<&SealedHeader>,
+    ) -> DownloadResult<Vec<BlockResponse>> {
+        // Filter headers with transaction or ommers. These are the only ones
+        // we will request
+        let headers_to_download =
+            headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).collect::<Vec<_>>();
+        if headers_to_download.is_empty() {
+            tracing::trace!(target: "downloaders::bodies", len = headers.len(), "Nothing to download");
+            return Ok(headers.into_iter().cloned().map(BlockResponse::Empty).collect())
+        }
 
-        response
-            .into_iter()
-            .zip(headers)
-            .map(|(body, header)| {
-                let block = BlockLocked {
+        // The bodies size might exceed a max response size limit set by peer. We need to keep
+        // retrying until we finish downloading all of the requested bodies
+        let mut responses = Vec::with_capacity(headers_to_download.len());
+        while responses.len() != headers_to_download.len() {
+            let request: Vec<_> =
+                headers_to_download.iter().skip(responses.len()).cloned().collect();
+            let request_len = request.len();
+            tracing::trace!(target: "downloaders::bodies", request_len, "Requesting bodies");
+            let (peer_id, bodies) = self.client.get_block_bodies(request.clone()).await?.split();
+
+            if bodies.is_empty() {
+                tracing::error!(
+                    target: "downloaders::bodies", ?peer_id, ?request, "Received empty response. Penalizing peer"
+                );
+                self.client.report_bad_message(peer_id);
+                // return error and trigger new retry
+                return Err(DownloadError::RequestError(RequestError::BadResponse))
+            }
+
+            tracing::trace!(
+                target: "downloaders::bodies", request_len, response_len = bodies.len(), ?peer_id, "Received bodies"
+            );
+            bodies.into_iter().for_each(|b| responses.push((peer_id, b)));
+        }
+
+        let mut bodies = responses.into_iter();
+        let mut results = Vec::with_capacity(headers.len());
+        for header in headers.into_iter().cloned() {
+            // If the header has no txs / ommers, just push it and continue
+            if header.is_empty() {
+                results.push(BlockResponse::Empty(header));
+            } else {
+                // The body must be present since we requested headers for all non-empty
+                // bodies at this point
+                let (peer_id, body) = bodies.next().expect("download logic failed");
+
+                let block = SealedBlock {
                     header: header.clone(),
                     body: body.transactions,
                     ommers: body.ommers.into_iter().map(|header| header.seal()).collect(),
                 };
 
-                match self.consensus.pre_validate_block(&block) {
-                    Ok(_) => Ok(block),
-                    Err(error) => {
-                        self.client.report_bad_message(peer_id);
-                        Err(DownloadError::BlockValidation { hash: header.hash(), error })
-                    }
-                }
-            })
-            .collect()
+                // This ensures that the TxRoot and OmmersRoot from the header match the
+                // ones calculated manually from the block body.
+                self.consensus.pre_validate_block(&block).map_err(|error| {
+                    tracing::trace!(
+                        target: "downloaders::bodies", ?peer_id, header = ?header.hash(), ?error, request = ?headers_to_download, "Penalizing peer"
+                    );
+                    self.client.report_bad_message(peer_id);
+                    DownloadError::BlockValidation { hash: header.hash(), error }
+                })?;
+
+                results.push(BlockResponse::Full(block));
+            }
+        }
+
+        Ok(results)
     }
 }
 
@@ -146,7 +212,7 @@ mod tests {
         p2p::{bodies::downloader::BodyDownloader, error::RequestError},
         test_utils::TestConsensus,
     };
-    use reth_primitives::{PeerId, H256};
+    use reth_primitives::{Header, PeerId, H256};
     use std::{
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -190,22 +256,26 @@ mod tests {
         assert_matches!(
             downloader
                 .bodies_stream(headers.clone().iter())
-                .try_collect::<Vec<BlockLocked>>()
+                .try_collect::<Vec<BlockResponse>>()
                 .await,
             Ok(responses) => {
                 assert_eq!(
                     responses,
                     headers
                         .into_iter()
-                        .map(| header | {
-                            let body = bodies .remove(&header.hash()).unwrap();
-                            BlockLocked {
-                                header,
-                                body: body.transactions,
-                                ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
+                        .map(|header| {
+                            let body = bodies.remove(&header.hash()).unwrap();
+                            if header.is_empty() {
+                                BlockResponse::Empty(header)
+                            } else {
+                                BlockResponse::Full(SealedBlock {
+                                    header,
+                                    body: body.transactions,
+                                    ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
+                                })
                             }
                         })
-                        .collect::<Vec<BlockLocked>>()
+                        .collect::<Vec<BlockResponse>>()
                 );
             }
         );
@@ -221,8 +291,10 @@ mod tests {
             Arc::new(TestConsensus::default()),
         );
 
+        let headers = &[Header { ommers_hash: H256::default(), ..Default::default() }.seal()];
+        let mut stream = downloader.bodies_stream(headers);
         assert_matches!(
-            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
+            stream.next().await,
             Some(Err(DownloadError::RequestError(RequestError::ChannelClosed)))
         );
     }
@@ -251,10 +323,11 @@ mod tests {
             Arc::new(TestConsensus::default()),
         );
 
+        let header = Header { ommers_hash: H256::default(), ..Default::default() }.seal();
         assert_matches!(
-            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
-            Some(Ok(body)) => {
-                assert_eq!(body, BlockLocked::default());
+            downloader.bodies_stream(&[header.clone()]).next().await,
+            Some(Ok(BlockResponse::Full(block))) => {
+                assert_eq!(block.header, header);
             }
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 0);
@@ -286,9 +359,119 @@ mod tests {
         .with_retries(0);
 
         assert_matches!(
-            downloader.bodies_stream(&[SealedHeader::default()]).next().await,
+            downloader
+                .bodies_stream(&[
+                    Header { ommers_hash: H256::default(), ..Default::default() }.seal()
+                ])
+                .next()
+                .await,
             Some(Err(DownloadError::RequestError(RequestError::Timeout)))
         );
         assert_eq!(Arc::try_unwrap(retries_left).unwrap().into_inner(), 2);
+    }
+
+    /// Checks that the downloader keeps retrying the request in case
+    /// it receives too few bodies
+    #[tokio::test]
+    async fn received_few_bodies() {
+        // Generate some random blocks
+        let response_len = 5;
+        let (headers, mut bodies) = generate_bodies(0..20);
+
+        let download_attempt = Arc::new(AtomicUsize::new(0));
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|hashes: Vec<H256>| {
+                let mut bodies = bodies.clone();
+                let download_attempt = download_attempt.clone();
+                async move {
+                    // Simulate that the request for this (random) block takes 0-100ms
+                    tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100))
+                        .await;
+
+                    let attempt = download_attempt.load(Ordering::SeqCst);
+                    let results = hashes
+                        .into_iter()
+                        .take(response_len)
+                        .map(|hash| {
+                            bodies
+                                .remove(&hash)
+                                .expect("Downloader asked for a block it should not ask for")
+                        })
+                        .collect();
+                    download_attempt.store(attempt + 1, Ordering::SeqCst);
+                    Ok((PeerId::default(), results).into())
+                }
+            })),
+            Arc::new(TestConsensus::default()),
+        );
+        assert_matches!(
+            downloader
+                .bodies_stream(headers.iter())
+                .try_collect::<Vec<BlockResponse>>()
+                .await,
+            Ok(responses) => {
+                assert_eq!(
+                    responses,
+                    headers
+                        .into_iter()
+                        .map(|header| {
+                            let body = bodies.remove(&header.hash()).unwrap();
+                            if header.is_empty() {
+                                BlockResponse::Empty(header)
+                            } else {
+                                BlockResponse::Full(SealedBlock {
+                                    header,
+                                    body: body.transactions,
+                                    ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
+                                })
+                            }
+                        })
+                        .collect::<Vec<BlockResponse>>()
+                );
+            }
+        );
+    }
+
+    /// Checks that the downloader bubbles up the error after attempting to re-request bodies
+    #[tokio::test]
+    async fn received_few_bodies_and_empty() {
+        // Generate some random blocks
+        let response_len = 5;
+        let (headers, bodies) = generate_bodies(0..20);
+
+        let download_attempt = Arc::new(AtomicUsize::new(0));
+        let downloader = ConcurrentDownloader::new(
+            Arc::new(TestBodiesClient::new(|hashes: Vec<H256>| {
+                let mut bodies = bodies.clone();
+                let download_attempt = download_attempt.clone();
+                async move {
+                    // Simulate that the request for this (random) block takes 0-100ms
+                    tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100))
+                        .await;
+
+                    if hashes.len() <= response_len {
+                        return Ok((PeerId::default(), vec![]).into())
+                    }
+
+                    let attempt = download_attempt.load(Ordering::SeqCst);
+                    let results = hashes
+                        .into_iter()
+                        .take(response_len)
+                        .map(|hash| {
+                            bodies
+                                .remove(&hash)
+                                .expect("Downloader asked for a block it should not ask for")
+                        })
+                        .collect();
+                    download_attempt.store(attempt + 1, Ordering::SeqCst);
+                    Ok((PeerId::default(), results).into())
+                }
+            })),
+            Arc::new(TestConsensus::default()),
+        );
+        assert_matches!(
+            downloader.bodies_stream(headers.iter()).try_collect::<Vec<BlockResponse>>().await,
+            Err(DownloadError::RequestError(RequestError::BadResponse))
+        );
     }
 }

@@ -1,4 +1,5 @@
 use crate::{Header, SealedHeader, TransactionSigned, H256};
+use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -22,9 +23,8 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-// ANCHOR: struct-BlockLocked
 #[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-pub struct BlockLocked {
+pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
     /// Transactions with signatures.
@@ -32,23 +32,37 @@ pub struct BlockLocked {
     /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
 }
-// ANCHOR_END: struct-BlockLocked
 
-impl BlockLocked {
+impl SealedBlock {
     /// Header hash.
     pub fn hash(&self) -> H256 {
         self.header.hash()
     }
+
+    /// Splits the sealed block into underlying components
+    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<SealedHeader>) {
+        (self.header, self.body, self.ommers)
+    }
+
+    /// Unseal the block
+    pub fn unseal(self) -> Block {
+        Block {
+            header: self.header.unseal(),
+            body: self.body,
+            ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
+        }
+    }
 }
 
-impl Deref for BlockLocked {
-    type Target = Header;
+impl Deref for SealedBlock {
+    type Target = SealedHeader;
     fn deref(&self) -> &Self::Target {
-        self.header.as_ref()
+        &self.header
     }
 }
 
 /// Either a block hash _or_ a block number
+#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockHashOrNumber {
     /// A block hash

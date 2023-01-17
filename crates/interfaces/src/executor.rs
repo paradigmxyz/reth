@@ -4,11 +4,9 @@ use thiserror::Error;
 
 /// Takes block and executes it, returns error
 #[async_trait]
-pub trait BlockExecutor {
+pub trait BlockExecutor: Send + Sync {
     /// Execute block
-    async fn execute(&self, _block: Block) -> Error {
-        Error::VerificationFailed
-    }
+    async fn execute(&self, _block: Block) -> Error;
 }
 
 /// BlockExecutor Errors
@@ -27,11 +25,11 @@ pub enum Error {
     ReceiptLogDiff,
     #[error("Receipt log is different.")]
     ExecutionSuccessDiff { got: bool, expected: bool },
-    #[error("Receipt root {got:?} is different then expected {expected:?}.")]
+    #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff { got: H256, expected: H256 },
-    #[error("Header bloom filter {got:?} is different then expected {expected:?}.")]
+    #[error("Header bloom filter {got:?} is different than expected {expected:?}.")]
     BloomLogDiff { got: Box<Bloom>, expected: Box<Bloom> },
-    #[error("Transaction gas limit {transaction_gas_limit} is more then blocks available gas {block_available_gas}")]
+    #[error("Transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
     TransactionGasLimitMoreThenAvailableBlockGas {
         transaction_gas_limit: u64,
         block_available_gas: u64,

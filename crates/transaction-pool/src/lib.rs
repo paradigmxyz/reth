@@ -101,13 +101,15 @@ use tokio::sync::mpsc::Receiver;
 mod config;
 pub mod error;
 mod identifier;
+pub mod metrics;
 mod ordering;
 pub mod pool;
 mod traits;
 mod validate;
 
-#[cfg(test)]
-mod test_util;
+#[cfg(any(test, feature = "test-utils"))]
+/// Common test helpers for mocking A pool
+pub mod test_utils;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]

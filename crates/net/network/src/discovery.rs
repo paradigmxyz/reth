@@ -2,12 +2,16 @@
 
 use crate::error::NetworkError;
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, NodeRecord};
-use reth_primitives::PeerId;
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
+use reth_dns_discovery::{
+    DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
+};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::task::JoinHandle;
@@ -24,15 +28,19 @@ pub struct Discovery {
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
-    discv4: Discv4,
+    discv4: Option<Discv4>,
     /// All KAD table updates from the discv4 service.
-    discv4_updates: ReceiverStream<DiscoveryUpdate>,
-    /// The initial config for the discv4 service
-    _dsicv4_config: Discv4Config,
+    discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
+    /// The handle to the spawned discv4 service
+    _discv4_service: Option<JoinHandle<()>>,
+    /// Handler to interact with the DNS discovery service
+    _dns_discovery: Option<DnsDiscoveryHandle>,
+    /// Updates from the DNS discovery service.
+    dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate>>,
+    /// The handle to the spawned DNS discovery service
+    _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
-    /// The handle to the spawned discv4 service
-    _discv4_service: JoinHandle<()>,
 }
 
 impl Discovery {
@@ -43,37 +51,71 @@ impl Discovery {
     pub async fn new(
         discovery_addr: SocketAddr,
         sk: SecretKey,
-        dsicv4_config: Discv4Config,
+        discv4_config: Option<Discv4Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
+        // setup discv4
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
-        let (discv4, mut discv4_service) =
-            Discv4::bind(discovery_addr, local_enr, sk, dsicv4_config.clone())
-                .await
-                .map_err(NetworkError::Discovery)?;
-        let discv4_updates = discv4_service.update_stream();
+        let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
+            let (discv4, mut discv4_service) =
+                Discv4::bind(discovery_addr, local_enr, sk, disc_config)
+                    .await
+                    .map_err(NetworkError::Discovery)?;
+            let discv4_updates = discv4_service.update_stream();
+            // spawn the service
+            let _discv4_service = discv4_service.spawn();
+            (Some(discv4), Some(discv4_updates), Some(_discv4_service))
+        } else {
+            (None, None, None)
+        };
 
-        // spawn the service
-        let _discv4_service = discv4_service.spawn();
+        // setup DNS discovery
+        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
+            if let Some(dns_config) = dns_discovery_config {
+                let (mut service, dns_disc) = DnsDiscoveryService::new_pair(
+                    Arc::new(DnsResolver::from_system_conf()?),
+                    dns_config,
+                );
+                let dns_discovery_updates = service.node_record_stream();
+                let dns_disc_service = service.spawn();
+                (Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service))
+            } else {
+                (None, None, None)
+            };
 
         Ok(Self {
             local_enr,
             discv4,
             discv4_updates,
-            _dsicv4_config: dsicv4_config,
             _discv4_service,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
+            _dns_disc_service,
+            _dns_discovery,
+            dns_discovery_updates,
         })
+    }
+
+    /// Updates the `eth:ForkId` field in discv4.
+    #[allow(unused)]
+    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
+        if let Some(discv4) = &self.discv4 {
+            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
+        }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip(&self, ip: IpAddr) {
-        self.discv4.ban_ip(ip)
+        if let Some(discv4) = &self.discv4 {
+            discv4.ban_ip(ip)
+        }
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
-        self.discv4.ban(peer_id, ip)
+        if let Some(discv4) = &self.discv4 {
+            discv4.ban(peer_id, ip)
+        }
     }
 
     /// Returns the id with which the local identifies itself in the network
@@ -81,18 +123,30 @@ impl Discovery {
         self.local_enr.id
     }
 
+    /// Processes an incoming [NodeRecord] update from a discovery service
+    fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
+        let id = record.id;
+        let addr = record.tcp_addr();
+        match self.discovered_nodes.entry(id) {
+            Entry::Occupied(_entry) => {}
+            Entry::Vacant(entry) => {
+                entry.insert(addr);
+                self.queued_events.push_back(DiscoveryEvent::Discovered {
+                    peer_id: id,
+                    socket_addr: addr,
+                    fork_id,
+                });
+            }
+        }
+    }
+
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            DiscoveryUpdate::Added(node) | DiscoveryUpdate::Discovered(node) => {
-                let id = node.id;
-                let addr = node.tcp_addr();
-                match self.discovered_nodes.entry(id) {
-                    Entry::Occupied(_entry) => {}
-                    Entry::Vacant(entry) => {
-                        entry.insert(addr);
-                        self.queued_events.push_back(DiscoveryEvent::Discovered(id, addr))
-                    }
-                }
+            DiscoveryUpdate::Added(record) => {
+                self.on_node_record_update(record, None);
+            }
+            DiscoveryUpdate::EnrForkId(node, fork_id) => {
+                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
             DiscoveryUpdate::Removed(node) => {
                 self.discovered_nodes.remove(&node);
@@ -112,9 +166,17 @@ impl Discovery {
                 return Poll::Ready(event)
             }
 
-            // drain the update stream
-            while let Poll::Ready(Some(update)) = self.discv4_updates.poll_next_unpin(cx) {
+            // drain the update streams
+            while let Some(Poll::Ready(Some(update))) =
+                self.discv4_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            {
                 self.on_discv4_update(update)
+            }
+
+            while let Some(Poll::Ready(Some(update))) =
+                self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            {
+                self.on_node_record_update(update.node_record, update.fork_id);
             }
 
             if self.queued_events.is_empty() {
@@ -124,10 +186,37 @@ impl Discovery {
     }
 }
 
+#[cfg(test)]
+impl Discovery {
+    /// Returns a Discovery instance that does nothing and is intended for testing purposes.
+    ///
+    /// NOTE: This instance does nothing
+    pub(crate) fn noop() -> Self {
+        Self {
+            discovered_nodes: Default::default(),
+            local_enr: NodeRecord {
+                address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                tcp_port: 0,
+                udp_port: 0,
+                id: PeerId::random(),
+            },
+            discv4: Default::default(),
+            discv4_updates: Default::default(),
+            queued_events: Default::default(),
+            _discv4_service: Default::default(),
+            _dns_discovery: None,
+            dns_discovery_updates: None,
+            _dns_disc_service: None,
+        }
+    }
+}
+
 /// Events produced by the [`Discovery`] manager.
 pub enum DiscoveryEvent {
     /// A new node was discovered
-    Discovered(PeerId, SocketAddr),
+    Discovered { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(PeerId, ForkId),
 }
 
 #[cfg(test)]
@@ -143,6 +232,8 @@ mod tests {
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
         let _discovery =
-            Discovery::new(discovery_addr, secret_key, Default::default()).await.unwrap();
+            Discovery::new(discovery_addr, secret_key, Default::default(), Default::default())
+                .await
+                .unwrap();
     }
 }

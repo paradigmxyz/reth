@@ -1,15 +1,19 @@
 //! Network config support
 
 use crate::{
+    error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
     peers::PeersConfig,
     session::SessionsConfig,
+    NetworkHandle, NetworkManager,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NodeRecord, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, PeerId, H256};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_primitives::{Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS};
+use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
+    collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
@@ -21,6 +25,7 @@ mod __reexport {
     pub use secp256k1::SecretKey;
 }
 pub use __reexport::*;
+use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, Status};
 
@@ -36,9 +41,11 @@ pub struct NetworkConfig<C> {
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
-    pub boot_nodes: Vec<NodeRecord>,
+    pub boot_nodes: HashSet<NodeRecord>,
+    /// How to set up discovery over DNS.
+    pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
-    pub discovery_v4_config: Discv4Config,
+    pub discovery_v4_config: Option<Discv4Config>,
     /// Address to use for discovery
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
@@ -51,6 +58,13 @@ pub struct NetworkConfig<C> {
     pub chain: Chain,
     /// Genesis hash of the network
     pub genesis_hash: H256,
+    /// The [`ForkFilter`] to use at launch for authenticating sessions.
+    ///
+    /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
+    ///
+    /// For sync from block `0`, this should be the default chain [`ForkFilter`] beginning at the
+    /// first hardfork, `Frontier` for mainnet.
+    pub fork_filter: ForkFilter,
     /// The block importer type.
     pub block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
@@ -78,7 +92,7 @@ impl<C> NetworkConfig<C> {
 
     /// Sets the config to use for the discovery v4 protocol.
     pub fn set_discovery_v4(mut self, discovery_config: Discv4Config) -> Self {
-        self.discovery_v4_config = discovery_config;
+        self.discovery_v4_config = Some(discovery_config);
         self
     }
 
@@ -89,6 +103,23 @@ impl<C> NetworkConfig<C> {
     }
 }
 
+impl<C> NetworkConfig<C>
+where
+    C: BlockProvider + HeaderProvider + 'static,
+{
+    /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
+    pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
+        let client = self.client.clone();
+        let (handle, network, _txpool, eth) =
+            NetworkManager::builder(self).await?.request_handler(client).split_with_handle();
+
+        tokio::task::spawn(network);
+        // TODO: tokio::task::spawn(txpool);
+        tokio::task::spawn(eth);
+        Ok(handle)
+    }
+}
+
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[allow(missing_docs)]
 pub struct NetworkConfigBuilder<C> {
@@ -96,10 +127,12 @@ pub struct NetworkConfigBuilder<C> {
     client: Arc<C>,
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
+    /// How to configure discovery over DNS.
+    dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
-    discovery_v4_builder: Discv4ConfigBuilder,
+    discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// All boot nodes to start network discovery with.
-    boot_nodes: Vec<NodeRecord>,
+    boot_nodes: HashSet<NodeRecord>,
     /// Address to use for discovery
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
@@ -122,6 +155,10 @@ pub struct NetworkConfigBuilder<C> {
     status: Option<Status>,
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
+    /// The [`ForkFilter`] to use at launch for authenticating sessions.
+    fork_filter: Option<ForkFilter>,
+    /// Head used to start set for the fork filter
+    head: Option<u64>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -132,19 +169,22 @@ impl<C> NetworkConfigBuilder<C> {
         Self {
             client,
             secret_key,
-            discovery_v4_builder: Default::default(),
-            boot_nodes: vec![],
+            dns_discovery_config: Some(Default::default()),
+            discovery_v4_builder: Some(Default::default()),
+            boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
             chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
-            genesis_hash: Default::default(),
+            genesis_hash: MAINNET_GENESIS,
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
             status: None,
             hello_message: None,
+            fork_filter: None,
+            head: None,
         }
     }
 
@@ -166,6 +206,12 @@ impl<C> NetworkConfigBuilder<C> {
     /// ```
     pub fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    /// Sets the chain ID.
+    pub fn chain_id<Id: Into<Chain>>(mut self, chain_id: Id) -> Self {
+        self.chain = chain_id.into();
         self
     }
 
@@ -230,14 +276,33 @@ impl<C> NetworkConfigBuilder<C> {
 
     /// Sets the discv4 config to use.
     pub fn discovery(mut self, builder: Discv4ConfigBuilder) -> Self {
-        self.discovery_v4_builder = builder;
+        self.discovery_v4_builder = Some(builder);
         self
     }
 
-    /// Sets the discv4 config to use.
+    /// Sets the dns discovery config to use.
+    pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
+        self.dns_discovery_config = Some(config);
+        self
+    }
+
+    /// Sets the boot nodes.
     pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         self.boot_nodes = nodes.into_iter().collect();
         self
+    }
+
+    /// Sets the discovery service off on true.
+    pub fn set_discovery(mut self, disable_discovery: bool) -> Self {
+        if disable_discovery {
+            self.disable_discovery();
+        }
+        self
+    }
+
+    /// disables discovery.
+    pub fn disable_discovery(&mut self) {
+        self.discovery_v4_builder = None;
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -246,6 +311,7 @@ impl<C> NetworkConfigBuilder<C> {
         let Self {
             client,
             secret_key,
+            mut dns_discovery_config,
             discovery_v4_builder,
             boot_nodes,
             discovery_addr,
@@ -259,6 +325,8 @@ impl<C> NetworkConfigBuilder<C> {
             executor,
             status,
             hello_message,
+            fork_filter,
+            head,
         } = self;
 
         let listener_addr = listener_addr.unwrap_or_else(|| {
@@ -269,11 +337,30 @@ impl<C> NetworkConfigBuilder<C> {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
+        // get the fork filter
+        let fork_filter = fork_filter.unwrap_or_else(|| {
+            let head = head.unwrap_or_default();
+            // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
+            ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
+        });
+
+        // If default DNS config is used then we add the known dns network to bootstrap from
+        if let Some(dns_networks) =
+            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
+        {
+            if dns_networks.is_empty() {
+                if let Some(link) = chain.public_dns_network_protocol() {
+                    dns_networks.insert(link.parse().expect("is valid DNS link entry"));
+                }
+            }
+        }
+
         NetworkConfig {
             client,
             secret_key,
             boot_nodes,
-            discovery_v4_config: discovery_v4_builder.build(),
+            dns_discovery_config,
+            discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
             discovery_addr: discovery_addr.unwrap_or_else(|| {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT))
             }),
@@ -287,6 +374,7 @@ impl<C> NetworkConfigBuilder<C> {
             executor,
             status: status.unwrap_or_default(),
             hello_message,
+            fork_filter,
         }
     }
 }
@@ -311,5 +399,30 @@ impl NetworkMode {
     /// Returns true if network has entered proof-of-stake
     pub fn is_stake(&self) -> bool {
         matches!(self, NetworkMode::Stake)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::thread_rng;
+    use reth_dns_discovery::tree::LinkEntry;
+    use reth_provider::test_utils::NoopProvider;
+
+    fn builder() -> NetworkConfigBuilder<NoopProvider> {
+        let secret_key = SecretKey::new(&mut thread_rng());
+        NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+    }
+
+    #[test]
+    fn test_network_dns_defaults() {
+        let config = builder().build();
+
+        let dns = config.dns_discovery_config.unwrap();
+        let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();
+        let mainnet_dns: LinkEntry =
+            Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
+        assert!(bootstrap_nodes.contains(&mainnet_dns));
+        assert_eq!(bootstrap_nodes.len(), 1);
     }
 }

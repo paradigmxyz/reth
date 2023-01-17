@@ -16,6 +16,9 @@ The main difference between metrics and traces is therefore that metrics are sys
 ### How to add a metric
 
 To add metrics use the [`metrics`][metrics] crate. 
+1. Add the code emitting the metric.
+2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/metrics.rs).
+3. Document the metric in this file.
 
 #### Metric anatomy
 
@@ -29,7 +32,7 @@ Each metric is identified by a [`Key`][metrics.Key], which itself is composed of
 
 The `KeyName` represents the actual metric name, and the labels are used to further drill down into the metric.
 
-For example, a metric that represents stage progress would have a key name of `stage.progress` and a `stage` label that can be used to get the progress of individual stages.
+For example, a metric that represents stage progress would have a key name of `stage_progress` and a `stage` label that can be used to get the progress of individual stages.
 
 There will only ever exist one description per metric `KeyName`; it is not possible to add a description for a label, or a `KeyName`/`Label` group.
 
@@ -50,8 +53,43 @@ How the metrics are exposed to the end-user is determined by the CLI.
 - Metric names should not contain spaces
 - Add a unit to the metric where appropriate
   - Use the Prometheus [base units][prom_base_units]
+- Do not add rate-metrics
+  - Rates can be calculated by e.g. Prometheus on the fly
+- Avoid duplicate metrics
+  - An example would be adding two metrics for connections: `reth.p2p.connections` for current connections and `reth.p2p.connections.total` for total connections. One of these metrics can be used to infer the other.
 
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
+
+### Current metrics
+
+This list may be non-exhaustive.
+
+#### Stage: Headers
+
+- `stages.headers.counter`: Number of headers successfully retrieved
+- `stages.headers.timeout_error`: Number of timeout errors while requesting headers
+- `stages.headers.validation_errors`: Number of validation errors while requesting headers
+- `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
+- `stages.headers.request_time`: Elapsed time of successful header requests
+
+#### Component: Transaction Pool
+
+- `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
+- `transaction_pool.invalid_transactions`: Number of invalid transactions 
+- `transaction_pool.removed_transactions`: Number of removed transactions from the pool
+
+#### Component: Network
+
+- `network.connected_peers`: Number of currently connected peers
+- `network.tracked_peers`: Number of peers known to the node
+- `network.pending_session_failures`: Cumulative number of failures of pending sessions
+- `network.closed_sessions`: Total number of sessions closed
+- `network.incoming_connections`: Number of active incoming connections
+- `network.outgoing_connections`: Number of active outgoing connections
+- `network.total_incoming_connections`: Total number of incoming connections handled
+- `network.total_outgoing_connections`: Total number of outgoing connections established
+- `network.invalid_messages_received`: Number of invalid/malformed messages received from peers
+- `network.propagated_transactions`: Total number of propagated transactions
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html

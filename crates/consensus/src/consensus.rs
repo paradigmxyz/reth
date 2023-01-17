@@ -1,20 +1,22 @@
 //! Consensus for ethereum network
-
 use crate::{verification, Config};
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockLocked, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, H256};
 use tokio::sync::{watch, watch::error::SendError};
 
-/// Ethereum consensus
-pub struct EthConsensus {
+/// Ethereum beacon consensus
+///
+/// This consensus engine does basic checks as outlined in the execution specs,
+/// but otherwise defers consensus on what the current chain is to a consensus client.
+pub struct BeaconConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Configuration
     config: Config,
 }
 
-impl EthConsensus {
-    /// Create a new instance of [EthConsensus]
+impl BeaconConsensus {
+    /// Create a new instance of [BeaconConsensus]
     pub fn new(config: Config) -> Self {
         Self {
             channel: watch::channel(ForkchoiceState {
@@ -35,7 +37,7 @@ impl EthConsensus {
     }
 }
 
-impl Consensus for EthConsensus {
+impl Consensus for BeaconConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }
@@ -44,7 +46,7 @@ impl Consensus for EthConsensus {
         verification::validate_header_standalone(header, &self.config)?;
         verification::validate_header_regarding_parent(parent, header, &self.config)?;
 
-        if header.number < self.config.paris_hard_fork_block {
+        if header.number < self.config.paris_block {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
@@ -52,11 +54,11 @@ impl Consensus for EthConsensus {
         Ok(())
     }
 
-    fn pre_validate_block(&self, block: &BlockLocked) -> Result<(), Error> {
+    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error> {
         verification::validate_block_standalone(block)
     }
 
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        block_num <= self.config.paris_hard_fork_block
+        block_num < self.config.paris_block
     }
 }

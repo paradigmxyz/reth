@@ -1,4 +1,5 @@
 use crate::{capability::Capability, EthVersion, ProtocolVersion};
+use reth_codecs::derive_arbitrary;
 use reth_primitives::PeerId;
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,7 @@ pub(crate) const DEFAULT_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PK
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
 /// version and capabilities.
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.
@@ -94,7 +96,8 @@ impl HelloMessageBuilder {
         HelloMessage {
             protocol_version: protocol_version.unwrap_or_default(),
             client_version: client_version.unwrap_or_else(|| DEFAULT_CLIENT_VERSION.to_string()),
-            capabilities: capabilities.unwrap_or_else(|| vec![EthVersion::Eth67.into()]),
+            capabilities: capabilities
+                .unwrap_or_else(|| vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()]),
             port: port.unwrap_or(30303),
             id,
         }
@@ -108,46 +111,8 @@ mod tests {
     use secp256k1::{SecretKey, SECP256K1};
 
     use crate::{
-        capability::Capability,
-        p2pstream::{P2PMessage, P2PMessageID},
-        EthVersion, HelloMessage, ProtocolVersion,
+        capability::Capability, p2pstream::P2PMessage, EthVersion, HelloMessage, ProtocolVersion,
     };
-
-    #[test]
-    fn test_pong_snappy_encoding_parity() {
-        // encode pong using our `Encodable` implementation
-        let pong = P2PMessage::Pong;
-        let mut pong_encoded = Vec::new();
-        pong.encode(&mut pong_encoded);
-
-        // the definition of pong is 0x80 (an empty rlp string)
-        let pong_raw = vec![EMPTY_STRING_CODE];
-        let mut snappy_encoder = snap::raw::Encoder::new();
-        let pong_compressed = snappy_encoder.compress_vec(&pong_raw).unwrap();
-        let mut pong_expected = vec![P2PMessageID::Pong as u8];
-        pong_expected.extend(&pong_compressed);
-
-        // ensure that the two encodings are equal
-        assert_eq!(
-            pong_expected, pong_encoded,
-            "left: {pong_expected:#x?}, right: {pong_encoded:#x?}"
-        );
-
-        // also ensure that the length is correct
-        assert_eq!(pong_expected.len(), P2PMessage::Pong.length());
-
-        // try to decode using Decodable
-        let p2p_message = P2PMessage::decode(&mut &pong_expected[..]).unwrap();
-        assert_eq!(p2p_message, P2PMessage::Pong);
-
-        // finally decode the encoded message with snappy
-        let mut snappy_decoder = snap::raw::Decoder::new();
-
-        // the message id is not compressed, only compress the latest bits
-        let decompressed = snappy_decoder.decompress_vec(&pong_encoded[1..]).unwrap();
-
-        assert_eq!(decompressed, pong_raw);
-    }
 
     #[test]
     fn test_hello_encoding_round_trip() {

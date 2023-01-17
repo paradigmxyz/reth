@@ -1,20 +1,16 @@
 //! A network implementation for testing purposes.
 
 use futures::{FutureExt, StreamExt};
-use parking_lot::Mutex;
 use pin_project::pin_project;
+use reth_eth_wire::DisconnectReason;
 use reth_network::{
     error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
     NetworkHandle, NetworkManager,
 };
-use reth_primitives::{
-    rpc::{BlockId, BlockNumber},
-    Block, BlockHash, Header, PeerId, H256, U256,
-};
-use reth_provider::{test_utils::TestApi, BlockProvider, ChainInfo, HeaderProvider};
+use reth_primitives::PeerId;
+use reth_provider::{test_utils::NoopProvider, BlockProvider, HeaderProvider};
 use secp256k1::SecretKey;
 use std::{
-    collections::HashMap,
     fmt,
     future::Future,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -70,6 +66,16 @@ where
 
     pub fn peers_iter(&self) -> impl Iterator<Item = &Peer<C>> + '_ {
         self.peers.iter()
+    }
+
+    pub async fn extend_peer_with_config(
+        &mut self,
+        configs: impl IntoIterator<Item = PeerConfig<C>>,
+    ) -> Result<(), NetworkError> {
+        for config in configs {
+            self.add_peer_with_config(config).await?;
+        }
+        Ok(())
     }
 
     pub async fn add_peer_with_config(
@@ -134,7 +140,7 @@ where
     }
 }
 
-impl Testnet<TestApi> {
+impl Testnet<NoopProvider> {
     /// Same as [`Self::try_create`] but panics on error
     pub async fn create(num_peers: usize) -> Self {
         Self::try_create(num_peers).await.unwrap()
@@ -247,7 +253,7 @@ where
     }
 }
 
-pub struct PeerConfig<C = TestApi> {
+pub struct PeerConfig<C = NoopProvider> {
     config: NetworkConfig<C>,
     client: Arc<C>,
     secret_key: SecretKey,
@@ -261,6 +267,10 @@ where
 {
     pub fn new(client: Arc<C>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
+        Self::with_secret_key(client, secret_key)
+    }
+
+    pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
         let config = NetworkConfig::builder(Arc::clone(&client), secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
@@ -271,7 +281,7 @@ where
 
 impl Default for PeerConfig {
     fn default() -> Self {
-        Self::new(Arc::new(TestApi::default()))
+        Self::new(Arc::new(NoopProvider::default()))
     }
 }
 
@@ -289,11 +299,11 @@ impl NetworkEventStream {
         Self { inner }
     }
 
-    pub async fn next_session_closed(&mut self) -> Option<PeerId> {
+    pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { peer_id } => return Some(peer_id),
-                NetworkEvent::SessionEstablished { .. } => continue,
+                NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
+                _ => continue,
             }
         }
         None
@@ -302,95 +312,10 @@ impl NetworkEventStream {
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => continue,
                 NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                _ => continue,
             }
         }
         None
-    }
-}
-
-/// A mock implementation for Provider interfaces.
-#[derive(Debug, Clone, Default)]
-pub struct MockEthProvider {
-    pub blocks: Arc<Mutex<HashMap<H256, Block>>>,
-    pub headers: Arc<Mutex<HashMap<H256, Header>>>,
-}
-
-impl MockEthProvider {
-    pub fn add_block(&self, hash: H256, block: Block) {
-        self.blocks.lock().insert(hash, block);
-    }
-
-    pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (H256, Block)>) {
-        for (hash, block) in iter.into_iter() {
-            self.add_block(hash, block)
-        }
-    }
-
-    pub fn add_header(&self, hash: H256, header: Header) {
-        self.headers.lock().insert(hash, header);
-    }
-
-    pub fn extend_headers(&self, iter: impl IntoIterator<Item = (H256, Header)>) {
-        for (hash, header) in iter.into_iter() {
-            self.add_header(hash, header)
-        }
-    }
-}
-
-impl HeaderProvider for MockEthProvider {
-    fn header(&self, block_hash: &BlockHash) -> reth_interfaces::Result<Option<Header>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(block_hash).cloned())
-    }
-
-    fn header_by_number(&self, num: u64) -> reth_interfaces::Result<Option<Header>> {
-        let lock = self.headers.lock();
-        Ok(lock.values().find(|h| h.number == num).cloned())
-    }
-}
-
-impl BlockProvider for MockEthProvider {
-    fn chain_info(&self) -> reth_interfaces::Result<ChainInfo> {
-        todo!()
-    }
-
-    fn block(&self, id: BlockId) -> reth_interfaces::Result<Option<Block>> {
-        let lock = self.blocks.lock();
-        match id {
-            BlockId::Hash(hash) => Ok(lock.get(&hash).cloned()),
-            BlockId::Number(BlockNumber::Number(num)) => {
-                Ok(lock.values().find(|b| b.number == num.as_u64()).cloned())
-            }
-            _ => {
-                unreachable!("unused in network tests")
-            }
-        }
-    }
-
-    fn block_number(
-        &self,
-        hash: H256,
-    ) -> reth_interfaces::Result<Option<reth_primitives::BlockNumber>> {
-        let lock = self.blocks.lock();
-        let num = lock.iter().find_map(|(h, b)| if *h == hash { Some(b.number) } else { None });
-        Ok(num)
-    }
-
-    fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
-        let lock = self.blocks.lock();
-
-        let hash =
-            lock.iter().find_map(
-                |(hash, b)| {
-                    if b.number == number.as_u64() {
-                        Some(*hash)
-                    } else {
-                        None
-                    }
-                },
-            );
-        Ok(hash)
     }
 }

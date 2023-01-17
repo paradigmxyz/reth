@@ -4,21 +4,42 @@ use std::{ffi::CStr, fmt, result, str};
 /// An MDBX error kind.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum Error {
+    /// The key/value pair already exists.
     KeyExist,
+    /// The requested key/value pair was not found.
     NotFound,
     NoData,
+    /// The requested page was not found.
     PageNotFound,
+    /// The database is corrupted (e.g. a page was a wrong type)
     Corrupted,
+    /// The environment had a fatal error (e.g. failed to update a meta page)
     Panic,
     VersionMismatch,
+    /// File is not a valid MDBX file
     Invalid,
+    /// Environment map size reached.
     MapFull,
+    /// Environment reached the maximum number of databases.
     DbsFull,
+    /// Environment reached the maximum number of readers.
     ReadersFull,
+    /// The transaction has too many dirty pages (i.e. the transaction is too big).
     TxnFull,
+    /// The cursor stack is too deep.
     CursorFull,
+    /// The page does not have enough space.
     PageFull,
-    UnableExtendMapsize,
+    /// The database engine was unable to extend mapping, e.g. the address space is unavailable or
+    /// busy.
+    ///
+    /// This can mean:
+    /// - The database size was extended by other processes beyond the environment map size, and
+    ///   the engine was unable to extend the mapping while starting a read transaction. The
+    ///   environment should be re-opened to continue.
+    /// - The engine was unable to extend the mapping during a write transaction or an explicit
+    ///   call to change the geometry of the environment.
+    UnableExtendMapSize,
     Incompatible,
     BadRslot,
     BadTxn,
@@ -27,13 +48,14 @@ pub enum Error {
     Problem,
     Busy,
     Multival,
+    BadSignature,
     WannaRecovery,
     KeyMismatch,
     DecodeError,
     Access,
     TooLarge,
     DecodeErrorLenDiff,
-    Other(u32),
+    Other(i32),
 }
 
 impl Error {
@@ -54,7 +76,7 @@ impl Error {
             ffi::MDBX_TXN_FULL => Error::TxnFull,
             ffi::MDBX_CURSOR_FULL => Error::CursorFull,
             ffi::MDBX_PAGE_FULL => Error::PageFull,
-            ffi::MDBX_UNABLE_EXTEND_MAPSIZE => Error::UnableExtendMapsize,
+            ffi::MDBX_UNABLE_EXTEND_MAPSIZE => Error::UnableExtendMapSize,
             ffi::MDBX_INCOMPATIBLE => Error::Incompatible,
             ffi::MDBX_BAD_RSLOT => Error::BadRslot,
             ffi::MDBX_BAD_TXN => Error::BadTxn,
@@ -68,7 +90,8 @@ impl Error {
             ffi::MDBX_EINVAL => Error::DecodeError,
             ffi::MDBX_EACCESS => Error::Access,
             ffi::MDBX_TOO_LARGE => Error::TooLarge,
-            other => Error::Other(other as u32),
+            ffi::MDBX_EBADSIGN => Error::BadSignature,
+            other => Error::Other(other),
         }
     }
 
@@ -77,6 +100,7 @@ impl Error {
         let err_code = match self {
             Error::KeyExist => ffi::MDBX_KEYEXIST,
             Error::NotFound => ffi::MDBX_NOTFOUND,
+            Error::NoData => ffi::MDBX_ENODATA,
             Error::PageNotFound => ffi::MDBX_PAGE_NOTFOUND,
             Error::Corrupted => ffi::MDBX_CORRUPTED,
             Error::Panic => ffi::MDBX_PANIC,
@@ -88,7 +112,7 @@ impl Error {
             Error::TxnFull => ffi::MDBX_TXN_FULL,
             Error::CursorFull => ffi::MDBX_CURSOR_FULL,
             Error::PageFull => ffi::MDBX_PAGE_FULL,
-            Error::UnableExtendMapsize => ffi::MDBX_UNABLE_EXTEND_MAPSIZE,
+            Error::UnableExtendMapSize => ffi::MDBX_UNABLE_EXTEND_MAPSIZE,
             Error::Incompatible => ffi::MDBX_INCOMPATIBLE,
             Error::BadRslot => ffi::MDBX_BAD_RSLOT,
             Error::BadTxn => ffi::MDBX_BAD_TXN,
@@ -102,7 +126,8 @@ impl Error {
             Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
-            Error::Other(err_code) => *err_code as i32,
+            Error::BadSignature => ffi::MDBX_EBADSIGN,
+            Error::Other(err_code) => *err_code,
             _ => unreachable!(),
         };
         err_code as u32
@@ -117,10 +142,14 @@ impl From<Error> for u32 {
 
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{}", unsafe {
-            let err = ffi::mdbx_strerror(self.to_err_code() as i32);
-            str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
-        })
+        let value = match self {
+            Self::DecodeErrorLenDiff => "Mismatched data length",
+            _ => unsafe {
+                let err = ffi::mdbx_strerror(self.to_err_code() as i32);
+                str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
+            },
+        };
+        write!(fmt, "{value}")
     }
 }
 
@@ -155,5 +184,10 @@ mod test {
         assert_eq!("Permission denied", Error::from_err_code(13).to_string());
 
         assert_eq!("MDBX_INVALID: File is not an MDBX file", Error::Invalid.to_string());
+    }
+
+    #[test]
+    fn test_conversion() {
+        assert_eq!(Error::from_err_code(ffi::MDBX_KEYEXIST), Error::KeyExist);
     }
 }

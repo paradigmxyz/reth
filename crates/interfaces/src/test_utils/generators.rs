@@ -1,6 +1,6 @@
-use rand::{thread_rng, Rng};
+use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Address, BlockLocked, Bytes, Header, SealedHeader, Signature, Transaction,
+    proofs, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
     TransactionKind, TransactionSigned, TxLegacy, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
@@ -80,14 +80,15 @@ pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1:
     let (rec_id, data) = s.serialize_compact();
 
     Ok(Signature {
-        r: U256::from_big_endian(&data[..32]),
-        s: U256::from_big_endian(&data[32..64]),
+        r: U256::try_from_be_slice(&data[..32]).unwrap(),
+        s: U256::try_from_be_slice(&data[32..64]).unwrap(),
         odd_y_parity: rec_id.to_i32() != 0,
     })
 }
 
-/// Generate a random block filled with a random number of signed transactions (generated using
-/// [random_signed_tx]).
+/// Generate a random block filled with signed transactions (generated using
+/// [random_signed_tx]). If no transaction count is provided, the number of transactions
+/// will be random, otherwise the provided count will be used.
 ///
 /// All fields use the default values (and are assumed to be invalid) except for:
 ///
@@ -99,25 +100,29 @@ pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1:
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block(number: u64, parent: Option<H256>) -> BlockLocked {
+pub fn random_block(
+    number: u64,
+    parent: Option<H256>,
+    tx_count: Option<u8>,
+    ommers_count: Option<u8>,
+) -> SealedBlock {
     let mut rng = thread_rng();
 
     // Generate transactions
-    let transactions: Vec<TransactionSigned> =
-        (0..rand::random::<u8>()).into_iter().map(|_| random_signed_tx()).collect();
+    let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
+    let transactions: Vec<TransactionSigned> = (0..tx_count).map(|_| random_signed_tx()).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
-    let mut ommers = Vec::new();
-    for _ in 0..rng.gen_range(0..2) {
-        ommers.push(random_header(number, parent).unseal());
-    }
+    let ommers_count = ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
+    let ommers =
+        (0..ommers_count).map(|_| random_header(number, parent).unseal()).collect::<Vec<_>>();
 
     // Calculate roots
     let transactions_root = proofs::calculate_transaction_root(transactions.iter());
     let ommers_hash = proofs::calculate_ommers_root(ommers.iter());
 
-    BlockLocked {
+    SealedBlock {
         header: Header {
             parent_hash: parent.unwrap_or_default(),
             number,
@@ -125,6 +130,7 @@ pub fn random_block(number: u64, parent: Option<H256>) -> BlockLocked {
             gas_limit: total_gas,
             transactions_root,
             ommers_hash,
+            base_fee_per_gas: Some(rng.gen()),
             ..Default::default()
         }
         .seal(),
@@ -139,12 +145,20 @@ pub fn random_block(number: u64, parent: Option<H256>) -> BlockLocked {
 /// in the result will be equal to `head`.
 ///
 /// See [random_block] for considerations when validating the generated blocks.
-pub fn random_block_range(rng: std::ops::Range<u64>, head: H256) -> Vec<BlockLocked> {
-    let mut blocks = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
-    for idx in rng {
+pub fn random_block_range(
+    block_numbers: std::ops::Range<u64>,
+    head: H256,
+    tx_count: std::ops::Range<u8>,
+) -> Vec<SealedBlock> {
+    let mut rng = rand::thread_rng();
+    let mut blocks =
+        Vec::with_capacity(block_numbers.end.saturating_sub(block_numbers.start) as usize);
+    for idx in block_numbers {
         blocks.push(random_block(
             idx,
-            Some(blocks.last().map(|block: &BlockLocked| block.header.hash()).unwrap_or(head)),
+            Some(blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head)),
+            Some(tx_count.clone().sample_single(&mut rng)),
+            None,
         ));
     }
     blocks

@@ -36,7 +36,7 @@
 
 /** Disables using GNU/Linux libc extensions.
  * \ingroup build_option
- * \note This option couldn't be moved to the options.h since dependant
+ * \note This option couldn't be moved to the options.h since dependent
  * control macros/defined should be prepared before include the options.h */
 #ifndef MDBX_DISABLE_GNU_SOURCE
 #define MDBX_DISABLE_GNU_SOURCE 0
@@ -1654,7 +1654,7 @@ MDBX_INTERNAL_FUNC int osal_lck_destroy(MDBX_env *env,
 MDBX_INTERNAL_FUNC int osal_lck_seize(MDBX_env *env);
 
 /// \brief Downgrades the level of initially acquired lock to
-///   operational level specified by argument. The reson for such downgrade:
+///   operational level specified by argument. The reason for such downgrade:
 ///    - unblocking of other processes that are waiting for access, i.e.
 ///      if (env->me_flags & MDBX_EXCLUSIVE) != 0, then other processes
 ///      should be made aware that access is unavailable rather than
@@ -2037,7 +2037,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 
 /** Controls sort order of internal page number lists.
  * This mostly experimental/advanced option with not for regular MDBX users.
- * \warning The database format depend on this option and libmdbx builded with
+ * \warning The database format depend on this option and libmdbx built with
  * different option value are incompatible. */
 #ifndef MDBX_PNL_ASCENDING
 #define MDBX_PNL_ASCENDING 0
@@ -2907,7 +2907,7 @@ typedef struct MDBX_lockinfo {
 
   /* Paired counter of processes that have mlock()ed part of mmapped DB.
    * The (mti_mlcnt[0] - mti_mlcnt[1]) > 0 means at least one process
-   * lock at leat one page, so therefore madvise() could return EINVAL. */
+   * lock at least one page, so therefore madvise() could return EINVAL. */
   MDBX_atomic_uint32_t mti_mlcnt[2];
 
   MDBX_ALIGNAS(MDBX_CACHELINE_SIZE) /* cacheline ----------------------------*/
@@ -4285,7 +4285,7 @@ node_largedata_pgno(const MDBX_node *const __restrict node) {
  *
  * BRANCH_NODE_MAX
  *   Branch-page must contain at least two nodes, within each a key and a child
- *   page number. But page can't be splitted if it contains less that 4 keys,
+ *   page number. But page can't be split if it contains less that 4 keys,
  *   i.e. a page should not overflow before adding the fourth key. Therefore,
  *   at least 3 branch-node should fit in the single branch-page. Further, the
  *   first node of a branch-page doesn't contain a key, i.e. the first node
@@ -4299,8 +4299,8 @@ node_largedata_pgno(const MDBX_node *const __restrict node) {
  *   Leaf-node must fit into single leaf-page, where a value could be placed on
  *   a large/overflow page. However, may require to insert a nearly page-sized
  *   node between two large nodes are already fill-up a page. In this case the
- *   page must be splitted to two if some pair of nodes fits on one page, or
- *   otherwise the page should be splitted to the THREE with a single node
+ *   page must be split to two if some pair of nodes fits on one page, or
+ *   otherwise the page should be split to the THREE with a single node
  *   per each of ones. Such 1-into-3 page splitting is costly and complex since
  *   requires TWO insertion into the parent page, that could lead to split it
  *   and so on up to the root. Therefore double-splitting is avoided here and
@@ -4922,7 +4922,7 @@ static __always_inline bool safe64_reset_compare(MDBX_atomic_uint64_t *p,
    *     the asynchronously cancellation of read transaction. Therefore,
    *     there may be a collision between the cleanup performed here and
    *     asynchronous termination and restarting of the read transaction
-   *     in another proces/thread. In general we MUST NOT reset the `mr_txnid`
+   *     in another process/thread. In general we MUST NOT reset the `mr_txnid`
    *     if a new transaction was started (i.e. if `mr_txnid` was changed). */
 #if MDBX_64BIT_CAS
   bool rc = atomic_cas64(p, compare, UINT64_MAX);
@@ -18489,12 +18489,12 @@ __hot static __always_inline int page_get_checker_lite(const uint16_t ILL,
       assert((ILL & (P_BRANCH | P_LEAF | P_LEAF2)) == 0);
       assert(page->mp_flags & (P_BRANCH | P_LEAF | P_LEAF2));
       return bad_page(page, "unexpected %s instead of %s (%u)\n",
-                      "large/overlow", "branch/leaf/leaf2", page->mp_flags);
+                      "large/overflow", "branch/leaf/leaf2", page->mp_flags);
     } else if (ILL & (P_BRANCH | P_LEAF | P_LEAF2)) {
       assert((ILL & P_BRANCH) && (ILL & P_LEAF) && (ILL & P_LEAF2));
       assert(page->mp_flags & (P_BRANCH | P_LEAF | P_LEAF2));
       return bad_page(page, "unexpected %s instead of %s (%u)\n",
-                      "branch/leaf/leaf2", "large/overlow", page->mp_flags);
+                      "branch/leaf/leaf2", "large/overflow", page->mp_flags);
     } else {
       assert(false);
     }
@@ -24323,7 +24323,7 @@ __cold static void compacting_fixup_meta(MDBX_env *env, MDBX_meta *meta) {
   unaligned_poke_u64(4, meta->mm_sign, meta_sign(meta));
 }
 
-/* Make resizeable */
+/* Make resizable */
 __cold static void meta_make_sizeable(MDBX_meta *meta) {
   meta->mm_geo.lower = MIN_PAGENO;
   if (meta->mm_geo.grow_pv == 0) {
@@ -24571,7 +24571,7 @@ __cold static int env_copy_asis(MDBX_env *env, MDBX_txn *read_txn,
         break;
       rc = errno;
       if (rc == EXDEV || rc == /* workaround for ecryptfs bug(s),
-                                  maybe usefull for others fs */
+                                  maybe useful for others fs */
                              EINVAL)
         not_the_same_filesystem = true;
       else if (ignore_enosys(rc) == MDBX_RESULT_TRUE)

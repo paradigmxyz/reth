@@ -1,5 +1,24 @@
 use crate::p2p::downloader::{DownloadStream, Downloader};
-use reth_primitives::{BlockLocked, SealedHeader};
+use reth_primitives::{SealedBlock, SealedHeader};
+
+/// The block response
+#[derive(PartialEq, Eq, Debug)]
+pub enum BlockResponse {
+    /// Full block response (with transactions or ommers)
+    Full(SealedBlock),
+    /// The empty block response
+    Empty(SealedHeader),
+}
+
+impl BlockResponse {
+    /// Return the reference to the response header
+    pub fn header(&self) -> &SealedHeader {
+        match self {
+            BlockResponse::Full(block) => &block.header,
+            BlockResponse::Empty(header) => header,
+        }
+    }
+}
 
 /// A downloader capable of fetching block bodies from header hashes.
 ///
@@ -19,7 +38,7 @@ pub trait BodyDownloader: Downloader {
     ///
     /// It is *not* guaranteed that all the requested bodies are fetched: the downloader may close
     /// the stream before the entire range has been fetched for any reason
-    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockLocked>
+    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockResponse>
     where
         I: IntoIterator<Item = &'b SealedHeader>,
         <I as IntoIterator>::IntoIter: Send + 'b,

@@ -17,12 +17,11 @@ mod state;
 pub mod test_utils;
 
 pub use block::{
-    get_cumulative_tx_count_by_hash, insert_canonical_block, BlockProvider, ChainInfo,
-    HeaderProvider,
+    insert_canonical_block, BlockHashProvider, BlockProvider, ChainInfo, HeaderProvider,
 };
 pub use db_provider::{
-    self as db, ProviderImpl, StateProviderImplHistory, StateProviderImplLatest,
-    StateProviderImplRefHistory, StateProviderImplRefLatest,
+    self as db, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
+    LatestStateProviderRef, ProviderImpl,
 };
 pub use reth_interfaces::provider::Error;
 pub use state::{AccountProvider, StateProvider, StateProviderFactory};

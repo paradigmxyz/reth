@@ -1,10 +1,11 @@
 use crate::{
+    keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumber, Bloom, H160, H256, U256,
+    BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
 use bytes::{BufMut, BytesMut};
-use ethers_core::{types::H64, utils::keccak256};
-use reth_codecs::{main_codec, Compact};
+use ethers_core::types::H64;
+use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -65,7 +66,7 @@ pub struct Header {
     pub base_fee_per_gas: Option<u64>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
-    pub extra_data: bytes::Bytes,
+    pub extra_data: Bytes,
 }
 
 impl Default for Header {
@@ -97,7 +98,12 @@ impl Header {
     pub fn hash_slow(&self) -> H256 {
         let mut out = BytesMut::new();
         self.encode(&mut out);
-        H256::from_slice(keccak256(&out).as_slice())
+        keccak256(&out)
+    }
+
+    /// Checks if the header is empty - has no transactions and no ommers
+    pub fn is_empty(&self) -> bool {
+        self.ommers_hash == EMPTY_LIST_HASH && self.transactions_root == EMPTY_ROOT
     }
 
     /// Calculate hash and seal the Header so that it can't be changed.
@@ -177,9 +183,9 @@ impl Decodable for Header {
             receipts_root: Decodable::decode(buf)?,
             logs_bloom: Decodable::decode(buf)?,
             difficulty: Decodable::decode(buf)?,
-            number: U256::decode(buf)?.as_u64(),
-            gas_limit: U256::decode(buf)?.as_u64(),
-            gas_used: U256::decode(buf)?.as_u64(),
+            number: U256::decode(buf)?.to::<u64>(),
+            gas_limit: U256::decode(buf)?.to::<u64>(),
+            gas_used: U256::decode(buf)?.to::<u64>(),
             timestamp: Decodable::decode(buf)?,
             extra_data: Decodable::decode(buf)?,
             mix_hash: Decodable::decode(buf)?,
@@ -188,7 +194,7 @@ impl Decodable for Header {
         };
         let consumed = started_len - buf.len();
         if consumed < rlp_head.payload_length {
-            this.base_fee_per_gas = Some(U256::decode(buf)?.as_u64());
+            this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
         }
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {
@@ -203,7 +209,6 @@ impl Decodable for Header {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-// ANCHOR: struct-SealedHeader
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
     /// Locked Header fields.
@@ -211,7 +216,6 @@ pub struct SealedHeader {
     /// Locked Header hash.
     hash: BlockHash,
 }
-// ANCHOR_END: struct-SealedHeader
 
 impl Default for SealedHeader {
     fn default() -> Self {
@@ -277,17 +281,22 @@ impl SealedHeader {
 }
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
+/// > The response must contain a number of block headers, of rising number when reverse is 0,
+/// > falling when 1
 ///
-/// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-/// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+/// Ref: <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+///
+/// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
+/// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+#[derive_arbitrary(rlp)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.
-    #[default]
     Falling,
     /// Rising block number.
+    #[default]
     Rising,
 }
 
@@ -306,13 +315,13 @@ impl HeadersDirection {
     ///
     /// Returns:
     ///
-    /// [`HeadersDirection::Rising`] block numbers for `reverse == true`
-    /// [`HeadersDirection::Falling`] block numbers for `reverse == false`
+    /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
+    /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
     pub fn new(reverse: bool) -> Self {
         if reverse {
-            HeadersDirection::Rising
-        } else {
             HeadersDirection::Falling
+        } else {
+            HeadersDirection::Rising
         }
     }
 }
@@ -343,21 +352,17 @@ impl From<bool> for HeadersDirection {
 impl From<HeadersDirection> for bool {
     fn from(value: HeadersDirection) -> Self {
         match value {
-            HeadersDirection::Rising => true,
-            HeadersDirection::Falling => false,
+            HeadersDirection::Rising => false,
+            HeadersDirection::Falling => true,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Decodable, Encodable, Header, H256};
-    use crate::Address;
-    use ethers_core::{
-        types::Bytes,
-        utils::hex::{self, FromHex},
-    };
-
+    use super::{Bytes, Decodable, Encodable, Header, H256};
+    use crate::{Address, HeadersDirection, U256};
+    use ethers_core::utils::hex::{self, FromHex};
     use std::str::FromStr;
 
     #[test]
@@ -365,12 +370,12 @@ mod tests {
     fn test_encode_block_header() {
         let expected = hex::decode("f901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000").unwrap();
         let header = Header {
-            difficulty: 0x8ae_u64.into(),
+            difficulty: U256::from(0x8ae_u64),
             number: 0xd05_u64,
             gas_limit: 0x115c_u64,
             gas_used: 0x15b3_u64,
             timestamp: 0x1a0a_u64,
-            extra_data: Bytes::from_str("7788").unwrap().0,
+            extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: H256::zero(),
             state_root: H256::zero(),
             transactions_root: H256::zero(),
@@ -397,12 +402,12 @@ mod tests {
             transactions_root: H256::from_str("50f738580ed699f0469702c7ccc63ed2e51bc034be9479b7bff4e68dee84accf").unwrap(),
             receipts_root: H256::from_str("29b0562f7140574dd0d50dee8a271b22e1a0a7b78fca58f7c60370d8317ba2a9").unwrap(),
             logs_bloom: <[u8; 256]>::from_hex("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
-            difficulty: 0x020000.into(),
+            difficulty: U256::from(0x020000),
             number: 0x01_u64,
             gas_limit: 0x016345785d8a0000_u64,
             gas_used: 0x015534_u64,
             timestamp: 0x079e,
-            extra_data: Bytes::from_str("42").unwrap().0,
+            extra_data: Bytes::from_str("42").unwrap(),
             mix_hash: H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
@@ -415,12 +420,12 @@ mod tests {
     fn test_decode_block_header() {
         let data = hex::decode("f901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000").unwrap();
         let expected = Header {
-            difficulty: 0x8aeu64.into(),
+            difficulty: U256::from(0x8aeu64),
             number: 0xd05u64,
             gas_limit: 0x115cu64,
             gas_used: 0x15b3u64,
             timestamp: 0x1a0au64,
-            extra_data: Bytes::from_str("7788").unwrap().0,
+            extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: H256::zero(),
             state_root: H256::zero(),
             transactions_root: H256::zero(),
@@ -429,5 +434,26 @@ mod tests {
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
         assert_eq!(header, expected);
+    }
+
+    #[test]
+    fn sanity_direction() {
+        let reverse = true;
+        assert_eq!(HeadersDirection::Falling, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Falling));
+
+        let reverse = false;
+        assert_eq!(HeadersDirection::Rising, reverse.into());
+        assert_eq!(reverse, bool::from(HeadersDirection::Rising));
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Falling;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+
+        let mut buf = Vec::new();
+        let direction = HeadersDirection::Rising;
+        direction.encode(&mut buf);
+        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
     }
 }

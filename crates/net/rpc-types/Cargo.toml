@@ -11,8 +11,9 @@ Reth RPC types
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-rlp = {path = "../../common/rlp"}
+reth-rlp = { path = "../../common/rlp" }
 
 # misc
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+bytes = "1.2"

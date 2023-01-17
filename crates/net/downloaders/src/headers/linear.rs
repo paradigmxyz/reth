@@ -18,7 +18,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 /// Download headers in batches
@@ -174,7 +173,7 @@ where
         HeadersRequest {
             start: self.request_start().into(),
             limit: self.batch_size,
-            direction: HeadersDirection::Rising,
+            direction: HeadersDirection::Falling,
         }
     }
 
@@ -201,7 +200,7 @@ where
                 let req = self.headers_request();
                 tracing::trace!(
                     target: "downloaders::headers",
-                    "requesting headers {req:?}"
+                    "Requesting headers {req:?}"
                 );
                 HeadersRequestFuture {
                     request: req.clone(),
@@ -223,7 +222,7 @@ where
         }
         tracing::trace!(
             target : "downloaders::headers",
-            "retrying future attempt: {}/{}",
+            "Retrying future attempt: {}/{}",
             fut.retries,
             fut.max_retries
         );
@@ -236,7 +235,7 @@ where
 
     /// Validate whether the header is valid in relation to it's parent
     ///
-    /// Returns Ok(false) if the
+    /// Returns and `Err` if the header does not conform to consensus rules.
     #[allow(clippy::result_large_err)]
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(&self.consensus, header, parent)?;
@@ -339,25 +338,25 @@ where
                                 this.request = Some(this.get_or_init_fut());
                             }
                         }
-                        Err(err) => {
+                        Err(error) => {
+                            tracing::error!(
+                                target: "downloaders::headers", request = ?fut.request, ?error, "Error processing header response",
+                            );
                             // Penalize the peer for bad response
                             if let Some(peer_id) = peer_id {
-                                tracing::trace!(
-                                    target: "downloaders::headers",
-                                    "penalizing peer {peer_id} for {err:?}"
-                                );
+                                tracing::trace!(target: "downloaders::headers", ?peer_id, ?error, "Penalizing peer");
                                 this.client.report_bad_message(peer_id);
                             }
                             // Response is invalid, attempt to retry
                             if this.try_fuse_request_fut(&mut fut).is_err() {
                                 tracing::trace!(
                                     target: "downloaders::headers",
-                                    "ran out of retries terminating stream"
+                                    "Ran out of retries, terminating stream"
                                 );
                                 // We exhausted all of the retries. Stream must terminate
                                 this.buffered.clear();
                                 this.encountered_error = true;
-                                return Poll::Ready(Some(Err(err)))
+                                return Poll::Ready(Some(Err(error)))
                             }
                             // Reset the future
                             this.request = Some(fut);
@@ -380,15 +379,13 @@ where
 pub struct LinearDownloadBuilder {
     /// The batch size per one request
     batch_size: u64,
-    /// A single request timeout
-    request_timeout: Duration,
     /// The number of retries for downloading
     request_retries: usize,
 }
 
 impl Default for LinearDownloadBuilder {
     fn default() -> Self {
-        Self { batch_size: 100, request_timeout: Duration::from_millis(100), request_retries: 5 }
+        Self { batch_size: 100, request_retries: 5 }
     }
 }
 
@@ -396,12 +393,6 @@ impl LinearDownloadBuilder {
     /// Set the request batch size
     pub fn batch_size(mut self, size: u64) -> Self {
         self.batch_size = size;
-        self
-    }
-
-    /// Set the request timeout
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.request_timeout = timeout;
         self
     }
 
@@ -456,6 +447,7 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await;
         assert!(result.is_err());
+        assert_eq!(client.request_attempts(), downloader.request_retries as u64);
     }
 
     #[tokio::test]
@@ -482,6 +474,7 @@ mod tests {
         let result = downloader.stream(p0.clone(), p0.hash_slow()).try_collect::<Vec<_>>().await;
         let headers = result.unwrap();
         assert!(headers.is_empty());
+        assert_eq!(client.request_attempts(), 1);
     }
 
     #[tokio::test]
@@ -511,47 +504,7 @@ mod tests {
         assert_eq!(headers[0], p0);
         assert_eq!(headers[1], p1);
         assert_eq!(headers[2], p2);
-    }
-
-    #[tokio::test]
-    async fn download_empty_stream() {
-        let client = Arc::new(TestHeadersClient::default());
-        let downloader =
-            LinearDownloadBuilder::default().build(CONSENSUS.clone(), Arc::clone(&client));
-
-        let result = downloader
-            .stream(SealedHeader::default(), H256::default())
-            .try_collect::<Vec<_>>()
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn download_stream() {
-        let client = Arc::new(TestHeadersClient::default());
-        let downloader = LinearDownloadBuilder::default()
-            .batch_size(3)
-            .build(CONSENSUS.clone(), Arc::clone(&client));
-
-        let p3 = SealedHeader::default();
-        let p2 = child_header(&p3);
-        let p1 = child_header(&p2);
-        let p0 = child_header(&p1);
-
-        client
-            .extend(vec![
-                p0.as_ref().clone(),
-                p1.as_ref().clone(),
-                p2.as_ref().clone(),
-                p3.as_ref().clone(),
-            ])
-            .await;
-
-        let result = downloader.stream(p3, p0.hash_slow()).try_collect::<Vec<_>>().await;
-        let headers = result.unwrap();
-        assert_eq!(headers.len(), 3);
-        assert_eq!(headers[0], p0);
-        assert_eq!(headers[1], p1);
-        assert_eq!(headers[2], p2);
+        // stream has to poll twice because of the batch size
+        assert_eq!(client.request_attempts(), 2);
     }
 }

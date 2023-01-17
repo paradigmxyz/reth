@@ -3,8 +3,10 @@
 use crate::session::{Direction, ExceedsSessionLimit};
 use std::time::Duration;
 
-/// Default request timeout.
-pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(500u64);
+/// Default request timeout for a single request.
+///
+/// This represents the time we wait for a response until we consider it timed out.
+pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 pub struct SessionsConfig {
@@ -25,14 +27,14 @@ impl Default for SessionsConfig {
         SessionsConfig {
             // This should be sufficient to slots for handling commands sent to the session task,
             // since the manager is the sender.
-            session_command_buffer: 10,
+            session_command_buffer: 32,
             // This should be greater since the manager is the receiver. The total size will be
-            // `buffer + num sessions`. Each session can therefor fit at least 1 message in the
+            // `buffer + num sessions`. Each session can therefore fit at least 1 message in the
             // channel. The buffer size is additional capacity. The channel is always drained on
             // `poll`.
-            session_event_buffer: 64,
+            session_event_buffer: 128,
             limits: Default::default(),
-            request_timeout: REQUEST_TIMEOUT,
+            request_timeout: INITIAL_REQUEST_TIMEOUT,
         }
     }
 }

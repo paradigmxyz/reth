@@ -1,50 +1,17 @@
-[Introduction](./README.md)
+# Reth Book
 
-# Getting Started
+## Getting Started
+- [Introduction](./README.md)
+- [System requirements](./getting_started/system_requirements.md)
+- [Installation](./getting_started/installation.md)
+- [Running Reth](./getting_started/running.md)
 
-- [Installation](./installation.md)
-- [First Steps with Reth]()
-<!-- An overview of all the flags, how they work and how to configure the node   -->
-- [Configuring The Node]()
-- [Running Reth]()
+## Fundamentals
+- [Node](./fundamentals/node.md)
+- [Command-Line Options](./fundamentals/command-line_options.md)
+- [Logs](./fundamentals/logs.md)
 
-# A Tour Of Reth
+## Monitoring
+- [Metrics](./monitoring/metrics.md)
 
-- [Database]()
-    - [codecs]()
-    - [libmdbx-rs]()
-    - [db]()
-- [Networking]()
-    - [P2P]()
-        - [network]()
-        - [eth-wire]()
-        - [discv4]()
-        - [ipc]()
-    - [RPC]()
-        - [rpc-api]()
-        - [rpc]()
-        - [rpc-types]()
-    - [Downloaders]()
-        - [bodies-downloaders]()
-        - [headers-downloaders]()
-- [Ethereum]()
-    - [executor]()
-    - [consensus]()
-    - [transaction-pool]()
-- [Staged Sync]()
-    - [stages](./stages/README.md)
-- [Primitives]()
-    - [primitives]()
-    - [rlp]()
-    - [rlp-derive]()
-- [Misc]()
-    - [interfaces]()
-    - [tracing]()
-    - [crate-template]()
-    - [examples]()
-
-
-
-# Design
-
-- [Goals](./design/goals.md)
+## [FAQ](./faq/README.md)

@@ -10,6 +10,7 @@
 //! This crate contains Ethereum primitive types and helper functions.
 
 mod account;
+mod bits;
 mod block;
 pub mod bloom;
 mod chain;
@@ -22,6 +23,7 @@ mod hex_bytes;
 mod integer_list;
 mod jsonu256;
 mod log;
+mod net;
 mod peer;
 mod receipt;
 mod storage;
@@ -31,17 +33,19 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
-pub use block::{Block, BlockHashOrNumber, BlockLocked};
+pub use bits::H512;
+pub use block::{Block, BlockHashOrNumber, SealedBlock};
+pub use bloom::Bloom;
 pub use chain::Chain;
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
-pub use ethbloom::Bloom;
-pub use forkid::{ForkFilter, ForkHash, ForkId, ValidationError};
+pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use hardfork::Hardfork;
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;
+pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use storage::StorageEntry;
@@ -70,11 +74,14 @@ pub type ChainId = u64;
 pub type StorageKey = H256;
 /// An account storage value.
 pub type StorageValue = U256;
+/// The ID of block/transaction transition (represents state transition)
+pub type TransitionId = u64;
 
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, H128, H160, H256, H512, H64, U128, U256, U64},
+    types::{BigEndianHash, H128, H64, U64},
 };
+pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 
 #[doc(hidden)]
 mod __reexport {
@@ -92,11 +99,13 @@ pub mod utils {
 pub use __reexport::*;
 
 /// Returns the keccak256 hash for the given data.
+#[inline]
 pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     use tiny_keccak::{Hasher, Keccak};
-    let mut keccak = Keccak::v256();
-    let mut output = [0; 32];
-    keccak.update(data.as_ref());
-    keccak.finalize(&mut output);
-    output.into()
+
+    let mut buf = [0u8; 32];
+    let mut hasher = Keccak::v256();
+    hasher.update(data.as_ref());
+    hasher.finalize(&mut buf);
+    buf.into()
 }

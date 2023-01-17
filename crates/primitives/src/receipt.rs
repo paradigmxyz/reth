@@ -36,12 +36,40 @@ impl Receipt {
     }
 
     /// Encodes the receipt data.
-    fn encode_receipt(&self, out: &mut dyn BufMut) {
+    fn encode_fields(&self, out: &mut dyn BufMut) {
         self.receipt_rlp_header().encode(out);
         self.success.encode(out);
         self.cumulative_gas_used.encode(out);
         self.bloom.encode(out);
         self.logs.encode(out);
+    }
+
+    /// Encode receipt with or without the header data.
+    pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
+        if matches!(self.tx_type, TxType::Legacy) {
+            self.encode_fields(out);
+            return
+        }
+
+        let mut payload = BytesMut::new();
+        self.encode_fields(&mut payload);
+
+        if with_header {
+            let payload_length = payload.len() + 1;
+            let header = reth_rlp::Header { list: false, payload_length };
+            header.encode(out);
+        }
+
+        match self.tx_type {
+            TxType::EIP2930 => {
+                out.put_u8(0x01);
+            }
+            TxType::EIP1559 => {
+                out.put_u8(0x02);
+            }
+            _ => unreachable!("legacy handled; qed."),
+        }
+        out.put_slice(payload.as_ref());
     }
 
     /// Returns the length of the receipt data.
@@ -84,35 +112,13 @@ impl Encodable for Receipt {
         if matches!(self.tx_type, TxType::EIP1559 | TxType::EIP2930) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
-            payload_len = length_of_length(payload_len);
+            payload_len += length_of_length(payload_len);
         }
 
         payload_len
     }
     fn encode(&self, out: &mut dyn BufMut) {
-        if matches!(self.tx_type, TxType::Legacy) {
-            self.encode_receipt(out);
-            return
-        }
-
-        let mut payload = BytesMut::new();
-        self.encode_receipt(&mut payload);
-        let payload_length = payload.len() + 1;
-
-        let header = reth_rlp::Header { list: false, payload_length };
-        header.encode(out);
-
-        match self.tx_type {
-            TxType::EIP2930 => {
-                out.put_u8(0x01);
-            }
-            TxType::EIP1559 => {
-                out.put_u8(0x02);
-            }
-            _ => unreachable!("legacy handled; qed."),
-        }
-
-        out.put_slice(payload.as_ref());
+        self.encode_inner(out, true)
     }
 }
 
@@ -153,15 +159,15 @@ impl Decodable for Receipt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Address, H256};
-    use ethers_core::{types::Bytes, utils::hex};
+    use crate::{hex_literal::hex, Address, H256};
+    use ethers_core::types::Bytes;
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     fn encode_legacy_receipt() {
-        let expected = hex::decode("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff").unwrap();
+        let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
         let mut data = vec![];
         let receipt = Receipt {
@@ -180,7 +186,7 @@ mod tests {
                     )
                     .unwrap(),
                 ],
-                data: Bytes::from_str("0100ff").unwrap().0,
+                data: Bytes::from_str("0100ff").unwrap().0.into(),
             }],
             success: false,
         };
@@ -195,7 +201,7 @@ mod tests {
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     fn decode_legacy_receipt() {
-        let data = hex::decode("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff").unwrap();
+        let data = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
         // EIP658Receipt
         let expected = Receipt {
@@ -214,7 +220,7 @@ mod tests {
                     )
                     .unwrap(),
                 ],
-                data: Bytes::from_str("0100ff").unwrap().0,
+                data: Bytes::from_str("0100ff").unwrap().0.into(),
             }],
             success: false,
         };

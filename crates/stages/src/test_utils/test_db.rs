@@ -7,38 +7,38 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedHeader, U256};
+use reth_primitives::{BlockNumber, SealedHeader};
 use std::{borrow::Borrow, sync::Arc};
 
 use crate::db::Transaction;
 
-/// The [StageTestDB] is used as an internal
+/// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
 ///
 /// ```rust
-/// let db = StageTestDB::default();
-/// stage.execute(&mut db.container(), input);
+/// let tx = TestTransaction::default();
+/// stage.execute(&mut tx.container(), input);
 /// ```
 pub(crate) struct TestTransaction {
-    db: Arc<Env<WriteMap>>,
+    tx: Arc<Env<WriteMap>>,
 }
 
 impl Default for TestTransaction {
-    /// Create a new instance of [StageTestDB]
+    /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { db: create_test_db::<WriteMap>(EnvKind::RW) }
+        Self { tx: create_test_db::<WriteMap>(EnvKind::RW) }
     }
 }
 
 impl TestTransaction {
     /// Return a database wrapped in [Transaction].
     pub(crate) fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
-        Transaction::new(self.db.borrow()).expect("failed to create db container")
+        Transaction::new(self.tx.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
     pub(crate) fn inner_raw(&self) -> Arc<Env<WriteMap>> {
-        self.db.clone()
+        self.tx.clone()
     }
 
     /// Invoke a callback with transaction committing it afterwards
@@ -46,9 +46,9 @@ impl TestTransaction {
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
-        let mut db = self.inner();
-        f(&mut db)?;
-        db.commit()?;
+        let mut tx = self.inner();
+        f(&mut tx)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -63,7 +63,7 @@ impl TestTransaction {
     /// Check if the table is empty
     pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
         self.query(|tx| {
-            let last = tx.cursor::<T>()?.last()?;
+            let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
         })
     }
@@ -72,8 +72,8 @@ impl TestTransaction {
     /// This function commits the transaction before exiting.
     ///
     /// ```rust
-    /// let db = StageTestDB::default();
-    /// db.map_put::<Table, _, _>(&items, |item| item)?;
+    /// let tx = TestTransaction::default();
+    /// tx.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
     #[allow(dead_code)]
     pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
@@ -96,8 +96,8 @@ impl TestTransaction {
     /// This function commits the transaction before exiting.
     ///
     /// ```rust
-    /// let db = StageTestDB::default();
-    /// db.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
+    /// let tx = TestTransaction::default();
+    /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
     #[allow(dead_code)]
     pub(crate) fn transform_append<T, S, F>(
@@ -112,7 +112,7 @@ impl TestTransaction {
         F: FnMut(&Option<<T as Table>::Value>, &S) -> (T::Key, T::Value),
     {
         self.commit(|tx| {
-            let mut cursor = tx.cursor_mut::<T>()?;
+            let mut cursor = tx.cursor_write::<T>()?;
             let mut last = cursor.last()?.map(|(_, v)| v);
             values.iter().try_for_each(|src| {
                 let (k, v) = transform(&last, src);
@@ -134,7 +134,7 @@ impl TestTransaction {
         F: FnMut(T::Key) -> BlockNumber,
     {
         self.query(|tx| {
-            let mut cursor = tx.cursor::<T>()?;
+            let mut cursor = tx.cursor_read::<T>()?;
             if let Some((key, _)) = cursor.last()? {
                 assert!(selector(key) <= num);
             }
@@ -154,7 +154,7 @@ impl TestTransaction {
         F: FnMut(T::Value) -> BlockNumber,
     {
         self.query(|tx| {
-            let mut cursor = tx.cursor::<T>()?;
+            let mut cursor = tx.cursor_read::<T>()?;
             let mut entry = cursor.last()?;
             while let Some((_, value)) = entry {
                 assert!(selector(value) <= num);
@@ -173,18 +173,12 @@ impl TestTransaction {
         self.commit(|tx| {
             let headers = headers.collect::<Vec<_>>();
 
-            let mut td: U256 =
-                tx.cursor::<tables::HeaderTD>()?.last()?.map(|(_, v)| v).unwrap_or_default().into();
-
             for header in headers {
                 let key: BlockNumHash = (header.number, header.hash()).into();
 
                 tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
                 tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
                 tx.put::<tables::Headers>(key, header.clone().unseal())?;
-
-                td += header.difficulty;
-                tx.put::<tables::HeaderTD>(key, td.into())?;
             }
 
             Ok(())

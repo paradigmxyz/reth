@@ -4,6 +4,7 @@ use crate::{
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
+    metrics::TransactionsManagerMetrics,
     network::NetworkHandleMessage,
     peers::ReputationChangeKind,
     NetworkHandle,
@@ -12,7 +13,7 @@ use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use reth_eth_wire::{
     GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
 };
-use reth_interfaces::p2p::error::RequestResult;
+use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
@@ -101,6 +102,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
+    /// TransactionsManager metrics
+    metrics: TransactionsManagerMetrics,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -130,6 +133,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedReceiverStream::new(from_network),
+            metrics: Default::default(),
         }
     }
 }
@@ -181,6 +185,11 @@ where
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
     fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+        // Nothing to propagate while syncing
+        if self.network.is_syncing() {
+            return
+        }
+
         trace!(target: "net::tx", "Start propagating transactions");
 
         let propagated = self.propagate_transactions(
@@ -230,16 +239,34 @@ where
             }
         }
 
+        // Update propagated transactions metrics
+        self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+
         propagated
     }
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
-    fn on_new_pooled_transactions(&mut self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
+    fn on_new_pooled_transaction_hashes(
+        &mut self,
+        peer_id: PeerId,
+        msg: NewPooledTransactionHashes,
+    ) {
+        // If the node is currently syncing, ignore transactions
+        if self.network.is_syncing() {
+            return
+        }
+
+        let mut num_already_seen = 0;
+
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let mut transactions = msg.0;
 
             // keep track of the transactions the peer knows
-            peer.transactions.extend(transactions.clone());
+            for tx in transactions.iter().copied() {
+                if !peer.transactions.insert(tx) {
+                    num_already_seen += 1;
+                }
+            }
 
             self.pool.retain_unknown(&mut transactions);
 
@@ -259,16 +286,20 @@ where
                 self.inflight_requests.push(GetPooledTxRequest { peer_id, response: rx })
             }
         }
+
+        if num_already_seen > 0 {
+            self.report_bad_message(peer_id);
+        }
     }
 
     /// Handles dedicated transaction events related tot the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
-                self.import_transactions(peer_id, msg.0);
+                self.import_transactions(peer_id, msg.0, TransactionSource::Broadcast);
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                self.on_new_pooled_transactions(peer_id, msg)
+                self.on_new_pooled_transaction_hashes(peer_id, msg)
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
@@ -288,7 +319,7 @@ where
     /// Handles a received event related to common network events.
     fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
-            NetworkEvent::SessionClosed { peer_id } => {
+            NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
@@ -306,18 +337,35 @@ where
 
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
-                let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
-                self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-                    peer_id,
-                    msg,
-                })
+                if !self.network.is_syncing() {
+                    let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
+                    self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
+                        peer_id,
+                        msg,
+                    })
+                }
             }
+            // TODO Add remaining events
+            _ => {}
         }
     }
 
     /// Starts the import process for the given transactions.
-    fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<TransactionSigned>) {
+    fn import_transactions(
+        &mut self,
+        peer_id: PeerId,
+        transactions: Vec<TransactionSigned>,
+        source: TransactionSource,
+    ) {
+        // If the node is currently syncing, ignore transactions
+        if self.network.is_syncing() {
+            return
+        }
+
+        // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
+        let mut num_already_seen = 0;
+
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             for tx in transactions {
                 // recover transaction
@@ -328,8 +376,13 @@ where
                     continue
                 };
 
-                // track that the peer knows this transaction
-                peer.transactions.insert(tx.hash);
+                // track that the peer knows this transaction, but only if this is a new broadcast.
+                // If we received the transactions as the response to our GetPooledTransactions
+                // requests (based on received `NewPooledTransactionHashes`) then we already
+                // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
+                if source.is_broadcast() && !peer.transactions.insert(tx.hash) {
+                    num_already_seen += 1;
+                }
 
                 match self.transactions_by_peers.entry(tx.hash) {
                     Entry::Occupied(mut entry) => {
@@ -352,7 +405,7 @@ where
             }
         }
 
-        if has_bad_transactions {
+        if has_bad_transactions || num_already_seen > 0 {
             self.report_bad_message(peer_id);
         }
     }
@@ -392,7 +445,7 @@ where
             this.on_network_event(event);
         }
 
-        // drain network/peer related events
+        // drain commands
         while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
             this.on_command(cmd);
         }
@@ -411,7 +464,7 @@ where
                     this.inflight_requests.push(req);
                 }
                 Poll::Ready(Ok(Ok(txs))) => {
-                    this.import_transactions(req.peer_id, txs.0);
+                    this.import_transactions(req.peer_id, txs.0, TransactionSource::Response);
                 }
                 Poll::Ready(Ok(Err(_))) => {
                     this.report_bad_message(req.peer_id);
@@ -449,6 +502,23 @@ where
     }
 }
 
+/// How we received the transactions.
+enum TransactionSource {
+    /// Transactions were broadcast to us via [`Transactions`] message.
+    Broadcast,
+    /// Transactions were sent as the response of [`GetPooledTxRequest`] issued by us.
+    Response,
+}
+
+// === impl TransactionSource ===
+
+impl TransactionSource {
+    /// Whether the transaction were sent as broadcast.
+    fn is_broadcast(&self) -> bool {
+        matches!(self, TransactionSource::Broadcast)
+    }
+}
+
 /// An inflight request for `PooledTransactions` from a peer
 #[allow(missing_docs)]
 struct GetPooledTxRequest {
@@ -473,7 +543,7 @@ enum TransactionsCommand {
 #[derive(Debug)]
 #[allow(missing_docs)]
 pub enum NetworkTransactionEvent {
-    /// Received list of transactions to the given peer.
+    /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
     IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
@@ -483,4 +553,45 @@ pub enum NetworkTransactionEvent {
         request: GetPooledTransactions,
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{NetworkConfig, NetworkManager};
+    use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+    use reth_provider::test_utils::NoopProvider;
+    use reth_transaction_pool::test_utils::testing_pool;
+    use secp256k1::SecretKey;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ignored_tx_broadcasts_while_syncing() {
+        reth_tracing::init_test_tracing();
+
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = Arc::new(NoopProvider::default());
+        let pool = testing_pool();
+        let config = NetworkConfig::builder(Arc::clone(&client), secret_key).build();
+        let (handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+
+        tokio::task::spawn(network);
+
+        handle.update_sync_state(SyncState::Downloading { target_block: 100 });
+        assert!(handle.is_syncing());
+
+        let peer_id = PeerId::random();
+
+        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+            peer_id,
+            msg: Transactions(vec![TransactionSigned::default()]),
+        });
+
+        assert!(pool.is_empty());
+    }
 }

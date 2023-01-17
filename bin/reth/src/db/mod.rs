@@ -1,8 +1,5 @@
-// TODO: Remove
-//! Main db command
-//!
 //! Database debugging tool
-
+use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
 use reth_db::{
@@ -14,15 +11,20 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::path::Path;
 use tracing::info;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Path to database folder
-    #[arg(long, default_value = "~/.reth/db")]
-    db: String,
+    /// The path to the database folder.
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
+    /// - macOS: `$HOME/Library/Application Support/reth/db`
+    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
+    db: PlatformPath<DbPath>,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -33,16 +35,18 @@ const DEFAULT_NUM_ITEMS: &str = "5";
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
 pub enum Subcommands {
-    /// Lists all the table names, number of entries, and size in KB
+    /// Lists all the tables, their entry count and their size
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
-    /// Seeds the block db with random blocks on top of each other
+    /// Seeds the database with random blocks on top of each other
     Seed {
         /// How many blocks to generate
         #[arg(default_value = DEFAULT_NUM_ITEMS)]
         len: u64,
     },
+    /// Deletes all database entries
+    Drop,
 }
 
 #[derive(Parser, Debug)]
@@ -59,15 +63,13 @@ pub struct ListArgs {
 }
 
 impl Command {
-    /// Execute `node` command
+    /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        let path = shellexpand::full(&self.db)?.into_owned();
-        let expanded_db_path = Path::new(&path);
-        std::fs::create_dir_all(expanded_db_path)?;
+        std::fs::create_dir_all(&self.db)?;
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            expanded_db_path,
+            self.db.as_ref(),
             reth_db::mdbx::EnvKind::RW,
         )?;
 
@@ -95,7 +97,8 @@ impl Command {
                         let overflow_pages = stats.overflow_pages();
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
-                        tracing::info!(
+                        info!(
+                            target: "reth::cli",
                             "Table {} has {} entries (total size: {} KB)",
                             table,
                             stats.entries(),
@@ -110,6 +113,9 @@ impl Command {
             }
             Subcommands::List(args) => {
                 tool.list(args)?;
+            }
+            Subcommands::Drop => {
+                tool.drop(&self.db)?;
             }
         }
 
@@ -130,8 +136,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Seeds the database with some random data, only used for testing
     fn seed(&mut self, len: u64) -> Result<()> {
-        tracing::info!("generating random block range from 0 to {len}");
-        let chain = random_block_range(0..len, Default::default());
+        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
+        let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
             chain.iter().try_for_each(|block| {
@@ -140,41 +146,62 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             })
         })??;
 
-        info!("Database committed with {len} blocks");
-
+        info!(target: "reth::cli", "Database seeded with {len} blocks");
         Ok(())
     }
 
     /// Lists the given table data
     fn list(&mut self, args: &ListArgs) -> Result<()> {
-        match args.table.as_str() {
-            "canonical_headers" => {
-                self.list_table::<tables::CanonicalHeaders>(args.start, args.len)?
-            }
-            "headers" => self.list_table::<tables::Headers>(args.start, args.len)?,
-            "txs" => self.list_table::<tables::Transactions>(args.start, args.len)?,
-            _ => panic!(),
-        };
+        macro_rules! list_tables {
+            ($arg:expr, $start:expr, $len:expr  => [$($table:ident,)*]) => {
+                match $arg {
+                    $(stringify!($table) => {
+                        self.list_table::<tables::$table>($start, $len)?
+                    },)*
+                    _ => {
+                        tracing::error!(target: "reth::cli", "Unknown table.");
+                        return Ok(())
+                    }
+                }
+            };
+        }
+
+        list_tables!(args.table.as_str(), args.start, args.len => [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodies,
+            BlockOmmers,
+            TxHashNumber,
+            PlainAccountState,
+            BlockTransitionIndex,
+            TxTransitionIndex,
+            SyncStage,
+            Transactions,
+        ]);
+
         Ok(())
     }
 
     fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
         let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor::<T>().expect("Was not able to obtain a cursor.");
+            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
             // TODO: Upstream this in the DB trait.
             let start_walker = cursor.current().transpose();
-            let walker = Walker {
-                cursor: &mut cursor,
-                start: start_walker,
-                _tx_phantom: std::marker::PhantomData,
-            };
+            let walker = Walker::new(&mut cursor, start_walker);
 
             walker.skip(start).take(len).collect::<Vec<_>>()
         })?;
 
         println!("{data:?}");
+        Ok(())
+    }
 
+    fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
+        info!(target: "reth::cli", "Dropping db at {}", path);
+        std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }
 }

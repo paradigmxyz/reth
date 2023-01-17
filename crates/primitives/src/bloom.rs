@@ -1,14 +1,21 @@
-//! Bloom related utilities.
-
-use crate::{keccak256, Bloom, Log};
+//! Bloom type.
+use crate::{impl_fixed_hash_type, keccak256, Log};
+use bytes::Buf;
+use derive_more::{AsRef, Deref};
+use fixed_hash::construct_fixed_hash;
+use impl_serde::impl_fixed_hash_serde;
+use reth_codecs::{impl_hash_compact, Compact};
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
 
 /// Length of bloom filter used for Ethereum.
 pub const BLOOM_BYTE_LENGTH: usize = 256;
 
+impl_fixed_hash_type!((Bloom, BLOOM_BYTE_LENGTH));
+
 // See Section 4.3.1 "Transaction Receipt" of the Yellow Paper
 fn m3_2048(bloom: &mut Bloom, x: &[u8]) {
     let hash = keccak256(x);
-    let h = hash.as_ref();
+    let h: &[u8; 32] = hash.as_ref();
     for i in [0, 2, 4] {
         let bit = (h[i + 1] as usize + ((h[i] as usize) << 8)) & 0x7FF;
         bloom.0[BLOOM_BYTE_LENGTH - 1 - bit / 8] |= 1 << (bit % 8);

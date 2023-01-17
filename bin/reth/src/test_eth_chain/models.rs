@@ -5,35 +5,35 @@ use reth_primitives::{
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
 
-/// Blockchain test deserializer.
+/// An Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 pub struct Test(pub BTreeMap<String, BlockchainTestData>);
 
-/// Ethereum blockchain test data
+/// Ethereum test data.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockchainTestData {
     /// Genesis block header.
     pub genesis_block_header: Header,
-    /// Genesis rlp.
+    /// RLP encoded genesis block.
     #[serde(rename = "genesisRLP")]
     pub genesis_rlp: Option<Bytes>,
-    /// Blocks.
+    /// Block data.
     pub blocks: Vec<Block>,
-    /// Post state.
-    pub post_state: Option<State>,
-    /// Pre state.
+    /// The expected post state.
+    pub post_state: Option<RootOrState>,
+    /// The test pre-state.
     pub pre: State,
-    /// Hash of best block.
+    /// Hash of the best block.
     pub lastblockhash: H256,
-    /// Network.
+    /// Network spec.
     pub network: ForkSpec,
     #[serde(default)]
-    /// Engine
+    /// Engine spec.
     pub self_engine: SealEngine,
 }
 
-/// Ethereum blockchain test data Header.
+/// A block header in an Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
@@ -77,16 +77,16 @@ impl From<Header> for SealedHeader {
     fn from(value: Header) -> Self {
         SealedHeader::new(
             RethHeader {
-                base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.as_u64()),
+                base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.to::<u64>()),
                 beneficiary: value.coinbase,
                 difficulty: value.difficulty.0,
-                extra_data: value.extra_data.0,
-                gas_limit: value.gas_limit.0.as_u64(),
-                gas_used: value.gas_used.0.as_u64(),
+                extra_data: value.extra_data,
+                gas_limit: value.gas_limit.0.to::<u64>(),
+                gas_used: value.gas_used.0.to::<u64>(),
                 mix_hash: value.mix_hash,
                 nonce: value.nonce.into_uint().as_u64(),
-                number: value.number.0.as_u64(),
-                timestamp: value.timestamp.0.as_u64(),
+                number: value.number.0.to::<u64>(),
+                timestamp: value.timestamp.0.to::<u64>(),
                 transactions_root: value.transactions_trie,
                 receipts_root: value.receipt_trie,
                 ommers_hash: value.uncle_hash,
@@ -99,26 +99,34 @@ impl From<Header> for SealedHeader {
     }
 }
 
-/// Ethereum blockchain test data Block.
+/// A block in an Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Block header.
     pub block_header: Option<Header>,
-    /// Rlp block bytes
+    /// RLP encoded block bytes
     pub rlp: Bytes,
     /// Transactions
     pub transactions: Option<Vec<Transaction>>,
     /// Uncle/ommer headers
     pub uncle_headers: Option<Vec<Header>>,
+    /// Transaction Sequence
+    pub transaction_sequence: Option<Vec<TransactionSequence>>,
 }
 
-/// Ethereum blockchain test data State.
-//#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-//#[serde(deny_unknown_fields)]
-//pub struct State(pub RootOrState);
+/// Transaction Sequence in block
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionSequence {
+    exception: String,
+    raw_bytes: Bytes,
+    valid: String,
+}
 
+/// Ethereum blockchain test data state.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 pub struct State(pub BTreeMap<Address, Account>);
 
@@ -132,7 +140,7 @@ pub enum RootOrState {
     State(BTreeMap<Address, Account>),
 }
 
-/// Spec account
+/// An account.
 #[derive(Debug, PartialEq, Eq, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Account {
@@ -146,7 +154,7 @@ pub struct Account {
     pub storage: BTreeMap<JsonU256, JsonU256>,
 }
 
-/// Fork Spec
+/// Fork specification.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
@@ -175,7 +183,7 @@ pub enum ForkSpec {
     Constantinople, // SKIPPED
     /// Constantinople fix
     ConstantinopleFix,
-    /// Instanbul
+    /// Istanbul
     Istanbul,
     /// Berlin
     Berlin,
@@ -185,12 +193,20 @@ pub enum ForkSpec {
     London,
     /// Paris aka The Merge
     Merge,
+    /// Shanghai
+    Shanghai,
     /// Merge EOF test
     #[serde(alias = "Merge+3540+3670")]
     MergeEOF,
     /// After Merge Init Code test
     #[serde(alias = "Merge+3860")]
     MergeMeterInitCode,
+    /// After Merge plus new PUSH0 opcode
+    #[serde(alias = "Merge+3855")]
+    MergePush0,
+    /// Fork Spec which is unknown to us
+    #[serde(other)]
+    Unknown,
 }
 
 impl From<ForkSpec> for reth_executor::SpecUpgrades {
@@ -214,14 +230,21 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
             ForkSpec::Merge => Self::new_paris_activated(),
             ForkSpec::MergeEOF => Self::new_paris_activated(),
             ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
+            ForkSpec::MergePush0 => Self::new_paris_activated(),
+            ForkSpec::Shanghai => {
+                panic!("Not supported")
+            }
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
-                panic!("Overriden with PETERSBURG")
+                panic!("Overridden with PETERSBURG")
+            }
+            ForkSpec::Unknown => {
+                panic!("Unknown fork");
             }
         }
     }
 }
 
-/// Json Block test possible engine kind.
+/// Possible seal engines.
 #[derive(Debug, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SealEngine {
@@ -452,6 +475,6 @@ mod test {
         ]"#;
 
         let res = serde_json::from_str::<Vec<Transaction>>(test);
-        assert!(res.is_ok(), "Failed to deserialize transactin with error: {res:?}");
+        assert!(res.is_ok(), "Failed to deserialize transaction with error: {res:?}");
     }
 }

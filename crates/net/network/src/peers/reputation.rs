@@ -3,6 +3,9 @@
 /// The type that tracks the reputation score.
 pub(crate) type Reputation = i32;
 
+/// The default reputation of a peer
+pub(crate) const DEFAULT_REPUTATION: Reputation = 0;
+
 /// The minimal unit we're measuring reputation
 const REPUTATION_UNIT: i32 = -1024;
 
@@ -23,6 +26,16 @@ const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 8 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
+
+/// A reputation change to apply to backoff the peer. This has the same effect as marking the peer
+/// as banned.
+pub(crate) const BACKOFF_REPUTATION_CHANGE: i32 = i32::MIN;
+
+/// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
+#[inline]
+pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
+    reputation < BANNED_REPUTATION
+}
 
 /// Various kinds of reputation changes.
 #[derive(Debug, Copy, Clone)]
@@ -49,6 +62,7 @@ pub enum ReputationChangeKind {
 
 /// How the [`ReputationChangeKind`] are weighted.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReputationChangeWeights {
     /// Weight for [`ReputationChangeKind::BadMessage`]
     pub bad_message: Reputation,

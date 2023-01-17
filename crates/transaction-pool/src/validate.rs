@@ -5,46 +5,58 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
-use reth_primitives::{rpc::Address, TxHash, U256};
+use reth_primitives::{Address, TxHash, U256};
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
 pub enum TransactionValidationOutcome<T: PoolTransaction> {
-    /// Transaction successfully validated
+    /// The transaction is considered _currently_ valid and can be inserted into the pool.
     Valid {
         /// Balance of the sender at the current point.
         balance: U256,
-        /// current nonce of the sender
+        /// Current nonce of the sender.
         state_nonce: u64,
         /// Validated transaction.
         transaction: T,
     },
-    /// The transaction is considered invalid indefinitely.
+    /// The transaction is considered invalid indefinitely: It violates constraints that prevent
+    /// this transaction from ever becoming valid.
     Invalid(T, PoolError),
 }
 
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
-pub trait TransactionValidator: Send + Sync + 'static {
+pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 
-    /// Validates the transaction and returns a validated outcome
+    /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
+    /// validity of the given transaction.
     ///
-    /// This is used by the transaction-pool check the transaction's validity against the state of
-    /// the given block hash.
+    /// This will be used by the transaction-pool to check whether the transaction should be
+    /// inserted into the pool or discarded right away.
     ///
-    /// This is supposed to extend the `transaction` with its id in the graph of
-    /// transactions for the sender.
+    ///
+    /// Implementers of this trait must ensure that the transaction is correct, i.e. that it
+    /// complies with at least all static constraints, which includes checking for:
+    ///
+    ///    * chain id
+    ///    * gas limit
+    ///    * max cost
+    ///    * nonce >= next nonce of the sender
+    ///
+    /// The transaction pool makes no assumptions about the validity of the transaction at the time
+    /// of this call before it inserts it. However, the validity of this transaction is still
+    /// subject to future changes enforced by the pool, for example nonce changes.
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
-        _transaction: Self::Transaction,
+        transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
 }
 
-/// A valida transaction in the pool.
+/// A valid transaction in the pool.
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,
@@ -52,7 +64,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
-    /// Total cost of the transaction: `feeCap x gasLimit + transferred_value`.
+    /// Total cost of the transaction: `feeCap x gasLimit + transferredValue`.
     pub cost: U256,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,
