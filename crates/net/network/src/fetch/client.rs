@@ -12,6 +12,10 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{PeerId, WithPeerId, H256};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Front-end API for fetching data from the network.
@@ -58,11 +62,17 @@ pub struct FetchClient {
     pub(crate) request_tx: UnboundedSender<DownloadRequest>,
     /// The handle to the peers
     pub(crate) peers_handle: PeersHandle,
+    /// Number of active peer sessions the node's currently handling.
+    pub(crate) num_active_peers: Arc<AtomicUsize>,
 }
 
 impl DownloadClient for FetchClient {
     fn report_bad_message(&self, peer_id: PeerId) {
         self.peers_handle.reputation_change(peer_id, ReputationChangeKind::BadMessage);
+    }
+
+    fn num_connected_peers(&self) -> usize {
+        self.num_active_peers.load(Ordering::Relaxed)
     }
 }
 
