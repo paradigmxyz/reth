@@ -1,5 +1,5 @@
 use metrics::{
-    set_recorder, Counter, Gauge, Histogram, Key, KeyName, Recorder, SharedString, Unit, Label,
+    set_recorder, Counter, Gauge, Histogram, Key, KeyName, Label, Recorder, SharedString, Unit,
 };
 use once_cell::sync::Lazy;
 use reth_metrics_derive::Metrics;
@@ -121,35 +121,31 @@ fn test_register(scope: &str) {
 
     let gauge = RECORDER.get_metric(&format!("{scope}_gauge"));
     assert!(gauge.is_some());
-    assert_eq!(gauge.unwrap(), TestMetric {
-        ty: TestMetricTy::Gauge,
-        description: None,
-        labels: None,
-    });
+    assert_eq!(
+        gauge.unwrap(),
+        TestMetric { ty: TestMetricTy::Gauge, description: None, labels: None }
+    );
 
     let second_gauge = RECORDER.get_metric(&format!("{scope}_second_gauge"));
     assert!(second_gauge.is_some());
-    assert_eq!(second_gauge.unwrap(), TestMetric {
-        ty: TestMetricTy::Gauge,
-        description: None,
-        labels: None,
-    });
+    assert_eq!(
+        second_gauge.unwrap(),
+        TestMetric { ty: TestMetricTy::Gauge, description: None, labels: None }
+    );
 
     let counter = RECORDER.get_metric(&format!("{scope}_counter"));
     assert!(counter.is_some());
-    assert_eq!(counter.unwrap(), TestMetric {
-        ty: TestMetricTy::Counter,
-        description: None,
-        labels: None,
-    });
+    assert_eq!(
+        counter.unwrap(),
+        TestMetric { ty: TestMetricTy::Counter, description: None, labels: None }
+    );
 
     let histogram = RECORDER.get_metric(&format!("{scope}_histogram"));
     assert!(histogram.is_some());
-    assert_eq!(histogram.unwrap(), TestMetric {
-        ty: TestMetricTy::Histogram,
-        description: None,
-        labels: None,
-    });
+    assert_eq!(
+        histogram.unwrap(),
+        TestMetric { ty: TestMetricTy::Histogram, description: None, labels: None }
+    );
 }
 
 #[test]
@@ -185,37 +181,25 @@ fn test_labels(scope: &str) {
     assert!(gauge.is_some());
     let labels = gauge.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(
-        labels.unwrap(),
-        test_labels.clone(),
-    );
+    assert_eq!(labels.unwrap(), test_labels.clone(),);
 
     let second_gauge = RECORDER.get_metric(&format!("{scope}_second_gauge"));
     assert!(second_gauge.is_some());
     let labels = second_gauge.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(
-        labels.unwrap(),
-        test_labels.clone(),
-    );
+    assert_eq!(labels.unwrap(), test_labels.clone(),);
 
     let counter = RECORDER.get_metric(&format!("{scope}_counter"));
     assert!(counter.is_some());
     let labels = counter.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(
-        labels.unwrap(),
-        test_labels.clone(),
-    );
+    assert_eq!(labels.unwrap(), test_labels.clone(),);
 
     let histogram = RECORDER.get_metric(&format!("{scope}_histogram"));
     assert!(histogram.is_some());
     let labels = histogram.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(
-        labels.unwrap(),
-        test_labels,
-    );
+    assert_eq!(labels.unwrap(), test_labels,);
 }
 
 #[test]
@@ -276,7 +260,13 @@ impl TestRecorder {
         self.metrics.lock().expect("failed to lock metrics").get(key).cloned()
     }
 
-    fn record_metric(&self, key: &str, ty: TestMetricTy, description: Option<String>, labels: Option<Vec<Label>>) {
+    fn record_metric(
+        &self,
+        key: &str,
+        ty: TestMetricTy,
+        description: Option<String>,
+        labels: Option<Vec<Label>>,
+    ) {
         self.metrics
             .lock()
             .expect("failed to lock metrics")
@@ -290,7 +280,12 @@ impl TestRecorder {
 
 impl Recorder for TestRecorder {
     fn describe_counter(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
-        self.record_metric(key.as_str(), TestMetricTy::Counter, Some(description.into_owned()), None)
+        self.record_metric(
+            key.as_str(),
+            TestMetricTy::Counter,
+            Some(description.into_owned()),
+            None,
+        )
     }
 
     fn describe_gauge(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
@@ -298,7 +293,12 @@ impl Recorder for TestRecorder {
     }
 
     fn describe_histogram(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
-        self.record_metric(key.as_str(), TestMetricTy::Histogram, Some(description.into_owned()), None)
+        self.record_metric(
+            key.as_str(),
+            TestMetricTy::Histogram,
+            Some(description.into_owned()),
+            None,
+        )
     }
 
     fn register_counter(&self, key: &Key) -> Counter {
