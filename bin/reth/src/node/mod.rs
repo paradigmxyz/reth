@@ -12,6 +12,7 @@ use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
+use reth_cli_utils::init::init_genesis;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -113,6 +114,9 @@ impl Command {
             prometheus_exporter::initialize(listen_addr)?;
             HeaderMetrics::describe();
         }
+
+        let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
+        info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
         let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
