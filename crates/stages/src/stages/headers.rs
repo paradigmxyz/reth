@@ -75,7 +75,7 @@ where
         Ok(())
     }
 
-    async fn is_stage_done<DB: Database>(
+    fn is_stage_done<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
@@ -158,7 +158,7 @@ where
     }
 
     /// Write downloaded headers to the database
-    async fn write_headers<DB: Database>(
+    fn write_headers<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         headers: Vec<SealedHeader>,
@@ -240,9 +240,9 @@ where
         self.validate_header_response(&downloaded_headers)?;
 
         // Write the headers to db
-        self.write_headers::<DB>(tx, downloaded_headers).await?.unwrap_or_default();
+        self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
 
-        if self.is_stage_done(tx, current_progress).await? {
+        if self.is_stage_done(tx, current_progress)? {
             let stage_progress = current_progress.max(
                 tx.cursor_read::<tables::CanonicalHeaders>()?
                     .last()?
