@@ -1,5 +1,4 @@
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
-use ethers_core::utils::Geth;
 use reth_primitives::PeerId;
 use std::{net::SocketAddr, time::Duration};
 
