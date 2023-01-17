@@ -45,13 +45,3 @@ pub fn unused_tcp_udp() -> (SocketAddr, SocketAddr) {
 
     (tcp_addr, udp_addr)
 }
-
-/// Creates a new Geth with an unused p2p port and temporary data dir.
-///
-/// Returns the new Geth and the temporary directory.
-pub fn create_new_geth() -> (Geth, tempfile::TempDir) {
-    let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let geth = Geth::new().data_dir(temp_dir.path()).p2p_port(unused_port());
-
-    (geth, temp_dir)
-}
