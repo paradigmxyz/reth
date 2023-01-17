@@ -179,6 +179,10 @@ impl DownloadClient for TestHeadersClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
         // noop
     }
+
+    fn num_connected_peers(&self) -> usize {
+        0
+    }
 }
 
 #[async_trait::async_trait]
