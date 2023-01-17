@@ -133,7 +133,7 @@ impl Command {
                 chain_id,
                 genesis_hash,
                 self.network.disable_discovery,
-                &self.bootnodes,
+                self.bootnodes.clone(),
                 self.nat,
             )
             .start_network()
