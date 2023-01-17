@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 
 use crate::tree::LinkEntry;
 use std::{collections::HashSet, num::NonZeroUsize, time::Duration};
