@@ -187,6 +187,12 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Sets the genesis hash
+    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
+        self.genesis_hash = Some(genesis_hash);
+        self
+    }
+
     /// Insert the given fork at the given block number
     pub fn with_fork(mut self, fork: Hardfork, block: BlockNumber) -> Self {
         self.hardforks.insert(fork, block);
@@ -334,18 +340,120 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::MAINNET;
+    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, Header, MAINNET};
+
+    #[test]
+    fn test_empty_forkid() {
+        // tests that we skip any forks in block 0, that's the genesis ruleset
+        let empty_genesis = Genesis::default();
+        let empty_header: Header = empty_genesis.clone().into();
+        let empty_sealed = empty_header.seal();
+        let spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis)
+            .genesis_hash(empty_sealed.hash())
+            .with_fork(Hardfork::Frontier, 0)
+            .with_fork(Hardfork::Homestead, 0)
+            .with_fork(Hardfork::Tangerine, 0)
+            .with_fork(Hardfork::SpuriousDragon, 0)
+            .with_fork(Hardfork::Byzantium, 0)
+            .with_fork(Hardfork::Constantinople, 0)
+            .with_fork(Hardfork::Istanbul, 0)
+            .with_fork(Hardfork::Muirglacier, 0)
+            .with_fork(Hardfork::Berlin, 0)
+            .with_fork(Hardfork::London, 0)
+            .with_fork(Hardfork::ArrowGlacier, 0)
+            .with_fork(Hardfork::GrayGlacier, 0)
+            .build();
+
+        // test at block one - all forks should be active
+        let res_forkid = spec.fork_id(1);
+        let expected_forkhash = ForkHash::from(spec.genesis_hash());
+
+        // if blocks get activated at genesis then they should not be accumulated into the forkhash
+        assert_eq!(res_forkid.hash, expected_forkhash);
+    }
+
+    #[test]
+    fn test_duplicate_fork_blocks() {
+        // forks activated at the same block should be deduplicated
+        let empty_genesis = Genesis::default();
+        let empty_header: Header = empty_genesis.clone().into();
+        let empty_sealed = empty_header.seal();
+        let unique_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis.clone())
+            .genesis_hash(empty_sealed.hash())
+            .with_fork(Hardfork::Frontier, 0)
+            .with_fork(Hardfork::Homestead, 1)
+            .build();
+
+        let duplicate_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(empty_genesis)
+            .genesis_hash(empty_sealed.hash())
+            .with_fork(Hardfork::Frontier, 0)
+            .with_fork(Hardfork::Homestead, 1)
+            .with_fork(Hardfork::Tangerine, 1)
+            .build();
+
+        assert_eq!(unique_spec.fork_id(2), duplicate_spec.fork_id(2));
+    }
 
     #[test]
     // this test checks that the forkid computation is accurate
-    fn test_forkid_from_hardfork() {
+    fn test_mainnet_forkids() {
         let frontier_forkid = MAINNET.fork_id(0);
         assert_eq!([0xfc, 0x64, 0xec, 0x04], frontier_forkid.hash.0);
         assert_eq!(1150000, frontier_forkid.next);
 
+        let homestead_forkid = MAINNET.fork_id(1150000);
+        assert_eq!([0x97, 0xc2, 0xc3, 0x4c], homestead_forkid.hash.0);
+        assert_eq!(1920000, homestead_forkid.next);
+
+        let dao_forkid = MAINNET.fork_id(1920000);
+        assert_eq!([0x91, 0xd1, 0xf9, 0x48], dao_forkid.hash.0);
+        assert_eq!(2463000, dao_forkid.next);
+
+        let tangerine_forkid = MAINNET.fork_id(2463000);
+        assert_eq!([0x7a, 0x64, 0xda, 0x13], tangerine_forkid.hash.0);
+        assert_eq!(2675000, tangerine_forkid.next);
+
+        let spurious_forkid = MAINNET.fork_id(2675000);
+        assert_eq!([0x3e, 0xdd, 0x5b, 0x10], spurious_forkid.hash.0);
+        assert_eq!(4370000, spurious_forkid.next);
+
+        let byzantium_forkid = MAINNET.fork_id(4370000);
+        assert_eq!([0xa0, 0x0b, 0xc3, 0x24], byzantium_forkid.hash.0);
+        assert_eq!(7280000, byzantium_forkid.next);
+
+        let constantinople_forkid = MAINNET.fork_id(7280000);
+        assert_eq!([0x66, 0x8d, 0xb0, 0xaf], constantinople_forkid.hash.0);
+        assert_eq!(9069000, constantinople_forkid.next);
+
+        let istanbul_forkid = MAINNET.fork_id(9069000);
+        assert_eq!([0x87, 0x9d, 0x6e, 0x30], istanbul_forkid.hash.0);
+        assert_eq!(9200000, istanbul_forkid.next);
+
+        let muir_glacier_forkid = MAINNET.fork_id(9200000);
+        assert_eq!([0xe0, 0x29, 0xe9, 0x91], muir_glacier_forkid.hash.0);
+        assert_eq!(12244000, muir_glacier_forkid.next);
+
         let berlin_forkid = MAINNET.fork_id(12244000);
         assert_eq!([0x0e, 0xb4, 0x40, 0xf6], berlin_forkid.hash.0);
         assert_eq!(12965000, berlin_forkid.next);
+
+        let london_forkid = MAINNET.fork_id(12965000);
+        assert_eq!([0xb7, 0x15, 0x07, 0x7d], london_forkid.hash.0);
+        assert_eq!(13773000, london_forkid.next);
+
+        let arrow_glacier_forkid = MAINNET.fork_id(13773000);
+        assert_eq!([0x20, 0xc3, 0x27, 0xfc], arrow_glacier_forkid.hash.0);
+        assert_eq!(15050000, arrow_glacier_forkid.next);
+
+        let gray_glacier_forkid = MAINNET.fork_id(15050000);
+        assert_eq!([0xf0, 0xaf, 0xd0, 0xe3], gray_glacier_forkid.hash.0);
+        assert_eq!(0, gray_glacier_forkid.next); // TODO: update post-gray glacier
 
         let latest_forkid = MAINNET.fork_id(15050000);
         assert_eq!(0, latest_forkid.next);
