@@ -724,7 +724,7 @@ impl Default for LinearDownloadBuilder {
             stream_batch_size: 10_000,
             max_concurrent_requests: 100,
             min_concurrent_requests: 5,
-            max_buffered_responses: 100,
+            max_buffered_responses: 500,
         }
     }
 }
