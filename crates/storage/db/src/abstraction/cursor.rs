@@ -101,11 +101,11 @@ pub trait DbDupCursorRW<'tx, T: DupSort> {
 /// the Cursor lifetime and it wouldn't be possible to use Walker.
 pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     /// Cursor to be used to walk through the table.
-    pub cursor: &'cursor mut CURSOR,
+    cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
-    pub start: IterPairResult<T>,
+    start: IterPairResult<T>,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
-    pub _tx_phantom: PhantomData<&'tx T>,
+    _tx_phantom: PhantomData<&'tx T>,
 }
 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
@@ -119,6 +119,58 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
         }
 
         self.cursor.next().transpose()
+    }
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> Walker<'cursor, 'tx, T, CURSOR> {
+    /// construct Walker
+    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
+        Self { cursor, start, _tx_phantom: std::marker::PhantomData }
+    }
+
+    /// convert current [`Walker`] to [`ReverseWalker`] which iterates reversely
+    pub fn rev(self) -> ReverseWalker<'cursor, 'tx, T, CURSOR> {
+        let start = self.cursor.current().transpose();
+        ReverseWalker::new(self.cursor, start)
+    }
+}
+
+/// Provides a reverse iterator to `Cursor` when handling `Table`.
+/// Also check [`Walker`]
+pub struct ReverseWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
+    /// Cursor to be used to walk through the table.
+    cursor: &'cursor mut CURSOR,
+    /// `(key, value)` where to start the walk.
+    start: IterPairResult<T>,
+    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
+    _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> ReverseWalker<'cursor, 'tx, T, CURSOR> {
+    /// construct ReverseWalker
+    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
+        Self { cursor, start, _tx_phantom: std::marker::PhantomData }
+    }
+
+    /// convert current [`ReverseWalker`] to [`Walker`] which iterate forwardly
+    pub fn forward(self) -> Walker<'cursor, 'tx, T, CURSOR> {
+        let start = self.cursor.current().transpose();
+        Walker::new(self.cursor, start)
+    }
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
+    for ReverseWalker<'cursor, 'tx, T, CURSOR>
+{
+    type Item = Result<(T::Key, T::Value), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.start.take();
+        if start.is_some() {
+            return start
+        }
+
+        self.cursor.prev().transpose()
     }
 }
 

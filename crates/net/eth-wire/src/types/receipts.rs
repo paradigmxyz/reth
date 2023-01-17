@@ -1,9 +1,11 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
+use reth_codecs::derive_arbitrary;
 use reth_primitives::{Receipt, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
 /// A request for transaction receipts from the given block hashes.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Debug,
@@ -22,6 +24,7 @@ pub struct GetReceipts(
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
+#[derive_arbitrary(rlp, 1)]
 #[derive(
     Clone,
     Debug,
@@ -44,6 +47,25 @@ mod test {
     use hex_literal::hex;
     use reth_primitives::{Log, Receipt, TxType};
     use reth_rlp::{Decodable, Encodable};
+
+    #[test]
+    fn roundtrip_eip1559() {
+        let receipts = Receipts(vec![vec![Receipt {
+            tx_type: TxType::EIP1559,
+            success: false,
+            cumulative_gas_used: 0,
+            bloom: Default::default(),
+            logs: vec![],
+        }]]);
+
+        let mut out = vec![];
+        receipts.encode(&mut out);
+
+        let mut out = out.as_slice();
+        let decoded = Receipts::decode(&mut out).unwrap();
+
+        assert!(receipts == decoded);
+    }
 
     #[test]
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481

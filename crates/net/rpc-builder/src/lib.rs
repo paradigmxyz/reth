@@ -9,6 +9,7 @@
 
 use jsonrpsee::{server::ServerBuilder, RpcModule};
 use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
@@ -25,21 +26,23 @@ use strum::{AsRefStr, EnumString, EnumVariantNames};
 ///     .with_config(RpcModuleConfig::Selection(vec![RethRpcModule::Eth]));
 /// ```
 #[derive(Debug)]
-pub struct RpcModuleBuilder<Client, Pool> {
+pub struct RpcModuleBuilder<Client, Pool, Network> {
     /// The Client type to when creating all rpc handlers
     client: Client,
     /// The Pool type to when creating all rpc handlers
     pool: Pool,
+    /// The Network type to when creating all rpc handlers
+    network: Network,
     /// What modules to configure
     config: RpcModuleConfig,
 }
 
 // === impl RpcBuilder ===
 
-impl<Client, Pool> RpcModuleBuilder<Client, Pool> {
+impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
     /// Create a new instance of the builder
-    pub fn new(client: Client, pool: Pool) -> Self {
-        Self { client, pool, config: Default::default() }
+    pub fn new(client: Client, pool: Pool, network: Network) -> Self {
+        Self { client, pool, network, config: Default::default() }
     }
 
     /// Configures what RPC modules should be installed
@@ -49,41 +52,51 @@ impl<Client, Pool> RpcModuleBuilder<Client, Pool> {
     }
 
     /// Configure the client instance.
-    pub fn with_client<C>(self, client: C) -> RpcModuleBuilder<C, Pool>
+    pub fn with_client<C>(self, client: C) -> RpcModuleBuilder<C, Pool, Network>
     where
         C: BlockProvider + StateProviderFactory + 'static,
     {
-        let Self { pool, config, .. } = self;
-        RpcModuleBuilder { client, config, pool }
+        let Self { pool, config, network, .. } = self;
+        RpcModuleBuilder { client, config, network, pool }
     }
 
     /// Configure the transaction pool instance.
-    pub fn with_pool<P>(self, pool: P) -> RpcModuleBuilder<Client, P>
+    pub fn with_pool<P>(self, pool: P) -> RpcModuleBuilder<Client, P, Network>
     where
         P: TransactionPool + 'static,
     {
-        let Self { client, config, .. } = self;
-        RpcModuleBuilder { client, config, pool }
+        let Self { client, config, network, .. } = self;
+        RpcModuleBuilder { client, config, network, pool }
+    }
+
+    /// Configure the network instance.
+    pub fn with_network<N>(self, network: N) -> RpcModuleBuilder<Client, Pool, N>
+    where
+        N: NetworkInfo + PeersInfo + 'static,
+    {
+        let Self { client, config, pool, .. } = self;
+        RpcModuleBuilder { client, config, network, pool }
     }
 }
 
-impl<Client, Pool> RpcModuleBuilder<Client, Pool>
+impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
     Pool: TransactionPool + 'static,
+    Network: NetworkInfo + PeersInfo + 'static,
 {
     /// Configures the [RpcModule] which can be used to start the server(s).
     pub fn build(self) -> RpcModule<()> {
-        let Self { client: _, pool: _, config: _ } = self;
+        let Self { client: _, pool: _, network: _, config: _ } = self;
         let _io = RpcModule::new(());
 
-        todo!("configure all handlers")
+        todo!("merge all handlers")
     }
 }
 
-impl Default for RpcModuleBuilder<(), ()> {
+impl Default for RpcModuleBuilder<(), (), ()> {
     fn default() -> Self {
-        RpcModuleBuilder::new((), ())
+        RpcModuleBuilder::new((), (), ())
     }
 }
 
