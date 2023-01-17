@@ -7,7 +7,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     rpc::{BlockId, H256 as EthersH256},
-    Header, SealedBlock, TransactionSigned, H64, U256,
+    ChainSpec, Header, SealedBlock, TransactionSigned, H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
@@ -24,8 +24,6 @@ use std::{
 };
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::Config;
 
 mod error;
 pub use error::{EngineApiError, EngineApiResult};
@@ -80,7 +78,7 @@ pub enum EngineMessage {
 pub struct EthConsensusEngine<Client> {
     client: Arc<Client>,
     /// Consensus configuration
-    config: Config,
+    chain_spec: ChainSpec,
     rx: UnboundedReceiverStream<EngineMessage>,
     // TODO: Placeholder for storing future blocks. Make cache bounded.
     // Use [lru](https://crates.io/crates/lru) crate
@@ -190,7 +188,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         };
 
         if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
-            if parent_td <= U256::from(self.config.merge_terminal_total_difficulty) {
+            if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: EngineApiError::PayloadPreMerge.to_string(),
                 }))
@@ -216,12 +214,11 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
             })
             .collect::<Result<Vec<_>, EngineApiError>>()?;
         let mut state_provider = SubState::new(State::new(&*self.client));
-        let config = (&self.config).into();
         match executor::execute_and_verify_receipt(
             &header,
             &transactions,
             &[],
-            &config,
+            &self.chain_spec,
             &mut state_provider,
         ) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, header.hash())),
@@ -272,8 +269,13 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
             terminal_block_number,
         } = config;
 
+        let merge_terminal_td = self
+            .chain_spec
+            .paris_status()
+            .terminal_total_difficulty()
+            .ok_or(EngineApiError::UnknownMergeTerminalTotalDifficulty)?;
+
         // Compare total difficulty values
-        let merge_terminal_td = U256::from(self.config.merge_terminal_total_difficulty);
         if merge_terminal_td != terminal_total_difficulty {
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
@@ -340,7 +342,7 @@ mod tests {
         use super::*;
         use bytes::{Bytes, BytesMut};
         use reth_interfaces::test_utils::generators::random_header;
-        use reth_primitives::Block;
+        use reth_primitives::{Block, MAINNET};
         use reth_rlp::DecodeError;
 
         fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> SealedBlock {
@@ -363,7 +365,7 @@ mod tests {
             let (_tx, rx) = unbounded_channel();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                config: Config::default(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -452,7 +454,7 @@ mod tests {
             let client = Arc::new(MockEthProvider::default());
             let engine = EthConsensusEngine {
                 client: client.clone(),
-                config: Config::default(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -480,7 +482,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                config: Config::default(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -501,11 +503,11 @@ mod tests {
         #[tokio::test]
         async fn payload_pre_merge() {
             let (tx, rx) = unbounded_channel();
-            let config = Config::default();
+            let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
             let engine = EthConsensusEngine {
                 client: client.clone(),
-                config: config.clone(),
+                chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -514,7 +516,8 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
-                b.header.difficulty = U256::from(config.merge_terminal_total_difficulty);
+                b.header.difficulty =
+                    chain_spec.paris_status().terminal_total_difficulty().unwrap();
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
@@ -535,11 +538,11 @@ mod tests {
         #[tokio::test]
         async fn invalid_payload_timestamp() {
             let (tx, rx) = unbounded_channel();
-            let config = Config::default();
+            let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
             let engine = EthConsensusEngine {
                 client: client.clone(),
-                config: config.clone(),
+                chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -551,7 +554,8 @@ mod tests {
             let parent_timestamp = block_timestamp + 10;
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.timestamp = parent_timestamp;
-                b.header.difficulty = U256::from(config.merge_terminal_total_difficulty + 1);
+                b.header.difficulty =
+                    chain_spec.paris_status().terminal_total_difficulty().unwrap() + U256::from(1);
                 b
             });
             let block =
@@ -583,6 +587,8 @@ mod tests {
     // non exhaustive tests for engine_getPayload
     // TODO: amend when block building is implemented
     mod get_payload {
+        use reth_primitives::MAINNET;
+
         use super::*;
 
         #[tokio::test]
@@ -590,7 +596,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                config: Config::default(),
+                chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -609,15 +615,17 @@ mod tests {
 
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
+        use reth_primitives::MAINNET;
+
         use super::*;
 
         #[tokio::test]
         async fn terminal_td_mismatch() {
             let (tx, rx) = unbounded_channel();
-            let config = Config::default();
+            let chain_spec = MAINNET.clone();
             let engine = EthConsensusEngine {
                 client: Arc::new(MockEthProvider::default()),
-                config: config.clone(),
+                chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -625,7 +633,11 @@ mod tests {
             tokio::spawn(engine);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: U256::from(config.merge_terminal_total_difficulty + 1),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap() +
+                    U256::from(1),
                 ..Default::default()
             };
 
@@ -639,7 +651,7 @@ mod tests {
             assert_matches!(
                 result_rx.await,
                 Ok(Err(EngineApiError::TerminalTD { execution, consensus }))
-                    if execution == U256::from(config.merge_terminal_total_difficulty)
+                    if execution == chain_spec.paris_status().terminal_total_difficulty().unwrap()
                         && consensus == U256::from(transition_config.terminal_total_difficulty)
             );
         }
@@ -648,10 +660,10 @@ mod tests {
         async fn terminal_block_hash_mismatch() {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
-            let config = Config::default();
+            let chain_spec = MAINNET.clone();
             let engine = EthConsensusEngine {
                 client: client.clone(),
-                config: config.clone(),
+                chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -663,7 +675,10 @@ mod tests {
             let execution_terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: U256::from(config.merge_terminal_total_difficulty),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
@@ -708,10 +723,10 @@ mod tests {
         async fn configurations_match() {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
-            let config = Config::default();
+            let chain_spec = MAINNET.clone();
             let engine = EthConsensusEngine {
                 client: client.clone(),
-                config: config.clone(),
+                chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
                 rx: UnboundedReceiverStream::new(rx),
             };
@@ -722,7 +737,10 @@ mod tests {
             let terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: U256::from(config.merge_terminal_total_difficulty),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };

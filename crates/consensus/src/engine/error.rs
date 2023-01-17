@@ -64,6 +64,9 @@ pub enum EngineApiError {
     /// Forkchoice zero hash head received.
     #[error("Received zero hash as forkchoice head")]
     ForkchoiceEmptyHead,
+    /// Chain spec merge terminal total difficulty is not set
+    #[error("The merge terminal total difficulty is not known")]
+    UnknownMergeTerminalTotalDifficulty,
     /// Encountered decoding error.
     #[error(transparent)]
     Decode(#[from] reth_rlp::DecodeError),

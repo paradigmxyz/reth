@@ -4368,6 +4368,7 @@ dependencies = [
  "hex-literal",
  "impl-serde",
  "modular-bitfield",
+ "once_cell",
  "parity-scale-codec",
  "plain_hasher",
  "proptest",

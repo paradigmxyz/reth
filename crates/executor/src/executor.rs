@@ -1,14 +1,13 @@
 use crate::{
-    config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
+    config::{revm_spec, WEI_2ETH, WEI_3ETH, WEI_5ETH},
     revm_wrap::{self, to_reth_acc, SubState},
-    Config,
 };
 use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Bloom, Header, Log, Receipt, TransactionSignedEcRecovered,
-    H160, H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
+    TransactionSignedEcRecovered, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -18,10 +17,7 @@ use revm::{
 use std::collections::BTreeMap;
 
 /// Main block executor
-pub struct Executor {
-    /// Configuration, Spec and optional flags.
-    pub config: Config,
-}
+pub struct Executor {}
 
 /// Contains old/new account changes
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -250,15 +246,15 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     ommers: &[Header],
-    config: &Config,
+    chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let transaction_change_set = execute(header, transactions, ommers, config, db)?;
+    let transaction_change_set = execute(header, transactions, ommers, chain_spec, db)?;
 
     let receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
 
-    if header.number >= config.spec_upgrades.byzantium {
+    if Some(header.number) >= chain_spec.fork_block(Hardfork::Byzantium) {
         verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
     }
     // TODO Before Byzantium, receipts contained state root that would mean that expensive operation
@@ -300,15 +296,15 @@ pub fn execute<DB: StateProvider>(
     header: &Header,
     transactions: &[TransactionSignedEcRecovered],
     ommers: &[Header],
-    config: &Config,
+    chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut evm = EVM::new();
     evm.database(db);
 
-    let spec_id = config.spec_upgrades.revm_spec(header.number);
-    evm.env.cfg.chain_id = config.chain_id;
-    evm.env.cfg.spec_id = config.spec_upgrades.revm_spec(header.number);
+    let spec_id = revm_spec(chain_spec, header.number);
+    evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
+    evm.env.cfg.spec_id = spec_id;
     evm.env.cfg.perf_all_precompiles_have_balance = false;
     evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 
@@ -393,9 +389,9 @@ pub fn execute<DB: StateProvider>(
     }
 
     let db = evm.db.expect("Db is set at the start of the function");
-    let mut block_reward = block_reward_changeset(header, ommers, db, config)?;
+    let mut block_reward = block_reward_changeset(header, ommers, db, chain_spec)?;
 
-    if config.spec_upgrades.dao_fork == header.number {
+    if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
         let mut irregular_state_changeset = dao_fork_changeset(db)?;
         irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
         block_reward = Some(irregular_state_changeset);
@@ -444,7 +440,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
     header: &Header,
     ommers: &[Header],
     db: &mut SubState<DB>,
-    config: &Config,
+    chain_spec: &ChainSpec,
 ) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
     // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
     // to config.
@@ -456,9 +452,9 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
     match header.number {
-        n if n >= config.spec_upgrades.paris => None,
-        n if n >= config.spec_upgrades.petersburg => Some(WEI_2ETH),
-        n if n >= config.spec_upgrades.byzantium => Some(WEI_3ETH),
+        n if Some(n) >= chain_spec.paris_status().block_number() => None,
+        n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
+        n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
         _ => Some(WEI_5ETH),
     }
     .map(|reward| -> Result<_, _> {
@@ -535,15 +531,15 @@ mod tests {
 
     use std::{collections::HashMap, sync::Arc};
 
-    use crate::{config::SpecUpgrades, revm_wrap::State};
+    use crate::revm_wrap::State;
     use reth_db::{
         database::Database,
         mdbx::{test_utils, Env, EnvKind, WriteMap},
         transaction::DbTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, SealedBlock, StorageKey, H160, H256,
-        U256,
+        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
+        StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -648,9 +644,8 @@ mod tests {
             HashMap::new(),
         );
 
-        let mut config = Config::new_ethereum();
-        // make it berlin fork
-        config.spec_upgrades = SpecUpgrades::new_berlin_activated();
+        // spec at berlin fork
+        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
 
         let mut db = SubState::new(State::new(db));
         let transactions: Vec<TransactionSignedEcRecovered> =
@@ -658,7 +653,7 @@ mod tests {
 
         // execute chain and verify receipts
         let out =
-            execute_and_verify_receipt(&block.header, &transactions, &ommers, &config, &mut db)
+            execute_and_verify_receipt(&block.header, &transactions, &ommers, &chain_spec, &mut db)
                 .unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
@@ -779,14 +774,14 @@ mod tests {
             beneficiary_balance += i;
         }
 
-        let mut config = Config::new_ethereum();
-        config.spec_upgrades = SpecUpgrades::new_homestead_activated();
-        // hardcode it to first block to match our mock data.
-        config.spec_upgrades.dao_fork = 1;
+        let chain_spec = ChainSpecBuilder::from(&*MAINNET)
+            .homestead_activated()
+            .with_fork(Hardfork::Dao, 1)
+            .build();
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&header, &[], &[], &config, &mut db).unwrap();
+        let out = execute_and_verify_receipt(&header, &[], &[], &chain_spec, &mut db).unwrap();
         assert_eq!(out.changesets.len(), 0, "No tx");
 
         // Check if cache is set
