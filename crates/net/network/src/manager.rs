@@ -184,6 +184,7 @@ where
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 
+        let num_active_peers = Arc::new(AtomicUsize::new(0));
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
 
         let sessions = SessionManager::new(
@@ -195,13 +196,18 @@ where
             fork_filter,
             bandwidth_meter.clone(),
         );
-        let state = NetworkState::new(client, discovery, peers_manager, genesis_hash);
+        let state = NetworkState::new(
+            client,
+            discovery,
+            peers_manager,
+            genesis_hash,
+            Arc::clone(&num_active_peers),
+        );
 
         let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
-        let num_active_peers = Arc::new(AtomicUsize::new(0));
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
             listener_address,

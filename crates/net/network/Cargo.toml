@@ -63,16 +63,27 @@ secp256k1 = { version = "0.24", features = [
     "recovery",
 ] }
 
+enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"], optional = true }
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
+tempfile = { version = "3.3", optional = true }
+
 [dev-dependencies]
 # reth
 reth-discv4 = { path = "../discv4", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+
+# we need to enable the test-utils feature in our own crate to use utils in
+# integration tests
+reth-network = { path = ".", features = ["test-utils"] }
+
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
 
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-middleware = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 
 enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"] }
 
@@ -83,3 +94,4 @@ serial_test = "0.10"
 
 [features]
 serde = ["dep:serde", "dep:humantime-serde"]
+test-utils = ["reth-provider/test-utils", "dep:enr", "dep:ethers-core", "dep:tempfile"]

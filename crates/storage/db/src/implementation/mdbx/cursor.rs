@@ -79,7 +79,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             .map_err(|e| Error::Read(e.into()))?
             .map(decoder::<T>);
 
-        Ok(Walker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
+        Ok(Walker::new(self, start))
     }
 }
 

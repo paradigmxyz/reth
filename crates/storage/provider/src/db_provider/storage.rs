@@ -44,9 +44,14 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
         // check if block is canonical or not. Only canonical blocks have changesets.
         let canonical_block_hash = tx
             .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockCanonical { block_number })?;
+            .ok_or(Error::BlockCanonical { block_number, block_hash })?;
         if canonical_block_hash != block_hash {
-            return Err(Error::BlockIsntCanonical { block_hash }.into())
+            return Err(Error::NonCanonicalBlock {
+                block_number,
+                received_hash: block_hash,
+                expected_hash: canonical_block_hash,
+            }
+            .into())
         }
 
         // get transition id

@@ -5,6 +5,7 @@
 
 use crate::{BlockNumber, H256};
 use crc::crc32;
+use reth_codecs::derive_arbitrary;
 use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,6 +16,7 @@ use std::{
 use thiserror::Error;
 
 /// `CRC32` hash of all previous forks starting from genesis block.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Copy,
@@ -58,6 +60,7 @@ impl Add<BlockNumber> for ForkHash {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Copy,

@@ -1,12 +1,12 @@
 //! A network implementation for testing purposes.
 
-use futures::{FutureExt, StreamExt};
-use pin_project::pin_project;
-use reth_eth_wire::DisconnectReason;
-use reth_network::{
+use crate::{
     error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
     NetworkHandle, NetworkManager,
 };
+use futures::{FutureExt, StreamExt};
+use pin_project::pin_project;
+use reth_eth_wire::DisconnectReason;
 use reth_primitives::PeerId;
 use reth_provider::{test_utils::NoopProvider, BlockProvider, HeaderProvider};
 use secp256k1::SecretKey;
@@ -52,22 +52,28 @@ where
         Ok(this)
     }
 
+    /// Return a mutable slice of all peers.
     pub fn peers_mut(&mut self) -> &mut [Peer<C>] {
         &mut self.peers
     }
 
+    /// Return a slice of all peers.
     pub fn peers(&self) -> &[Peer<C>] {
         &self.peers
     }
 
+    /// Return a mutable iterator over all peers.
     pub fn peers_iter_mut(&mut self) -> impl Iterator<Item = &mut Peer<C>> + '_ {
         self.peers.iter_mut()
     }
 
+    /// Return an iterator over all peers.
     pub fn peers_iter(&self) -> impl Iterator<Item = &Peer<C>> + '_ {
         self.peers.iter()
     }
 
+    /// Extend the list of peers with new peers that are configured with each of the given
+    /// [`PeerConfig`]s.
     pub async fn extend_peer_with_config(
         &mut self,
         configs: impl IntoIterator<Item = PeerConfig<C>>,
@@ -78,6 +84,7 @@ where
         Ok(())
     }
 
+    /// Add a peer to the [`Testnet`] with the given [`PeerConfig`].
     pub async fn add_peer_with_config(
         &mut self,
         config: PeerConfig<C>,
@@ -155,6 +162,7 @@ impl Testnet<NoopProvider> {
         Ok(this)
     }
 
+    /// Add a peer to the [`Testnet`]
     pub async fn add_peer(&mut self) -> Result<(), NetworkError> {
         self.add_peer_with_config(Default::default()).await
     }
@@ -181,6 +189,7 @@ where
     }
 }
 
+/// A handle to a [`Testnet`] that can be shared.
 pub struct TestnetHandle<C> {
     _handle: JoinHandle<()>,
     terminate: oneshot::Sender<oneshot::Sender<Testnet<C>>>,
@@ -213,6 +222,7 @@ impl<C> Peer<C>
 where
     C: BlockProvider + HeaderProvider,
 {
+    /// Returns the number of connected peers.
     pub fn num_peers(&self) -> usize {
         self.network.num_connected_peers()
     }
@@ -222,6 +232,7 @@ where
         self.network.local_addr()
     }
 
+    /// Returns the [`NetworkHandle`] of this peer.
     pub fn handle(&self) -> NetworkHandle {
         self.network.handle().clone()
     }
@@ -253,6 +264,7 @@ where
     }
 }
 
+/// A helper config for setting up the reth networking stack.
 pub struct PeerConfig<C = NoopProvider> {
     config: NetworkConfig<C>,
     client: Arc<C>,
@@ -265,11 +277,15 @@ impl<C> PeerConfig<C>
 where
     C: BlockProvider + HeaderProvider,
 {
+    /// Initialize the network with a random secret key, allowing the devp2p and discovery to bind
+    /// to any available IP and port.
     pub fn new(client: Arc<C>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         Self::with_secret_key(client, secret_key)
     }
 
+    /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
+    /// available IP and port.
     pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
         let config = NetworkConfig::builder(Arc::clone(&client), secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
@@ -295,10 +311,12 @@ pub struct NetworkEventStream {
 // === impl NetworkEventStream ===
 
 impl NetworkEventStream {
+    /// Create a new [`NetworkEventStream`] from the given network event receiver stream.
     pub fn new(inner: UnboundedReceiverStream<NetworkEvent>) -> Self {
         Self { inner }
     }
 
+    /// Awaits the next event for a session to be closed
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             match ev {
@@ -308,6 +326,7 @@ impl NetworkEventStream {
         }
         None
     }
+
     /// Awaits the next event for an established session
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
@@ -317,5 +336,22 @@ impl NetworkEventStream {
             }
         }
         None
+    }
+
+    /// Ensures that the first two events are a [`PeerAdded`] and [`SessionEstablished`],
+    /// returning the [`PeerId`] of the established session.
+    pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
+        let peer_id = match self.inner.next().await {
+            Some(NetworkEvent::PeerAdded(peer_id)) => peer_id,
+            _ => return None,
+        };
+
+        match self.inner.next().await {
+            Some(NetworkEvent::SessionEstablished { peer_id: peer_id2, .. }) => {
+                debug_assert_eq!(peer_id, peer_id2, "PeerAdded peer_id {peer_id} does not match SessionEstablished peer_id {peer_id2}");
+                Some(peer_id)
+            }
+            _ => None,
+        }
     }
 }
