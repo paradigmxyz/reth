@@ -424,7 +424,7 @@ It's worth noting that once the node starts downloading either headers or bodies
 
 When `FetchClient.get_headers` or `FetchClient.get_block_bodies` is called, those `DownloadRequest`s are sent into the `StateFetcher.download_requests_tx` channel, and are processed as the `StateFetcher` gets polled.
 
-Every time the `StateFetcher` is polled, it finds the next non-idle peer available to service the current request (for either a block header, or a block body). In this context, "idle" means any peer that is not currently handling a request from the node:
+Every time the `StateFetcher` is polled, it finds the next idle peer available to service the current request (for either a block header, or a block body). In this context, "idle" means any peer that is not currently handling a request from the node:
 
 [File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
