@@ -175,7 +175,7 @@ fn ui<B: Backend, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<T>) {
 
     // Footer
     let footer = Paragraph::new(
-        CMDS.iter().map(|(k, v)| format!("[{v}] {k}")).collect::<Vec<_>>().join(" | "),
+        CMDS.iter().map(|(k, v)| format!("[{k}] {v}")).collect::<Vec<_>>().join(" | "),
     )
     .block(Block::default().borders(Borders::ALL))
     .alignment(Alignment::Center)
