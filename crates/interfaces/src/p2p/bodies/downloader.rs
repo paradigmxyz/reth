@@ -1,5 +1,5 @@
 use crate::p2p::downloader::{DownloadStream, Downloader};
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
 
 /// The block response
 #[derive(PartialEq, Eq, Debug)]
@@ -17,6 +17,11 @@ impl BlockResponse {
             BlockResponse::Full(block) => &block.header,
             BlockResponse::Empty(header) => header,
         }
+    }
+
+    /// Return the block number
+    pub fn block_number(&self) -> BlockNumber {
+        self.header().number
     }
 }
 
