@@ -128,10 +128,8 @@ pub struct NetworkConfigBuilder {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
-    #[serde(skip)]
     dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
-    #[serde(skip)]
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
@@ -142,7 +140,6 @@ pub struct NetworkConfigBuilder {
     /// How to instantiate peer manager.
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
-    #[serde(skip)]
     sessions_config: Option<SessionsConfig>,
     /// The network's chain id
     chain: Chain,
