@@ -775,6 +775,10 @@ mod tests {
             fn report_bad_message(&self, _: reth_primitives::PeerId) {
                 panic!("Noop client should not be called")
             }
+
+            fn num_connected_peers(&self) -> usize {
+                panic!("Noop client should not be called")
+            }
         }
 
         #[async_trait::async_trait]
