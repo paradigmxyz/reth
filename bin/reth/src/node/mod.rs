@@ -5,11 +5,7 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::{init_db, init_genesis},
-        parse_socket_address,
-    },
+    utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
     NetworkOpts,
 };
 use clap::{crate_version, Parser};
@@ -18,11 +14,10 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
-use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, NodeRecord, H256};
+use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -68,7 +63,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecification,
+    chain: ChainSpec,
 
     /// Enable Prometheus metrics.
     ///
@@ -119,15 +114,12 @@ impl Command {
             HeaderMetrics::describe();
         }
 
-        let chain_id = self.chain.consensus.chain_id;
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
-        let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
+        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
         let network = config
             .network_config(
                 db.clone(),
-                chain_id,
-                genesis_hash,
+                self.chain.clone(),
                 self.network.disable_discovery,
                 self.bootnodes.clone(),
             )
@@ -178,7 +170,7 @@ impl Command {
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
             .push(ExecutionStage {
-                config: ExecutorConfig::new_ethereum(),
+                chain_spec: self.chain.clone(),
                 commit_threshold: config.stages.execution.commit_threshold,
             });
 
