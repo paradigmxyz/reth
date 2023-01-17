@@ -9,13 +9,12 @@
 //! # Features
 //!
 //! - `serde`: Enable serde support for configuration types.
-pub mod config;
 pub mod consensus;
+pub mod constants;
 pub mod verification;
 
 /// Engine API module.
 pub mod engine;
 
-pub use config::Config;
 pub use consensus::BeaconConsensus;
 pub use reth_interfaces::consensus::Error;

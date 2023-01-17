@@ -1,6 +1,6 @@
 use reth_primitives::{
-    Address, BigEndianHash, Bloom, Bytes, Header as RethHeader, JsonU256, SealedHeader, H160, H256,
-    H64,
+    Address, BigEndianHash, Bloom, Bytes, ChainSpec, ChainSpecBuilder, Header as RethHeader,
+    JsonU256, SealedHeader, H160, H256, H64,
 };
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
@@ -209,28 +209,30 @@ pub enum ForkSpec {
     Unknown,
 }
 
-impl From<ForkSpec> for reth_executor::SpecUpgrades {
+impl From<ForkSpec> for ChainSpec {
     fn from(fork_spec: ForkSpec) -> Self {
+        let spec_builder = ChainSpecBuilder::mainnet();
+
         match fork_spec {
-            ForkSpec::Frontier => Self::new_frontier_activated(),
+            ForkSpec::Frontier => spec_builder.frontier_activated(),
             ForkSpec::Homestead | ForkSpec::FrontierToHomesteadAt5 => {
-                Self::new_homestead_activated()
+                spec_builder.homestead_activated()
             }
             ForkSpec::EIP150 | ForkSpec::HomesteadToDaoAt5 | ForkSpec::HomesteadToEIP150At5 => {
-                Self::new_tangerine_whistle_activated()
+                spec_builder.tangerine_whistle_activated()
             }
-            ForkSpec::EIP158 => Self::new_spurious_dragon_activated(),
+            ForkSpec::EIP158 => spec_builder.spurious_dragon_activated(),
             ForkSpec::Byzantium |
             ForkSpec::EIP158ToByzantiumAt5 |
             ForkSpec::ConstantinopleFix |
-            ForkSpec::ByzantiumToConstantinopleFixAt5 => Self::new_byzantium_activated(),
-            ForkSpec::Istanbul => Self::new_istanbul_activated(),
-            ForkSpec::Berlin => Self::new_berlin_activated(),
-            ForkSpec::London | ForkSpec::BerlinToLondonAt5 => Self::new_london_activated(),
-            ForkSpec::Merge => Self::new_paris_activated(),
-            ForkSpec::MergeEOF => Self::new_paris_activated(),
-            ForkSpec::MergeMeterInitCode => Self::new_paris_activated(),
-            ForkSpec::MergePush0 => Self::new_paris_activated(),
+            ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder.byzantium_activated(),
+            ForkSpec::Istanbul => spec_builder.istanbul_activated(),
+            ForkSpec::Berlin => spec_builder.berlin_activated(),
+            ForkSpec::London | ForkSpec::BerlinToLondonAt5 => spec_builder.london_activated(),
+            ForkSpec::Merge => spec_builder.paris_activated(),
+            ForkSpec::MergeEOF => spec_builder.paris_activated(),
+            ForkSpec::MergeMeterInitCode => spec_builder.paris_activated(),
+            ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => {
                 panic!("Not supported")
             }
@@ -241,6 +243,7 @@ impl From<ForkSpec> for reth_executor::SpecUpgrades {
                 panic!("Unknown fork");
             }
         }
+        .build()
     }
 }
 
