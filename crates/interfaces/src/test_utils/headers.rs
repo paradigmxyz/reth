@@ -2,7 +2,7 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadClient, DownloadStream, Downloader},
+        downloader::{DownloadClient, Downloader},
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
@@ -10,13 +10,14 @@ use crate::{
         },
     },
 };
-use futures::{Future, FutureExt, Stream};
+use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
     BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
+    fmt,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -32,12 +33,13 @@ pub struct TestHeaderDownloader {
     client: Arc<TestHeadersClient>,
     consensus: Arc<TestConsensus>,
     limit: u64,
+    download: Option<TestDownload>,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
     pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>, limit: u64) -> Self {
-        Self { client, consensus, limit }
+        Self { client, consensus, limit, download: None }
     }
 
     fn create_download(&self) -> TestDownload {
@@ -53,22 +55,31 @@ impl TestHeaderDownloader {
 }
 
 impl Downloader for TestHeaderDownloader {
-    type Consensus = TestConsensus;
     type Client = TestHeadersClient;
-
-    fn consensus(&self) -> &Self::Consensus {
-        &self.consensus
-    }
+    type Consensus = TestConsensus;
 
     fn client(&self) -> &Self::Client {
         &self.client
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        &self.consensus
     }
 }
 
 #[async_trait::async_trait]
 impl HeaderDownloader for TestHeaderDownloader {
-    fn stream(&self, _head: SealedHeader, _tip: H256) -> DownloadStream<'_, SealedHeader> {
-        Box::pin(self.create_download())
+    fn set_batch_size(&mut self, _limit: usize) {}
+}
+
+impl Stream for TestHeaderDownloader {
+    type Item = Vec<SealedHeader>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let download = this.download.get_or_insert(this.create_download());
+        let res = ready!(download.poll_next_unpin(cx));
+        Poll::Ready(res.map(|res| vec![res.unwrap()]))
     }
 }
 
@@ -95,6 +106,18 @@ impl TestDownload {
             self.fut = Some(Box::pin(async move { client.get_headers(request).await }));
         }
         self.fut.as_mut().unwrap()
+    }
+}
+
+impl fmt::Debug for TestDownload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TestDownload")
+            .field("client", &self.client)
+            .field("consensus", &self.consensus)
+            .field("limit", &self.limit)
+            .field("buffer", &self.buffer)
+            .field("done", &self.done)
+            .finish_non_exhaustive()
     }
 }
 

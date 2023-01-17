@@ -1,35 +1,23 @@
 use crate::{
     consensus::Consensus,
     p2p::{
-        downloader::{DownloadStream, Downloader},
+        downloader::Downloader,
         error::{DownloadError, DownloadResult},
     },
 };
 use futures::Stream;
-use reth_primitives::{SealedHeader, H256};
+use reth_primitives::SealedHeader;
 
-/// A downloader capable of fetching block headers.
+/// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
 /// while a [HeadersClient] represents a client capable of fulfilling these requests.
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeaderDownloader: Downloader {
-    /// Stream the headers
-    fn stream(&self, head: SealedHeader, tip: H256) -> DownloadStream<'_, SealedHeader>;
-
-    /// Validate whether the header is valid in relation to it's parent
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
-        validate_header_download(self.consensus(), header, parent)?;
-        Ok(())
-    }
-}
-
-/// A downloader capable of fetching block headers.
 ///
-/// A downloader represents a distinct strategy for submitting requests to download block headers,
-/// while a [HeadersClient] represents a client capable of fulfilling these requests.
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HeaderDownloader2: Downloader + Stream<Item = Vec<SealedHeader>> {
+/// A [HeaderDownloader] is a [Stream] that returns batches for headers.
+pub trait HeaderDownloader: Downloader + Stream<Item = Vec<SealedHeader>> {
+    /// Sets the headers batch size that the Stream should return.
+    fn set_batch_size(&mut self, limit: usize);
+
     /// Validate whether the header is valid in relation to it's parent
     fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
         validate_header_download(self.consensus(), header, parent)?;
