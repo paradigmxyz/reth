@@ -45,8 +45,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let previous_stage_progress = input.previous_stage_progress();
 
         // read account changeset, merge it into one changeset and calculate account hashes.
-        let from_transition = tx.get_block_transition(stage_progress)? + 1;
-        let to_transition = tx.get_block_transition(previous_stage_progress)? + 1;
+        let from_transition = tx.get_block_transition(stage_progress)?;
+        let to_transition = tx.get_block_transition(previous_stage_progress)?;
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
@@ -125,8 +125,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // There is no threshold on account unwind, we will always take changesets and
         // apply past values to HashedAccount table.
 
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)? + 1;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)? + 1;
+        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
+        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.cursor_read::<tables::AccountChangeSet>()?
