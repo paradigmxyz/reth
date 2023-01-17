@@ -1,10 +1,9 @@
 //! Connection tests
 
-use super::testnet::Testnet;
-use crate::{NetworkEventStream, PeerConfig};
-use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use ethers_core::utils::Geth;
+
 use ethers_providers::{Http, Middleware, Provider};
+
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::DisconnectReason;
@@ -13,7 +12,12 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateUpdater},
 };
 use reth_net_common::ban_list::BanList;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkManager, PeersConfig};
+use reth_network::{
+    test_utils::{
+        enr_to_peer_id, unused_tcp_udp, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT,
+    },
+    NetworkConfig, NetworkEvent, NetworkManager, PeersConfig,
+};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
@@ -21,17 +25,6 @@ use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task;
-
-// The timeout for tests that create a GethInstance
-const GETH_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Obtains a PeerId from an ENR. In this case, the PeerId represents the public key contained in
-/// the ENR.
-fn enr_to_peer_id(enr: Enr<SigningKey>) -> PeerId {
-    // In the following tests, methods which accept a public key expect it to contain the public
-    // key in its 64-byte encoded (uncompressed) form.
-    enr.public_key().encode_uncompressed().into()
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -337,11 +330,10 @@ async fn test_incoming_node_id_blacklist() {
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
-        let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30303);
-        let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30304);
+        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
-            .listener_addr(reth_p2p_socket)
-            .discovery_addr(reth_disc_socket)
+            .listener_addr(reth_p2p)
+            .discovery_addr(reth_disc)
             .peer_config(peer_config)
             .build();
 
@@ -353,7 +345,7 @@ async fn test_incoming_node_id_blacklist() {
         tokio::task::spawn(network);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(reth_p2p_socket, *handle.peer_id());
+        let our_enode = NodeRecord::new(reth_p2p, *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
 
@@ -387,11 +379,10 @@ async fn test_incoming_connect_with_single_geth() {
         // get the peer id we should be expecting
         let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
-        let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30305);
-        let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30306);
+        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
-            .listener_addr(reth_p2p_socket)
-            .discovery_addr(reth_disc_socket)
+            .listener_addr(reth_p2p)
+            .discovery_addr(reth_disc)
             .build();
 
         let network = NetworkManager::new(config).await.unwrap();
@@ -403,7 +394,7 @@ async fn test_incoming_connect_with_single_geth() {
         let mut event_stream = NetworkEventStream::new(events);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(reth_p2p_socket, *handle.peer_id());
+        let our_enode = NodeRecord::new(reth_p2p, *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
 
@@ -422,11 +413,10 @@ async fn test_outgoing_connect_with_single_geth() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30307);
-        let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30308);
+        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
-            .listener_addr(reth_p2p_socket)
-            .discovery_addr(reth_disc_socket)
+            .listener_addr(reth_p2p)
+            .discovery_addr(reth_disc)
             .build();
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -448,8 +438,7 @@ async fn test_outgoing_connect_with_single_geth() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId =
-            provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         // add geth as a peer then wait for a `SessionEstablished` event
         handle.add_peer(geth_peer_id, geth_socket);
@@ -469,11 +458,10 @@ async fn test_geth_disconnect() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let reth_p2p_socket = SocketAddr::new([127, 0, 0, 1].into(), 30309);
-        let reth_disc_socket = SocketAddr::new([127, 0, 0, 1].into(), 30310);
+        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
-            .listener_addr(reth_p2p_socket)
-            .discovery_addr(reth_disc_socket)
+            .listener_addr(reth_p2p)
+            .discovery_addr(reth_disc)
             .build();
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -494,8 +482,7 @@ async fn test_geth_disconnect() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId =
-            provider.node_info().await.unwrap().enr.public_key().encode_uncompressed().into();
+        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);
