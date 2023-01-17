@@ -32,15 +32,8 @@ pub struct NodeInfo {
 impl NodeInfo {
     /// Creates a new instance of `NodeInfo`.
     pub fn new(enr: NodeRecord) -> NodeInfo {
-        let mut protocol_info = BTreeMap::from([(
-            "eth".into(),
-            ProtocolInfo::Eth(EthProtocolInfo {
-                difficulty: todo!(),
-                head: todo!(),
-                network: 0,
-                genesis: todo!(),
-            }),
-        )]);
+        let protocol_info =
+            BTreeMap::from([("eth".into(), ProtocolInfo::Eth(EthProtocolInfo::default()))]);
 
         NodeInfo {
             enode: enr,
@@ -70,7 +63,7 @@ pub enum ProtocolInfo {
     Eth(EthProtocolInfo),
 }
 /// Information about the Ethereum Wire Protocol (ETH)
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct EthProtocolInfo {
     /// The current difficulty at the head of the chain.
     pub difficulty: U256,
