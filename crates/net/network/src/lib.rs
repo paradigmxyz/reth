@@ -113,6 +113,10 @@
 //!
 //! - `serde`: Enable serde support for configuration types.
 
+#[cfg(any(test, feature = "test-utils"))]
+/// Common helpers for network testing.
+pub mod test_utils;
+
 mod builder;
 mod cache;
 pub mod config;
