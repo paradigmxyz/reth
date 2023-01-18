@@ -199,21 +199,21 @@ where
     }
 
     /// Updates the state based on the given `target_block_number`
-    fn on_block_number_update(&mut self, target_block_number: u64, next_block_to_request: u64) {
+    fn on_block_number_update(&mut self, target_block_number: u64, next_block: u64) {
         // Update the trackers
         if let Some(old_target) = self.sync_target.number.replace(target_block_number) {
             if target_block_number > old_target {
                 // the new target is higher than the old target we need to update the
-                // request tracker and clear everything
-                self.next_request_block_number = next_block_to_request;
-                self.buffered_responses.clear();
+                // request tracker and reset everything
+                self.next_request_block_number = next_block;
+                self.next_chain_tip_block_number = next_block;
+                self.clear();
             }
         } else {
-            // initial sync target request
-            self.next_request_block_number = next_block_to_request;
+            // this occurs on the initial sync target request
+            self.next_request_block_number = next_block;
+            self.next_chain_tip_block_number = next_block;
         }
-
-        self.next_chain_tip_block_number = next_block_to_request;
     }
 
     /// Handles the response for the request for the sync target
@@ -505,12 +505,12 @@ where
                 if target != self.sync_target.hash {
                     // If the target has changed, update the request pointers based on the new
                     // targeted block number
-                    let block_number = existing.number.saturating_sub(1);
+                    let parent_block_number = existing.number.saturating_sub(1);
 
-                    trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?target, %block_number, "Updated sync target");
+                    trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?target, %parent_block_number, "Updated sync target");
 
                     self.sync_target.hash = target;
-                    self.on_block_number_update(block_number, block_number);
+                    self.on_block_number_update(parent_block_number, parent_block_number);
                 }
             }
         }
