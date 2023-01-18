@@ -9,6 +9,7 @@ The database is a central component to Reth, enabling persistent storage for dat
 Within Reth, the database is organized via "tables". A table is any struct that implements the `Table` trait.
 
 [File: crates/storage/db/src/abstraction/table.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/table.rs#L56-L65)
+
 ```rust ignore
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
@@ -22,10 +23,10 @@ pub trait Table: Send + Sync + Debug + 'static {
 }
 
 //--snip--
-pub trait Key: Encode + Decode {}
+pub trait Key: Encode + Decode + Ord {}
 
 //--snip--
-pub trait Value: Compress + Decompress {}
+pub trait Value: Compress + Decompress + Serialize {}
 
 ```
 
@@ -61,9 +62,10 @@ There are many tables within the node, all used to store different types of data
 
 ## Database
 
-Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/mod.rs#L33), which takes advantage of [generic associated types](https://blog.rust-lang.org/2022/10/28/gats-stabilization.html) and [a few design tricks](https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats) to implement the database's functionality across many types.  Let's take a quick look at the `Database` trait and how it works.
+Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/mod.rs#L33), which takes advantage of [generic associated types](https://blog.rust-lang.org/2022/10/28/gats-stabilization.html) and [a few design tricks](https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats) to implement the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
 [File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L19)
+
 ```rust ignore
 /// Main Database trait that spawns transactions to be executed.
 pub trait Database: for<'a> DatabaseGAT<'a> {
@@ -102,10 +104,11 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
     }
 }
 ```
-Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. As an example, lets revisit the `Transaction` struct from the `stages` crate. This struct contains a field named `db` which is a reference to a generic type `DB` that implements the `Database` trait. The `Transaction` struct can use the `db` field to store new headers, bodies and senders in the database. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction. 
 
+Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. As an example, lets revisit the `Transaction` struct from the `stages` crate. This struct contains a field named `db` which is a reference to a generic type `DB` that implements the `Database` trait. The `Transaction` struct can use the `db` field to store new headers, bodies and senders in the database. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction.
 
 [File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L95-L98)
+
 ```rust ignore
 pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
@@ -131,6 +134,7 @@ where
 The `Database` trait also implements the `DatabaseGAT` trait which defines two associated types `TX` and `TXMut`.
 
 [File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L11)
+
 ```rust ignore
 /// Implements the GAT method from:
 /// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
@@ -144,13 +148,14 @@ pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + S
 }
 ```
 
-In Rust, associated types are like generics in that they can be any type fitting the generic's definition, with the difference being that associated types are associated with a trait and can only be used in the context of that trait. 
+In Rust, associated types are like generics in that they can be any type fitting the generic's definition, with the difference being that associated types are associated with a trait and can only be used in the context of that trait.
 
-In the code snippet above, the `DatabaseGAT` trait has two associated types, `TX` and `TXMut`. 
+In the code snippet above, the `DatabaseGAT` trait has two associated types, `TX` and `TXMut`.
 
-The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions. 
+The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L36)
+
 ```rust ignore
 /// Read only transaction
 pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
@@ -169,6 +174,7 @@ pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
 The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L49)
+
 ```rust ignore
 /// Read write transaction that allows writing to database
 pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
@@ -178,9 +184,9 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error>;
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), Error>;
-    /// Cursor for writing 
+    /// Cursor for writing
     fn cursor_write<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
-    /// DupCursor for writing 
+    /// DupCursor for writing
     fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error>;
@@ -190,6 +196,7 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
 Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `Transaction` struct as an example, the `Transaction::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash in the form of `self.get::<tables::CanonicalHeaders>(number)`.
 
 [File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L106)
+
 ```rust ignore
 
 impl<'this, DB> Transaction<'this, DB>
@@ -219,20 +226,21 @@ impl<'a, DB: Database> Deref for Transaction<'a, DB> {
 
 The `Transaction` struct implements the `Deref` trait, which returns a reference to its `tx` field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `DatabaseGAT` trait, which is defined as `type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
-Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter. 
-
+Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L38)
+
 ```rust ignore
 fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
 ```
 
-This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.  
+This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.
 
 Lets take a look at a couple examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
 [File: crates/storage/provider/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/block.rs#L121-L125)
-```rust ignore 
+
+```rust ignore
     let block_num_hash = BlockNumHash((block.number, block.hash()));
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
     // Put header with canonical hashes.
@@ -240,12 +248,11 @@ Lets take a look at a couple examples before moving on. In the snippet below, th
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 ```
 
-
 This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 
-
 [File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L93-L101)
-```rust ignore 
+
+```rust ignore
 // Get next canonical block hashes to execute.
     let mut canonicals = db_tx.cursor_read::<tables::CanonicalHeaders>()?;
     // Get header with canonical hashes.
@@ -262,6 +269,7 @@ This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Curso
 We are almost at the last stop in the tour of the `db` crate. In addition to the methods provided by the `DbTx` and `DbTxMut` traits, `DbTx` also inherits the `DbTxGAT` trait, while `DbTxMut` inherits `DbTxMutGAT`. These next two traits provide various associated types related to cursors as well as methods to utilize the cursor types.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L12-L17)
+
 ```rust ignore
 pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
@@ -271,9 +279,10 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 }
 ```
 
-Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline. 
+Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
 [File: crates/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/bodies.rs#L205-L238)
+
 ```rust ignore
  /// Unwind the stage.
     async fn unwind(
@@ -311,7 +320,7 @@ Lets look at an examples of how cursors are used. The code snippet below contain
 
 ```
 
-This function first grabs a mutable cursor for the `CumulativeTxCount`, `BlockOmmers` and `Transactions` tables. 
+This function first grabs a mutable cursor for the `CumulativeTxCount`, `BlockOmmers` and `Transactions` tables.
 
 The `tx_count_cursor` is used to get the last key value pair written to the `CumulativeTxCount` table and delete key value pair where the cursor is currently pointing.
 
@@ -324,6 +333,7 @@ While this is a brief look at how cursors work in the context of database tables
 <br>
 
 ## Summary
+
 This chapter was packed with information, so lets do a quick review. The database is comprised of tables, with each table being a collection of key-value pairs representing various pieces of data in the blockchain. Any struct that implements the `Database` trait can view, update or delete entries in the various tables. The database design leverages nested traits and generic associated types to provide methods to interact with each table in the database.
 
 <br>
