@@ -1,0 +1,57 @@
+[package]
+name = "reth-tests"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = """
+Reth integration tests
+"""
+
+[dependencies]
+# reth
+reth-primitives = { path = "../primitives" }
+reth-tracing = { path = "../tracing" }
+reth-stages = { path = "../stages" }
+reth-db = { path = "../storage/db" }
+reth-consensus = { path = "../consensus" }
+reth-cli-utils = { path = "../cli/utils" }
+reth-interfaces = { path = "../interfaces" }
+reth-downloaders = { path = "../net/downloaders" }
+reth-network = { path = "../net/network", features = ["test-utils"] }
+reth-eth-wire = { path = "../net/eth-wire" }
+reth-executor = { path = "../executor" }
+reth-provider = { path = "../storage/provider"}
+
+# ethers
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-providers = { git = "https://github.com/gakonst/ethers-rs", features = ["ws"], default-features = false }
+ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-middleware = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+
+# enr
+enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"] }
+
+# crypto
+rand = "0.8"
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
+# errors
+thiserror = "1.0.37"
+
+# async/futures
+futures = "0.3"
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
+tokio-stream = "0.1"
+
+# tracing
+tracing = "0.1"
+
+# misc
+hex = "0.4"
+tempfile = "3.3"
