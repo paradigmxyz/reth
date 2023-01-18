@@ -12,7 +12,7 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use tracing::{error, info};
 
 /// DB List TUI
@@ -215,7 +215,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Grabs the contents of the table within a certain index range and places the
     /// entries into a [HashMap].
-    fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<HashMap<T::Key, T::Value>> {
+    fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<BTreeMap<T::Key, T::Value>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
@@ -231,7 +231,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         })?;
 
         data.into_iter()
-            .collect::<Result<HashMap<T::Key, T::Value>, _>>()
+            .collect::<Result<BTreeMap<T::Key, T::Value>, _>>()
             .map_err(|e| eyre::eyre!(e))
     }
 

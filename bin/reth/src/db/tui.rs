@@ -5,7 +5,7 @@ use crossterm::{
 };
 use reth_db::table::Table;
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     io,
     time::{Duration, Instant},
 };
@@ -31,11 +31,11 @@ pub(crate) struct DbListTUI<T: Table> {
     /// The total number of entries in the database
     pub(crate) total_entries: usize,
     /// Entries to show in the TUI.
-    pub(crate) entries: HashMap<T::Key, T::Value>,
+    pub(crate) entries: BTreeMap<T::Key, T::Value>,
 }
 
 impl<T: Table> DbListTUI<T> {
-    fn new(entries: HashMap<T::Key, T::Value>, start: usize, total_entries: usize) -> Self {
+    fn new(entries: BTreeMap<T::Key, T::Value>, start: usize, total_entries: usize) -> Self {
         Self { state: ListState::default(), start, total_entries, entries }
     }
 
@@ -71,7 +71,7 @@ impl<T: Table> DbListTUI<T> {
 
     /// Show the [DbListTUI] in the terminal.
     pub(crate) fn show_tui(
-        entries: HashMap<T::Key, T::Value>,
+        entries: BTreeMap<T::Key, T::Value>,
         start: usize,
         total_entries: usize,
     ) -> eyre::Result<()> {
