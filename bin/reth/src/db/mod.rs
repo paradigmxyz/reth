@@ -1,4 +1,7 @@
 //! Database debugging tool
+
+mod vectors;
+
 use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use eyre::{Result, WrapErr};
@@ -47,6 +50,8 @@ pub enum Subcommands {
     },
     /// Deletes all database entries
     Drop,
+    /// Generates test vectors for different tables
+    GenTableVectors,
 }
 
 #[derive(Parser, Debug)]
@@ -116,6 +121,9 @@ impl Command {
             }
             Subcommands::Drop => {
                 tool.drop(&self.db)?;
+            }
+            Subcommands::GenTableVectors => {
+                vectors::generate_db_vectors()?;
             }
         }
 
