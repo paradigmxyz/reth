@@ -3957,10 +3957,8 @@ name = "reth-cli-utils"
 version = "0.1.0"
 dependencies = [
  "eyre",
- "reth-consensus",
  "reth-db",
  "reth-primitives",
- "serde",
  "serde_json",
  "shellexpand",
  "tracing",
