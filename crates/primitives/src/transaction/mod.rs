@@ -661,11 +661,7 @@ impl Decodable for TransactionSigned {
                 _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
             };
 
-            let signature = Signature {
-                odd_y_parity: Decodable::decode(buf)?,
-                r: Decodable::decode(buf)?,
-                s: Decodable::decode(buf)?,
-            };
+            let signature = Signature::decode(buf)?;
 
             let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
             signed.hash = keccak256(&original_encoding[..first_header.payload_length]);
@@ -680,7 +676,7 @@ impl Decodable for TransactionSigned {
                 input: Bytes(Decodable::decode(buf)?),
                 chain_id: None,
             });
-            let (signature, extracted_id) = Signature::decode_eip155_inner(buf)?;
+            let (signature, extracted_id) = Signature::decode_legacy(buf)?;
             if let Some(id) = extracted_id {
                 transaction.set_chain_id(id);
             }
@@ -731,13 +727,7 @@ impl TransactionSigned {
             let header = Header { list: true, payload_length: self.payload_len() };
             header.encode(out);
             self.transaction.encode_fields(out);
-
-            if let Some(id) = chain_id {
-                self.signature.encode_eip155_inner(out, id);
-            } else {
-                // if the transaction has no chain id then it is a pre-EIP-155 transaction
-                self.signature.encode_inner_legacy(out);
-            }
+            self.signature.encode_legacy(out, chain_id);
         } else {
             if with_header {
                 let header = Header { list: false, payload_length: self.payload_len() };
@@ -760,9 +750,7 @@ impl TransactionSigned {
             }
 
             self.transaction.encode_fields(out);
-            self.signature.odd_y_parity.encode(out);
-            self.signature.r.encode(out);
-            self.signature.s.encode(out);
+            self.signature.encode(out);
         }
     }
 
@@ -786,16 +774,9 @@ impl TransactionSigned {
     pub(crate) fn inner_tx_len(&self) -> usize {
         let mut len = self.transaction.fields_len();
         if let Transaction::Legacy(TxLegacy { chain_id, .. }) = self.transaction {
-            if let Some(id) = chain_id {
-                len += self.signature.eip155_payload_len(id);
-            } else {
-                // if the transaction has no chain id then it is a pre-EIP-155 transaction
-                len += self.signature.payload_len_legacy();
-            }
+            len += self.signature.payload_len_legacy(chain_id);
         } else {
-            len += self.signature.odd_y_parity.length();
-            len += self.signature.r.length();
-            len += self.signature.s.length();
+            len += self.signature.payload_len();
         }
         len
     }
