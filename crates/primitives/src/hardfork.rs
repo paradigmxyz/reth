@@ -12,7 +12,8 @@ pub enum Hardfork {
     Frontier,
     Homestead,
     Dao,
-    Tangerine,
+    Eip150,
+    Eip158,
     SpuriousDragon,
     Byzantium,
     Constantinople,
@@ -31,6 +32,9 @@ pub enum Hardfork {
 
 impl Hardfork {
     /// Compute the forkid for the given [`ChainSpec`].
+    ///
+    /// This assumes the current hardfork's block number is the current head and uses known future
+    /// hardforks from the [`ChainSpec`] to set the forkid's `next` field.
     ///
     /// If the hard fork is not present in the [`ChainSpec`] then `None` is returned.
     pub fn fork_id(&self, chain_spec: &ChainSpec) -> Option<ForkId> {
@@ -56,6 +60,9 @@ impl Hardfork {
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
     ///
+    /// This assumes the current hardfork's block number is the current head and uses known future
+    /// hardforks from the [`ChainSpec`] to initialize the filter.
+    ///
     /// This returns `None` if the hardfork is not present in the given [`ChainSpec`].
     pub fn fork_filter(&self, chain_spec: &ChainSpec) -> Option<ForkFilter> {
         if let Some(fork_block) = chain_spec.fork_block(*self) {
@@ -79,18 +86,19 @@ impl FromStr for Hardfork {
             "frontier" | "1" => Hardfork::Frontier,
             "homestead" | "2" => Hardfork::Homestead,
             "dao" | "3" => Hardfork::Dao,
-            "tangerine" | "4" => Hardfork::Tangerine,
-            "spuriousdragon" | "5" => Hardfork::SpuriousDragon,
-            "byzantium" | "6" => Hardfork::Byzantium,
-            "constantinople" | "7" => Hardfork::Constantinople,
-            "petersburg" | "8" => Hardfork::Petersburg,
-            "istanbul" | "9" => Hardfork::Istanbul,
-            "muirglacier" | "10" => Hardfork::Muirglacier,
-            "berlin" | "11" => Hardfork::Berlin,
-            "london" | "12" => Hardfork::London,
-            "arrowglacier" | "13" => Hardfork::ArrowGlacier,
+            "eip150" | "4" => Hardfork::Eip150,
+            "eip158" | "5" => Hardfork::Eip158,
+            "spuriousdragon" | "6" => Hardfork::SpuriousDragon,
+            "byzantium" | "7" => Hardfork::Byzantium,
+            "constantinople" | "8" => Hardfork::Constantinople,
+            "petersburg" | "9" => Hardfork::Petersburg,
+            "istanbul" | "10" => Hardfork::Istanbul,
+            "muirglacier" | "11" => Hardfork::Muirglacier,
+            "berlin" | "12" => Hardfork::Berlin,
+            "london" | "13" => Hardfork::London,
+            "arrowglacier" | "14" => Hardfork::ArrowGlacier,
             "grayglacier" => Hardfork::GrayGlacier,
-            "latest" | "14" => Hardfork::Latest,
+            "latest" | "15" => Hardfork::Latest,
             _ => return Err(format!("Unknown hardfork {s}")),
         };
         Ok(hardfork)
