@@ -434,6 +434,13 @@ mod tests {
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
         assert_eq!(header, expected);
+
+        // make sure the hash matches
+        let expected_hash = H256::from_slice(
+            &hex::decode("8c2f2af15b7b563b6ab1e09bed0e9caade7ed730aec98b70a993597a797579a9")
+                .unwrap(),
+        );
+        assert_eq!(header.hash_slow(), expected_hash);
     }
 
     #[test]

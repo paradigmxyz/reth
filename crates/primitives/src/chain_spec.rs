@@ -1,10 +1,12 @@
+use crate::{
+    proofs::genesis_state_root, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
+    GenesisAccount, Hardfork, Header, H160, H256, U256,
+};
+use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
 use once_cell::sync::Lazy;
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
-
-use crate::{BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, H256, U256};
+use std::collections::{BTreeMap, HashMap};
 
 /// The Etereum mainnet spec
 pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
@@ -57,7 +59,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
     genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
-    hardforks: BTreeMap::new(),
+    hardforks: BTreeMap::from([(Hardfork::MergeNetsplit, 1735371)]),
     dao_fork_support: true,
     paris_block: Some(1450408),
     paris_ttd: Some(U256::from(17000000000000000_u64)),
@@ -66,13 +68,26 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
 /// The Ethereum chain spec
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChainSpec {
-    chain: Chain,
-    genesis: Genesis,
-    genesis_hash: H256,
-    hardforks: BTreeMap<Hardfork, BlockNumber>,
-    dao_fork_support: bool,
-    paris_block: Option<u64>,
-    paris_ttd: Option<U256>,
+    /// The chain id
+    pub chain: Chain,
+
+    /// The genesis block information
+    pub genesis: Genesis,
+
+    /// The genesis block hash
+    pub genesis_hash: H256,
+
+    /// The active hard forks and their block numbers
+    pub hardforks: BTreeMap<Hardfork, BlockNumber>,
+
+    /// Whether or not the DAO fork is supported
+    pub dao_fork_support: bool,
+
+    /// The block number of the merge
+    pub paris_block: Option<u64>,
+
+    /// The merge terminal total difficulty
+    pub paris_ttd: Option<U256>,
 }
 
 impl ChainSpec {
@@ -89,6 +104,11 @@ impl ChainSpec {
     /// Returns the chain genesis hash
     pub fn genesis_hash(&self) -> H256 {
         self.genesis_hash
+    }
+
+    /// Returns the supported hardforks and their fork block numbers
+    pub fn hardforks(&self) -> &BTreeMap<Hardfork, BlockNumber> {
+        &self.hardforks
     }
 
     /// Get the first block number of the hardfork.
@@ -122,7 +142,6 @@ impl ChainSpec {
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given [BlockNumber].
-
     pub fn fork_filter(&self, block: BlockNumber) -> ForkFilter {
         let future_forks =
             self.forks_iter().map(|(_, b)| b).filter(|b| *b > block).collect::<Vec<_>>();
@@ -151,6 +170,68 @@ impl ChainSpec {
     /// Returns a [ChainSpecBuilder] to help build custom specs
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
+    }
+}
+
+impl From<EthersGenesis> for ChainSpec {
+    fn from(genesis: EthersGenesis) -> Self {
+        let alloc = genesis
+            .alloc
+            .iter()
+            .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+            .collect::<HashMap<H160, GenesisAccount>>();
+
+        let state_root = genesis_state_root(alloc.clone());
+
+        let genesis_block = Genesis {
+            nonce: genesis.nonce.as_u64(),
+            timestamp: genesis.timestamp.as_u64(),
+            gas_limit: genesis.gas_limit.as_u64(),
+            difficulty: genesis.difficulty.into(),
+            mix_hash: genesis.mix_hash.0.into(),
+            coinbase: genesis.coinbase.0.into(),
+            extra_data: genesis.extra_data.0.into(),
+            alloc,
+            state_root,
+        };
+
+        let genesis_hash = Header::from(genesis_block.clone()).seal().hash();
+        let paris_ttd = genesis.config.terminal_total_difficulty.map(|ttd| ttd.into());
+        let hardfork_opts = vec![
+            (Hardfork::Homestead, genesis.config.homestead_block),
+            (Hardfork::Dao, genesis.config.dao_fork_block),
+            (Hardfork::Tangerine, genesis.config.eip150_block),
+            // TODO: eip-158 was also activated when eip-155 was activated, but we don't have the
+            // proper hardfork identifier for it. this breaks the hardfork abstraction slightly
+            (Hardfork::SpuriousDragon, genesis.config.eip155_block),
+            (Hardfork::Byzantium, genesis.config.byzantium_block),
+            (Hardfork::Constantinople, genesis.config.constantinople_block),
+            (Hardfork::Petersburg, genesis.config.petersburg_block),
+            (Hardfork::Istanbul, genesis.config.istanbul_block),
+            (Hardfork::Muirglacier, genesis.config.muir_glacier_block),
+            (Hardfork::Berlin, genesis.config.berlin_block),
+            (Hardfork::London, genesis.config.london_block),
+            (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
+            (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
+            // TODO: similar problem as eip-158, but with the merge netsplit block. only used in
+            // sepolia, but required for proper forkid generation
+        ];
+
+        let configured_hardforks = hardfork_opts
+            .iter()
+            .filter_map(|(hardfork, opt)| opt.map(|block| (*hardfork, block)))
+            .collect::<BTreeMap<_, _>>();
+
+        Self {
+            chain: genesis.config.chain_id.into(),
+            dao_fork_support: genesis.config.dao_fork_support,
+            genesis: genesis_block,
+            hardforks: configured_hardforks,
+            genesis_hash,
+            paris_ttd,
+            // paris block is not used to fork, and is not used in genesis.json
+            paris_block: None,
+        }
     }
 }
 
