@@ -59,9 +59,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
     genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
-    hardforks: BTreeMap::from([
-        (Hardfork::MergeNetsplit, 1735371)
-    ]),
+    hardforks: BTreeMap::from([(Hardfork::MergeNetsplit, 1735371)]),
     dao_fork_support: true,
     paris_block: Some(1450408),
     paris_ttd: Some(U256::from(17000000000000000_u64)),
