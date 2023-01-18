@@ -1,5 +1,5 @@
 #![allow(missing_docs, dead_code, unused_variables, unused_imports)]
-use std::{collections::HashMap, marker::PhantomData};
+use std::{borrow::Borrow, collections::HashMap, marker::PhantomData};
 
 use crate::Transaction;
 use bytes::BytesMut;
@@ -16,21 +16,23 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_primitives::{
-    keccak256, proofs::KeccakHasher, rpc::H160, Account, Address, StorageEntry, H256, KECCAK_EMPTY,
-    U256,
+    keccak256, proofs::KeccakHasher, rpc::H160, Account, Address, Bytes, StorageEntry, H256,
+    KECCAK_EMPTY, U256,
 };
-use reth_rlp::{Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use trie_db::{
-    CError, HashDB, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout, TrieMut,
+    node::{NodePlan, Value},
+    CError, ChildReference, HashDB, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout,
+    TrieMut,
 };
 
-// #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
-// pub enum TrieError {
-//     #[error("{0:?}")]
-//     ImplError(#[from] Box<trie_db::TrieError<reth_primitives::H256, parity_scale_codec::Error>>),
-//     #[error("{0:?}")]
-//     DecodeError(#[from] reth_db::Error),
-// }
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub(crate) enum TrieError {
+    #[error("{0:?}")]
+    ImplError(#[from] Box<trie_db::TrieError<reth_primitives::H256, parity_scale_codec::Error>>),
+    #[error("{0:?}")]
+    DecodeError(#[from] reth_db::Error),
+}
 
 struct DBTrieLayout;
 
@@ -43,7 +45,7 @@ impl TrieLayout for DBTrieLayout {
     const MAX_INLINE_VALUE: Option<u32> = None;
 
     type Hash = KeccakHasher;
-    type Codec = ReferenceNodeCodec<Self::Hash>;
+    type Codec = RLPNodeCodec<Self::Hash>;
 }
 
 // pub struct HashDatabase<DB: Database> {
@@ -81,6 +83,168 @@ impl TrieLayout for DBTrieLayout {
 //         self
 //     }
 // }
+
+#[derive(Debug, Default, Clone)]
+struct RLPNodeCodec<H: Hasher>(PhantomData<H>);
+
+impl<H> NodeCodec for RLPNodeCodec<H>
+where
+    H: Hasher,
+{
+    type Error = TrieError;
+
+    type HashOut = <H as Hasher>::Out;
+
+    fn hashed_null_node() -> <H as Hasher>::Out {
+        H::hash(<Self as NodeCodec>::empty_node())
+    }
+
+    fn decode_plan(data: &[u8]) -> Result<NodePlan, Self::Error> {
+        // Self::decode_plan_inner_hashed(data)
+        todo!()
+    }
+
+    fn is_empty_node(data: &[u8]) -> bool {
+        data == <Self as NodeCodec>::empty_node()
+    }
+
+    fn empty_node() -> &'static [u8] {
+        // rlp('')
+        &[0x80]
+    }
+
+    fn leaf_node(
+        partial: impl Iterator<Item = u8>,
+        number_nibble: usize,
+        value: Value<'_>,
+    ) -> Vec<u8> {
+        let contains_hash = matches!(&value, Value::Node(..));
+        let mut output: Vec<u8> = Vec::new();
+        // let mut output = if contains_hash {
+        //     partial_from_iterator_encode(partial, number_nibble, NodeKind::HashedValueLeaf)
+        // } else {
+        //     partial_from_iterator_encode(partial, number_nibble, NodeKind::Leaf)
+        // };
+        // match value {
+        //     Value::Inline(value) => {
+        //         debug_assert!(value.len() < H::LENGTH);
+        //         Compact(value.len() as u32).encode_to(&mut output);
+        //         output.extend_from_slice(value);
+        //     }
+        //     Value::Node(hash) => {
+        //         debug_assert!(hash.len() == H::LENGTH);
+        //         output.extend_from_slice(hash);
+        //     }
+        // }
+        output
+    }
+
+    fn extension_node(
+        partial: impl Iterator<Item = u8>,
+        number_nibble: usize,
+        child: ChildReference<Self::HashOut>,
+    ) -> Vec<u8> {
+        // let mut output = partial_from_iterator_to_key(
+        //     partial,
+        //     number_nibble,
+        //     EXTENSION_NODE_OFFSET,
+        //     EXTENSION_NODE_OVER,
+        // );
+        // match child {
+        //     ChildReference::Hash(h) => h.as_ref().encode_to(&mut output),
+        //     ChildReference::Inline(inline_data, len) => {
+        //         (&AsRef::<[u8]>::as_ref(&inline_data)[..len]).encode_to(&mut output)
+        //     }
+        // };
+        // output
+        Vec::new()
+    }
+
+    fn branch_node(
+        children: impl Iterator<Item = impl Borrow<Option<ChildReference<Self::HashOut>>>>,
+        maybe_value: Option<Value<'_>>,
+    ) -> Vec<u8> {
+        // let mut output = vec![0; BITMAP_LENGTH + 1];
+        // let mut prefix: [u8; 3] = [0; 3];
+        // let have_value = match maybe_value {
+        //     Some(Value::Inline(value)) => {
+        //         Compact(value.len() as u32).encode_to(&mut output);
+        //         output.extend_from_slice(value);
+        //         true
+        //     }
+        //     None => false,
+        //     _ => unimplemented!("unsupported"),
+        // };
+        // let has_children = children.map(|maybe_child| match maybe_child.borrow() {
+        //     Some(ChildReference::Hash(h)) => {
+        //         h.as_ref().encode_to(&mut output);
+        //         true
+        //     }
+        //     &Some(ChildReference::Inline(inline_data, len)) => {
+        //         inline_data.as_ref()[..len].encode_to(&mut output);
+        //         true
+        //     }
+        //     None => false,
+        // });
+        // branch_node_buffered(have_value, has_children, prefix.as_mut());
+        // output[0..BITMAP_LENGTH + 1].copy_from_slice(prefix.as_ref());
+        // output
+        Vec::new()
+    }
+
+    fn branch_node_nibbled(
+        partial: impl Iterator<Item = u8>,
+        number_nibble: usize,
+        children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
+        value: Option<Value<'_>>,
+    ) -> Vec<u8> {
+        // let contains_hash = matches!(&value, Some(Value::Node(..)));
+        // let mut output = match (&value, contains_hash) {
+        //     (&None, _) => {
+        //         partial_from_iterator_encode(partial, number_nibble, NodeKind::BranchNoValue)
+        //     }
+        //     (_, false) => {
+        //         partial_from_iterator_encode(partial, number_nibble, NodeKind::BranchWithValue)
+        //     }
+        //     (_, true) => {
+        //         partial_from_iterator_encode(partial, number_nibble, NodeKind::HashedValueBranch)
+        //     }
+        // };
+
+        // let bitmap_index = output.len();
+        // let mut bitmap: [u8; BITMAP_LENGTH] = [0; BITMAP_LENGTH];
+        // (0..BITMAP_LENGTH).for_each(|_| output.push(0));
+        // match value {
+        //     Some(Value::Inline(value)) => {
+        //         Compact(value.len() as u32).encode_to(&mut output);
+        //         output.extend_from_slice(value);
+        //     }
+        //     Some(Value::Node(hash)) => {
+        //         debug_assert!(hash.len() == H::LENGTH);
+        //         output.extend_from_slice(hash);
+        //     }
+        //     None => (),
+        // }
+        // Bitmap::encode(
+        //     children.map(|maybe_child| match maybe_child.borrow() {
+        //         Some(ChildReference::Hash(h)) => {
+        //             h.as_ref().encode_to(&mut output);
+        //             true
+        //         }
+        //         &Some(ChildReference::Inline(inline_data, len)) => {
+        //             inline_data.as_ref()[..len].encode_to(&mut output);
+        //             true
+        //         }
+        //         None => false,
+        //     }),
+        //     bitmap.as_mut(),
+        // );
+        // output[bitmap_index..bitmap_index + BITMAP_LENGTH]
+        //     .copy_from_slice(&bitmap[..BITMAP_LENGTH]);
+        // output
+        Vec::new()
+    }
+}
 
 /// An Ethereum account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
@@ -160,10 +324,6 @@ impl DBTrieLoader {
 
         *trie.root()
     }
-}
-
-pub(crate) fn gather_account_changes() {
-    todo!()
 }
 
 #[cfg(test)]
