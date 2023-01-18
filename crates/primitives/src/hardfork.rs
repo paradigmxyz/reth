@@ -48,7 +48,9 @@ impl Hardfork {
         ]
     }
 
-    /// Compute the forkid for the given [ChainSpec]
+    /// Compute the forkid for the given [`ChainSpec`].
+    ///
+    /// If the hard fork is not present in the [`ChainSpec`] then `None` is returned.
     pub fn fork_id(&self, chain_spec: &ChainSpec) -> Option<ForkId> {
         if let Some(fork_block) = chain_spec.fork_block(*self) {
             let mut curr_forkhash = ForkHash::from(chain_spec.genesis_hash());
@@ -72,15 +74,13 @@ impl Hardfork {
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
     ///
-    /// **CAUTION**: This assumes the current hardfork's block number is the current head and uses
-    /// all known future hardforks to initialize the filter.
+    /// This returns `None` if the hardfork is not present in the given [`ChainSpec`].
     pub fn fork_filter(&self, chain_spec: &ChainSpec) -> Option<ForkFilter> {
         if let Some(fork_block) = chain_spec.fork_block(*self) {
             let future_forks: Vec<BlockNumber> =
                 chain_spec.forks_iter().filter(|(_, b)| b > &fork_block).map(|(_, b)| b).collect();
 
-            // this data structure is not chain-agnostic, so we can pass in the constant mainnet
-            // genesis
+            // pass in the chain spec's genesis hash to initialize the fork filter
             Some(ForkFilter::new(fork_block, chain_spec.genesis_hash(), future_forks))
         } else {
             None
