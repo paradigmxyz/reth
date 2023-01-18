@@ -23,7 +23,8 @@ use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
-        bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
+        bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
+        hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
         sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
     PipelineEvent, StageId,
@@ -181,7 +182,13 @@ impl Command {
             .push(ExecutionStage {
                 chain_spec: self.chain.clone(),
                 commit_threshold: config.stages.execution.commit_threshold,
-            });
+            })
+            // This Merkle stage is used only on unwind
+            .push(MerkleStage { is_execute: false })
+            .push(AccountHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
+            .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
+            // This merkle stage is used only for execute
+            .push(MerkleStage { is_execute: true });
 
         if let Some(tip) = self.tip {
             debug!(target: "reth::cli", %tip, "Tip manually set");
