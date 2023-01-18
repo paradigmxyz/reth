@@ -5,7 +5,7 @@ The `discv4` crate plays an important role in Reth, enabling discovery of other 
 ## Starting the Node Discovery Protocol
 As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
 
-[File: ]()
+[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/main/bin/reth/src/node/mod.rs#L95)
 ```rust ignore
   pub async fn execute(&self) -> eyre::Result<()> {
     //--snip--
@@ -22,7 +22,7 @@ As mentioned in the network and stages chapters, when the node is first started 
 
 During this process, a new `NetworkManager` is created through the `NetworkManager::new()` function, which starts the discovery protocol through a handful of newly spawned tasks. Lets take a look at how this actually works under the hood. 
 
-[File: ]()
+[File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/manager.rs#L147)
 ```rust ignore
 impl<C> NetworkManager<C>
 where
@@ -59,7 +59,7 @@ where
 
 First, the `NetworkConfig` is deconstructed and the `disc_config` is updated to merge configured [bootstrap nodes](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/bootnodes.rs#L8) and add the `forkid` to adhere to [EIP 868](https://eips.ethereum.org/EIPS/eip-868). This updated configuration variable is then passed into the `Discovery::new()` function. Note that `Discovery` is a catch all for all discovery services, which include discv4, DNS discovery and others in the future.
 
-[File: ]()
+[File: crates/net/network/src/discovery.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/discovery.rs#L51)
 ```rust ignore
 impl Discovery {
     /// Spawns the discovery service.
@@ -104,7 +104,7 @@ The `NodeRecord::from_secret_key()` takes the socket address used for discovery 
 
 If the `discv4_config` supplied to the `Discovery::new()` function is `None`, the discv4 service will not be spawned. In this case, no new peers will be discovered across the network. The node will have to rely on manually added peers. However, if the `discv4_config` contains a `Some(Discv4Config)` value, then the `Discv4::bind()` function is called to bind to a new UdpSocket and create the disc_v4 service.
 
-[File: ]()
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L188)
 ```rust ignore
 impl Discv4 {
     //--snip--
@@ -133,7 +133,7 @@ impl Discv4 {
 
 To better understand what is actually happening when the disc_v4 service is created, lets take a deeper look at the `Discv4Service::new()` function.
 
-[File: ]()
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L392)
 ```rust ignore
 impl Discv4Service {
     /// Create a new instance for a bound [`UdpSocket`].
@@ -194,9 +194,9 @@ In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Fu
 
 Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections.
 
-[File: ]()
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1302)
 ```rust ignore
-pub struct Discv4Service {
+impl Discv4Service {
     //--snip--
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
         loop {
@@ -237,7 +237,7 @@ pub struct Discv4Service {
 
 As the function starts, a `loop` is entered and the `Discv4Service.queued_events` are evaluated to see if there are any events ready to be processed. If there is an event ready, the function immediately returns the event wrapped in `Poll::Ready()`. The `queued_events` field is a `VecDeque<Discv4Event>` where `Discv4Event` is an enum containing one of the following variants.
 
-[File: ]()
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1455)
 ```rust ignore
 pub enum Discv4Event {
     /// A `Ping` message was handled.
@@ -263,6 +263,7 @@ Next, the Discv4Service handles all incoming `Discv4Command`s until there are no
 
 In Reth, once a new `NetworkState` is initialized as the node starts up and a new task is spawned to handle the network, the `poll()` function is used to advance the state of the network.
 
+[File: crates/net/network/src/state.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/state.rs#L377)
 ```rust ignore
 impl<C> NetworkState<C>
 where
