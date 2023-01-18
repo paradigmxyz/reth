@@ -11,7 +11,7 @@ use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -40,6 +40,8 @@ pub struct StateFetcher {
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
     peers_handle: PeersHandle,
+    /// Number of active peer sessions the node's currently handling.
+    num_active_peers: Arc<AtomicUsize>,
     /// Requests queued for processing
     queued_requests: VecDeque<DownloadRequest>,
     /// Receiver for new incoming download requests
@@ -51,13 +53,14 @@ pub struct StateFetcher {
 // === impl StateSyncer ===
 
 impl StateFetcher {
-    pub(crate) fn new(peers_handle: PeersHandle) -> Self {
+    pub(crate) fn new(peers_handle: PeersHandle, num_active_peers: Arc<AtomicUsize>) -> Self {
         let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
             peers: Default::default(),
             peers_handle,
+            num_active_peers,
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
@@ -261,6 +264,7 @@ impl StateFetcher {
         FetchClient {
             request_tx: self.download_requests_tx.clone(),
             peers_handle: self.peers_handle.clone(),
+            num_active_peers: Arc::clone(&self.num_active_peers),
         }
     }
 }
@@ -393,7 +397,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle());
+        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
 
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
@@ -411,7 +415,7 @@ mod tests {
     #[tokio::test]
     async fn test_peer_rotation() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle());
+        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = H512::random();
         let peer2 = H512::random();
@@ -434,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn test_peer_prioritization() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle());
+        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = H512::random();
         let peer2 = H512::random();

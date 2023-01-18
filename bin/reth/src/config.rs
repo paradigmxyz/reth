@@ -2,11 +2,12 @@
 use std::sync::Arc;
 
 use reth_db::database::Database;
+use reth_discv4::Discv4Config;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig, PeersConfig,
+    NetworkConfig, NetworkConfigBuilder, PeersConfig,
 };
-use reth_primitives::H256;
+use reth_primitives::{ChainSpec, NodeRecord};
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -26,20 +27,23 @@ impl Config {
     pub fn network_config<DB: Database>(
         &self,
         db: Arc<DB>,
-        chain_id: u64,
-        genesis_hash: H256,
+        chain_spec: ChainSpec,
         disable_discovery: bool,
+        bootnodes: Option<Vec<NodeRecord>>,
+        nat_resolution_method: reth_net_nat::NatResolver,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
             .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
-        NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
-            .boot_nodes(mainnet_nodes())
+        let discv4 =
+            Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
+        NetworkConfigBuilder::new(rng_secret_key())
+            .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
             .peer_config(peer_config)
-            .genesis_hash(genesis_hash)
-            .chain_id(chain_id)
+            .discovery(discv4)
+            .chain_spec(chain_spec)
             .set_discovery(disable_discovery)
-            .build()
+            .build(Arc::new(ProviderImpl::new(db)))
     }
 }
 

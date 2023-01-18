@@ -1,6 +1,6 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{consensus, db::Error as DbError, executor};
-use reth_primitives::{BlockHash, BlockNumber, TxNumber, H256};
+use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -101,8 +101,8 @@ pub enum DatabaseIntegrityError {
         /// The transaction id
         id: TxNumber,
     },
-    #[error("Block transition not found for block #{number} ({hash:?})")]
-    BlockTransition { number: BlockNumber, hash: BlockHash },
+    #[error("Block transition not found for block #{number}")]
+    BlockTransition { number: BlockNumber },
     #[error("Gap in transaction table. Missing tx number #{missing}.")]
     TransactionsGap { missing: TxNumber },
     #[error("Gap in transaction signer table. Missing tx number #{missing}.")]

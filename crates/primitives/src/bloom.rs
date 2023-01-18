@@ -1,45 +1,16 @@
-//! Bloom related utilities.
-use crate::{keccak256, Log};
+//! Bloom type.
+use crate::{impl_fixed_hash_type, keccak256, Log};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    arbitrary::{any_with, Arbitrary as PropTestArbitrary, ParamsFor},
-    strategy::{BoxedStrategy, Strategy},
-};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use arbitrary::Arbitrary;
+use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
 
 /// Length of bloom filter used for Ethereum.
 pub const BLOOM_BYTE_LENGTH: usize = 256;
 
-construct_fixed_hash! {
-    /// 2048 bits type.
-    #[cfg_attr(any(test, feature = "arbitrary"), derive(Arbitrary))]
-    #[derive(AsRef, Deref, RlpEncodableWrapper, RlpDecodableWrapper)]
-    pub struct Bloom(BLOOM_BYTE_LENGTH);
-}
-
-impl_hash_compact!(Bloom);
-impl_fixed_hash_serde!(Bloom, BLOOM_BYTE_LENGTH);
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl PropTestArbitrary for Bloom {
-    type Parameters = ParamsFor<u8>;
-    type Strategy = BoxedStrategy<Bloom>;
-
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        proptest::collection::vec(any_with::<u8>(args), BLOOM_BYTE_LENGTH)
-            .prop_map(move |vec| Bloom::from_slice(&vec))
-            .boxed()
-    }
-}
+impl_fixed_hash_type!((Bloom, BLOOM_BYTE_LENGTH));
 
 // See Section 4.3.1 "Transaction Receipt" of the Yellow Paper
 fn m3_2048(bloom: &mut Bloom, x: &[u8]) {
@@ -104,20 +75,5 @@ mod tests {
                 "00000000001400000000000000008000000000000000000000000000000000"
             ))
         );
-    }
-    #[test]
-    fn arbitrary() {
-        proptest::proptest!(|(bloom: Bloom)| {
-            let mut buf = vec![];
-            bloom.to_compact(&mut buf);
-
-            // Add noise
-            buf.push(1);
-
-            let (decoded, remaining_buf) = Bloom::from_compact(&buf, buf.len());
-
-            assert!(bloom == decoded);
-            assert!(remaining_buf.len() == 1);
-        });
     }
 }

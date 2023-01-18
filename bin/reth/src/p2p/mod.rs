@@ -2,20 +2,18 @@
 use crate::{
     config::Config,
     dirs::{ConfigPath, PlatformPath},
-    utils::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        hash_or_num_value_parser,
-    },
+    utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
 };
 use backon::{ConstantBackoff, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
+use reth_discv4::NatResolver;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
-use reth_primitives::{BlockHashOrNumber, Header, NodeRecord, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
 use std::sync::Arc;
 
 /// `reth p2p` command
@@ -40,7 +38,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecification,
+    chain: ChainSpec,
 
     /// Disable the discovery service.
     #[arg(short, long)]
@@ -60,6 +58,9 @@ pub struct Command {
 
     #[clap(subcommand)]
     command: Subcommands,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 #[derive(Subcommand, Debug)]
@@ -86,10 +87,6 @@ impl Command {
 
         let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
 
-        let chain_id = self.chain.consensus.chain_id;
-        let genesis: Header = self.chain.genesis.clone().into();
-        let genesis_hash = genesis.hash_slow();
-
         if let Some(peer) = self.trusted_peer {
             config.peers.trusted_nodes.insert(peer);
         }
@@ -101,7 +98,7 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         let network = config
-            .network_config(noop_db, chain_id, genesis_hash, self.disable_discovery)
+            .network_config(noop_db, self.chain.clone(), self.disable_discovery, None, self.nat)
             .start_network()
             .await?;
 

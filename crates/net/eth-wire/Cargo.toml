@@ -14,6 +14,7 @@ thiserror = "1"
 serde = "1"
 
 # reth
+reth-codecs = { path = "../../storage/codecs" }
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp", features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
 
@@ -29,7 +30,13 @@ snap = "1.0.5"
 smol_str = { version = "0.1", features = ["serde"] }
 metrics = "0.20.1"
 
+# arbitrary utils
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+proptest = { version = "1.0", optional = true }
+proptest-derive = { version = "0.3", optional = true }
+
 [dev-dependencies]
+reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
 reth-ecies = { path = "../ecies" }
 reth-tracing = { path = "../../tracing" }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
@@ -39,3 +46,16 @@ tokio-util = { version = "0.7.4", features = ["io", "codec"] }
 hex-literal = "0.3"
 rand = "0.8"
 secp256k1 = { version = "0.24.2", features = ["global-context", "rand-std", "recovery"] }
+
+arbitrary = { version = "1.1.7", features = ["derive"] }
+proptest = { version = "1.0" }
+proptest-derive = "0.3"
+
+[features]
+default = []
+arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+
+[[test]]
+name = "fuzz_roundtrip"
+path = "tests/fuzz_roundtrip.rs"
+required-features = ["arbitrary"]

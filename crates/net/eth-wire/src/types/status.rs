@@ -1,6 +1,7 @@
 use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{Chain, ForkId, Hardfork, H256, MAINNET_GENESIS, U256};
+use reth_codecs::derive_arbitrary;
+use reth_primitives::{Chain, ForkId, Hardfork, H256, MAINNET, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -10,6 +11,7 @@ use std::fmt::{Debug, Display};
 ///
 /// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
 /// hash. This information should be treated as untrusted.
+#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
@@ -98,9 +100,11 @@ impl Default for Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
-            blockhash: MAINNET_GENESIS,
-            genesis: MAINNET_GENESIS,
-            forkid: Hardfork::Frontier.fork_id(),
+            blockhash: MAINNET.genesis_hash(),
+            genesis: MAINNET.genesis_hash(),
+            forkid: Hardfork::Frontier
+                .fork_id(&MAINNET)
+                .expect("The Frontier hardfork should always exist"),
         }
     }
 }

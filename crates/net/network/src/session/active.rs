@@ -568,7 +568,7 @@ mod tests {
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
-    use reth_primitives::{ForkFilter, Hardfork};
+    use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::TcpListener;
@@ -714,7 +714,9 @@ mod tests {
                 secret_key,
                 local_peer_id,
                 status: StatusBuilder::default().build(),
-                fork_filter: Hardfork::Frontier.fork_filter(),
+                fork_filter: Hardfork::Frontier
+                    .fork_filter(&MAINNET)
+                    .expect("The Frontier fork filter should exist on mainnet"),
                 bandwidth_meter: BandwidthMeter::default(),
             }
         }
