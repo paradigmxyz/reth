@@ -16,6 +16,7 @@ use reth_cli_utils::init::init_genesis;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
+use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
@@ -83,6 +84,9 @@ pub struct Command {
 
     #[arg(long, value_delimiter = ',')]
     bootnodes: Option<Vec<NodeRecord>>,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 impl Command {
@@ -126,6 +130,7 @@ impl Command {
                 self.chain.clone(),
                 self.network.disable_discovery,
                 self.bootnodes.clone(),
+                self.nat,
             )
             .start_network()
             .await?;

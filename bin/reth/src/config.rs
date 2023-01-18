@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use reth_db::database::Database;
+use reth_discv4::Discv4Config;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
@@ -29,6 +30,7 @@ impl Config {
         chain_spec: ChainSpec,
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
+        nat_resolution_method: reth_net_nat::NatResolver,
     ) -> NetworkConfig<ProviderImpl<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
@@ -36,6 +38,7 @@ impl Config {
         NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
             .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
             .peer_config(peer_config)
+            .discovery(Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)))
             .chain_spec(chain_spec)
             .set_discovery(disable_discovery)
             .build()
