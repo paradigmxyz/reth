@@ -9,13 +9,17 @@
 //!
 //! Provides abstractions for the reth-network crate.
 
-use reth_primitives::NodeRecord;
-use std::net::SocketAddr;
+use reth_primitives::{NodeRecord, H256, U256};
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, net::SocketAddr};
 
 /// Provides general purpose information about the network.
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
+
+    /// Returns the current status of the network being ran by the local node.
+    fn network_status(&self) -> NetworkStatus;
 }
 
 /// Provides general purpose information about Peers in the network.
@@ -27,4 +31,32 @@ pub trait PeersInfo: Send + Sync {
 
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
+}
+
+/// The status of the network being ran by the local node.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NetworkStatus {
+    /// The local node client name.
+    pub client_name: String,
+    /// The protocols the client is currently running.
+    pub protocols: BTreeMap<String, ProtocolInfo>,
+}
+
+/// Information about the different protocols that can be run by the node (ETH, )
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ProtocolInfo {
+    /// Information about the Ethereum Wire Protocol.
+    Eth(EthProtocolInfo),
+}
+/// Information about the Ethereum Wire Protocol (ETH)
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct EthProtocolInfo {
+    /// The current difficulty at the head of the chain.
+    pub difficulty: U256,
+    /// The block hash of the head of the chain.
+    pub head: H256,
+    /// Network ID in base 10.
+    pub network: u64,
+    /// Genesis block of the current chain.
+    pub genesis: H256,
 }

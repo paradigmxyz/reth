@@ -13,7 +13,7 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_network_api::{NetworkInfo, NetworkStatus, PeersInfo};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -218,6 +218,10 @@ impl PeersInfo for NetworkHandle {
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
+    }
+
+    fn network_status(&self) -> NetworkStatus {
+        todo!()
     }
 }
 
