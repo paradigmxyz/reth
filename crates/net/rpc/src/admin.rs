@@ -1,7 +1,9 @@
 use jsonrpsee::core::RpcResult;
 use reth_network::{peers::PeerKind, NetworkHandle};
+use reth_network_api::PeersInfo;
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
+use reth_rpc_types::NodeInfo;
 
 /// `admin` API implementation.
 ///
@@ -9,6 +11,13 @@ use reth_rpc_api::AdminApiServer;
 pub struct AdminApi {
     /// An interface to interact with the network
     network: NetworkHandle,
+}
+
+impl AdminApi {
+    /// Creates a new instance of `AdminApi`.
+    pub fn new(network: NetworkHandle) -> AdminApi {
+        AdminApi { network }
+    }
 }
 
 impl AdminApiServer for AdminApi {
@@ -37,6 +46,12 @@ impl AdminApiServer for AdminApi {
         _subscription_sink: jsonrpsee::SubscriptionSink,
     ) -> jsonrpsee::types::SubscriptionResult {
         todo!()
+    }
+
+    fn node_info(&self) -> RpcResult<NodeInfo> {
+        let enr = self.network.local_node_record();
+
+        Ok(NodeInfo::new(enr))
     }
 }
 
