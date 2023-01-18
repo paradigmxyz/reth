@@ -5,7 +5,7 @@ use reth_db::database::Database;
 use reth_discv4::Discv4Config;
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig, PeersConfig,
+    NetworkConfig, NetworkConfigBuilder, PeersConfig,
 };
 use reth_primitives::{ChainSpec, NodeRecord};
 use reth_provider::ProviderImpl;
@@ -37,13 +37,13 @@ impl Config {
             .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
+        NetworkConfigBuilder::new(rng_secret_key())
             .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
             .peer_config(peer_config)
             .discovery(discv4)
             .chain_spec(chain_spec)
             .set_discovery(disable_discovery)
-            .build()
+            .build(Arc::new(ProviderImpl::new(db)))
     }
 }
 

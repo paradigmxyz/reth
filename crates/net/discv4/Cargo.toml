@@ -24,7 +24,9 @@ secp256k1 = { version = "0.24", features = [
     "rand-std",
     "recovery",
 ] }
-enr = { version = "0.7.0",  default-features = false, features = ["rust-secp256k1"] }
+enr = { version = "0.7.0", default-features = false, features = [
+    "rust-secp256k1",
+] }
 
 # async/futures
 tokio = { version = "1", features = ["io-util", "net", "time"] }
@@ -37,6 +39,7 @@ thiserror = "1.0"
 hex = "0.4"
 rand = { version = "0.8", optional = true }
 generic-array = "0.14"
+serde = "1.0"
 
 [dev-dependencies]
 rand = "0.8"
