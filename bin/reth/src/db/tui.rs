@@ -19,8 +19,7 @@ use tui::{
 };
 
 /// Available keybindings for the [DbListTUI]
-static CMDS: [(&'static str, &'static str); 3] =
-    [("q", "Quit"), ("up", "Entry Above"), ("down", "Entry Below")];
+static CMDS: [(&str, &str); 3] = [("q", "Quit"), ("up", "Entry Above"), ("down", "Entry Below")];
 
 /// Modified version of the [ListState] struct that exposes the `offset` field.
 /// Used to make the [DbListTUI] keys clickable.
