@@ -23,31 +23,13 @@ pub enum Hardfork {
     London,
     ArrowGlacier,
     GrayGlacier,
+    MergeNetsplit,
     Shanghai,
     #[default]
     Latest,
 }
 
 impl Hardfork {
-    /// This returns all known hardforks in order.
-    pub fn all_forks() -> Vec<Self> {
-        vec![
-            Hardfork::Homestead,
-            Hardfork::Dao,
-            Hardfork::Tangerine,
-            Hardfork::SpuriousDragon,
-            Hardfork::Byzantium,
-            Hardfork::Constantinople, /* petersburg is skipped because it's the same block num
-                                       * as constantinople */
-            Hardfork::Istanbul,
-            Hardfork::Muirglacier,
-            Hardfork::Berlin,
-            Hardfork::London,
-            Hardfork::ArrowGlacier,
-            Hardfork::GrayGlacier,
-        ]
-    }
-
     /// Compute the forkid for the given [`ChainSpec`].
     ///
     /// If the hard fork is not present in the [`ChainSpec`] then `None` is returned.
