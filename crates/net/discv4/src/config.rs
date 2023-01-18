@@ -137,7 +137,7 @@ impl Default for Discv4Config {
 }
 
 /// Builder type for [`Discv4Config`]
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
 }

@@ -8,7 +8,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{Chain, ForkFilter, Hardfork, NodeRecord, PeerId, H256, MAINNET_GENESIS};
+use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
@@ -55,10 +55,8 @@ pub struct NetworkConfig<C> {
     pub peers_config: PeersConfig,
     /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// The id of the network
-    pub chain: Chain,
-    /// Genesis hash of the network
-    pub genesis_hash: H256,
+    /// The chain spec
+    pub chain_spec: ChainSpec,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -141,10 +139,8 @@ pub struct NetworkConfigBuilder {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-    /// The network's chain id
-    chain: Chain,
-    /// Network genesis hash
-    genesis_hash: H256,
+    /// The network's chain spec
+    chain_spec: ChainSpec,
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
@@ -174,8 +170,7 @@ impl NetworkConfigBuilder {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain: Chain::Named(reth_primitives::rpc::Chain::Mainnet),
-            genesis_hash: MAINNET_GENESIS,
+            chain_spec: MAINNET.clone(),
             network_mode: Default::default(),
             executor: None,
             status: None,
@@ -206,9 +201,9 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Sets the chain ID.
-    pub fn chain_id<Id: Into<Chain>>(mut self, chain_id: Id) -> Self {
-        self.chain = chain_id.into();
+    /// Sets the chain spec.
+    pub fn chain_spec(mut self, chain_spec: ChainSpec) -> Self {
+        self.chain_spec = chain_spec;
         self
     }
 
@@ -244,12 +239,6 @@ impl NetworkConfigBuilder {
     /// Sets a custom config for how sessions are handled.
     pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
-        self
-    }
-
-    /// Sets the genesis hash for the network.
-    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
-        self.genesis_hash = genesis_hash;
         self
     }
 
@@ -309,8 +298,7 @@ impl NetworkConfigBuilder {
             listener_addr,
             peers_config,
             sessions_config,
-            chain,
-            genesis_hash,
+            chain_spec,
             network_mode,
             executor,
             status,
@@ -330,8 +318,7 @@ impl NetworkConfigBuilder {
         // get the fork filter
         let fork_filter = fork_filter.unwrap_or_else(|| {
             let head = head.unwrap_or_default();
-            // TODO(mattsse): this should be chain agnostic: <https://github.com/paradigmxyz/reth/issues/485>
-            ForkFilter::new(head, genesis_hash, Hardfork::all_forks())
+            chain_spec.fork_filter(head)
         });
 
         // If default DNS config is used then we add the known dns network to bootstrap from
@@ -339,7 +326,7 @@ impl NetworkConfigBuilder {
             dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
         {
             if dns_networks.is_empty() {
-                if let Some(link) = chain.public_dns_network_protocol() {
+                if let Some(link) = chain_spec.chain().public_dns_network_protocol() {
                     dns_networks.insert(link.parse().expect("is valid DNS link entry"));
                 }
             }
@@ -357,8 +344,7 @@ impl NetworkConfigBuilder {
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
-            chain,
-            genesis_hash,
+            chain_spec,
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode,
             executor,
@@ -397,6 +383,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
+    use reth_primitives::Chain;
     use reth_provider::test_utils::NoopProvider;
 
     fn builder() -> NetworkConfigBuilder {

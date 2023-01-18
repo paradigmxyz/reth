@@ -26,16 +26,11 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
 
     fn history_by_block_number(&self, block_number: BlockNumber) -> Result<Self::HistorySP<'_>> {
         let tx = self.db.tx()?;
-        // get block hash
-        let block_hash = tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockNumber { block_number })?;
 
         // get transition id
-        let block_num_hash = (block_number, block_hash);
         let transition = tx
-            .get::<tables::BlockTransitionIndex>(block_num_hash.into())?
-            .ok_or(Error::BlockTransition { block_number, block_hash })?;
+            .get::<tables::BlockTransitionIndex>(block_number)?
+            .ok_or(Error::BlockTransition { block_number })?;
 
         Ok(HistoricalStateProvider::new(tx, transition))
     }
@@ -46,11 +41,23 @@ impl<DB: Database> StateProviderFactory for ProviderImpl<DB> {
         let block_number =
             tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
 
+        // check if block is canonical or not. Only canonical blocks have changesets.
+        let canonical_block_hash = tx
+            .get::<tables::CanonicalHeaders>(block_number)?
+            .ok_or(Error::BlockCanonical { block_number, block_hash })?;
+        if canonical_block_hash != block_hash {
+            return Err(Error::NonCanonicalBlock {
+                block_number,
+                received_hash: block_hash,
+                expected_hash: canonical_block_hash,
+            }
+            .into())
+        }
+
         // get transition id
-        let block_num_hash = (block_number, block_hash);
         let transition = tx
-            .get::<tables::BlockTransitionIndex>(block_num_hash.into())?
-            .ok_or(Error::BlockTransition { block_number, block_hash })?;
+            .get::<tables::BlockTransitionIndex>(block_number)?
+            .ok_or(Error::BlockTransition { block_number })?;
 
         Ok(HistoricalStateProvider::new(tx, transition))
     }
