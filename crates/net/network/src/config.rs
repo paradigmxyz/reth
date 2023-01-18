@@ -12,6 +12,7 @@ use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -80,12 +81,12 @@ pub struct NetworkConfig<C> {
 impl<C> NetworkConfig<C> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
     pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
-        Self::builder(client, secret_key).build()
+        Self::builder(secret_key).build(client)
     }
 
     /// Convenience method for creating the corresponding builder type
-    pub fn builder(client: Arc<C>, secret_key: SecretKey) -> NetworkConfigBuilder<C> {
-        NetworkConfigBuilder::new(client, secret_key)
+    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder {
+        NetworkConfigBuilder::new(secret_key)
     }
 
     /// Sets the config to use for the discovery v4 protocol.
@@ -119,10 +120,9 @@ where
 }
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(missing_docs)]
-pub struct NetworkConfigBuilder<C> {
-    /// The client type that can interact with the chain.
-    client: Arc<C>,
+pub struct NetworkConfigBuilder {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
@@ -141,11 +141,10 @@ pub struct NetworkConfigBuilder<C> {
     sessions_config: Option<SessionsConfig>,
     /// The network's chain spec
     chain_spec: ChainSpec,
-    /// The block importer type.
-    block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
+    #[serde(skip)]
     executor: Option<TaskExecutor>,
     /// The `Status` message to send to peers at the beginning.
     status: Option<Status>,
@@ -160,10 +159,9 @@ pub struct NetworkConfigBuilder<C> {
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
-impl<C> NetworkConfigBuilder<C> {
-    pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
+impl NetworkConfigBuilder {
+    pub fn new(secret_key: SecretKey) -> Self {
         Self {
-            client,
             secret_key,
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
@@ -173,7 +171,6 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: None,
             sessions_config: None,
             chain_spec: MAINNET.clone(),
-            block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
             status: None,
@@ -245,12 +242,6 @@ impl<C> NetworkConfigBuilder<C> {
         self
     }
 
-    /// Sets the [`BlockImport`] type to configure.
-    pub fn block_import<T: BlockImport + 'static>(mut self, block_import: T) -> Self {
-        self.block_import = Box::new(block_import);
-        self
-    }
-
     /// Sets the socket address the network will listen on
     pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
@@ -295,10 +286,10 @@ impl<C> NetworkConfigBuilder<C> {
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
-    pub fn build(self) -> NetworkConfig<C> {
+    /// for the given client type that can interact with the chain.
+    pub fn build<C>(self, client: Arc<C>) -> NetworkConfig<C> {
         let peer_id = self.get_peer_id();
         let Self {
-            client,
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
@@ -308,7 +299,6 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config,
             sessions_config,
             chain_spec,
-            block_import,
             network_mode,
             executor,
             status,
@@ -355,7 +345,7 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain_spec,
-            block_import,
+            block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode,
             executor,
             status: status.unwrap_or_default(),
@@ -370,7 +360,7 @@ impl<C> NetworkConfigBuilder<C> {
 /// This affects block propagation in the `eth` sub-protocol [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
 ///
 /// In POS `NewBlockHashes` and `NewBlock` messages become invalid.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Serialize, Deserialize)]
 pub enum NetworkMode {
     /// Network is in proof-of-work mode.
     Work,
@@ -396,14 +386,14 @@ mod tests {
     use reth_primitives::Chain;
     use reth_provider::test_utils::NoopProvider;
 
-    fn builder() -> NetworkConfigBuilder<NoopProvider> {
+    fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut thread_rng());
-        NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        NetworkConfigBuilder::new(secret_key)
     }
 
     #[test]
     fn test_network_dns_defaults() {
-        let config = builder().build();
+        let config = builder().build(Arc::new(NoopProvider::default()));
 
         let dns = config.dns_discovery_config.unwrap();
         let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();

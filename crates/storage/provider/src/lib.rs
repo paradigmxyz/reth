@@ -17,7 +17,8 @@ mod state;
 pub mod test_utils;
 
 pub use block::{
-    insert_canonical_block, BlockHashProvider, BlockProvider, ChainInfo, HeaderProvider,
+    insert_block, insert_canonical_block, BlockHashProvider, BlockProvider, ChainInfo,
+    HeaderProvider,
 };
 pub use db_provider::{
     self as db, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,

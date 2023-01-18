@@ -106,7 +106,7 @@ pub enum ValidationError {
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
 /// compatibility.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkFilter {
     forks: BTreeMap<BlockNumber, ForkHash>,
 
@@ -256,7 +256,7 @@ pub struct ForkTransition {
     pub past: ForkId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Cache {
     // An epoch is a period between forks.
     // When we progress from one fork to the next one we move to the next epoch.

@@ -1,4 +1,4 @@
-//! Support for monitoring bandwidth. Takes heavy inspiration from https://github.com/libp2p/rust-libp2p/blob/master/src/bandwidth.rs
+//! Support for metering bandwidth. Takes heavy inspiration from https://github.com/libp2p/rust-libp2p/blob/master/src/bandwidth.rs
 
 // Copyright 2019 Parity Technologies (UK) Ltd.
 //
@@ -90,7 +90,7 @@ pub struct MeteredStream<S> {
     /// The stream this instruments
     #[pin]
     inner: S,
-    /// The [`BandwidthMeter`] struct this uses to monitor bandwidth
+    /// The [`BandwidthMeter`] struct this uses to meter bandwidth
     meter: BandwidthMeter,
 }
 
@@ -209,13 +209,13 @@ mod tests {
         // Taken in large part from https://docs.rs/tokio/latest/tokio/io/struct.DuplexStream.html#example
 
         let (client, server) = duplex(64);
-        let mut monitored_client = MeteredStream::new(client);
-        let mut monitored_server = MeteredStream::new(server);
+        let mut metered_client = MeteredStream::new(client);
+        let mut metered_server = MeteredStream::new(server);
 
-        duplex_stream_ping_pong(&mut monitored_client, &mut monitored_server).await;
+        duplex_stream_ping_pong(&mut metered_client, &mut metered_server).await;
 
-        assert_bandwidth_counts(monitored_client.get_bandwidth_meter(), 4, 4);
-        assert_bandwidth_counts(monitored_server.get_bandwidth_meter(), 4, 4);
+        assert_bandwidth_counts(metered_client.get_bandwidth_meter(), 4, 4);
+        assert_bandwidth_counts(metered_server.get_bandwidth_meter(), 4, 4);
     }
 
     #[tokio::test]
@@ -252,18 +252,18 @@ mod tests {
         let shared_client_bandwidth_meter = BandwidthMeter::default();
         let shared_server_bandwidth_meter = BandwidthMeter::default();
 
-        let mut monitored_client_1 =
+        let mut metered_client_1 =
             MeteredStream::new_with_meter(client_1, shared_client_bandwidth_meter.clone());
-        let mut monitored_server_1 =
+        let mut metered_server_1 =
             MeteredStream::new_with_meter(server_1, shared_server_bandwidth_meter.clone());
 
-        let mut monitored_client_2 =
+        let mut metered_client_2 =
             MeteredStream::new_with_meter(client_2, shared_client_bandwidth_meter.clone());
-        let mut monitored_server_2 =
+        let mut metered_server_2 =
             MeteredStream::new_with_meter(server_2, shared_server_bandwidth_meter.clone());
 
-        duplex_stream_ping_pong(&mut monitored_client_1, &mut monitored_server_1).await;
-        duplex_stream_ping_pong(&mut monitored_client_2, &mut monitored_server_2).await;
+        duplex_stream_ping_pong(&mut metered_client_1, &mut metered_server_1).await;
+        duplex_stream_ping_pong(&mut metered_client_2, &mut metered_server_2).await;
 
         assert_bandwidth_counts(&shared_client_bandwidth_meter, 8, 8);
         assert_bandwidth_counts(&shared_server_bandwidth_meter, 8, 8);

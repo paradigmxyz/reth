@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use crate::tree::LinkEntry;
 use std::{collections::HashSet, num::NonZeroUsize, time::Duration};
 
 /// Settings for the [DnsDiscoveryClient](crate::DnsDiscoveryClient).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsDiscoveryConfig {
     /// Timeout for DNS lookups.
     ///

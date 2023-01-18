@@ -164,7 +164,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             if has_reward {
                 transition_id += 1;
             }
-            block_transition_cursor.append(numhash, transition_id)?;
+            block_transition_cursor.append(numhash.number(), transition_id)?;
 
             highest_block = numhash.number();
         }
@@ -205,7 +205,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             }
 
             // Delete the block transition if any
-            if block_transition_cursor.seek_exact(key)?.is_some() {
+            if block_transition_cursor.seek_exact(key.number())?.is_some() {
                 block_transition_cursor.delete_current()?;
             }
 
@@ -526,6 +526,7 @@ mod tests {
         };
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
+            consensus::Consensus,
             p2p::{
                 bodies::{
                     client::BodiesClient,
@@ -616,7 +617,7 @@ mod tests {
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
-                        let key = (progress.number, progress.hash()).into();
+                        let key: BlockNumHash = (progress.number, progress.hash()).into();
                         let body = StoredBlockBody {
                             start_tx_id: 0,
                             tx_count: progress.body.len() as u64,
@@ -628,13 +629,11 @@ mod tests {
                             tx.put::<tables::TxTransitionIndex>(tx_id, tx_id)
                         })?;
 
-                        // Randomize rewards
-                        let has_reward: bool = rand::random();
-                        let last_transition_id = progress.body.len().saturating_sub(1) as u64;
-                        let block_transition_id =
-                            last_transition_id + if has_reward { 1 } else { 0 };
+                        let last_transition_id = progress.body.len() as u64;
+                        let block_transition_id = last_transition_id + 1; // for block reward
+                        println!("Bodies tx:{}", progress.body.len());
 
-                        tx.put::<tables::BlockTransitionIndex>(key, block_transition_id)?;
+                        tx.put::<tables::BlockTransitionIndex>(key.number(), block_transition_id)?;
                         tx.put::<tables::BlockBodies>(key, body)?;
                         tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
                         Ok(())
@@ -667,7 +666,7 @@ mod tests {
                 })?;
                 self.tx.check_no_entry_above::<tables::BlockTransitionIndex, _>(
                     input.unwind_to,
-                    |key| key.number(),
+                    |key| key,
                 )?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.tx
@@ -721,7 +720,8 @@ mod tests {
                     };
 
                     let mut prev_key: Option<BlockNumHash> = None;
-                   for entry in bodies_cursor.walk(first_body_key)? {
+                    let mut current_transition_id = 0;
+                    for entry in bodies_cursor.walk(first_body_key)? {
                         let (key, body) = entry?;
 
                         // Validate sequentiality only after prev progress,
@@ -742,21 +742,28 @@ mod tests {
                         // Validate that ommers exist
                         assert_matches!(ommers_cursor.seek_exact(key), Ok(Some(_)), "Block ommers are missing");
 
-                        // Validate that block transition exists
-                        assert_matches!(block_transition_cursor.seek_exact(key), Ok(Some(_)), "Block transition is missing");
-
                         for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
-                            assert_matches!(
-                                tx_transition_cursor.seek_exact(tx_id), Ok(Some(_)), "Transaction transition is missing"
+                            assert_eq!(
+                                tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present").1, current_transition_id
                             );
+                            current_transition_id += 1;
                             assert_matches!(
                                 tx_hash_num_cursor.seek_exact(tx_entry.unwrap().1.hash),
                                 Ok(Some(_)),
                                 "Transaction hash to index mapping is missing."
                             );
                         }
+
+                        // for block reward
+                        if self.consensus.has_block_reward(key.number()) {
+                            current_transition_id += 1;
+                        }
+
+                        // Validate that block transition exists
+                        assert_eq!(block_transition_cursor.seek_exact(key.number()).expect("To be okay").expect("Block transition to be present").1,current_transition_id);
+
 
                         prev_key = Some(key);
                     }
