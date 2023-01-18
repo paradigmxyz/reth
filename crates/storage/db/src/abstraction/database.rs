@@ -25,9 +25,9 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
-    fn view<T, F>(&self, f: F) -> Result<T, Error>
+    fn view<T, F>(&self, mut f: F) -> Result<T, Error>
     where
-        F: Fn(&<Self as DatabaseGAT<'_>>::TX) -> T,
+        F: FnMut(&<Self as DatabaseGAT<'_>>::TX) -> T,
     {
         let tx = self.tx()?;
 

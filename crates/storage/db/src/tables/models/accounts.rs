@@ -11,7 +11,7 @@ use reth_primitives::{Account, Address, TransitionId};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     pub address: Address,
@@ -42,7 +42,7 @@ impl Compact for AccountBeforeTx {
 /// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd)]
 pub struct TransitionIdAddress(pub (TransitionId, Address));
 
 impl TransitionIdAddress {

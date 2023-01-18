@@ -78,12 +78,14 @@ macro_rules! table {
         impl $table_name {
             #[doc=concat!("Return ", stringify!($table_name), " as it is present inside the database.")]
             pub const fn const_name() -> &'static str {
-                stringify!($table_name) }
+                stringify!($table_name)
+            }
         }
 
         impl std::fmt::Display for $table_name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", stringify!($table_name)) }
+                write!(f, "{}", stringify!($table_name))
+            }
         }
     };
 }
