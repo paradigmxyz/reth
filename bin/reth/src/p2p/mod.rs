@@ -7,6 +7,7 @@ use crate::{
 use backon::{ConstantBackoff, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
+use reth_discv4::NatResolver;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
@@ -57,6 +58,9 @@ pub struct Command {
 
     #[clap(subcommand)]
     command: Subcommands,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 #[derive(Subcommand, Debug)]
@@ -94,7 +98,7 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         let network = config
-            .network_config(noop_db, self.chain.clone(), self.disable_discovery, None)
+            .network_config(noop_db, self.chain.clone(), self.disable_discovery, None, self.nat)
             .start_network()
             .await?;
 

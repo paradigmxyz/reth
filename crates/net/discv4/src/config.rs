@@ -135,7 +135,7 @@ impl Default for Discv4Config {
 }
 
 /// Builder type for [`Discv4Config`]
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
 }
