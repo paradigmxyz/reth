@@ -3591,6 +3591,7 @@ name = "reth"
 version = "0.1.0"
 dependencies = [
  "backon",
+ "bincode",
  "clap 4.0.32",
  "confy",
  "dirs-next",
@@ -3600,6 +3601,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
+ "proptest",
  "reth-cli-utils",
  "reth-consensus",
  "reth-db",
@@ -3686,6 +3688,7 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "async-trait",
+ "bincode",
  "bytes",
  "criterion",
  "futures",

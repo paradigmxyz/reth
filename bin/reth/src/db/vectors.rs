@@ -21,11 +21,12 @@ pub(crate) fn generate_db_vectors() -> Result<()> {
     generate_table_vectors::<tables::BlockBodies>(&mut runner)?;
     generate_table_vectors::<tables::BlockOmmers>(&mut runner)?;
     generate_table_vectors::<tables::TxHashNumber>(&mut runner)?;
-    generate_table_vectors::<tables::PlainAccountState>(&mut runner)?;
     generate_table_vectors::<tables::BlockTransitionIndex>(&mut runner)?;
     generate_table_vectors::<tables::TxTransitionIndex>(&mut runner)?;
     generate_table_vectors::<tables::SyncStage>(&mut runner)?;
     generate_table_vectors::<tables::Transactions>(&mut runner)?;
+    generate_table_vectors::<tables::PlainStorageState>(&mut runner)?;
+    generate_table_vectors::<tables::PlainAccountState>(&mut runner)?;
 
     Ok(())
 }

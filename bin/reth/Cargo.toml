@@ -8,7 +8,7 @@ readme = "README.md"
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../crates/primitives" }
+reth-primitives = { path = "../../crates/primitives", features = ["arbitrary"] }
 reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
@@ -51,3 +51,7 @@ tokio-stream = "0.1"
 futures = "0.3.25"
 tempfile = { version = "3.3.0" }
 backon = "0.2.0"
+
+# test vectors generation
+proptest = "1.0"
+bincode = "1.3"
