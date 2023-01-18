@@ -12,6 +12,7 @@ Reth RPC types
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../common/rlp" }
+reth-network-api = { path = "../network-api"}
 
 # misc
 serde = { version = "1.0", features = ["derive"] }

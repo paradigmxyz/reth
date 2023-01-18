@@ -1,6 +1,6 @@
 use jsonrpsee::core::RpcResult;
 use reth_network::{peers::PeerKind, NetworkHandle};
-use reth_network_api::PeersInfo;
+use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::NodeInfo;
@@ -50,8 +50,9 @@ impl AdminApiServer for AdminApi {
 
     fn node_info(&self) -> RpcResult<NodeInfo> {
         let enr = self.network.local_node_record();
+        let status = self.network.network_status();
 
-        Ok(NodeInfo::new(enr))
+        Ok(NodeInfo::new(enr, status))
     }
 }
 
