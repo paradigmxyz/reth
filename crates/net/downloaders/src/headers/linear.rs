@@ -574,6 +574,18 @@ where
 
         // this will submit new requests and poll them
         loop {
+
+            // poll requests
+            while let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
+                // handle response
+                if let Err(err) = this.on_headers_outcome(outcome) {
+                    this.on_headers_error(err);
+                }
+            }
+
+            // marks the loop's exit condition: exit if no requests submitted
+            let mut progress = false;
+
             let concurrent_request_limit = this.concurrent_request_limit();
             // populate requests
             while this.in_progress_queue.len() < concurrent_request_limit &&
@@ -584,6 +596,7 @@ where
                         target: "downloaders::headers",
                         "Requesting headers {request:?}"
                     );
+                    progress = true;
                     this.submit_request(request);
                 } else {
                     // no more requests
@@ -606,13 +619,7 @@ where
                 return Poll::Ready(Some(next_batch))
             }
 
-            // poll requests
-            if let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
-                // handle response
-                if let Err(err) = this.on_headers_outcome(outcome) {
-                    this.on_headers_error(err);
-                }
-            } else {
+            if !progress {
                 break
             }
         }
@@ -747,9 +754,9 @@ impl Default for LinearDownloadBuilder {
         Self {
             request_batch_size: 1_000,
             stream_batch_size: 10_000,
-            max_concurrent_requests: 100,
+            max_concurrent_requests: 150,
             min_concurrent_requests: 5,
-            max_buffered_responses: 500,
+            max_buffered_responses: 750,
         }
     }
 }
