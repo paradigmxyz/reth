@@ -14,10 +14,10 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::{
         client::{HeadersClient, StatusUpdater},
-        downloader::{ensure_parent, HeaderDownloader},
+        downloader::{ensure_parent, HeaderDownloader, SyncTarget},
     },
 };
-use reth_primitives::{BlockNumber, Header, SealedHeader, H256, U256};
+use reth_primitives::{BlockNumber, Header, SealedHeader, U256};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -89,11 +89,13 @@ where
     }
 
     /// Get the head and tip of the range we need to sync
-    async fn get_head_and_tip<DB: Database>(
+    ///
+    /// See also [SyncTarget]
+    async fn get_sync_gap<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
-    ) -> Result<(SealedHeader, H256), StageError> {
+    ) -> Result<SyncGap, StageError> {
         // Create a cursor over canonical header hashes
         let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
@@ -107,7 +109,7 @@ where
         let (_, head) = header_cursor
             .seek_exact((head_num, head_hash).into())?
             .ok_or(DatabaseIntegrityError::Header { number: head_num, hash: head_hash })?;
-        let head = SealedHeader::new(head, head_hash);
+        let local_head = SealedHeader::new(head, head_hash);
 
         // Look up the next header
         let next_header = cursor
@@ -124,15 +126,16 @@ where
         // If the next element found in the cursor is not the "expected" next block per our current
         // progress, then there is a gap in the database and we should start downloading in
         // reverse from there. Else, it should use whatever the forkchoice state reports.
-        let tip = match next_header {
-            Some(header) if stage_progress + 1 != header.number => header.parent_hash,
-            None => self.next_fork_choice_state().await.head_block_hash,
+        let target = match next_header {
+            Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header.seal()),
+            None => SyncTarget::Tip(self.next_fork_choice_state().await.head_block_hash),
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
 
-        Ok((head, tip))
+        Ok(SyncGap { local_head, target })
     }
 
+    /// Awaits the next [ForkchoiceState] message from [Consensus] with a non-zero block hash
     async fn next_fork_choice_state(&self) -> ForkchoiceState {
         let mut state_rcv = self.consensus.fork_choice_state();
         loop {
@@ -145,6 +148,8 @@ where
     }
 
     /// Perform basic header response validation
+    ///
+    /// Note: this expects the `headers` to be sorted with falling block numbers
     fn validate_header_response(&self, headers: &[SealedHeader]) -> Result<(), StageError> {
         let mut headers_iter = headers.iter().peekable();
         while let Some(header) = headers_iter.next() {
@@ -158,7 +163,9 @@ where
         Ok(())
     }
 
-    /// Write downloaded headers to the database
+    /// Write downloaded headers to the given transaction
+    ///
+    /// Note: this writes the headers with rising block numbers.
     fn write_headers<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
@@ -216,18 +223,20 @@ where
         self.update_head::<DB>(tx, current_progress).await?;
 
         // Lookup the head and tip of the sync range
-        let (head, tip) = self.get_head_and_tip(tx, current_progress).await?;
+        let gap = self.get_sync_gap(tx, current_progress).await?;
+
+        let tip = gap.target.tip();
 
         // Nothing to sync
-        if head.hash() == tip {
+        if gap.local_head.hash() == tip {
             info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
             return Ok(ExecOutput { stage_progress: current_progress, done: true })
         }
 
-        debug!(target: "sync::stages::headers", ?tip, head = ?head.hash(), "Commencing sync");
+        debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
 
         // let the downloader know what to sync
-        self.downloader.update_sync_gap(head, tip);
+        self.downloader.update_sync_gap(gap.local_head, gap.target);
 
         // The downloader returns the headers in descending order starting from the tip
         // down to the local head (latest block in db)
@@ -278,6 +287,13 @@ where
     }
 }
 
+/// Represents a gap to sync: from `local_head` to `target`
+#[derive(Debug)]
+struct SyncGap {
+    local_head: SealedHeader,
+    target: SyncTarget,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +303,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::{p2p::error::RequestError, test_utils::generators::random_header};
+    use reth_primitives::H256;
     use test_runner::HeadersTestRunner;
 
     stage_test_suite!(HeadersTestRunner);
@@ -395,7 +412,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            stage.get_head_and_tip(&tx, stage_progress).await,
+            stage.get_sync_gap(&tx, stage_progress).await,
             Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { number }))
                 if number == stage_progress
         );
@@ -405,28 +422,29 @@ mod tests {
             .expect("failed to write canonical");
         tx.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
             .expect("failed to write header");
-        assert_matches!(
-            stage.get_head_and_tip(&tx, stage_progress).await,
-            Ok((h, t)) if h == head && t == consensus_tip
-        );
+
+        let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), consensus_tip);
 
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
             .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
             .expect("failed to write header");
-        assert_matches!(
-            stage.get_head_and_tip(&tx, stage_progress).await,
-            Ok((h, t)) if h == head && t == gap_tip.parent_hash
-        );
+
+        let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), gap_tip.parent_hash);
 
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
             .expect("failed to write canonical");
         tx.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
             .expect("failed to write header");
+
         assert_matches!(
-            stage.get_head_and_tip(&tx, stage_progress).await,
+            stage.get_sync_gap(&tx, stage_progress).await,
             Err(StageError::StageProgress(progress)) if progress == stage_progress
         );
     }

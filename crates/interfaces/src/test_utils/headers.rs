@@ -6,7 +6,7 @@ use crate::{
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
-            downloader::HeaderDownloader,
+            downloader::{HeaderDownloader, SyncTarget},
         },
     },
 };
@@ -70,7 +70,7 @@ impl Downloader for TestHeaderDownloader {
 impl HeaderDownloader for TestHeaderDownloader {
     fn update_local_head(&mut self, _head: SealedHeader) {}
 
-    fn update_sync_target(&mut self, _target: BlockHash) {}
+    fn update_sync_target(&mut self, _target: SyncTarget) {}
 
     fn set_batch_size(&mut self, _limit: usize) {}
 }

@@ -9,11 +9,11 @@ use reth_interfaces::{
         error::{DownloadError, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::HeaderDownloader,
+            downloader::{HeaderDownloader, SyncTarget},
         },
     },
 };
-use reth_primitives::{BlockHash, Header, HeadersDirection, PeerId, SealedHeader, H256};
+use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, H256};
 use std::{
     borrow::Borrow,
     cmp::{Ordering, Reverse},
@@ -44,7 +44,7 @@ pub struct LinearDownloader<C, H> {
     /// The local head of the chain.
     local_head: SealedHeader,
     /// Block we want to close the gap to.
-    sync_target: SyncTarget,
+    sync_target: SyncTargetBlock,
     /// The block number to use for requests.
     next_request_block_number: u64,
     /// Keeps track of the block we need to validate next.
@@ -155,7 +155,7 @@ where
     ///
     /// Returns an error if the given headers are invalid.
     ///
-    /// Caution: this expects the `headers` to be sorted.
+    /// Caution: this expects the `headers` to be sorted with _falling_ block numbers
     #[allow(clippy::result_large_err)]
     fn process_next_headers(
         &mut self,
@@ -198,6 +198,24 @@ where
         Ok(())
     }
 
+    /// Updates the state based on the given `target_block_number`
+    fn on_block_number_update(&mut self, target_block_number: u64, next_block_to_request: u64) {
+        // Update the trackers
+        if let Some(old_target) = self.sync_target.number.replace(target_block_number) {
+            if target_block_number > old_target {
+                // the new target is higher than the old target we need to update the
+                // request tracker and clear everything
+                self.next_request_block_number = next_block_to_request;
+                self.buffered_responses.clear();
+            }
+        } else {
+            // initial sync target request
+            self.next_request_block_number = next_block_to_request;
+        }
+
+        self.next_chain_tip_block_number = next_block_to_request;
+    }
+
     /// Handles the response for the request for the sync target
     #[allow(clippy::result_large_err)]
     fn on_sync_target_outcome(
@@ -235,29 +253,15 @@ where
 
                 trace!(target: "downloaders::headers", head=%self.local_head.number, hash=?target.hash(), number=%target.number, "Received sync target");
 
-                // Update the trackers
-                if let Some(old_target) = self.sync_target.number.replace(target.number) {
-                    if target.number > old_target {
-                        // the new target is higher than the old target we need to update the
-                        // request tracker
-                        self.next_request_block_number = target.number.saturating_sub(1);
-                        self.buffered_responses.clear();
-                    }
-                } else {
-                    // initial sync target request
-                    self.next_request_block_number = target.number.saturating_sub(1);
-                }
+                // This is the next block we need to start issuing requests from
+                let parent_block_number = target.number.saturating_sub(1);
 
-                self.next_chain_tip_block_number = target.number.saturating_sub(1);
+                self.on_block_number_update(target.number, parent_block_number);
+
                 self.queued_validated_headers.push(target);
 
                 // try to validate all buffered responses blocked by this successful response
                 self.try_validate_buffered().map(Err::<(), HeadersResponseError>).transpose()?;
-
-                // enforce new sync bounds
-                self.enforce_sync_gap_bounds();
-
-                // TODO(mattsse): perf: could handle remaining headers in the request
 
                 Ok(())
             }
@@ -325,7 +329,7 @@ where
                     self.try_validate_buffered()
                         .map(Err::<(), HeadersResponseError>)
                         .transpose()?;
-                } else {
+                } else if highest.number > self.local_head.number {
                     // can't validate yet
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
@@ -426,34 +430,8 @@ where
         self.clear();
     }
 
-    /// Ensures all validated headers are within the sync gap [local head..target]
-    fn enforce_sync_gap_bounds(&mut self) {
-        // ensure we're only yielding headers that are in range and follow the current local head.
-        while self
-            .queued_validated_headers
-            .last()
-            .map(|last| last.number <= self.local_head.number)
-            .unwrap_or_default()
-        {
-            // headers are sorted high to low
-            self.queued_validated_headers.pop();
-        }
-
-        if let Some(target_num) = self.sync_target.number {
-            let skip = self
-                .queued_validated_headers
-                .iter()
-                .take_while(|last| last.number > target_num)
-                .count();
-            // removes all headers that are larger than then current target
-            self.queued_validated_headers.drain(0..skip);
-        }
-    }
-
     /// Splits off the next batch of headers
     fn split_next_batch(&mut self) -> Vec<SealedHeader> {
-        self.enforce_sync_gap_bounds();
-
         let batch_size = self.stream_batch_size.min(self.queued_validated_headers.len());
         let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
@@ -485,27 +463,56 @@ where
 {
     fn update_local_head(&mut self, head: SealedHeader) {
         self.local_head = head;
+        // ensure we're only yielding headers that are in range and follow the current local head.
+        while self
+            .queued_validated_headers
+            .last()
+            .map(|last| last.number <= self.local_head.number)
+            .unwrap_or_default()
+        {
+            // headers are sorted high to low
+            self.queued_validated_headers.pop();
+        }
     }
 
     /// If the given target is different from the current target, we need to update the sync target
-    fn update_sync_target(&mut self, target: BlockHash) {
-        if target != self.sync_target.hash {
-            trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?target, "Update sync target");
-            self.sync_target.hash = target;
+    fn update_sync_target(&mut self, target: SyncTarget) {
+        match target {
+            SyncTarget::Tip(tip) => {
+                if tip != self.sync_target.hash {
+                    trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?tip, "Update sync target");
+                    self.sync_target.hash = tip;
 
-            // if the new sync target is the next queued request we don't need to re-start the
-            if let Some(target_number) = self
-                .queued_validated_headers
-                .first()
-                .filter(|h| h.hash() == target)
-                .map(|h| h.number)
-            {
-                self.sync_target.number = Some(target_number);
-                return
+                    // if the new sync target is the next queued request we don't need to re-start
+                    // the target update
+                    if let Some(target_number) = self
+                        .queued_validated_headers
+                        .first()
+                        .filter(|h| h.hash() == tip)
+                        .map(|h| h.number)
+                    {
+                        self.sync_target.number = Some(target_number);
+                        return
+                    }
+
+                    trace!(target: "downloaders::headers", new=?target, "Request new sync target");
+                    self.sync_target_request =
+                        Some(self.request_fut(self.get_sync_target_request()));
+                }
             }
+            SyncTarget::Gap(existing) => {
+                let target = existing.parent_hash;
+                if target != self.sync_target.hash {
+                    // If the target has changed, update the request pointers based on the new
+                    // targeted block number
+                    let block_number = existing.number.saturating_sub(1);
 
-            trace!(target: "downloaders::headers", new=?target, "Request new sync target");
-            self.sync_target_request = Some(self.request_fut(self.get_sync_target_request()));
+                    trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?target, %block_number, "Updated sync target");
+
+                    self.sync_target.hash = target;
+                    self.on_block_number_update(block_number, block_number);
+                }
+            }
         }
     }
 
@@ -693,9 +700,9 @@ struct HeadersResponseError {
     error: DownloadError,
 }
 
-/// The block to which we want to close the gap: [local head...sync target]
+/// The block to which we want to close the gap: (local head...sync target]
 #[derive(Debug)]
-struct SyncTarget {
+struct SyncTargetBlock {
     hash: H256,
     /// This is an `Option` because we don't know the block number at first
     number: Option<u64>,
@@ -784,7 +791,7 @@ impl LinearDownloadBuilder {
             consensus,
             client,
             local_head,
-            sync_target: SyncTarget { hash: sync_target_block_hash, number: None },
+            sync_target: SyncTargetBlock { hash: sync_target_block_hash, number: None },
             // Note: we set these to `0` first, they'll be updated once the sync target response is
             // handled and only used afterwards
             next_request_block_number: 0,
@@ -843,6 +850,33 @@ mod tests {
         child.parent_hash = parent.hash_slow();
         let hash = child.hash_slow();
         SealedHeader::new(child, hash)
+    }
+
+    /// Tests that request calc works
+    #[test]
+    fn test_sync_target_update() {
+        let client = Arc::new(TestHeadersClient::default());
+
+        let genesis = SealedHeader::default();
+
+        let mut downloader = LinearDownloadBuilder::default().build(
+            CONSENSUS.clone(),
+            Arc::clone(&client),
+            genesis,
+            H256::random(),
+        );
+
+        downloader.sync_target_request.take();
+
+        let target = SyncTarget::Tip(H256::random());
+        downloader.update_sync_target(target);
+        assert!(downloader.sync_target_request.is_some());
+
+        downloader.sync_target_request.take();
+        let target = SyncTarget::Gap(SealedHeader::new(Default::default(), H256::random()));
+        downloader.update_sync_target(target);
+        assert!(downloader.sync_target_request.is_none());
+        assert!(downloader.sync_target.number.is_some());
     }
 
     #[test]
