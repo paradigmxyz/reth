@@ -1,5 +1,6 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::NodeRecord;
+use reth_rpc_types::NodeInfo;
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
 #[rpc(server)]
@@ -33,4 +34,8 @@ pub trait AdminApi {
         item = String
     )]
     fn subscribe(&self);
+
+    /// Returns the ENR of the node.
+    #[method(name = "admin_nodeInfo")]
+    fn node_info(&self) -> Result<NodeInfo>;
 }

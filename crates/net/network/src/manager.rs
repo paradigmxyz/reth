@@ -153,7 +153,7 @@ where
             listener_addr,
             peers_config,
             sessions_config,
-            genesis_hash,
+            chain_spec,
             block_import,
             network_mode,
             boot_nodes,
@@ -196,11 +196,12 @@ where
             fork_filter,
             bandwidth_meter.clone(),
         );
+
         let state = NetworkState::new(
             client,
             discovery,
             peers_manager,
-            genesis_hash,
+            chain_spec.genesis_hash(),
             Arc::clone(&num_active_peers),
         );
 

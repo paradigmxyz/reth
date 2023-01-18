@@ -3928,9 +3928,11 @@ dependencies = [
  "reth-cli-utils",
  "reth-consensus",
  "reth-db",
+ "reth-discv4",
  "reth-downloaders",
  "reth-executor",
  "reth-interfaces",
+ "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
@@ -4054,6 +4056,7 @@ dependencies = [
  "reth-rlp-derive",
  "reth-tracing",
  "secp256k1 0.24.2",
+ "serde",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -4076,6 +4079,8 @@ dependencies = [
  "reth-rlp",
  "reth-tracing",
  "secp256k1 0.24.2",
+ "serde",
+ "serde_with",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -4261,6 +4266,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-metrics-common"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "reth-metrics-derive",
+ "tokio",
+]
+
+[[package]]
 name = "reth-metrics-derive"
 version = "0.1.0"
 dependencies = [
@@ -4291,6 +4305,7 @@ dependencies = [
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
+ "serde_with",
  "thiserror",
  "tokio",
  "tracing",
@@ -4368,6 +4383,7 @@ dependencies = [
  "hex-literal",
  "impl-serde",
  "modular-bitfield",
+ "once_cell",
  "parity-scale-codec",
  "plain_hasher",
  "proptest",
@@ -4907,6 +4923,7 @@ checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "rand 0.8.5",
  "secp256k1-sys 0.6.1",
+ "serde",
 ]
 
 [[package]]

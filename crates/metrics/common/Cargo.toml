@@ -1,17 +1,19 @@
 [package]
-name = "reth-net-common"
+name = "reth-metrics-common"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 description = """
-Types shared across network code
+Common metric types across the Reth codebase
 """
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async
-pin-project = "1.0"
 tokio = { version = "1.21.2", features = ["full"] }
+
+# metrics
+metrics = "0.20.1"
