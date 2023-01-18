@@ -176,7 +176,11 @@ table!(
 
 table!(
     /// Stores the mapping of block number to state transition id.
-    ( BlockTransitionIndex ) BlockNumHash | TransitionId
+    /// The block transition marks the final state at the end of the block.
+    /// Increment the transition if the block contains an addition block reward.
+    /// If the block does not have a reward and transaction, the transition will be the same as the
+    /// transition at the last transaction of this block.
+    ( BlockTransitionIndex ) BlockNumber | TransitionId
 );
 
 table!(
