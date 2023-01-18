@@ -627,9 +627,7 @@ impl Decodable for TransactionSigned {
             // For eip2728 types transaction header is not used inside hash
             let original_encoding = *buf;
 
-            let tx_type = *buf
-                .first()
-                .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
+            let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
             buf.advance(1);
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
@@ -897,8 +895,15 @@ mod tests {
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
-    use reth_rlp::{Decodable, Encodable};
+    use reth_rlp::{Decodable, DecodeError, Encodable};
     use std::str::FromStr;
+
+    #[test]
+    fn test_decode_empty_typed_tx() {
+        let input = [0x80u8];
+        let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
+        assert_eq!(DecodeError::InputTooShort, res);
+    }
 
     #[test]
     fn test_decode_create() {
