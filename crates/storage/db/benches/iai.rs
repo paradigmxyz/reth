@@ -44,7 +44,6 @@ impl_iai!(
     HeaderNumbers,
     Headers,
     BlockOmmers,
-    CumulativeTxCount,
     NonCanonicalTransactions,
     Transactions,
     TxHashNumber,

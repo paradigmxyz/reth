@@ -23,7 +23,6 @@ pub fn db(c: &mut Criterion) {
     measure_table_db::<HeaderNumbers>(&mut group);
     measure_table_db::<Headers>(&mut group);
     measure_table_db::<BlockOmmers>(&mut group);
-    measure_table_db::<CumulativeTxCount>(&mut group);
     measure_table_db::<NonCanonicalTransactions>(&mut group);
     measure_table_db::<Transactions>(&mut group);
     measure_table_db::<TxHashNumber>(&mut group);
@@ -51,7 +50,6 @@ pub fn serialization(c: &mut Criterion) {
     measure_table_serialization::<HeaderNumbers>(&mut group);
     measure_table_serialization::<Headers>(&mut group);
     measure_table_serialization::<BlockOmmers>(&mut group);
-    measure_table_serialization::<CumulativeTxCount>(&mut group);
     measure_table_serialization::<NonCanonicalTransactions>(&mut group);
     measure_table_serialization::<Transactions>(&mut group);
     measure_table_serialization::<TxHashNumber>(&mut group);
@@ -123,7 +121,7 @@ where
             let db = create_test_rw_db::<WriteMap>();
 
             let tx = db.tx_mut().expect("tx");
-            let mut crsr = tx.cursor_mut::<T>().expect("cursor");
+            let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
             // TODO sort kv before
             // placeholder: cant insert multiple default values, that's why we're limiting to one
