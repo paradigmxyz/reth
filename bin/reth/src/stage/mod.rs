@@ -11,6 +11,7 @@ use crate::{
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 
+use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
 use reth_stages::{
     metrics::HeaderMetrics,
@@ -84,6 +85,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
@@ -141,6 +145,7 @@ impl Command {
                         self.chain.clone(),
                         self.network.disable_discovery,
                         None,
+                        self.nat,
                     )
                     .start_network()
                     .await?;
