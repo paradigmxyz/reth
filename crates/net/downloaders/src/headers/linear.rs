@@ -199,6 +199,15 @@ where
     }
 
     /// Updates the state based on the given `target_block_number`
+    ///
+    /// There are three different outcomes:
+    ///  * This is the first time this is called: current `sync_target` block is still `None`. In
+    ///    which case we're initializing the request trackers to `next_block`
+    ///  * The `target_block_number` is _higher_ than the current target. In which case we start
+    ///    over with a new range
+    ///  * The `target_block_number` is _lower_ than the current target or the _same_. In which case
+    ///    we don't need to update the request trackers but need to ensure already buffered headers
+    ///    are _not_ higher than the new `target_block_number`.
     fn on_block_number_update(&mut self, target_block_number: u64, next_block: u64) {
         // Update the trackers
         if let Some(old_target) = self.sync_target.number.replace(target_block_number) {
