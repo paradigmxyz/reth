@@ -403,9 +403,9 @@ where
     }
 }
 
-pub fn encode_iter<'a, K>(i: impl Iterator<Item = &'a K> + Clone, out: &mut dyn BufMut)
+pub fn encode_iter<K>(i: impl Iterator<Item = K> + Clone, out: &mut dyn BufMut)
 where
-    K: Encodable + 'a,
+    K: Encodable,
 {
     let mut h = Header { list: true, payload_length: 0 };
     for x in i.clone() {

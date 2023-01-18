@@ -1,10 +1,9 @@
 #![allow(missing_docs, dead_code, unused_variables, unused_imports)]
-use std::{borrow::Borrow, collections::HashMap, marker::PhantomData};
-
 use crate::Transaction;
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use hash256_std_hasher::Hash256StdHasher;
 use hash_db::{AsHashDB, Prefix};
+use itertools::Itertools;
 use memory_db::{HashKey, MemoryDB};
 use reference_trie::ReferenceNodeCodec;
 use reth_db::{
@@ -19,7 +18,10 @@ use reth_primitives::{
     keccak256, proofs::KeccakHasher, rpc::H160, Account, Address, Bytes, StorageEntry, H256,
     KECCAK_EMPTY, U256,
 };
-use reth_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{
+    encode_iter, encode_list, Decodable, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE,
+};
+use std::{borrow::Borrow, collections::HashMap, marker::PhantomData};
 use trie_db::{
     node::{NodePlan, Value},
     CError, ChildReference, HashDB, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout,
@@ -84,6 +86,26 @@ impl TrieLayout for DBTrieLayout {
 //     }
 // }
 
+fn encode_partial(
+    mut partial: impl Iterator<Item = u8>,
+    nibbles: usize,
+    terminating: bool,
+) -> Vec<u8> {
+    debug_assert_ne!(nibbles, 0);
+    let mut out = Vec::with_capacity(nibbles / 2 + 1);
+
+    let mut flag_byte = if terminating { 0x20 } else { 0x00 };
+
+    if nibbles % 2 != 0 {
+        // should never be None
+        flag_byte |= 0x10;
+        flag_byte |= partial.next().unwrap_or_default();
+    }
+    out.push(flag_byte);
+    out.extend(partial);
+    out
+}
+
 #[derive(Debug, Default, Clone)]
 struct RLPNodeCodec<H: Hasher>(PhantomData<H>);
 
@@ -100,7 +122,9 @@ where
     }
 
     fn decode_plan(data: &[u8]) -> Result<NodePlan, Self::Error> {
-        // Self::decode_plan_inner_hashed(data)
+        if data == Self::empty_node() {
+            return Ok(NodePlan::Empty)
+        }
         todo!()
     }
 
@@ -110,7 +134,7 @@ where
 
     fn empty_node() -> &'static [u8] {
         // rlp('')
-        &[0x80]
+        &[reth_rlp::EMPTY_STRING_CODE]
     }
 
     fn leaf_node(
@@ -118,24 +142,16 @@ where
         number_nibble: usize,
         value: Value<'_>,
     ) -> Vec<u8> {
-        let contains_hash = matches!(&value, Value::Node(..));
-        let mut output: Vec<u8> = Vec::new();
-        // let mut output = if contains_hash {
-        //     partial_from_iterator_encode(partial, number_nibble, NodeKind::HashedValueLeaf)
-        // } else {
-        //     partial_from_iterator_encode(partial, number_nibble, NodeKind::Leaf)
-        // };
-        // match value {
-        //     Value::Inline(value) => {
-        //         debug_assert!(value.len() < H::LENGTH);
-        //         Compact(value.len() as u32).encode_to(&mut output);
-        //         output.extend_from_slice(value);
-        //     }
-        //     Value::Node(hash) => {
-        //         debug_assert!(hash.len() == H::LENGTH);
-        //         output.extend_from_slice(hash);
-        //     }
-        // }
+        let encoded_vec = encode_partial(partial, number_nibble, true);
+        let encoded_partial = encoded_vec.as_ref();
+        let value = match value {
+            Value::Inline(node) => node,
+            Value::Node(hash) => hash,
+        };
+
+        let mut output = Vec::new();
+
+        encode_iter([encoded_partial, value].into_iter(), &mut output);
         output
     }
 
@@ -144,52 +160,50 @@ where
         number_nibble: usize,
         child: ChildReference<Self::HashOut>,
     ) -> Vec<u8> {
-        // let mut output = partial_from_iterator_to_key(
-        //     partial,
-        //     number_nibble,
-        //     EXTENSION_NODE_OFFSET,
-        //     EXTENSION_NODE_OVER,
-        // );
-        // match child {
-        //     ChildReference::Hash(h) => h.as_ref().encode_to(&mut output),
-        //     ChildReference::Inline(inline_data, len) => {
-        //         (&AsRef::<[u8]>::as_ref(&inline_data)[..len]).encode_to(&mut output)
-        //     }
-        // };
-        // output
-        Vec::new()
+        let encoded_vec = encode_partial(partial, number_nibble, false);
+        let encoded_partial = encoded_vec.as_ref();
+
+        let value = match child {
+            ChildReference::Hash(ref hash) => {
+                // 0x80 + length (RLP header)
+                hash.as_ref()
+            }
+            ChildReference::Inline(ref inline_data, len) => {
+                unreachable!("can't happen")
+                // inline_data.as_ref()[..len].as_ref()
+            }
+        };
+
+        let mut output = Vec::new();
+        encode_iter([encoded_partial, value].into_iter(), &mut output);
+        output
     }
 
     fn branch_node(
         children: impl Iterator<Item = impl Borrow<Option<ChildReference<Self::HashOut>>>>,
         maybe_value: Option<Value<'_>>,
     ) -> Vec<u8> {
-        // let mut output = vec![0; BITMAP_LENGTH + 1];
-        // let mut prefix: [u8; 3] = [0; 3];
-        // let have_value = match maybe_value {
-        //     Some(Value::Inline(value)) => {
-        //         Compact(value.len() as u32).encode_to(&mut output);
-        //         output.extend_from_slice(value);
-        //         true
-        //     }
-        //     None => false,
-        //     _ => unimplemented!("unsupported"),
-        // };
-        // let has_children = children.map(|maybe_child| match maybe_child.borrow() {
-        //     Some(ChildReference::Hash(h)) => {
-        //         h.as_ref().encode_to(&mut output);
-        //         true
-        //     }
-        //     &Some(ChildReference::Inline(inline_data, len)) => {
-        //         inline_data.as_ref()[..len].encode_to(&mut output);
-        //         true
-        //     }
-        //     None => false,
-        // });
-        // branch_node_buffered(have_value, has_children, prefix.as_mut());
-        // output[0..BITMAP_LENGTH + 1].copy_from_slice(prefix.as_ref());
-        // output
-        Vec::new()
+        let mut output = Vec::new();
+        let mut children: Vec<_> = children
+            .map(|c| -> Vec<u8> {
+                match c.borrow() {
+                    Some(ChildReference::Hash(hash)) => hash.as_ref().to_vec(),
+                    Some(ChildReference::Inline(value, len)) => {
+                        unimplemented!();
+                        // value.as_ref().to_vec()
+                    }
+                    None => vec![],
+                }
+            })
+            .collect();
+
+        children.push(match maybe_value {
+            Some(Value::Inline(value)) => value.to_vec(),
+            None => vec![],
+            _ => unimplemented!("unsupported"),
+        });
+        encode_iter(children.iter().map(|c| c.as_slice()), &mut output);
+        output
     }
 
     fn branch_node_nibbled(
@@ -198,51 +212,7 @@ where
         children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
         value: Option<Value<'_>>,
     ) -> Vec<u8> {
-        // let contains_hash = matches!(&value, Some(Value::Node(..)));
-        // let mut output = match (&value, contains_hash) {
-        //     (&None, _) => {
-        //         partial_from_iterator_encode(partial, number_nibble, NodeKind::BranchNoValue)
-        //     }
-        //     (_, false) => {
-        //         partial_from_iterator_encode(partial, number_nibble, NodeKind::BranchWithValue)
-        //     }
-        //     (_, true) => {
-        //         partial_from_iterator_encode(partial, number_nibble, NodeKind::HashedValueBranch)
-        //     }
-        // };
-
-        // let bitmap_index = output.len();
-        // let mut bitmap: [u8; BITMAP_LENGTH] = [0; BITMAP_LENGTH];
-        // (0..BITMAP_LENGTH).for_each(|_| output.push(0));
-        // match value {
-        //     Some(Value::Inline(value)) => {
-        //         Compact(value.len() as u32).encode_to(&mut output);
-        //         output.extend_from_slice(value);
-        //     }
-        //     Some(Value::Node(hash)) => {
-        //         debug_assert!(hash.len() == H::LENGTH);
-        //         output.extend_from_slice(hash);
-        //     }
-        //     None => (),
-        // }
-        // Bitmap::encode(
-        //     children.map(|maybe_child| match maybe_child.borrow() {
-        //         Some(ChildReference::Hash(h)) => {
-        //             h.as_ref().encode_to(&mut output);
-        //             true
-        //         }
-        //         &Some(ChildReference::Inline(inline_data, len)) => {
-        //             inline_data.as_ref()[..len].encode_to(&mut output);
-        //             true
-        //         }
-        //         None => false,
-        //     }),
-        //     bitmap.as_mut(),
-        // );
-        // output[bitmap_index..bitmap_index + BITMAP_LENGTH]
-        //     .copy_from_slice(&bitmap[..BITMAP_LENGTH]);
-        // output
-        Vec::new()
+        unimplemented!("doesn't use");
     }
 }
 
@@ -280,20 +250,23 @@ impl DBTrieLoader {
         let mut walker = accounts_cursor.walk(Address::zero()).unwrap();
         // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
 
-        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::default();
+        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
+            RLPNodeCodec::<KeccakHasher>::empty_node(),
+            RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
+        );
         let mut root = H256::zero();
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
         while let Some((address, account)) = walker.next().transpose().unwrap() {
-            let mut key = EthAccount::from(account);
+            let mut value = EthAccount::from(account);
 
             // storage_root
-            key.storage_root = self.calculate_storage_root(tx, address);
+            value.storage_root = self.calculate_storage_root(tx, address);
 
             let mut bytes = BytesMut::new();
-            Encodable::encode(&key, &mut bytes);
-            trie.insert(address.as_bytes(), &bytes).unwrap();
+            Encodable::encode(&value, &mut bytes);
+            trie.insert(keccak256(address).as_bytes(), bytes.as_ref()).unwrap();
         }
 
         *trie.root()
@@ -305,7 +278,10 @@ impl DBTrieLoader {
         tx: &Transaction<'_, DB>,
         address: Address,
     ) -> H256 {
-        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::default();
+        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
+            RLPNodeCodec::<KeccakHasher>::empty_node(),
+            RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
+        );
         let mut root = H256::zero();
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
@@ -319,7 +295,7 @@ impl DBTrieLoader {
             let mut bytes = BytesMut::new();
             let location = [H256::from(address).as_bytes(), storage_key.as_bytes()].concat();
             Encodable::encode(&value, &mut bytes);
-            trie.insert(location.as_slice(), &bytes).unwrap();
+            trie.insert(keccak256(location).as_bytes(), &bytes).unwrap();
         }
 
         *trie.root()
@@ -334,7 +310,11 @@ mod tests {
         tables,
         transaction::DbTxMut,
     };
-    use reth_primitives::{hex_literal::hex, proofs::EMPTY_ROOT, Address, ChainSpec, KECCAK_EMPTY};
+    use reth_primitives::{
+        hex_literal::hex,
+        proofs::{genesis_state_root, EMPTY_ROOT},
+        Address, ChainSpec, GenesisAccount, KECCAK_EMPTY,
+    };
     use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
     use std::str::FromStr;
     use trie_db::TrieDBMutBuilder;
@@ -348,10 +328,72 @@ mod tests {
     }
 
     #[test]
-    fn verify_genesis() {
+    fn single_account_trie() {
         let mut trie = DBTrieLoader {};
         let db = create_test_rw_db::<WriteMap>();
         let tx = Transaction::new(db.as_ref()).unwrap();
+        let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
+        let account = GenesisAccount { nonce: None, balance: U256::MAX, code: None, storage: None };
+        tx.put::<tables::PlainAccountState>(
+            address,
+            Account {
+                nonce: account.nonce.unwrap_or_default(),
+                balance: account.balance,
+                bytecode_hash: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            trie.calculate_root(&tx),
+            genesis_state_root(HashMap::from([(address, account)]))
+        );
+    }
+
+    #[test]
+    fn two_accounts_trie() {
+        let mut trie = DBTrieLoader {};
+        let db = create_test_rw_db::<WriteMap>();
+        let tx = Transaction::new(db.as_ref()).unwrap();
+
+        let accounts = [
+            (
+                Address::from(hex!("9fe4abd71ad081f091bd06dd1c16f7e92927561e")),
+                GenesisAccount {
+                    nonce: Some(155),
+                    balance: U256::from(414241124),
+                    code: None,
+                    storage: None,
+                },
+            ),
+            (
+                Address::from(hex!("f8a6edaad4a332e6e550d0915a7fd5300b0b12d1")),
+                GenesisAccount {
+                    nonce: Some(3),
+                    balance: U256::from(78978),
+                    code: None,
+                    storage: None,
+                },
+            ),
+        ];
+        for (address, account) in accounts.clone() {
+            tx.put::<tables::PlainAccountState>(
+                address,
+                Account {
+                    nonce: account.nonce.unwrap_or_default(),
+                    balance: account.balance,
+                    bytecode_hash: account.code.map(|c| keccak256(c)),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(trie.calculate_root(&tx), genesis_state_root(HashMap::from(accounts)));
+    }
+
+    #[test]
+    fn verify_genesis() {
+        let mut trie = DBTrieLoader {};
+        let db = create_test_rw_db::<WriteMap>();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
         let ChainSpec { genesis, .. } = chain_spec_value_parser("mainnet").unwrap();
 
         // Insert account state
@@ -366,6 +408,7 @@ mod tests {
             )
             .unwrap();
         }
+        tx.commit().unwrap();
 
         assert_eq!(trie.calculate_root(&tx), genesis.state_root);
     }
