@@ -208,6 +208,15 @@ where
                 self.next_request_block_number = next_block;
                 self.next_chain_tip_block_number = next_block;
                 self.clear();
+            } else {
+                // ensure already validated headers are in range
+                let skip = self
+                    .queued_validated_headers
+                    .iter()
+                    .take_while(|last| last.number > target_block_number)
+                    .count();
+                // removes all headers that are higher than then current target
+                self.queued_validated_headers.drain(..skip);
             }
         } else {
             // this occurs on the initial sync target request
