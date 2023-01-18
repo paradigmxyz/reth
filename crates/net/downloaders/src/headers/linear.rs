@@ -101,7 +101,7 @@ where
 
         // we try to keep more requests than available peers active so that there's always a
         // followup request available for a peer
-        let dynamic_target = num_peers * 3;
+        let dynamic_target = num_peers * 4;
         let max_dynamic = dynamic_target.max(self.min_concurrent_requests);
 
         // If only a few peers are connected we keep it low
