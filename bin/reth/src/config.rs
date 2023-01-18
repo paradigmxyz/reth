@@ -7,7 +7,7 @@ use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, PeersConfig,
 };
-use reth_primitives::{NodeRecord, H256};
+use reth_primitives::{ChainSpec, NodeRecord};
 use reth_provider::ProviderImpl;
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +27,7 @@ impl Config {
     pub fn network_config<DB: Database>(
         &self,
         db: Arc<DB>,
-        chain_id: u64,
-        genesis_hash: H256,
+        chain_spec: ChainSpec,
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
@@ -39,9 +38,8 @@ impl Config {
         NetworkConfig::builder(Arc::new(ProviderImpl::new(db)), rng_secret_key())
             .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
             .peer_config(peer_config)
-            .genesis_hash(genesis_hash)
-            .chain_id(chain_id)
             .discovery(Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)))
+            .chain_spec(chain_spec)
             .set_discovery(disable_discovery)
             .build()
     }

@@ -5,11 +5,6 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Reth executor executes transaction in block of data.
+//! Common metric types that can be used across the Reth codebase
 
-pub mod config;
-pub mod eth_dao_fork;
-/// Executor
-pub mod executor;
-/// Wrapper around revm database and types
-pub mod revm_wrap;
+pub mod metered_sender;
