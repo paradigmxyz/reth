@@ -4056,6 +4056,7 @@ dependencies = [
  "reth-rlp-derive",
  "reth-tracing",
  "secp256k1 0.24.2",
+ "serde",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -4078,6 +4079,8 @@ dependencies = [
  "reth-rlp",
  "reth-tracing",
  "secp256k1 0.24.2",
+ "serde",
+ "serde_with",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -4302,6 +4305,7 @@ dependencies = [
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
+ "serde_with",
  "thiserror",
  "tokio",
  "tracing",
@@ -4919,6 +4923,7 @@ checksum = "d9512ffd81e3a3503ed401f79c33168b9148c75038956039166cd750eaa037c3"
 dependencies = [
  "rand 0.8.5",
  "secp256k1-sys 0.6.1",
+ "serde",
 ]
 
 [[package]]
