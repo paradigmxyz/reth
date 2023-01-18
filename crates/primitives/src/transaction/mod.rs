@@ -915,7 +915,13 @@ mod tests {
         let tx_bytes =
               hex::decode("b901f202f901ee05228459682f008459682f11830209bf8080b90195608060405234801561001057600080fd5b50610175806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c80630c49c36c14610030575b600080fd5b61003861004e565b604051610045919061011d565b60405180910390f35b60606020600052600f6020527f68656c6c6f2073746174656d696e64000000000000000000000000000000000060405260406000f35b600081519050919050565b600082825260208201905092915050565b60005b838110156100be5780820151818401526020810190506100a3565b838111156100cd576000848401525b50505050565b6000601f19601f8301169050919050565b60006100ef82610084565b6100f9818561008f565b93506101098185602086016100a0565b610112816100d3565b840191505092915050565b6000602082019050818103600083015261013781846100e4565b90509291505056fea264697066735822122051449585839a4ea5ac23cae4552ef8a96b64ff59d0668f76bfac3796b2bdbb3664736f6c63430008090033c080a0136ebffaa8fc8b9fda9124de9ccb0b1f64e90fbd44251b4c4ac2501e60b104f9a07eb2999eec6d185ef57e91ed099afb0a926c5b536f0155dd67e537c7476e1471")
                   .unwrap();
-        let _decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+
+        let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+
+        let mut encoded = BytesMut::new();
+        decoded.encode(&mut encoded);
+
+        assert_eq!(tx_bytes, encoded);
     }
 
     #[test]
@@ -956,7 +962,7 @@ mod tests {
 
     #[test]
     fn decode_multiple_network_txs() {
-        let bytes_first = &mut &hex::decode("f86b02843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba00eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5aea03a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18").unwrap()[..];
+        let bytes_first = hex::decode("f86b02843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba00eb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5aea03a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18").unwrap();
         let expected_request = Transaction::Legacy(TxLegacy {
             chain_id: Some(4u64),
             nonce: 2,
@@ -977,14 +983,17 @@ mod tests {
         };
         let expected =
             TransactionSigned::from_transaction_and_signature(expected_request, expected_signature);
-        assert_eq!(expected, TransactionSigned::decode(bytes_first).unwrap());
+        assert_eq!(expected, TransactionSigned::decode(&mut &bytes_first[..]).unwrap());
         assert_eq!(
             expected.hash,
             H256::from_str("0xa517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34")
                 .unwrap()
         );
+        let mut encoded = BytesMut::new();
+        expected.encode(&mut encoded);
+        assert_eq!(bytes_first, encoded);
 
-        let bytes_second = &mut &hex::decode("f86b01843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac3960468702769bb01b2a00802ba0e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0aa05406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da").unwrap()[..];
+        let bytes_second = hex::decode("f86b01843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac3960468702769bb01b2a00802ba0e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0aa05406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da").unwrap();
         let expected_request = Transaction::Legacy(TxLegacy {
             chain_id: Some(4),
             nonce: 1u64,
@@ -1006,9 +1015,12 @@ mod tests {
 
         let expected =
             TransactionSigned::from_transaction_and_signature(expected_request, expected_signature);
-        assert_eq!(expected, TransactionSigned::decode(bytes_second).unwrap());
+        assert_eq!(expected, TransactionSigned::decode(&mut &bytes_second[..]).unwrap());
+        let mut encoded = BytesMut::new();
+        expected.encode(&mut encoded);
+        assert_eq!(bytes_second, encoded);
 
-        let bytes_third = &mut &hex::decode("f86b0384773594008398968094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba0ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071a03ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88").unwrap()[..];
+        let bytes_third = hex::decode("f86b0384773594008398968094d3e8763675e4c425df46cc3b5c0f6cbdac39604687038d7ea4c68000802ba0ce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071a03ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88").unwrap();
         let expected_request = Transaction::Legacy(TxLegacy {
             chain_id: Some(4),
             nonce: 3,
@@ -1031,9 +1043,12 @@ mod tests {
 
         let expected =
             TransactionSigned::from_transaction_and_signature(expected_request, expected_signature);
-        assert_eq!(expected, TransactionSigned::decode(bytes_third).unwrap());
+        assert_eq!(expected, TransactionSigned::decode(&mut &bytes_third[..]).unwrap());
+        let mut encoded = BytesMut::new();
+        expected.encode(&mut encoded);
+        assert_eq!(bytes_third, encoded);
 
-        let bytes_fourth = &mut &hex::decode("b87502f872041a8459682f008459682f0d8252089461815774383099e24810ab832a5b2a5425c154d58829a2241af62c000080c001a059e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafda0016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469").unwrap()[..];
+        let bytes_fourth = hex::decode("b87502f872041a8459682f008459682f0d8252089461815774383099e24810ab832a5b2a5425c154d58829a2241af62c000080c001a059e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafda0016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469").unwrap();
         let expected = Transaction::Eip1559(TxEip1559 {
             chain_id: 4,
             nonce: 26,
@@ -1058,9 +1073,12 @@ mod tests {
 
         let expected =
             TransactionSigned::from_transaction_and_signature(expected, expected_signature);
-        assert_eq!(expected, TransactionSigned::decode(bytes_fourth).unwrap());
+        assert_eq!(expected, TransactionSigned::decode(&mut &bytes_fourth[..]).unwrap());
+        let mut encoded = BytesMut::new();
+        expected.encode(&mut encoded);
+        assert_eq!(bytes_fourth, encoded);
 
-        let bytes_fifth = &mut &hex::decode("f8650f84832156008287fb94cf7f9e66af820a19257a2108375b180b0ec491678204d2802ca035b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981a0612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860").unwrap()[..];
+        let bytes_fifth = hex::decode("f8650f84832156008287fb94cf7f9e66af820a19257a2108375b180b0ec491678204d2802ca035b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981a0612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860").unwrap();
         let expected = Transaction::Legacy(TxLegacy {
             chain_id: Some(4),
             nonce: 15,
@@ -1081,7 +1099,10 @@ mod tests {
         };
 
         let expected = TransactionSigned::from_transaction_and_signature(expected, signature);
-        assert_eq!(expected, TransactionSigned::decode(bytes_fifth).unwrap());
+        assert_eq!(expected, TransactionSigned::decode(&mut &bytes_fifth[..]).unwrap());
+        let mut encoded = BytesMut::new();
+        expected.encode(&mut encoded);
+        assert_eq!(bytes_fifth, encoded);
     }
 
     #[test]
