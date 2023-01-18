@@ -368,22 +368,6 @@ mod tests {
             }
             self.check_hashed_storage()
         }
-
-        async fn after_execution(&self, _seed: Self::Seed) -> Result<(), TestRunnerError> {
-            println!(" printing state...");
-            self.tx
-                .query(|tx| {
-                    let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-
-                    while let Some((address, entry)) = storage_cursor.next()? {
-                        println!("{:?} -> {:?}", address, entry);
-                    }
-
-                    Ok(())
-                })
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
-            Ok(())
-        }
     }
 
     impl UnwindStageTestRunner for StorageHashingTestRunner {
