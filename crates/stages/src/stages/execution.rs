@@ -10,12 +10,12 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_executor::{
-    config::SpecUpgrades,
     executor::AccountChangeSet,
     revm_wrap::{State, SubState},
-    Config,
 };
-use reth_primitives::{Address, Header, StorageEntry, TransactionSignedEcRecovered, H256, U256};
+use reth_primitives::{
+    Address, ChainSpec, Header, StorageEntry, TransactionSignedEcRecovered, H256, MAINNET, U256,
+};
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
 use tracing::*;
@@ -52,24 +52,21 @@ const EXECUTION: StageId = StageId("Execution");
 #[derive(Debug)]
 pub struct ExecutionStage {
     /// Executor configuration.
-    pub config: Config,
+    pub chain_spec: ChainSpec,
     /// Commit threshold
     pub commit_threshold: u64,
 }
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self {
-            config: Config { chain_id: U256::from(1), spec_upgrades: SpecUpgrades::new_ethereum() },
-            commit_threshold: 1000,
-        }
+        Self { chain_spec: MAINNET.clone(), commit_threshold: 1000 }
     }
 }
 
 impl ExecutionStage {
     /// Create new execution stage with specified config.
-    pub fn new(config: Config, commit_threshold: u64) -> Self {
-        Self { config, commit_threshold }
+    pub fn new(chain_spec: ChainSpec, commit_threshold: u64) -> Self {
+        Self { chain_spec, commit_threshold }
     }
 }
 
@@ -193,7 +190,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             header,
                             &recovered_transactions,
                             ommers,
-                            &self.config,
+                            &self.chain_spec,
                             &mut state_provider,
                         )
                     })
@@ -381,7 +378,9 @@ mod tests {
 
     use super::*;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_primitives::{hex_literal::hex, keccak256, Account, SealedBlock, H160, U256};
+    use reth_primitives::{
+        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, U256,
+    };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
 
@@ -427,8 +426,10 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-        let mut execution_stage = ExecutionStage::default();
-        execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
+        let mut execution_stage = ExecutionStage {
+            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
+            ..Default::default()
+        };
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
         assert_eq!(output, ExecOutput { stage_progress: 1, done: true });
@@ -513,8 +514,10 @@ mod tests {
 
         // execute
 
-        let mut execution_stage = ExecutionStage::default();
-        execution_stage.config.spec_upgrades = SpecUpgrades::new_berlin_activated();
+        let mut execution_stage = ExecutionStage {
+            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
+            ..Default::default()
+        };
         let _ = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 

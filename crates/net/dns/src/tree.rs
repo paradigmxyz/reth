@@ -28,6 +28,7 @@ use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
 use reth_primitives::hex;
 use secp256k1::SecretKey;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{fmt, str::FromStr};
 
 const ROOT_V1_PREFIX: &str = "enrtree-root:v1";
@@ -202,7 +203,7 @@ impl fmt::Display for BranchEntry {
 }
 
 /// A link entry
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, SerializeDisplay, DeserializeFromStr)]
 pub struct LinkEntry<K: EnrKeyUnambiguous = SecretKey> {
     pub domain: String,
     pub pubkey: K::PublicKey,
