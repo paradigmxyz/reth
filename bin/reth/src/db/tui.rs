@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -21,6 +21,12 @@ use tui::{
 /// Available keybindings for the [DbListTUI]
 static CMDS: [(&'static str, &'static str); 3] =
     [("q", "Quit"), ("up", "Entry Above"), ("down", "Entry Below")];
+
+/// Modified version of the [ListState] struct that exposes the `offset` field.
+/// Used to make the [DbListTUI] keys clickable.
+struct ExpListState {
+    pub(crate) offset: usize,
+}
 
 #[derive(Default)]
 pub(crate) struct DbListTUI<T: Table> {
@@ -113,13 +119,33 @@ fn run<B: Backend, T: Table>(
         let timeout =
             tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
         if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
+            match event::read()? {
+                Event::Key(key) => match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(()),
                     KeyCode::Down => app.next(),
                     KeyCode::Up => app.previous(),
                     _ => {}
-                }
+                },
+                Event::Mouse(e) => match e.kind {
+                    MouseEventKind::ScrollDown => app.next(),
+                    MouseEventKind::ScrollUp => app.previous(),
+                    // TODO: This click event can be triggered outside of the list widget.
+                    MouseEventKind::Down(_) => {
+                        // SAFETY: The pointer to the app's state will always be valid for
+                        // reads here, and the source is larger than the destination.
+                        //
+                        // This is technically unsafe, but because the alignment requirements
+                        // in both the source and destination are the same and we can ensure
+                        // that the pointer to `app.state` is valid for reads, this is safe.
+                        let state: ExpListState = unsafe { std::mem::transmute_copy(&app.state) };
+                        let new_idx = (e.row as usize + state.offset).saturating_sub(1);
+                        if new_idx < app.entries.len() {
+                            app.state.select(Some(new_idx));
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
             }
         }
         if last_tick.elapsed() >= tick_rate {
@@ -157,7 +183,7 @@ fn ui<B: Backend, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<T>) {
             )))
             .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
-            .highlight_symbol(">> ")
+            .highlight_symbol("➜ ")
             .start_corner(Corner::TopLeft);
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.state);
 
