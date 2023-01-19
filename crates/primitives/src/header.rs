@@ -4,7 +4,7 @@ use crate::{
     BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
 use bytes::{BufMut, BytesMut};
-use ethers_core::types::H64;
+use ethers_core::types::{Block, H256 as EthersH256, H64};
 use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -215,6 +215,29 @@ pub struct SealedHeader {
     header: Header,
     /// Locked Header hash.
     hash: BlockHash,
+}
+
+impl From<Block<EthersH256>> for SealedHeader {
+    fn from(block: Block<EthersH256>) -> Self {
+        let header = Header {
+            number: block.number.unwrap().as_u64(),
+            gas_limit: block.gas_limit.as_u64(),
+            difficulty: block.difficulty.into(),
+            nonce: block.nonce.unwrap().to_low_u64_be(),
+            extra_data: block.extra_data.0.into(),
+            state_root: block.state_root.0.into(),
+            timestamp: block.timestamp.as_u64(),
+            mix_hash: block.mix_hash.unwrap().0.into(),
+            beneficiary: block.author.unwrap().0.into(),
+            base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
+            ..Default::default()
+        };
+        let hash = match block.hash {
+            Some(hash) => hash.0.into(),
+            None => header.hash_slow(),
+        };
+        SealedHeader::new(header, hash)
+    }
 }
 
 impl Default for SealedHeader {
