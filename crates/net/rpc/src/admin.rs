@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network::{peers::PeerKind, NetworkHandle};
 use reth_network_api::{NetworkInfo, PeersInfo};
@@ -20,6 +21,7 @@ impl AdminApi {
     }
 }
 
+#[async_trait]
 impl AdminApiServer for AdminApi {
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
         self.network.add_peer(record.id, record.tcp_addr());
@@ -48,9 +50,9 @@ impl AdminApiServer for AdminApi {
         todo!()
     }
 
-    fn node_info(&self) -> RpcResult<NodeInfo> {
+    async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enr = self.network.local_node_record();
-        let status = self.network.network_status();
+        let status = self.network.network_status().await.expect("Could not fetch status");
 
         Ok(NodeInfo::new(enr, status))
     }

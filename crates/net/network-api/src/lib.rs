@@ -9,17 +9,20 @@
 //!
 //! Provides abstractions for the reth-network crate.
 
+use async_trait::async_trait;
 use reth_primitives::{NodeRecord, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use tokio::sync::oneshot;
 
 /// Provides general purpose information about the network.
+#[async_trait]
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
 
     /// Returns the current status of the network being ran by the local node.
-    fn network_status(&self) -> NetworkStatus;
+    async fn network_status(&self) -> Result<NetworkStatus, oneshot::error::RecvError>;
 }
 
 /// Provides general purpose information about Peers in the network.
