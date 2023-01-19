@@ -4577,6 +4577,7 @@ dependencies = [
  "futures-util",
  "itertools 0.10.5",
  "metrics",
+ "paste",
  "rand 0.8.5",
  "rayon",
  "reth-db",

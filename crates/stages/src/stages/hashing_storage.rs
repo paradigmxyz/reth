@@ -223,7 +223,7 @@ mod tests {
         SealedBlock, StorageEntry, Transaction, TransactionKind, TxLegacy, H256, U256,
     };
 
-    stage_test_suite_ext!(StorageHashingTestRunner);
+    stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
