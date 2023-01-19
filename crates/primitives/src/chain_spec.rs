@@ -18,8 +18,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::Frontier, 0),
         (Hardfork::Homestead, 1150000),
         (Hardfork::Dao, 1920000),
-        (Hardfork::Eip150, 2463000),
-        (Hardfork::Eip158, 2463000),
+        (Hardfork::Tangerine, 2463000),
         (Hardfork::SpuriousDragon, 2675000),
         (Hardfork::Byzantium, 4370000),
         (Hardfork::Constantinople, 7280000),
@@ -201,8 +200,7 @@ impl From<EthersGenesis> for ChainSpec {
         let hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
             (Hardfork::Dao, genesis.config.dao_fork_block),
-            (Hardfork::Eip150, genesis.config.eip150_block),
-            (Hardfork::Eip158, genesis.config.eip158_block),
+            (Hardfork::Tangerine, genesis.config.eip150_block),
             (Hardfork::SpuriousDragon, genesis.config.eip155_block),
             (Hardfork::Byzantium, genesis.config.byzantium_block),
             (Hardfork::Constantinople, genesis.config.constantinople_block),
@@ -300,8 +298,7 @@ impl ChainSpecBuilder {
     /// Enables Tangerine
     pub fn tangerine_whistle_activated(mut self) -> Self {
         self = self.homestead_activated();
-        self.hardforks.insert(Hardfork::Eip150, 0);
-        self.hardforks.insert(Hardfork::Eip158, 0);
+        self.hardforks.insert(Hardfork::Tangerine, 0);
         self
     }
 
@@ -440,8 +437,7 @@ mod tests {
             .genesis_hash(empty_sealed.hash())
             .with_fork(Hardfork::Frontier, 0)
             .with_fork(Hardfork::Homestead, 0)
-            .with_fork(Hardfork::Eip150, 0)
-            .with_fork(Hardfork::Eip158, 0)
+            .with_fork(Hardfork::Tangerine, 0)
             .with_fork(Hardfork::SpuriousDragon, 0)
             .with_fork(Hardfork::Byzantium, 0)
             .with_fork(Hardfork::Constantinople, 0)
@@ -481,7 +477,7 @@ mod tests {
             .genesis_hash(empty_sealed.hash())
             .with_fork(Hardfork::Frontier, 0)
             .with_fork(Hardfork::Homestead, 1)
-            .with_fork(Hardfork::Eip150, 1)
+            .with_fork(Hardfork::Tangerine, 1)
             .build();
 
         assert_eq!(unique_spec.fork_id(2), duplicate_spec.fork_id(2));
