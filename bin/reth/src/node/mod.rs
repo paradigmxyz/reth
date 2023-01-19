@@ -164,10 +164,16 @@ impl Command {
             })
             .push(BodyStage {
                 downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
-                    // TODO: config properly
+                    .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
+                    .with_request_batch_size(config.stages.bodies.downloader_request_batch_size)
+                    .with_max_concurrent_requests(
+                        config.stages.bodies.downloader_max_concurrent_requests,
+                    )
+                    .with_max_buffered_responses(
+                        config.stages.bodies.downloader_max_buffered_responses,
+                    )
                     .build(fetch_client.clone(), consensus.clone(), db.clone()),
                 consensus: consensus.clone(),
-                commit_threshold: config.stages.bodies.commit_threshold,
             })
             .push(SenderRecoveryStage {
                 batch_size: config.stages.sender_recovery.batch_size,

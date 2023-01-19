@@ -56,11 +56,6 @@ pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     pub downloader: D,
     /// The consensus engine.
     pub consensus: Arc<C>,
-    /// The maximum amount of block bodies to process in one stage execution.
-    ///
-    /// Smaller batch sizes result in less memory usage, but more disk I/O. Larger batch sizes
-    /// result in more memory usage, less disk I/O, and more infrequent checkpoints.
-    pub commit_threshold: u64,
 }
 
 #[async_trait::async_trait]
@@ -504,7 +499,6 @@ mod tests {
                         self.batch_size,
                     ),
                     consensus: self.consensus.clone(),
-                    commit_threshold: self.batch_size,
                 }
             }
         }

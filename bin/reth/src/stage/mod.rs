@@ -153,10 +153,16 @@ impl Command {
 
                 let mut stage = BodyStage {
                     downloader: ConcurrentDownloaderBuilder::default()
-                        // TODO: config properly
+                        .with_stream_batch_size(num_blocks as usize)
+                        .with_request_batch_size(config.stages.bodies.downloader_request_batch_size)
+                        .with_max_concurrent_requests(
+                            config.stages.bodies.downloader_max_concurrent_requests,
+                        )
+                        .with_max_buffered_responses(
+                            config.stages.bodies.downloader_max_buffered_responses,
+                        )
                         .build(fetch_client.clone(), consensus.clone(), db.clone()),
                     consensus: consensus.clone(),
-                    commit_threshold: num_blocks,
                 };
 
                 if !self.skip_unwind {
