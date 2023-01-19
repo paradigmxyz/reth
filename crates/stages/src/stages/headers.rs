@@ -14,7 +14,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::{
         client::{HeadersClient, StatusUpdater},
-        downloader::{ensure_parent, HeaderDownloader, SyncTarget},
+        downloader::{HeaderDownloader, SyncTarget},
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, U256};
@@ -46,8 +46,6 @@ pub struct HeaderStage<D: HeaderDownloader, C: Consensus, H: HeadersClient, S: S
     pub client: Arc<H>,
     /// Network handle for updating status
     pub network_handle: S,
-    /// The number of block headers to commit at once
-    pub commit_threshold: u64,
     /// Header metrics
     pub metrics: HeaderMetrics,
 }
@@ -147,22 +145,6 @@ where
         }
     }
 
-    /// Perform basic header response validation
-    ///
-    /// Note: this expects the `headers` to be sorted with falling block numbers
-    fn validate_header_response(&self, headers: &[SealedHeader]) -> Result<(), StageError> {
-        let mut headers_iter = headers.iter().peekable();
-        while let Some(header) = headers_iter.next() {
-            if let Some(parent) = headers_iter.peek() {
-                ensure_parent(header, parent)
-                    .map_err(|err| StageError::Download(err.to_string()))
-                    .unwrap();
-            }
-        }
-
-        Ok(())
-    }
-
     /// Write downloaded headers to the given transaction
     ///
     /// Note: this writes the headers with rising block numbers.
@@ -251,9 +233,6 @@ where
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
         self.metrics.headers_counter.increment(downloaded_headers.len() as u64);
 
-        // Perform basic response validation
-        self.validate_header_response(&downloaded_headers)?;
-
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
 
@@ -305,6 +284,188 @@ mod tests {
     use reth_interfaces::{p2p::error::RequestError, test_utils::generators::random_header};
     use reth_primitives::H256;
     use test_runner::HeadersTestRunner;
+
+    mod test_runner {
+        use crate::{
+            metrics::HeaderMetrics,
+            stages::headers::HeaderStage,
+            test_utils::{
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+                UnwindStageTestRunner,
+            },
+            ExecInput, ExecOutput, UnwindInput,
+        };
+        use reth_db::{
+            models::blocks::BlockNumHash,
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
+        use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
+        use reth_interfaces::{
+            p2p::headers::downloader::HeaderDownloader,
+            test_utils::{
+                generators::{random_header, random_header_range},
+                TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
+            },
+        };
+        use reth_primitives::{BlockNumber, SealedHeader, U256};
+        use std::sync::Arc;
+
+        pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
+            pub(crate) consensus: Arc<TestConsensus>,
+            pub(crate) client: Arc<TestHeadersClient>,
+            downloader_factory: Box<dyn Fn() -> D + Send + Sync  + 'static>,
+            network_handle: TestStatusUpdater,
+            tx: TestTransaction,
+        }
+
+        impl Default for HeadersTestRunner<TestHeaderDownloader> {
+            fn default() -> Self {
+                let client = Arc::new(TestHeadersClient::default());
+                let consensus = Arc::new(TestConsensus::default());
+                Self {
+                    client: client.clone(),
+                    consensus: consensus.clone(),
+                    downloader_factory: Box::new(move || {
+                        TestHeaderDownloader::new(client.clone(), consensus.clone(), 1000)
+                    }),
+                    network_handle: TestStatusUpdater::default(),
+                    tx: TestTransaction::default(),
+                }
+            }
+        }
+
+        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
+            type S = HeaderStage<D, TestConsensus, TestHeadersClient, TestStatusUpdater>;
+
+            fn tx(&self) -> &TestTransaction {
+                &self.tx
+            }
+
+            fn stage(&self) -> Self::S {
+                HeaderStage {
+                    consensus: self.consensus.clone(),
+                    client: self.client.clone(),
+                    downloader: (*self.downloader_factory)(),
+                    network_handle: self.network_handle.clone(),
+                    metrics: HeaderMetrics::default(),
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
+            type Seed = Vec<SealedHeader>;
+
+            fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+                let start = input.stage_progress.unwrap_or_default();
+                let head = random_header(start, None);
+                self.tx.insert_headers(std::iter::once(&head))?;
+                // patch td table for `update_head` call
+                self.tx.commit(|tx| {
+                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::ZERO.into())
+                })?;
+
+                // use previous progress as seed size
+                let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+
+                if start + 1 >= end {
+                    return Ok(Vec::default())
+                }
+
+                let mut headers = random_header_range(start + 1..end, head.hash());
+                headers.insert(0, head);
+                Ok(headers)
+            }
+
+            /// Validate stored headers
+            fn validate_execution(
+                &self,
+                input: ExecInput,
+                output: Option<ExecOutput>,
+            ) -> Result<(), TestRunnerError> {
+                let initial_stage_progress = input.stage_progress.unwrap_or_default();
+                match output {
+                    Some(output) if output.stage_progress > initial_stage_progress => {
+                        self.tx.query(|tx| {
+                            for block_num in (initial_stage_progress..output.stage_progress).rev() {
+                                // look up the header hash
+                                let hash = tx
+                                    .get::<tables::CanonicalHeaders>(block_num)?
+                                    .expect("no header hash");
+                                let key: BlockNumHash = (block_num, hash).into();
+
+                                // validate the header number
+                                assert_eq!(tx.get::<tables::HeaderNumbers>(hash)?, Some(block_num));
+
+                                // validate the header
+                                let header = tx.get::<tables::Headers>(key)?;
+                                assert!(header.is_some());
+                                let header = header.unwrap().seal();
+                                assert_eq!(header.hash(), hash);
+                            }
+                            Ok(())
+                        })?;
+                    }
+                    _ => self.check_no_header_entry_above(initial_stage_progress)?,
+                };
+                Ok(())
+            }
+
+            async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
+                self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
+                let tip = if !headers.is_empty() {
+                    headers.last().unwrap().hash()
+                } else {
+                    let tip = random_header(0, None);
+                    self.tx.insert_headers(std::iter::once(&tip))?;
+                    tip.hash()
+                };
+                self.consensus.update_tip(tip);
+                Ok(())
+            }
+        }
+
+        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
+            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+                self.check_no_header_entry_above(input.unwind_to)
+            }
+        }
+
+        impl HeadersTestRunner<LinearDownloader<TestConsensus, TestHeadersClient>> {
+            pub(crate) fn with_linear_downloader() -> Self {
+                let client = Arc::new(TestHeadersClient::default());
+                let consensus = Arc::new(TestConsensus::default());
+                Self {
+                    client: client.clone(),
+                    consensus: consensus.clone(),
+                    downloader_factory: Box::new(move || {
+                        LinearDownloadBuilder::default().build(
+                            consensus.clone(),
+                            client.clone(),
+                            Default::default(),
+                            Default::default(),
+                        )
+                    }),
+                    network_handle: TestStatusUpdater::default(),
+                    tx: TestTransaction::default(),
+                }
+            }
+        }
+
+        impl<D: HeaderDownloader> HeadersTestRunner<D> {
+            pub(crate) fn check_no_header_entry_above(
+                &self,
+                block: BlockNumber,
+            ) -> Result<(), TestRunnerError> {
+                self.tx
+                    .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
+                self.tx.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.tx.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
+                Ok(())
+            }
+        }
+    }
 
     stage_test_suite!(HeadersTestRunner);
 
@@ -478,184 +639,5 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
-    }
-
-    mod test_runner {
-        use crate::{
-            stages::headers::HeaderStage,
-            test_utils::{
-                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-                UnwindStageTestRunner,
-            },
-            ExecInput, ExecOutput, UnwindInput,
-        };
-        use reth_db::{
-            models::blocks::BlockNumHash,
-            tables,
-            transaction::{DbTx, DbTxMut},
-        };
-        use reth_downloaders::headers::linear::LinearDownloader;
-        use reth_interfaces::{
-            p2p::headers::downloader::HeaderDownloader,
-            test_utils::{
-                generators::{random_header, random_header_range},
-                TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
-            },
-        };
-        use reth_primitives::{BlockNumber, SealedHeader, U256};
-        use std::sync::Arc;
-
-        pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
-            pub(crate) consensus: Arc<TestConsensus>,
-            pub(crate) client: Arc<TestHeadersClient>,
-            downloader: D,
-            network_handle: TestStatusUpdater,
-            tx: TestTransaction,
-        }
-
-        impl Default for HeadersTestRunner<TestHeaderDownloader> {
-            fn default() -> Self {
-                let client = Arc::new(TestHeadersClient::default());
-                let consensus = Arc::new(TestConsensus::default());
-                Self {
-                    client: client.clone(),
-                    consensus: consensus.clone(),
-                    downloader: TestHeaderDownloader::new(client, consensus, 1000),
-                    network_handle: TestStatusUpdater::default(),
-                    tx: TestTransaction::default(),
-                }
-            }
-        }
-
-        impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<D, TestConsensus, TestHeadersClient, TestStatusUpdater>;
-
-            fn tx(&self) -> &TestTransaction {
-                &self.tx
-            }
-
-            fn stage(&self) -> Self::S {
-                todo!()
-                // HeaderStage {
-                //     consensus: self.consensus.clone(),
-                //     client: self.client.clone(),
-                //     downloader: self.downloader.clone(),
-                //     network_handle: self.network_handle.clone(),
-                //     commit_threshold: 500,
-                //     metrics: HeaderMetrics::default(),
-                // }
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
-            type Seed = Vec<SealedHeader>;
-
-            fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.stage_progress.unwrap_or_default();
-                let head = random_header(start, None);
-                self.tx.insert_headers(std::iter::once(&head))?;
-                // patch td table for `update_head` call
-                self.tx.commit(|tx| {
-                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::ZERO.into())
-                })?;
-
-                // use previous progress as seed size
-                let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
-
-                if start + 1 >= end {
-                    return Ok(Vec::default())
-                }
-
-                let mut headers = random_header_range(start + 1..end, head.hash());
-                headers.insert(0, head);
-                Ok(headers)
-            }
-
-            /// Validate stored headers
-            fn validate_execution(
-                &self,
-                input: ExecInput,
-                output: Option<ExecOutput>,
-            ) -> Result<(), TestRunnerError> {
-                let initial_stage_progress = input.stage_progress.unwrap_or_default();
-                match output {
-                    Some(output) if output.stage_progress > initial_stage_progress => {
-                        self.tx.query(|tx| {
-                            for block_num in (initial_stage_progress..output.stage_progress).rev() {
-                                // look up the header hash
-                                let hash = tx
-                                    .get::<tables::CanonicalHeaders>(block_num)?
-                                    .expect("no header hash");
-                                let key: BlockNumHash = (block_num, hash).into();
-
-                                // validate the header number
-                                assert_eq!(tx.get::<tables::HeaderNumbers>(hash)?, Some(block_num));
-
-                                // validate the header
-                                let header = tx.get::<tables::Headers>(key)?;
-                                assert!(header.is_some());
-                                let header = header.unwrap().seal();
-                                assert_eq!(header.hash(), hash);
-                            }
-                            Ok(())
-                        })?;
-                    }
-                    _ => self.check_no_header_entry_above(initial_stage_progress)?,
-                };
-                Ok(())
-            }
-
-            async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
-                self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
-                let tip = if !headers.is_empty() {
-                    headers.last().unwrap().hash()
-                } else {
-                    let tip = random_header(0, None);
-                    self.tx.insert_headers(std::iter::once(&tip))?;
-                    tip.hash()
-                };
-                self.consensus.update_tip(tip);
-                Ok(())
-            }
-        }
-
-        impl<D: HeaderDownloader + 'static> UnwindStageTestRunner for HeadersTestRunner<D> {
-            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.check_no_header_entry_above(input.unwind_to)
-            }
-        }
-
-        impl HeadersTestRunner<LinearDownloader<TestConsensus, TestHeadersClient>> {
-            #[allow(unused)]
-            pub(crate) fn with_linear_downloader() -> Self {
-                todo!()
-                // let client = Arc::new(TestHeadersClient::default());
-                // let consensus = Arc::new(TestConsensus::default());
-                // let downloader =
-                //     LinearDownloadBuilder::default().build(consensus.clone(), client.clone()
-                // );
-                // Self {
-                //     client,
-                //     consensus,
-                //     downloader,
-                //     network_handle: TestStatusUpdater::default(),
-                //     tx: TestTransaction::default(),
-                // }
-            }
-        }
-
-        impl<D: HeaderDownloader> HeadersTestRunner<D> {
-            pub(crate) fn check_no_header_entry_above(
-                &self,
-                block: BlockNumber,
-            ) -> Result<(), TestRunnerError> {
-                self.tx
-                    .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
-                self.tx.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.tx.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
-                Ok(())
-            }
-        }
     }
 }

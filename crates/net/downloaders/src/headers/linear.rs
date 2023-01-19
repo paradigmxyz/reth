@@ -256,6 +256,7 @@ where
                 }
 
                 let target = headers.remove(0).seal();
+
                 if target.hash() != self.sync_target.hash {
                     return Err(HeadersResponseError {
                         request,
@@ -440,10 +441,6 @@ where
         self.in_progress_queue.clear();
     }
 
-    /// Marks the stream as terminated
-    fn terminate(&mut self) {
-        self.clear();
-    }
 
     /// Splits off the next batch of headers
     fn split_next_batch(&mut self) -> Vec<SealedHeader> {
@@ -621,6 +618,7 @@ where
         if this.in_progress_queue.is_empty() {
             let next_batch = this.split_next_batch();
             if next_batch.is_empty() {
+                this.clear();
                 return Poll::Ready(None)
             }
             return Poll::Ready(Some(next_batch))
@@ -720,6 +718,7 @@ struct HeadersResponseError {
 /// The block to which we want to close the gap: (local head...sync target]
 #[derive(Debug)]
 struct SyncTargetBlock {
+    /// Block hash of the targeted block
     hash: H256,
     /// This is an `Option` because we don't know the block number at first
     number: Option<u64>,
@@ -823,7 +822,6 @@ impl LinearDownloadBuilder {
             in_progress_queue: Default::default(),
             buffered_responses: Default::default(),
             queued_validated_headers: Default::default(),
-            is_terminated: false,
         };
 
         downloader.sync_target_request =
@@ -894,6 +892,27 @@ mod tests {
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert!(downloader.sync_target.number.is_some());
+    }
+
+    /// Tests that request calc works
+    #[test]
+    fn test_head_update() {
+        let client = Arc::new(TestHeadersClient::default());
+
+        let header = SealedHeader::default();
+
+        let mut downloader = LinearDownloadBuilder::default().build(
+            CONSENSUS.clone(),
+            Arc::clone(&client),
+            header.clone(),
+            H256::random(),
+        );
+
+        downloader.queued_validated_headers.push(header.clone());
+        let mut next = header.as_ref().clone();
+        next.number+=1;
+        downloader.update_local_head(SealedHeader::new(next, H256::random()));
+        assert!(downloader.queued_validated_headers.is_empty());
     }
 
     #[test]

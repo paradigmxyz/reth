@@ -163,7 +163,6 @@ impl Command {
                 consensus: consensus.clone(),
                 client: fetch_client.clone(),
                 network_handle: network.clone(),
-                commit_threshold: config.stages.headers.commit_threshold,
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
