@@ -104,67 +104,59 @@ mod tests {
     use crate::{Address, Signature, H256, U256};
 
     #[test]
-    fn test_payload_len_legacy_without_eip155() {
+    fn test_payload_len_legacy() {
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
-        let len = signature.payload_len_legacy(None);
-        assert_eq!(3, len);
+
+        assert_eq!(3, signature.payload_len_legacy(None));
+        assert_eq!(3, signature.payload_len_legacy(Some(1)));
+        assert_eq!(4, signature.payload_len_legacy(Some(47)));
     }
 
     #[test]
-    fn test_encode_legacy_without_eip155() {
+    fn test_v() {
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
-        let mut encoded = BytesMut::new();
-        signature.encode_legacy(&mut encoded, None);
-        let expected = 27u8;
-        assert_eq!(expected, encoded.as_ref()[0]);
+        assert_eq!(27, signature.v(None));
+        assert_eq!(37, signature.v(Some(1)));
 
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: true };
-        let mut encoded = BytesMut::new();
-        signature.encode_legacy(&mut encoded, None);
-        let expected = 28u8;
-        assert_eq!(expected, encoded.as_ref()[0]);
+        assert_eq!(28, signature.v(None));
+        assert_eq!(38, signature.v(Some(1)));
     }
 
     #[test]
-    fn test_payload_len_legacy_with_eip155() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
-        let len = signature.payload_len_legacy(Some(1));
-        assert_eq!(3, len);
-
-        let len = signature.payload_len_legacy(Some(47));
-        assert_eq!(4, len);
-    }
-
-    #[test]
-    fn test_encode_legacy_with_eip155() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
-        let mut encoded = BytesMut::new();
-        signature.encode_legacy(&mut encoded, Some(1));
-        let expected = 37u8;
-        assert_eq!(expected, encoded.as_ref()[0]);
-
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: true };
-        let mut encoded = BytesMut::new();
-        signature.encode_legacy(&mut encoded, Some(1));
-        let expected = 38u8;
-        assert_eq!(expected, encoded.as_ref()[0]);
-    }
-
-    #[test]
-    fn test_decode_legacy() {
+    fn test_encode_and_decode_legacy() {
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
 
         let mut encoded = BytesMut::new();
         signature.encode_legacy(&mut encoded, None);
+        assert_eq!(encoded.len(), signature.payload_len_legacy(None));
         let (decoded, chain_id) = Signature::decode_legacy(&mut &*encoded).unwrap();
         assert_eq!(signature, decoded);
         assert_eq!(None, chain_id);
 
         let mut encoded = BytesMut::new();
         signature.encode_legacy(&mut encoded, Some(1));
+        assert_eq!(encoded.len(), signature.payload_len_legacy(Some(1)));
         let (decoded, chain_id) = Signature::decode_legacy(&mut &*encoded).unwrap();
         assert_eq!(signature, decoded);
         assert_eq!(Some(1), chain_id);
+    }
+
+    #[test]
+    fn test_payload_len() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        assert_eq!(3, signature.payload_len());
+    }
+
+    #[test]
+    fn test_encode_and_decode() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+
+        let mut encoded = BytesMut::new();
+        signature.encode(&mut encoded);
+        assert_eq!(encoded.len(), signature.payload_len());
+        let decoded = Signature::decode(&mut &*encoded).unwrap();
+        assert_eq!(signature, decoded);
     }
 
     #[test]
