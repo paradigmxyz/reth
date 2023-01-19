@@ -19,6 +19,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
+use reth_pipeline::{pipeline::Pipeline, PipelineEvent};
 use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
@@ -27,7 +28,7 @@ use reth_stages::{
         hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
         sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
-    PipelineEvent, StageId,
+    StageId,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::select;
@@ -145,7 +146,7 @@ impl Command {
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         let fetch_client = Arc::new(network.fetch_client().await?);
-        let mut pipeline = reth_stages::Pipeline::default()
+        let mut pipeline = Pipeline::default()
             .with_sync_state_updater(network.clone())
             .with_channel(sender)
             .push(HeaderStage {

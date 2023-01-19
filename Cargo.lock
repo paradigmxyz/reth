@@ -3980,6 +3980,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
+ "reth-pipeline",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
@@ -4409,6 +4410,35 @@ name = "reth-network-api"
 version = "0.1.0"
 dependencies = [
  "reth-primitives",
+]
+
+[[package]]
+name = "reth-pipeline"
+version = "0.1.0"
+dependencies = [
+ "aquamarine",
+ "assert_matches",
+ "async-trait",
+ "futures-util",
+ "itertools 0.10.5",
+ "metrics",
+ "rand 0.8.5",
+ "rayon",
+ "reth-db",
+ "reth-downloaders",
+ "reth-eth-wire",
+ "reth-executor",
+ "reth-interfaces",
+ "reth-metrics-derive",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rlp",
+ "reth-stages",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

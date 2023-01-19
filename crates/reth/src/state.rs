@@ -1,8 +1,6 @@
-use crate::{
-    pipeline::event::PipelineEvent,
-    util::{opt, opt::MaybeSender},
-};
+use crate::event::PipelineEvent;
 use reth_primitives::BlockNumber;
+use reth_stages::util::{opt, opt::MaybeSender};
 
 /// The state of the pipeline during execution.
 pub(crate) struct PipelineState {

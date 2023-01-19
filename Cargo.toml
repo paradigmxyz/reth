@@ -2,6 +2,7 @@
 members = [
     "bin/reth",
     "crate-template",
+    "crates/reth",
     "crates/common/rlp",
     "crates/common/rlp-derive",
     "crates/consensus",

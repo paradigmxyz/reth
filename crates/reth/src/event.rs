@@ -1,8 +1,8 @@
-use crate::{
+use reth_primitives::BlockNumber;
+use reth_stages::{
     id::StageId,
     stage::{ExecOutput, UnwindInput, UnwindOutput},
 };
-use reth_primitives::BlockNumber;
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
 ///

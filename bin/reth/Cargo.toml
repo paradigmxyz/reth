@@ -8,6 +8,7 @@ readme = "README.md"
 
 [dependencies]
 # reth
+reth-pipeline = { path = "../../crates/reth" }
 reth-primitives = { path = "../../crates/primitives" }
 reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature

@@ -1,25 +1,36 @@
-use crate::{
-    error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput,
-};
-use reth_db::{database::Database, Transaction};
+use crate::{ctrl::*, state::*, PipelineEvent};
+
+use reth_db::{database::Database, Error as DbError, Transaction};
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_primitives::BlockNumber;
+use reth_stages::{
+    util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+};
 use std::{
     fmt::{Debug, Formatter},
     ops::Deref,
     sync::Arc,
 };
-use tokio::sync::mpsc::Sender;
+use thiserror::Error;
+use tokio::sync::mpsc::{error::SendError, Sender};
 use tracing::*;
-
-mod ctrl;
-mod event;
-mod state;
-
-use ctrl::*;
-pub use event::*;
-use state::*;
+///
+/// A pipeline execution error.
+#[derive(Error, Debug)]
+pub enum PipelineError {
+    /// The pipeline encountered an irrecoverable error in one of the stages.
+    #[error("A stage encountered an irrecoverable error.")]
+    Stage(#[from] StageError),
+    /// The pipeline encountered a database error.
+    #[error("A database error occurred.")]
+    Database(#[from] DbError),
+    /// The pipeline encountered an error while trying to send an event.
+    #[error("The pipeline encountered an error while trying to send an event.")]
+    Channel(#[from] SendError<PipelineEvent>),
+    /// The stage encountered an internal error.
+    #[error(transparent)]
+    Internal(Box<dyn std::error::Error + Send + Sync>),
+}
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -403,10 +414,10 @@ impl<DB: Database> QueuedStage<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, Env, EnvKind, WriteMap};
     use reth_interfaces::{consensus, sync::NoopSyncStateUpdate};
+    use reth_stages::{StageId, UnwindOutput};
     use tokio::sync::mpsc::channel;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
     use utils::TestStage;
@@ -611,6 +622,8 @@ mod tests {
             .run(db)
             .await;
         assert_matches!(result, Ok(()));
+
+        use reth_db::tx::DatabaseIntegrityError;
 
         // Fatal
         let db = test_utils::create_test_db(EnvKind::RW);

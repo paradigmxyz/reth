@@ -5,12 +5,10 @@ use reth_db::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
+    Error as DbError, Transaction,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{borrow::Borrow, sync::Arc};
-
-use crate::db::Transaction;
 
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.

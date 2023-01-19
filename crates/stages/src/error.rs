@@ -1,9 +1,7 @@
-use crate::pipeline::PipelineEvent;
 use reth_db::tx::DatabaseIntegrityError;
 use reth_interfaces::{consensus, db::Error as DbError, executor};
 use reth_primitives::BlockNumber;
 use thiserror::Error;
-use tokio::sync::mpsc::error::SendError;
 
 impl From<DbError> for StageError {
     fn from(value: DbError) -> Self {
@@ -61,21 +59,4 @@ impl StageError {
         matches!(self, |StageError::DatabaseIntegrity(_)| StageError::StageProgress(_) |
             StageError::Fatal(_))
     }
-}
-
-/// A pipeline execution error.
-#[derive(Error, Debug)]
-pub enum PipelineError {
-    /// The pipeline encountered an irrecoverable error in one of the stages.
-    #[error("A stage encountered an irrecoverable error.")]
-    Stage(#[from] StageError),
-    /// The pipeline encountered a database error.
-    #[error("A database error occurred.")]
-    Database(#[from] DbError),
-    /// The pipeline encountered an error while trying to send an event.
-    #[error("The pipeline encountered an error while trying to send an event.")]
-    Channel(#[from] SendError<PipelineEvent>),
-    /// The stage encountered an internal error.
-    #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
 }

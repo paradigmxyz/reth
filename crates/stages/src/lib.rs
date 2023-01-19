@@ -14,11 +14,17 @@
 //!
 //! - `stage_progress{stage}`: The block number each stage has currently reached.
 
-mod error;
-mod id;
-mod pipeline;
-mod stage;
-mod util;
+/// Errors during stage execution
+pub mod error;
+
+/// Wrapper for a stage and its progress
+pub mod id;
+
+/// Implementations of the various Rath stages
+pub mod stage;
+
+/// Various utilities for working with Options
+pub mod util;
 
 #[cfg(test)]
 mod test_utils;
@@ -31,7 +37,6 @@ pub mod metrics;
 
 pub use error::*;
 pub use id::*;
-pub use pipeline::*;
 pub use stage::*;
 
 // NOTE: Needed so the link in the module-level rustdoc works.
