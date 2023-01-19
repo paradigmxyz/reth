@@ -4,12 +4,12 @@ use criterion::{
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
-    mdbx::{test_utils::create_test_rw_db, WriteMap},
+    mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
     table::*,
     tables::*,
     transaction::DbTxMut,
 };
-use std::time::Instant;
+use std::{path::Path, time::Instant};
 
 criterion_group!(benches, db, serialization);
 criterion_main!(benches);
@@ -121,22 +121,24 @@ where
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
     let pair = &load_vectors::<T>();
+    let bench_db_path = Path::new("/tmp/reth-benches");
 
     group.bench_function(format!("{}.SeqWrite", T::NAME), |b| {
         b.iter_custom(|_| {
             let pair = pair.clone();
             let timer = Instant::now();
+
+            // Reset DB
+            let _ = std::fs::remove_dir_all(bench_db_path);
+            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, &bench_db_path);
+
+            // Create TX
+            let tx = db.tx_mut().expect("tx");
+            let mut crsr = tx.cursor_write::<T>().expect("cursor");
+
             black_box({
-                // TODO generic test db
-                let db = create_test_rw_db::<WriteMap>();
-
-                let tx = db.tx_mut().expect("tx");
-                let mut crsr = tx.cursor_write::<T>().expect("cursor");
-
-                // placeholder: cant insert multiple default values, that's why we're limiting to
-                // one for now.
                 for (k, _, v, _) in pair {
-                    crsr.insert(k, v).expect("submit");
+                    crsr.append(k, v).expect("submit");
                 }
 
                 tx.inner.commit().unwrap();
