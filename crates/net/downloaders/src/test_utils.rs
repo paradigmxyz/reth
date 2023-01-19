@@ -9,12 +9,8 @@ use reth_interfaces::{
 use reth_primitives::{PeerId, SealedHeader, H256};
 use std::{
     collections::HashMap,
-    fmt::{Debug, Formatter},
-    future::Future,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    fmt::Debug,
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 use tokio::sync::Mutex;

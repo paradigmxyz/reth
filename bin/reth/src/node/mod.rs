@@ -163,11 +163,9 @@ impl Command {
                 commit_threshold: config.stages.total_difficulty.commit_threshold,
             })
             .push(BodyStage {
-                downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloaderBuilder::default()
-                        // TODO: config properly
-                        .build(fetch_client.clone(), consensus.clone()),
-                ),
+                downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
+                    // TODO: config properly
+                    .build(fetch_client.clone(), consensus.clone()),
                 consensus: consensus.clone(),
                 commit_threshold: config.stages.bodies.commit_threshold,
             })

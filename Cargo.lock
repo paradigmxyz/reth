@@ -4246,6 +4246,7 @@ dependencies = [
  "async-trait",
  "auto_impl 1.0.1",
  "bytes",
+ "derive_more",
  "futures",
  "hex-literal",
  "modular-bitfield",

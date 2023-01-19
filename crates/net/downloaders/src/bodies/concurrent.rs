@@ -4,7 +4,11 @@ use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Error as ConsensusError},
     p2p::{
-        bodies::{client::BodiesClient, downloader::BlockResponse},
+        bodies::{
+            client::BodiesClient,
+            downloader::BodyDownloader,
+            response::{BlockResponse, OrderedBlockResponse},
+        },
         downloader::Downloader,
         error::{PeerRequestResult, RequestError},
     },
@@ -14,6 +18,7 @@ use std::{
     borrow::Borrow,
     cmp::Ordering,
     collections::{BinaryHeap, VecDeque},
+    ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -38,14 +43,14 @@ pub struct ConcurrentDownloader<B, C> {
     /// Maximum amount of received headers to buffer internally.
     max_buffered_responses: usize,
     /// The first block number.
-    first_block_number: BlockNumber, // TODO: Option
+    first_block_number: BlockNumber,
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
-    /// Headers to download bodies for.
+    /// Ordered collection of headers to download bodies for.
     headers: VecDeque<SealedHeader>,
     /// requests in progress
     in_progress_queue: FuturesUnordered<BodiesRequestFuture<B, C>>,
-    /// Buffered, unvalidated responses
+    /// Buffered responses
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
     /// Queued body responses
     queued_bodies: Vec<BlockResponse>,
@@ -80,31 +85,30 @@ where
         }
     }
 
-    /// Add headers to download
-    pub fn add_headers(&mut self, mut headers: Vec<SealedHeader>) {
-        headers.sort_by_key(|h| h.number);
-        self.first_block_number = headers.first().map(|h| h.number).unwrap_or_default();
-        // TODO: dedup and push instead resetting
-        self.headers = VecDeque::from(headers);
-    }
-
+    /// Returns the next contiguous request.
     fn next_request_fut(&mut self) -> Option<BodiesRequestFuture<B, C>> {
-        let mut headers = Vec::default();
+        let mut request = Vec::<SealedHeader>::default();
         let mut non_empty_headers = 0;
         while non_empty_headers < self.request_batch_size && !self.headers.is_empty() {
+            if let Some(last) = request.last() {
+                if last.number + 1 != self.headers.front().unwrap().number {
+                    break
+                }
+            }
+
             let next_header = self.headers.pop_front().unwrap();
             if !next_header.is_empty() {
                 non_empty_headers += 1;
             }
-            headers.push(next_header);
+            request.push(next_header);
         }
 
-        if headers.is_empty() {
+        if request.is_empty() {
             None
         } else {
             Some(
                 BodiesRequestFuture::new(Arc::clone(&self.client), Arc::clone(&self.consensus))
-                    .with_headers(headers),
+                    .with_headers(request),
             )
         }
     }
@@ -135,23 +139,33 @@ where
     }
 
     /// Returns a response if it's first block number matches the next expected.
-    fn try_next_buffered(&mut self) -> Option<OrderedBodiesResponse> {
+    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse>> {
         if let Some(next) = self.buffered_responses.peek() {
-            if next.block_number() == self.next_expected_block_number() {
-                return self.buffered_responses.pop()
+            let expected = self.next_expected_block_number();
+            let next_block_rng = next.block_rng();
+
+            if next_block_rng.contains(&expected) {
+                return self.buffered_responses.pop().map(|buffered| {
+                    buffered.0.into_iter().skip_while(|b| b.block_number() < expected).collect()
+                })
+            }
+
+            // Drop buffered response since we passed that range
+            if *next_block_rng.end() < expected {
+                self.buffered_responses.pop();
             }
         }
         None
     }
 }
 
-impl<Client, Consensus> Downloader for ConcurrentDownloader<Client, Consensus>
+impl<B, C> Downloader for ConcurrentDownloader<B, C>
 where
-    Client: BodiesClient,
-    Consensus: ConsensusTrait,
+    B: BodiesClient,
+    C: ConsensusTrait,
 {
-    type Client = Client;
-    type Consensus = Consensus;
+    type Client = B;
+    type Consensus = C;
 
     fn client(&self) -> &Self::Client {
         self.client.borrow()
@@ -159,6 +173,91 @@ where
 
     fn consensus(&self) -> &Self::Consensus {
         self.consensus.borrow()
+    }
+}
+
+impl<B, C> BodyDownloader for ConcurrentDownloader<B, C>
+where
+    B: BodiesClient + 'static,
+    C: ConsensusTrait + 'static,
+{
+    /// Set headers for download.
+    fn set_headers(&mut self, mut headers: Vec<SealedHeader>) {
+        if headers.is_empty() {
+            tracing::warn!(target: "downloaders::bodies", "No new headers added to the download");
+            return
+        }
+
+        // Sort the headers
+        headers.sort_by_key(|h| h.number);
+        let first_block_number = headers.first().unwrap().number;
+
+        // Clear in progress queue
+        self.in_progress_queue.clear();
+
+        // Collect buffered bodies from queue and buffer
+        let mut buffered_bodies = BinaryHeap::<OrderedBlockResponse>::default();
+
+        // Drain currently buffered responses. Retain requested bodies.
+        for buffered in self.buffered_responses.drain() {
+            for body in buffered.0 {
+                if let Some(idx) = headers.iter().position(|h| h.number == body.block_number()) {
+                    headers.remove(idx);
+                    buffered_bodies.push(body.into());
+                }
+            }
+        }
+
+        // Drain queued bodies.
+        for queued in self.queued_bodies.drain(..) {
+            if let Some(idx) = headers.iter().position(|h| h.number == queued.block_number()) {
+                headers.remove(idx);
+                buffered_bodies.push(OrderedBlockResponse(queued));
+            }
+        }
+
+        let mut bodies = buffered_bodies.into_sorted_vec().into_iter().peekable(); // ascending
+
+        // Immediately dispatch requests for block numbers less than the first buffered response
+        let mut headers = headers.into_iter().peekable();
+        while self.has_capacity() &&
+            headers
+                .peek()
+                .and_then(|h| bodies.peek().map(|b| h.number < b.block_number()))
+                .unwrap_or_default()
+        {
+            let mut request = Vec::from([headers.next().unwrap()]);
+            while headers
+                .peek()
+                .map(|h| request.first().unwrap().number + 1 == h.number)
+                .unwrap_or_default()
+            {
+                request.push(headers.next().unwrap());
+            }
+
+            self.in_progress_queue.push(
+                BodiesRequestFuture::new(Arc::clone(&self.client), Arc::clone(&self.consensus))
+                    .with_headers(request),
+            );
+        }
+
+        // Put bodies back into the buffer.
+        while bodies.peek().is_some() {
+            let mut contigious_batch = Vec::from([bodies.next().unwrap().0]);
+            while bodies
+                .peek()
+                .map(|b| b.block_number() == contigious_batch.last().unwrap().block_number() + 1)
+                .unwrap_or_default()
+            {
+                contigious_batch.push(bodies.next().unwrap().0);
+            }
+
+            self.buffered_responses.push(OrderedBodiesResponse(contigious_batch));
+        }
+
+        self.first_block_number = first_block_number;
+        self.latest_queued_block_number = None;
+        self.headers = headers.collect();
     }
 }
 
@@ -195,10 +294,10 @@ where
             // Poll requests
             if let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
                 let response = OrderedBodiesResponse(response);
-                if response.block_number() == this.next_expected_block_number() {
+                if response.first_block_number() == this.next_expected_block_number() {
                     this.queue_bodies(response.0);
                     while let Some(buf_response) = this.try_next_buffered() {
-                        this.queue_bodies(buf_response.0);
+                        this.queue_bodies(buf_response);
                     }
                 } else {
                     this.buffered_responses.push(response);
@@ -252,13 +351,16 @@ enum BodyRequestError {
 
 /// Body request implemented as a [Future].
 ///
-/// TODO: modify
-/// Given a batch of headers, it proceeds to:
-/// 1. Filter for all the non-empty headers
-/// 2. Return early with the header values, if there were no non-empty headers, else..
-/// 3. Request the bodies for the non-empty headers from a peer chosen by the network client
-/// 4. For any non-empty headers, it proceeds to validate the corresponding body from the peer
-/// and return it as part of the response via the [`BlockResponse::Full`] variant.
+/// The future will poll the underlying request until fullfilled.
+/// If the response arrived with insufficient number of bodies, the future
+/// will issue another request until all bodies are collected.
+///
+/// It then proceeds to verify the downloaded bodies. In case of an validation error,
+/// the future will start over.
+///
+/// The future will filter out any empty headers (see [SealedHeader::is_empty]) from the request.
+/// If [BodiesRequestFuture] was initialiazed with all empty headers, no request will be dispatched
+/// and they will be immediately returned upon polling.
 ///
 /// NB: This assumes that peers respond with bodies in the order that they were requested.
 /// This is a reasonable assumption to make as that's [what Geth
@@ -334,8 +436,8 @@ where
     /// If the number of buffered bodies does not equal the number of non empty headers.
     fn try_construct_blocks(&mut self) -> Result<Vec<BlockResponse>, (PeerId, BodyRequestError)> {
         let mut bodies = self.buffer.drain(..);
-        let mut results = Vec::with_capacity(self.headers.len());
-        for (idx, header) in self.headers.iter().cloned().enumerate() {
+        let mut results = Vec::default();
+        for header in self.headers.iter().cloned() {
             if header.is_empty() {
                 results.push(BlockResponse::Empty(header));
             } else {
@@ -438,14 +540,22 @@ impl OrderedBodiesResponse {
     ///
     /// # Panics
     /// If the response vec is empty.
-    fn block_number(&self) -> u64 {
+    fn first_block_number(&self) -> u64 {
         self.0.first().expect("is not empty").block_number()
+    }
+
+    /// Returns the range of the block numbers in the response
+    ///
+    /// # Panics
+    /// If the response vec is empty.
+    fn block_rng(&self) -> RangeInclusive<u64> {
+        self.first_block_number()..=self.0.last().expect("is not empty").block_number()
     }
 }
 
 impl PartialEq for OrderedBodiesResponse {
     fn eq(&self, other: &Self) -> bool {
-        self.block_number() == other.block_number()
+        self.first_block_number() == other.first_block_number()
     }
 }
 
@@ -459,7 +569,7 @@ impl PartialOrd for OrderedBodiesResponse {
 
 impl Ord for OrderedBodiesResponse {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.block_number().cmp(&other.block_number()).reverse()
+        self.first_block_number().cmp(&other.first_block_number()).reverse()
     }
 }
 
@@ -562,7 +672,7 @@ mod tests {
 
     /// Check if future returns empty bodies without dispathing any requests.
     #[tokio::test]
-    async fn returns_empty_bodies() {
+    async fn request_returns_empty_bodies() {
         let headers = random_header_range(0..20, H256::zero());
 
         let client = Arc::new(TestBodiesClient::default());
@@ -608,7 +718,7 @@ mod tests {
         );
         let mut downloader = ConcurrentDownloaderBuilder::default()
             .build(client.clone(), Arc::new(TestConsensus::default()));
-        downloader.add_headers(headers.clone());
+        downloader.set_headers(headers.clone());
 
         assert_matches!(downloader.next().await, Some(res) => assert_eq!(res, zip_blocks(headers, bodies)));
         assert_eq!(client.times_requested(), 1);
