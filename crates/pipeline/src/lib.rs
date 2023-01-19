@@ -20,3 +20,9 @@ pub mod event;
 pub mod state;
 
 pub use event::*;
+
+/// A builder for the Reth pipeline
+pub mod builder;
+
+/// Utilities for initializing a pipeline e.g. chainspecs/genesis
+pub mod utils;

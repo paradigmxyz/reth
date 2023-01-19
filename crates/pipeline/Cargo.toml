@@ -28,6 +28,9 @@ metrics = "0.20.1"
 futures-util = "0.3.25"
 itertools = "0.10.5"
 rayon = "1.6.0"
+eyre = "0.6.8"
+shellexpand = "3.0.0"
+serde_json = "1.0.91"
 
 [dev-dependencies]
 # reth
