@@ -2,7 +2,6 @@
 members = [
     "bin/reth",
     "crate-template",
-    "crates/reth",
     "crates/common/rlp",
     "crates/common/rlp-derive",
     "crates/consensus",
@@ -22,6 +21,7 @@ members = [
     "crates/net/rpc-builder",
     "crates/net/rpc-types",
     "crates/net/downloaders",
+    "crates/pipeline",
     "crates/primitives",
     "crates/stages",
     "crates/storage/codecs",
