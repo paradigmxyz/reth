@@ -6,6 +6,7 @@ use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
+    priority::Priority,
 };
 use reth_primitives::{Header, PeerId, H256};
 use std::{
@@ -159,9 +160,14 @@ impl StateFetcher {
             loop {
                 // poll incoming requests
                 match self.download_requests_rx.poll_next_unpin(cx) {
-                    Poll::Ready(Some(request)) => {
-                        self.queued_requests.push_back(request);
-                    }
+                    Poll::Ready(Some(request)) => match request.get_priority() {
+                        Priority::High => {
+                            self.queued_requests.push_front(request);
+                        }
+                        Priority::Normal => {
+                            self.queued_requests.push_back(request);
+                        }
+                    },
                     Poll::Ready(None) => {
                         unreachable!("channel can't close")
                     }
@@ -344,11 +350,13 @@ pub(crate) enum DownloadRequest {
     GetBlockHeaders {
         request: HeadersRequest,
         response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
+        priority: Priority,
     },
     /// Download the requested headers and send response through channel
     GetBlockBodies {
         request: Vec<H256>,
         response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
+        priority: Priority,
     },
 }
 
@@ -360,6 +368,13 @@ impl DownloadRequest {
         match self {
             DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+        }
+    }
+
+    fn get_priority(&self) -> Priority {
+        match self {
+            DownloadRequest::GetBlockHeaders { request, response, priority } => priority,
+            DownloadRequest::GetBlockBodies { request, response, priority } => priority,
         }
     }
 }

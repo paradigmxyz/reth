@@ -1,6 +1,6 @@
 /// BlockHeader and BodyHeader download request priority
 #[derive(Debug, Clone)]
-enum Priority {
+pub enum Priority {
     High,
     Normal,
 }

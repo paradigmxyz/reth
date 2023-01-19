@@ -1,4 +1,4 @@
-use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult};
+use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult, priority::Priority};
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_primitives::H256;
@@ -13,7 +13,7 @@ pub trait BodiesClient: DownloadClient {
     /// Fetches the block body for the requested block with priority
     async fn get_block_bodies_with_priority(
         &self,
-        request: HeadersRequest,
+        hashes: Vec<H256>,
         priority: Priority,
-    ) -> PeerRequestResult<BlockHeaders>;
+    ) -> PeerRequestResult<Vec<BlockBody>>;
 }

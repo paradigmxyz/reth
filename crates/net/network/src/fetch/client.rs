@@ -10,6 +10,7 @@ use reth_interfaces::p2p::{
     downloader::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
+    priority,
 };
 use reth_primitives::{PeerId, WithPeerId, H256};
 use std::sync::{
@@ -81,7 +82,21 @@ impl HeadersClient for FetchClient {
     /// Sends a `GetBlockHeaders` request to an available peer.
     async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response })?;
+        self.request_tx.send(DownloadRequest::GetBlockHeaders {
+            request,
+            response,
+            priority: Priority::Normal,
+        })?;
+        rx.await?.map(WithPeerId::transform)
+    }
+
+    async fn get_headers_with_priority(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> PeerRequestResult<BlockHeaders> {
+        let (response, rx) = oneshot::channel();
+        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response, priority })?;
         rx.await?.map(WithPeerId::transform)
     }
 }
@@ -90,7 +105,21 @@ impl HeadersClient for FetchClient {
 impl BodiesClient for FetchClient {
     async fn get_block_bodies(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockBodies { request, response })?;
+        self.request_tx.send(DownloadRequest::GetBlockBodies {
+            request,
+            response,
+            priority: Priority::Normal,
+        })?;
+        rx.await?
+    }
+
+    async fn get_block_bodies_with_priority(
+        &self,
+        request: Vec<H256>,
+        priority: Priority,
+    ) -> PeerRequestResult<Vec<BlockBody>> {
+        let (response, rx) = oneshot::channel();
+        self.request_tx.send(DownloadRequest::GetBlockBodies { request, response, priority })?;
         rx.await?
     }
 }
