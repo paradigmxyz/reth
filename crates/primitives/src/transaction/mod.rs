@@ -579,7 +579,7 @@ impl Encodable for TransactionSigned {
     }
 
     fn length(&self) -> usize {
-        self.payload_len_inner(true)
+        self.payload_len_inner()
     }
 }
 
@@ -720,11 +720,11 @@ impl TransactionSigned {
         }
     }
 
-    /// Output the length of the encode_inner()
-    pub(crate) fn payload_len_inner(&self, with_header: bool) -> usize {
+    /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
+    /// `true`.
+    pub(crate) fn payload_len_inner(&self) -> usize {
         match self.transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
                 let payload_length =
                     self.transaction.fields_len() + self.signature.payload_len_legacy(chain_id);
                 // 'header length' + 'payload length'
@@ -734,12 +734,7 @@ impl TransactionSigned {
                 let payload_length = self.transaction.fields_len() + self.signature.payload_len();
                 // 'transaction type byte length' + 'header length' + 'payload length'
                 let len = 1 + length_of_length(payload_length) + payload_length;
-
-                if with_header {
-                    length_of_length(len) + len
-                } else {
-                    len
-                }
+                length_of_length(len) + len
             }
         }
     }
