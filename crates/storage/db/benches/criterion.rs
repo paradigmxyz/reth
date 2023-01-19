@@ -1,5 +1,5 @@
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use reth_db::{
     cursor::DbCursorRW,
@@ -9,6 +9,7 @@ use reth_db::{
     tables::*,
     transaction::DbTxMut,
 };
+use std::time::Instant;
 
 criterion_group!(benches, db, serialization);
 criterion_main!(benches);
@@ -60,35 +61,55 @@ where
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
     let pair = &load_vectors::<T>();
-    group.bench_function(format!("{}.KeyEncode", T::NAME), |b| {
-        b.iter(|| {
-            for (k, _, _, _) in pair {
-                k.clone().encode();
-            }
+    group.bench_function(format!("{}.KeyEncode", T::NAME), move |b| {
+        b.iter_custom(|_| {
+            let pair = pair.clone();
+            let timer = Instant::now();
+            black_box({
+                for (k, _, _, _) in pair {
+                    k.encode();
+                }
+            });
+            timer.elapsed()
         })
     });
 
     group.bench_function(format!("{}.KeyDecode", T::NAME), |b| {
-        b.iter(|| {
-            for (_, k, _, _) in pair {
-                let _ = <T as Table>::Key::decode(k.clone());
-            }
+        b.iter_custom(|_| {
+            let pair = pair.clone();
+            let timer = Instant::now();
+            black_box({
+                for (_, k, _, _) in pair {
+                    let _ = <T as Table>::Key::decode(k);
+                }
+            });
+            timer.elapsed()
         })
     });
 
     group.bench_function(format!("{}.ValueCompress", T::NAME), move |b| {
-        b.iter(move || {
-            for (_, _, v, _) in pair {
-                v.clone().compress();
-            }
+        b.iter_custom(|_| {
+            let pair = pair.clone();
+            let timer = Instant::now();
+            black_box({
+                for (_, _, v, _) in pair {
+                    v.compress();
+                }
+            });
+            timer.elapsed()
         })
     });
 
     group.bench_function(format!("{}.ValueDecompress", T::NAME), |b| {
-        b.iter(|| {
-            for (_, _, _, v) in pair {
-                let _ = <T as Table>::Value::decompress(v.clone());
-            }
+        b.iter_custom(|_| {
+            let pair = pair.clone();
+            let timer = Instant::now();
+            black_box({
+                for (_, _, _, v) in pair {
+                    let _ = <T as Table>::Value::decompress(v);
+                }
+            });
+            timer.elapsed()
         })
     });
 }
@@ -102,21 +123,25 @@ where
     let pair = &load_vectors::<T>();
 
     group.bench_function(format!("{}.SeqWrite", T::NAME), |b| {
-        b.iter(|| {
-            // TODO generic test db
-            let db = create_test_rw_db::<WriteMap>();
+        b.iter_custom(|_| {
+            let pair = pair.clone();
+            let timer = Instant::now();
+            black_box({
+                // TODO generic test db
+                let db = create_test_rw_db::<WriteMap>();
 
-            let tx = db.tx_mut().expect("tx");
-            let mut crsr = tx.cursor_write::<T>().expect("cursor");
+                let tx = db.tx_mut().expect("tx");
+                let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
-            // TODO sort kv before
-            // placeholder: cant insert multiple default values, that's why we're limiting to one
-            // for now.
-            for (k, _, v, _) in &pair[..1] {
-                crsr.insert(k.clone(), v.clone()).expect("submit");
-            }
+                // placeholder: cant insert multiple default values, that's why we're limiting to
+                // one for now.
+                for (k, _, v, _) in pair {
+                    crsr.insert(k, v).expect("submit");
+                }
 
-            tx.inner.commit().unwrap();
+                tx.inner.commit().unwrap();
+            });
+            timer.elapsed()
         })
     });
 }
