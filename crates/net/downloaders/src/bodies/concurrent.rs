@@ -134,7 +134,7 @@ where
                 non_empty_headers += 1;
             }
             headers.push(SealedHeader::new(header, key.hash()));
-            if non_empty_headers >= count || non_empty_headers > self.stream_batch_size {
+            if non_empty_headers >= count || headers.len() >= self.stream_batch_size {
                 break
             }
             canonical_entry = canonical_cursor.next()?;
