@@ -48,6 +48,7 @@ impl From<H256> for ForkHash {
 impl AddAssign<BlockNumber> for ForkHash {
     fn add_assign(&mut self, block: BlockNumber) {
         let blob = block.to_be_bytes();
+        #[allow(clippy::suspicious_op_assign_impl)]
         let initial = (u32::from_be_bytes(self.0) ^ CRC_32_IEEE.algorithm.xorout).reverse_bits();
         let mut digest = CRC_32_IEEE.digest_with_initial(initial);
         digest.update(&blob);
