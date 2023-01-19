@@ -347,48 +347,6 @@ mod tests {
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
-    // TODO:
-    // /// Checks that the stage returns to the pipeline on validation failure.
-    // #[tokio::test]
-    // async fn pre_validation_failure() {
-    //     let (stage_progress, previous_stage) = (1, 20);
-
-    //     // Set up test runner
-    //     let mut runner = BodyTestRunner::default();
-
-    //     let input = ExecInput {
-    //         previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-    //         stage_progress: Some(stage_progress),
-    //     };
-    //     let blocks = runner.seed_execution(input).expect("failed to seed execution");
-
-    //     // Fail validation
-    //     let responses = blocks
-    //         .iter()
-    //         .map(|b| {
-    //             (
-    //                 b.hash(),
-    //                 Err(DownloadError::BlockValidation {
-    //                     hash: b.hash(),
-    //                     error: consensus::Error::BaseFeeMissing,
-    //                 }),
-    //             )
-    //         })
-    //         .collect::<HashMap<_, _>>();
-    //     runner.set_responses(responses);
-
-    //     // Run the stage
-    //     let rx = runner.execute(input);
-
-    //     // Check that the error bubbles up
-    //     assert_matches!(
-    //         rx.await.unwrap(),
-    //         Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
-    //             if out_stage_progress == stage_progress
-    //     );
-    //     assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
-    // }
-
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
     #[tokio::test]
     async fn unwind_missing_tx() {
@@ -457,6 +415,8 @@ mod tests {
         use futures_util::Stream;
         use reth_db::{
             cursor::DbCursorRO,
+            database::Database,
+            mdbx::{Env, WriteMap},
             models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
@@ -538,7 +498,11 @@ mod tests {
 
             fn stage(&self) -> Self::S {
                 BodyStage {
-                    downloader: TestBodyDownloader::new(self.tx.clone(), self.responses.clone()),
+                    downloader: TestBodyDownloader::new(
+                        self.tx.inner_raw(),
+                        self.responses.clone(),
+                        self.batch_size,
+                    ),
                     consensus: self.consensus.clone(),
                     commit_threshold: self.batch_size,
                 }
@@ -574,7 +538,12 @@ mod tests {
 
                         tx.put::<tables::BlockTransitionIndex>(key.number(), block_transition_id)?;
                         tx.put::<tables::BlockBodies>(key, body)?;
-                        tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
+                        if !progress.is_empty() {
+                            tx.put::<tables::BlockOmmers>(
+                                key,
+                                StoredBlockOmmers { ommers: vec![] },
+                            )?;
+                        }
                         Ok(())
                     })?;
                 }
@@ -646,6 +615,7 @@ mod tests {
             ) -> Result<(), TestRunnerError> {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
+                    let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
@@ -678,8 +648,15 @@ mod tests {
                             key.number(), highest_block
                         );
 
+                        let (_, header) = headers_cursor.seek_exact(key)?.expect("to be present");
                         // Validate that ommers exist
-                        assert_matches!(ommers_cursor.seek_exact(key), Ok(Some(_)), "Block ommers are missing");
+                        assert_matches!(
+                            ommers_cursor.seek_exact(key),
+                            Ok(ommers) => {
+                                assert!(if header.is_empty() { ommers.is_none() } else { ommers.is_some() })
+                            },
+                            "Block ommers are missing"
+                        );
 
                         for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
@@ -736,17 +713,21 @@ mod tests {
 
         // TODO(onbjerg): Move
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
-        #[derive(Default)]
+        #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            db: TestTransaction,
+            db: Arc<Env<WriteMap>>,
             responses: HashMap<H256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
         }
 
         impl TestBodyDownloader {
-            pub(crate) fn new(db: TestTransaction, responses: HashMap<H256, BlockBody>) -> Self {
-                Self { db, responses, headers: VecDeque::default(), batch_size: 100 }
+            pub(crate) fn new(
+                db: Arc<Env<WriteMap>>,
+                responses: HashMap<H256, BlockBody>,
+                batch_size: u64,
+            ) -> Self {
+                Self { db, responses, headers: VecDeque::default(), batch_size }
             }
         }
 
@@ -765,7 +746,7 @@ mod tests {
 
         impl BodyDownloader for TestBodyDownloader {
             fn set_header_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
-                self.headers = VecDeque::from(self.db.query(|tx| {
+                self.headers = VecDeque::from(self.db.view(|tx| {
                     let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
                     let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
@@ -781,7 +762,7 @@ mod tests {
                         headers.push(SealedHeader::new(header, hash));
                     }
                     Ok(headers)
-                })?);
+                })??);
                 Ok(())
             }
         }

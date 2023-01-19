@@ -154,7 +154,7 @@ impl Command {
                 let mut stage = BodyStage {
                     downloader: ConcurrentDownloaderBuilder::default()
                         // TODO: config properly
-                        .build(fetch_client.clone(), consensus.clone()),
+                        .build(fetch_client.clone(), consensus.clone(), db.clone()),
                     consensus: consensus.clone(),
                     commit_threshold: num_blocks,
                 };
