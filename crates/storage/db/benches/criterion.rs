@@ -14,6 +14,8 @@ use std::{path::Path, time::Instant};
 criterion_group!(benches, db, serialization);
 criterion_main!(benches);
 
+const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
+
 pub fn db(c: &mut Criterion) {
     let mut group = c.benchmark_group("tables_db");
     group.measurement_time(std::time::Duration::from_millis(200));
@@ -129,7 +131,7 @@ where
 
             // Reset DB
             let _ = std::fs::remove_dir_all(bench_db_path);
-            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, &bench_db_path);
+            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
             // Create TX
             let tx = db.tx_mut().expect("tx");
@@ -147,18 +149,38 @@ where
         })
     });
 
-    group.bench_function(format!("{}.SeqRead", T::NAME), |b| {
-        // Reset DB
-        let _ = std::fs::remove_dir_all(bench_db_path);
-        let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, &bench_db_path);
+    group.bench_function(format!("{}.RandomWrite", T::NAME), |b| {
+        b.iter_custom(|_| {
+            let pair = pair.clone();
 
-        // Prepare data to be read
-        let tx = db.tx_mut().expect("tx");
-        let mut cursor = tx.cursor_write::<T>().expect("cursor");
-        for (k, _, v, _) in pair.clone() {
-            cursor.append(k, v).expect("submit");
-        }
-        tx.inner.commit().unwrap();
+            // Reset DB
+            let _ = std::fs::remove_dir_all(bench_db_path);
+            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+
+            // Create TX
+            let tx = db.tx_mut().expect("tx");
+            let mut crsr = tx.cursor_write::<T>().expect("cursor");
+
+            let timer = Instant::now();
+            let pair = pair
+                .into_iter()
+                .enumerate()
+                .filter(|(i, _)| RANDOM_INDEXES.contains(i))
+                .collect::<Vec<_>>();
+
+            black_box({
+                for (_, (k, _, v, _)) in pair {
+                    crsr.insert(k, v).expect("submit");
+                }
+
+                tx.inner.commit().unwrap();
+            });
+            timer.elapsed()
+        })
+    });
+
+    group.bench_function(format!("{}.SeqRead", T::NAME), |b| {
+        let db = set_up_db::<T>(bench_db_path, pair);
 
         b.iter_custom(|_| {
             // Create TX
@@ -175,6 +197,50 @@ where
             timer.elapsed()
         })
     });
+
+    group.bench_function(format!("{}.RandomRead", T::NAME), |b| {
+        let db = set_up_db::<T>(bench_db_path, pair);
+
+        b.iter_custom(|_| {
+            // Create TX
+            let tx = db.tx().expect("tx");
+
+            let timer = Instant::now();
+            black_box({
+                for index in RANDOM_INDEXES {
+                    let mut cursor = tx.cursor_read::<T>().expect("cursor");
+                    cursor.seek_exact(pair.get(index).unwrap().0.clone()).unwrap();
+                }
+            });
+            timer.elapsed()
+        })
+    });
+}
+
+fn set_up_db<T>(
+    bench_db_path: &Path,
+    pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,
+) -> reth_db::mdbx::Env<WriteMap>
+where
+    T: Table + Default,
+    T::Key: Default + Clone,
+    T::Value: Default + Clone,
+{
+    // Reset DB
+    let _ = std::fs::remove_dir_all(bench_db_path);
+    let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+
+    {
+        // Prepare data to be read
+        let tx = db.tx_mut().expect("tx");
+        let mut cursor = tx.cursor_write::<T>().expect("cursor");
+        for (k, _, v, _) in pair.clone() {
+            cursor.append(k, v).expect("submit");
+        }
+        tx.inner.commit().unwrap();
+    }
+
+    db
 }
 
 include!("./utils.rs");
