@@ -11,7 +11,7 @@
 
 use reth_primitives::{NodeRecord, H256, U256};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::net::SocketAddr;
 
 /// Provides general purpose information about the network.
 pub trait NetworkInfo: Send + Sync {
@@ -34,20 +34,14 @@ pub trait PeersInfo: Send + Sync {
 }
 
 /// The status of the network being ran by the local node.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct NetworkStatus {
     /// The local node client name.
     pub client_name: String,
-    /// The protocols the client is currently running.
-    pub protocols: BTreeMap<String, ProtocolInfo>,
+    /// Information about the Ethereum Wire Protocol.
+    pub eth_protocol_info: EthProtocolInfo,
 }
 
-/// Information about the different protocols that can be run by the node (ETH, )
-#[derive(Serialize, Deserialize, Debug)]
-pub enum ProtocolInfo {
-    /// Information about the Ethereum Wire Protocol.
-    Eth(EthProtocolInfo),
-}
 /// Information about the Ethereum Wire Protocol (ETH)
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct EthProtocolInfo {

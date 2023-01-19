@@ -221,7 +221,7 @@ impl NetworkInfo for NetworkHandle {
     }
 
     fn network_status(&self) -> NetworkStatus {
-        todo!()
+        NetworkStatus::default()
     }
 }
 
