@@ -10,7 +10,7 @@ use std::{
     time::SystemTime,
 };
 
-use crate::constants;
+use reth_primitives::constants;
 
 /// Validate header standalone
 pub fn validate_header_standalone(
