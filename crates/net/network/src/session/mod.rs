@@ -49,6 +49,7 @@ pub struct SessionId(usize);
 
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
+#[derive(Debug)]
 pub(crate) struct SessionManager {
     /// Tracks the identifier for the next session.
     next_id: usize,
@@ -140,6 +141,11 @@ impl SessionManager {
         let id = self.next_id;
         self.next_id += 1;
         SessionId(id)
+    }
+
+    /// Returns the current status of the session.
+    pub(crate) fn status(&self) -> Status {
+        self.status
     }
 
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].

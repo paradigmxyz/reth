@@ -4364,8 +4364,10 @@ dependencies = [
 name = "reth-network-api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "reth-primitives",
  "serde",
+ "tokio",
 ]
 
 [[package]]
