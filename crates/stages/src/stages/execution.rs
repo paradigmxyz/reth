@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,6 +8,8 @@ use reth_db::{
     models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
+    tx::DatabaseIntegrityError,
+    Transaction,
 };
 use reth_executor::{
     executor::AccountChangeSet,

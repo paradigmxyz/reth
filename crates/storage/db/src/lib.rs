@@ -24,3 +24,7 @@ pub mod mdbx {
 pub use abstraction::*;
 pub use reth_interfaces::db::Error;
 pub use tables::*;
+
+/// Read/Write transaction with managed lifecycle for multiple commits
+pub mod tx;
+pub use tx::Transaction;

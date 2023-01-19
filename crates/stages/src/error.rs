@@ -1,8 +1,15 @@
 use crate::pipeline::PipelineEvent;
+use reth_db::tx::DatabaseIntegrityError;
 use reth_interfaces::{consensus, db::Error as DbError, executor};
-use reth_primitives::{BlockNumber, TxNumber, H256};
+use reth_primitives::BlockNumber;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
+
+impl From<DbError> for StageError {
+    fn from(value: DbError) -> Self {
+        StageError::DatabaseIntegrity(DatabaseIntegrityError::Inner(value))
+    }
+}
 
 /// A stage execution error.
 #[derive(Error, Debug)]
@@ -16,9 +23,6 @@ pub enum StageError {
         #[source]
         error: consensus::Error,
     },
-    /// The stage encountered a database error.
-    #[error("An internal database error occurred: {0}")]
-    Database(#[from] DbError),
     #[error("Stage encountered a execution error in block {block}: {error}.")]
     /// The stage encountered a execution error
     // TODO: Probably redundant, should be rolled into `Validation`
@@ -54,69 +58,9 @@ pub enum StageError {
 impl StageError {
     /// If the error is fatal the pipeline will stop.
     pub fn is_fatal(&self) -> bool {
-        matches!(
-            self,
-            StageError::Database(_) |
-                StageError::DatabaseIntegrity(_) |
-                StageError::StageProgress(_) |
-                StageError::Fatal(_)
-        )
+        matches!(self, |StageError::DatabaseIntegrity(_)| StageError::StageProgress(_) |
+            StageError::Fatal(_))
     }
-}
-
-/// A database integrity error.
-/// The sender stage error
-#[derive(Error, Debug)]
-#[allow(missing_docs)]
-pub enum DatabaseIntegrityError {
-    /// The canonical header for a block is missing from the database.
-    #[error("No canonical header for block #{number}")]
-    CanonicalHeader {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// A header is missing from the database.
-    #[error("No header for block #{number} ({hash:?})")]
-    Header {
-        /// The block number key
-        number: BlockNumber,
-        /// The block hash key
-        hash: H256,
-    },
-    /// A ommers are missing.
-    #[error("Block ommers not found for block #{number}")]
-    Ommers {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// A block body is missing.
-    #[error("Block body not found for block #{number}")]
-    BlockBody {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// The transaction is missing
-    #[error("Transaction #{id} not found")]
-    Transaction {
-        /// The transaction id
-        id: TxNumber,
-    },
-    #[error("Block transition not found for block #{number}")]
-    BlockTransition { number: BlockNumber },
-    #[error("Gap in transaction table. Missing tx number #{missing}.")]
-    TransactionsGap { missing: TxNumber },
-    #[error("Gap in transaction signer table. Missing tx number #{missing}.")]
-    TransactionsSignerGap { missing: TxNumber },
-    #[error("Got to the end of transaction table")]
-    EndOfTransactionTable,
-    #[error("Got to the end of the transaction sender table")]
-    EndOfTransactionSenderTable,
-    /// The total difficulty from the block header is missing.
-    #[error("Total difficulty not found for block #{number}")]
-    TotalDifficulty {
-        /// The block number key
-        number: BlockNumber,
-    },
 }
 
 /// A pipeline execution error.

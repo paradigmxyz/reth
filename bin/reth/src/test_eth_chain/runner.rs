@@ -7,14 +7,14 @@ use reth_db::{
     mdbx::{test_utils::create_test_rw_db, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
+    Error as DbError, Transaction,
 };
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, ChainSpec, JsonU256, SealedBlock, SealedHeader,
     StorageEntry, H256, U256,
 };
 use reth_rlp::Decodable;
-use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageId, Transaction};
+use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageId};
 use std::{
     collections::HashMap,
     ffi::OsStr,

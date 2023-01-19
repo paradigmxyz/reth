@@ -1,8 +1,8 @@
 use crate::{
-    db::Transaction, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
-    StageId, UnwindInput,
+    error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput,
 };
-use reth_db::database::Database;
+use reth_db::{database::Database, Transaction};
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_primitives::BlockNumber;
 use std::{

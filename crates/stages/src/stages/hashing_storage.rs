@@ -1,12 +1,11 @@
-use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::TransitionIdAddress,
     tables,
     transaction::{DbTx, DbTxMut},
+    tx::Transaction,
 };
 use reth_primitives::{keccak256, Address, StorageEntry, H160, H256, U256};
 use std::{collections::BTreeMap, fmt::Debug};

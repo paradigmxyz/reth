@@ -1,7 +1,5 @@
-use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
-};
-use reth_db::database::Database;
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use reth_db::{database::Database, tx::Transaction};
 use std::fmt::Debug;
 use tracing::*;
 

@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -9,6 +9,8 @@ use reth_db::{
     models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
+    tx::DatabaseIntegrityError,
+    Transaction,
 };
 use reth_interfaces::{
     consensus::Consensus,

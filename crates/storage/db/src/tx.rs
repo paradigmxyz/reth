@@ -4,7 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use reth_db::{
+use crate::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
     models::{BlockNumHash, StoredBlockBody},
@@ -14,8 +14,6 @@ use reth_db::{
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumber, TransitionId, TxNumber};
-
-use crate::{DatabaseIntegrityError, StageError};
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
@@ -63,6 +61,63 @@ impl<'a, DB: Database> DerefMut for Transaction<'a, DB> {
     }
 }
 
+/// A database integrity error.
+/// The sender stage error
+#[derive(thiserror::Error, Debug)]
+#[allow(missing_docs)]
+pub enum DatabaseIntegrityError {
+    /// The canonical header for a block is missing from the database.
+    #[error("No canonical header for block #{number}")]
+    CanonicalHeader {
+        /// The block number key
+        number: BlockNumber,
+    },
+    /// A header is missing from the database.
+    #[error("No header for block #{number} ({hash:?})")]
+    Header {
+        /// The block number key
+        number: BlockNumber,
+        /// The block hash key
+        hash: BlockHash,
+    },
+    /// A ommers are missing.
+    #[error("Block ommers not found for block #{number}")]
+    Ommers {
+        /// The block number key
+        number: BlockNumber,
+    },
+    /// A block body is missing.
+    #[error("Block body not found for block #{number}")]
+    BlockBody {
+        /// The block number key
+        number: BlockNumber,
+    },
+    /// The transaction is missing
+    #[error("Transaction #{id} not found")]
+    Transaction {
+        /// The transaction id
+        id: TxNumber,
+    },
+    #[error("Block transition not found for block #{number}")]
+    BlockTransition { number: BlockNumber },
+    #[error("Gap in transaction table. Missing tx number #{missing}.")]
+    TransactionsGap { missing: TxNumber },
+    #[error("Gap in transaction signer table. Missing tx number #{missing}.")]
+    TransactionsSignerGap { missing: TxNumber },
+    #[error("Got to the end of transaction table")]
+    EndOfTransactionTable,
+    #[error("Got to the end of the transaction sender table")]
+    EndOfTransactionSenderTable,
+    /// The total difficulty from the block header is missing.
+    #[error("Total difficulty not found for block #{number}")]
+    TotalDifficulty {
+        /// The block number key
+        number: BlockNumber,
+    },
+    #[error(transparent)]
+    Inner(#[from] Error),
+}
+
 impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
@@ -103,7 +158,7 @@ where
     }
 
     /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
+    pub fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, DatabaseIntegrityError> {
         let hash = self
             .get::<tables::CanonicalHeaders>(number)?
             .ok_or(DatabaseIntegrityError::CanonicalHeader { number })?;
@@ -111,15 +166,18 @@ where
     }
 
     /// Query for block hash by block number and return it as [BlockNumHash] key
-    pub(crate) fn get_block_numhash(
+    pub fn get_block_numhash(
         &self,
         number: BlockNumber,
-    ) -> Result<BlockNumHash, StageError> {
+    ) -> Result<BlockNumHash, DatabaseIntegrityError> {
         Ok((number, self.get_block_hash(number)?).into())
     }
 
     /// Query the block body by [BlockNumHash] key
-    pub(crate) fn get_block_body(&self, key: BlockNumHash) -> Result<StoredBlockBody, StageError> {
+    pub fn get_block_body(
+        &self,
+        key: BlockNumHash,
+    ) -> Result<StoredBlockBody, DatabaseIntegrityError> {
         let body = self
             .get::<tables::BlockBodies>(key)?
             .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
@@ -127,19 +185,19 @@ where
     }
 
     /// Query the block body by number
-    pub(crate) fn get_block_body_by_num(
+    pub fn get_block_body_by_num(
         &self,
         number: BlockNumber,
-    ) -> Result<StoredBlockBody, StageError> {
+    ) -> Result<StoredBlockBody, DatabaseIntegrityError> {
         let key = self.get_block_numhash(number)?;
         self.get_block_body(key)
     }
 
     /// Query the last transition of the block by [BlockNumber] key
-    pub(crate) fn get_block_transition(
+    pub fn get_block_transition(
         &self,
         key: BlockNumber,
-    ) -> Result<TransitionId, StageError> {
+    ) -> Result<TransitionId, DatabaseIntegrityError> {
         let last_transition_id = self
             .get::<tables::BlockTransitionIndex>(key)?
             .ok_or(DatabaseIntegrityError::BlockTransition { number: key })?;
@@ -148,10 +206,10 @@ where
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
     /// block. Returns Zero/Zero for Genesis.
-    pub(crate) fn get_next_block_ids(
+    pub fn get_next_block_ids(
         &self,
         block: BlockNumber,
-    ) -> Result<(TxNumber, TransitionId), StageError> {
+    ) -> Result<(TxNumber, TransitionId), DatabaseIntegrityError> {
         if block == 0 {
             return Ok((0, 0))
         }
@@ -166,7 +224,7 @@ where
 
     /// Unwind table by some number key
     #[inline]
-    pub(crate) fn unwind_table_by_num<T>(&self, num: u64) -> Result<(), Error>
+    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<(), Error>
     where
         DB: Database,
         T: Table<Key = u64>,
@@ -176,7 +234,7 @@ where
 
     /// Unwind table by composite block number hash key
     #[inline]
-    pub(crate) fn unwind_table_by_num_hash<T>(&self, block: BlockNumber) -> Result<(), Error>
+    pub fn unwind_table_by_num_hash<T>(&self, block: BlockNumber) -> Result<(), Error>
     where
         DB: Database,
         T: Table<Key = BlockNumHash>,
@@ -185,11 +243,7 @@ where
     }
 
     /// Unwind the table to a provided block
-    pub(crate) fn unwind_table<T, F>(
-        &self,
-        block: BlockNumber,
-        mut selector: F,
-    ) -> Result<(), Error>
+    pub fn unwind_table<T, F>(&self, block: BlockNumber, mut selector: F) -> Result<(), Error>
     where
         DB: Database,
         T: Table,
@@ -208,7 +262,7 @@ where
     }
 
     /// Unwind a table forward by a [Walker] on another table
-    pub(crate) fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), Error>
+    pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), Error>
     where
         DB: Database,
         T1: Table,

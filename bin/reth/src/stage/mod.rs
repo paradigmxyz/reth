@@ -11,12 +11,13 @@ use crate::{
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 
+use reth_db::Transaction;
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
-    ExecInput, Stage, StageId, Transaction, UnwindInput,
+    ExecInput, Stage, StageId, UnwindInput,
 };
 
 use clap::{Parser, ValueEnum};

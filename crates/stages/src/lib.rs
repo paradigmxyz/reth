@@ -14,7 +14,6 @@
 //!
 //! - `stage_progress{stage}`: The block number each stage has currently reached.
 
-mod db;
 mod error;
 mod id;
 mod pipeline;
@@ -30,7 +29,6 @@ pub mod stages;
 /// Stage metrics.
 pub mod metrics;
 
-pub use db::Transaction;
 pub use error::*;
 pub use id::*;
 pub use pipeline::*;
