@@ -1,20 +1,19 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::{Database, DatabaseGAT},
+    database::Database,
     models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -78,12 +77,16 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // TODO:
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::bodies");
+        let ((start_block, end_block), _) = match input.next_action(None) {
+            ExecAction::Run { range, capped } => (range.into_inner(), capped),
+            ExecAction::Done { stage_progress, target } => {
+                info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
+                return Ok(ExecOutput { stage_progress, done: true })
+            }
+        };
 
-        let bodies_to_download = self.bodies_to_download::<DB>(tx, start_block, end_block)?;
-        self.downloader.set_headers(bodies_to_download);
+        // Update the header range on the downloader
+        self.downloader.set_header_range(start_block..end_block + 1)?;
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
@@ -172,7 +175,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let done = !capped && highest_block == end_block;
+        let done = highest_block == end_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: highest_block, done })
     }
@@ -234,35 +237,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     }
 }
 
-impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
-    /// Computes a list of `(block_number, header_hash)` for blocks that we need to download bodies
-    /// for.
-    ///
-    /// This skips empty blocks (i.e. no ommers, no transactions).
-    fn bodies_to_download<DB: Database>(
-        &self,
-        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
-        starting_block: BlockNumber,
-        target: BlockNumber,
-    ) -> Result<Vec<SealedHeader>, StageError> {
-        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
-        let mut header_hashes_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let mut walker = header_hashes_cursor
-            .walk(starting_block)?
-            .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= target));
-
-        let mut bodies_to_download = Vec::new();
-        while let Some(Ok((block_number, header_hash))) = walker.next() {
-            let (_, header) = header_cursor.seek_exact((block_number, header_hash).into())?.ok_or(
-                DatabaseIntegrityError::Header { number: block_number, hash: header_hash },
-            )?;
-            bodies_to_download.push(SealedHeader::new(header, header_hash));
-        }
-
-        Ok(bodies_to_download)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,11 +245,6 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{
-        consensus,
-        p2p::error::{DownloadError, RequestError},
-    };
-    use std::collections::HashMap;
     use test_utils::*;
 
     stage_test_suite_ext!(BodyTestRunner);
@@ -530,12 +499,13 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             consensus::Consensus,
+            db,
             p2p::{
                 bodies::{
                     client::BodiesClient, downloader::BodyDownloader, response::BlockResponse,
                 },
-                downloader::{DownloadClient, DownloadStream, Downloader},
-                error::{DownloadResult, PeerRequestResult},
+                downloader::{DownloadClient, Downloader},
+                error::PeerRequestResult,
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -545,6 +515,7 @@ mod tests {
         use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{
             collections::{HashMap, VecDeque},
+            ops::Range,
             pin::Pin,
             sync::Arc,
             task::{Context, Poll},
@@ -602,7 +573,7 @@ mod tests {
 
             fn stage(&self) -> Self::S {
                 BodyStage {
-                    downloader: TestBodyDownloader::new(self.responses.clone()),
+                    downloader: TestBodyDownloader::new(self.tx.clone(), self.responses.clone()),
                     consensus: self.consensus.clone(),
                     commit_threshold: self.batch_size,
                 }
@@ -635,7 +606,6 @@ mod tests {
 
                         let last_transition_id = progress.body.len() as u64;
                         let block_transition_id = last_transition_id + 1; // for block reward
-                        println!("Bodies tx:{}", progress.body.len());
 
                         tx.put::<tables::BlockTransitionIndex>(key.number(), block_transition_id)?;
                         tx.put::<tables::BlockBodies>(key, body)?;
@@ -801,16 +771,17 @@ mod tests {
 
         // TODO(onbjerg): Move
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
-        #[derive(Debug, Default, Clone)]
+        #[derive(Default)]
         pub(crate) struct TestBodyDownloader {
+            db: TestTransaction,
             responses: HashMap<H256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
         }
 
         impl TestBodyDownloader {
-            pub(crate) fn new(responses: HashMap<H256, BlockBody>) -> Self {
-                Self { responses, headers: VecDeque::default(), batch_size: 100 }
+            pub(crate) fn new(db: TestTransaction, responses: HashMap<H256, BlockBody>) -> Self {
+                Self { db, responses, headers: VecDeque::default(), batch_size: 100 }
             }
         }
 
@@ -828,14 +799,31 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn set_headers(&mut self, headers: Vec<SealedHeader>) {
-                self.headers = VecDeque::from(headers);
+            fn set_header_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
+                self.headers = VecDeque::from(self.db.query(|tx| {
+                    let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+
+                    let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+                    let walker = canonical_cursor.walk(range.start)?.take_while(|entry| {
+                        entry.as_ref().map(|(num, _)| *num < range.end).unwrap_or_default()
+                    });
+
+                    let mut headers = Vec::default();
+                    for entry in walker {
+                        let (num, hash) = entry?;
+                        let (_, header) =
+                            header_cursor.seek_exact((num, hash).into())?.expect("missing header");
+                        headers.push(SealedHeader::new(header, hash));
+                    }
+                    Ok(headers)
+                })?);
+                Ok(())
             }
         }
 
         impl Stream for TestBodyDownloader {
             type Item = Vec<BlockResponse>;
-            fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
                 if this.headers.is_empty() {

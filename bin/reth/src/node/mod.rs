@@ -165,7 +165,7 @@ impl Command {
             .push(BodyStage {
                 downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
                     // TODO: config properly
-                    .build(fetch_client.clone(), consensus.clone()),
+                    .build(fetch_client.clone(), consensus.clone(), db.clone()),
                 consensus: consensus.clone(),
                 commit_threshold: config.stages.bodies.commit_threshold,
             })

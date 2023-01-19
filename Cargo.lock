@@ -4142,6 +4142,7 @@ dependencies = [
  "futures",
  "futures-util",
  "once_cell",
+ "reth-db",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
