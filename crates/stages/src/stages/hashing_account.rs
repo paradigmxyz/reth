@@ -235,8 +235,7 @@ mod tests {
                 &self,
                 blocks: Vec<SealedBlock>,
             ) -> Result<(), TestRunnerError> {
-                let mut blocks_iter = blocks.iter();
-                while let Some(block) = blocks_iter.next() {
+                for block in blocks.iter() {
                     self.tx.commit(|tx| {
                         insert_canonical_block(tx, block, true).unwrap();
                         Ok(())
@@ -248,10 +247,9 @@ mod tests {
 
             pub(crate) fn insert_accounts(
                 &self,
-                accounts: &Vec<(Address, Account)>,
+                accounts: &[(Address, Account)],
             ) -> Result<(), TestRunnerError> {
-                let mut accs_iter = accounts.iter();
-                while let Some((addr, acc)) = accs_iter.next() {
+                for (addr, acc) in accounts.iter() {
                     self.tx.commit(|tx| {
                         tx.put::<tables::PlainAccountState>(*addr, *acc)?;
                         Ok(())
