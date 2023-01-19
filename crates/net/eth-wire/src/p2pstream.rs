@@ -391,17 +391,6 @@ where
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.as_mut();
 
-        match this.inner.poll_ready_unpin(cx) {
-            Poll::Pending => {}
-            Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
-            Poll::Ready(Ok(())) => {
-                let flushed = this.poll_flush(cx);
-                if flushed.is_ready() {
-                    return flushed
-                }
-            }
-        }
-
         // poll the pinger to determine if we should send a ping
         match this.pinger.poll_ping(cx) {
             Poll::Pending => {}
@@ -424,6 +413,17 @@ where
 
                 // End the stream after ping related error
                 return Poll::Ready(Ok(()))
+            }
+        }
+
+        match this.inner.poll_ready_unpin(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
+            Poll::Ready(Ok(())) => {
+                let flushed = this.poll_flush(cx);
+                if flushed.is_ready() {
+                    return flushed
+                }
             }
         }
 
