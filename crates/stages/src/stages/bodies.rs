@@ -193,8 +193,8 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
 
-        let mut entry = body_cursor.last()?;
-        while let Some((key, body)) = entry {
+        let mut rev_walker = body_cursor.walk_back(None)?;
+        while let Some((key, body)) = rev_walker.next().transpose()? {
             if key.number() <= input.unwind_to {
                 break
             }
@@ -225,9 +225,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             }
 
             // Delete the current body value
-            body_cursor.delete_current()?;
-            // Move the cursor to the previous value
-            entry = body_cursor.prev()?;
+            tx.delete::<tables::BlockBodies>(key, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
