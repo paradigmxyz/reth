@@ -11,9 +11,6 @@ description = "Network interfaces"
 # reth
 reth-primitives = { path = "../../primitives" }
 
-# async/futures
-tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
-
 # io
 serde = { version = "1.0", features = ["derive"] }
 

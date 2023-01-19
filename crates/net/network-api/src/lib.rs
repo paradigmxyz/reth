@@ -12,17 +12,19 @@
 use async_trait::async_trait;
 use reth_primitives::{NodeRecord, H256, U256};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
-use tokio::sync::oneshot;
+use std::{error::Error, net::SocketAddr};
 
 /// Provides general purpose information about the network.
 #[async_trait]
 pub trait NetworkInfo: Send + Sync {
+    /// Associated error type for the network implementation.
+    type Error: Send + Sync + Error;
+
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
 
     /// Returns the current status of the network being ran by the local node.
-    async fn network_status(&self) -> Result<NetworkStatus, oneshot::error::RecvError>;
+    async fn network_status(&self) -> Result<NetworkStatus, Self::Error>;
 }
 
 /// Provides general purpose information about Peers in the network.

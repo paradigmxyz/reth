@@ -4367,7 +4367,6 @@ dependencies = [
  "async-trait",
  "reth-primitives",
  "serde",
- "tokio",
 ]
 
 [[package]]

@@ -227,11 +227,13 @@ impl PeersInfo for NetworkHandle {
 
 #[async_trait]
 impl NetworkInfo for NetworkHandle {
+    type Error = oneshot::error::RecvError;
+
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
     }
 
-    async fn network_status(&self) -> Result<NetworkStatus, oneshot::error::RecvError> {
+    async fn network_status(&self) -> Result<NetworkStatus, Self::Error> {
         let status = self.get_status().await?;
 
         Ok(NetworkStatus {
