@@ -307,6 +307,11 @@ where
         self.swarm.state().fetch_client()
     }
 
+    /// Returns the current [`Status`] for the local node.
+    pub fn status(&self) -> Status {
+        self.swarm.sessions().status()
+    }
+
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &mut self,
@@ -498,6 +503,9 @@ where
             }
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
+            }
+            NetworkHandleMessage::GetStatus(tx) => {
+                let _ = tx.send(self.status());
             }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
                 if let Some(transition) =
