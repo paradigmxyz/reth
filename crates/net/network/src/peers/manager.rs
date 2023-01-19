@@ -317,6 +317,10 @@ impl PeersManager {
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
                 } else {
+                    // reset the peer's state
+                    // we reset the backoff counter since we're able to establish a succesful
+                    // session to that peer
+                    entry.get_mut().backoff_counter = 0;
                     entry.get_mut().state = PeerConnectionState::Idle;
                     return
                 }

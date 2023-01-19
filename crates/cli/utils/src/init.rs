@@ -1,4 +1,3 @@
-use crate::chainspec::Genesis;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -6,7 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, Header, H256};
+use reth_primitives::{Account, Genesis, Header, H256};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -52,7 +51,7 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, genesis: Genesis) -> Result<H256,
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
     tx.put::<tables::HeaderNumbers>(hash, 0)?;
     tx.put::<tables::BlockBodies>((0, hash).into(), Default::default())?;
-    tx.put::<tables::BlockTransitionIndex>((0, hash).into(), 0)?;
+    tx.put::<tables::BlockTransitionIndex>(0, 0)?;
     tx.put::<tables::HeaderTD>((0, hash).into(), header.difficulty.into())?;
     tx.put::<tables::Headers>((0, hash).into(), header)?;
 

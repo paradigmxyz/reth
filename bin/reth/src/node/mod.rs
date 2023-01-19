@@ -5,28 +5,26 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::{init_db, init_genesis},
-        parse_socket_address,
-    },
+    utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
     NetworkOpts,
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
+use reth_cli_utils::init::init_genesis;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
-use reth_executor::Config as ExecutorConfig;
 use reth_interfaces::consensus::ForkchoiceState;
+use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, NodeRecord, H256};
+use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
-        bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
+        bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
+        hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
         sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
     PipelineEvent, StageId,
@@ -68,7 +66,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecification,
+    chain: ChainSpec,
 
     /// Enable Prometheus metrics.
     ///
@@ -87,6 +85,9 @@ pub struct Command {
 
     #[arg(long, value_delimiter = ',')]
     bootnodes: Option<Vec<NodeRecord>>,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 impl Command {
@@ -119,17 +120,18 @@ impl Command {
             HeaderMetrics::describe();
         }
 
-        let chain_id = self.chain.consensus.chain_id;
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
-        let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
+        let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
+        info!(target: "reth::cli", ?genesis, "Inserted genesis");
+
+        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
         let network = config
             .network_config(
                 db.clone(),
-                chain_id,
-                genesis_hash,
+                self.chain.clone(),
                 self.network.disable_discovery,
                 self.bootnodes.clone(),
+                self.nat,
             )
             .start_network()
             .await?;
@@ -178,9 +180,15 @@ impl Command {
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
             .push(ExecutionStage {
-                config: ExecutorConfig::new_ethereum(),
+                chain_spec: self.chain.clone(),
                 commit_threshold: config.stages.execution.commit_threshold,
-            });
+            })
+            // This Merkle stage is used only on unwind
+            .push(MerkleStage { is_execute: false })
+            .push(AccountHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
+            .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
+            // This merkle stage is used only for execute
+            .push(MerkleStage { is_execute: true });
 
         if let Some(tip) = self.tip {
             debug!(target: "reth::cli", %tip, "Tip manually set");

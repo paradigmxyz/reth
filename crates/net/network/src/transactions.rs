@@ -558,7 +558,7 @@ pub enum NetworkTransactionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NetworkConfig, NetworkManager};
+    use crate::{NetworkConfigBuilder, NetworkManager};
     use reth_interfaces::sync::{SyncState, SyncStateUpdater};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::testing_pool;
@@ -572,7 +572,7 @@ mod tests {
 
         let client = Arc::new(NoopProvider::default());
         let pool = testing_pool();
-        let config = NetworkConfig::builder(Arc::clone(&client), secret_key).build();
+        let config = NetworkConfigBuilder::new(secret_key).build(Arc::clone(&client));
         let (handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
