@@ -123,7 +123,6 @@ where
                 self.next_request_block_number,
                 self.request_batch_size,
             );
-
             // need to shift the tracked request block number based on the number of requested
             // headers so follow-up requests will use that as start.
             self.next_request_block_number -= request.limit;
@@ -272,7 +271,6 @@ where
 
                 // This is the next block we need to start issuing requests from
                 let parent_block_number = target.number.saturating_sub(1);
-
                 self.on_block_number_update(target.number, parent_block_number);
 
                 self.queued_validated_headers.push(target);
@@ -514,6 +512,8 @@ where
             SyncTarget::Gap(existing) => {
                 let target = existing.parent_hash;
                 if target != self.sync_target.hash {
+                    // there could be a sync target request in progress
+                    self.sync_target_request.take();
                     // If the target has changed, update the request pointers based on the new
                     // targeted block number
                     let parent_block_number = existing.number.saturating_sub(1);
@@ -707,6 +707,7 @@ impl Ord for OrderedHeadersResponse {
 }
 
 /// Type returned if a bad response was processed
+#[derive(Debug)]
 struct HeadersResponseError {
     request: HeadersRequest,
     peer_id: Option<PeerId>,

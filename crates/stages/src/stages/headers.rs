@@ -439,7 +439,7 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader_factory: Box::new(move || {
-                        LinearDownloadBuilder::default().build(
+                        LinearDownloadBuilder::default().stream_batch_size(500).build(
                             consensus.clone(),
                             client.clone(),
                             Default::default(),
@@ -550,6 +550,7 @@ mod tests {
     #[tokio::test]
     async fn execute_from_previous_progress() {
         let mut runner = HeadersTestRunner::with_linear_downloader();
+        // pick range that's larger than the configured headers batch size
         let (stage_progress, previous_stage) = (600, 1200);
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
@@ -567,11 +568,10 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);
 
-        let rx = runner.execute(input);
-
         runner.client.clear().await;
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
 
+        let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
         assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
