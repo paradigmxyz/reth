@@ -1,6 +1,7 @@
 //! Database debugging tool
 use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
+use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
@@ -11,7 +12,11 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use tracing::info;
+use std::collections::BTreeMap;
+use tracing::{error, info};
+
+/// DB List TUI
+mod tui;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
@@ -78,6 +83,17 @@ impl Command {
         match &self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
+                let mut stats_table = ComfyTable::new();
+                stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+                stats_table.set_header([
+                    "Table Name",
+                    "# Entries",
+                    "Branch Pages",
+                    "Leaf Pages",
+                    "Overflow Pages",
+                    "Total Size (KB)",
+                ]);
+
                 tool.db.view(|tx| {
                     for table in tables::TABLES.iter().map(|(_, name)| name) {
                         let table_db =
@@ -97,22 +113,69 @@ impl Command {
                         let overflow_pages = stats.overflow_pages();
                         let num_pages = leaf_pages + branch_pages + overflow_pages;
                         let table_size = page_size * num_pages;
-                        info!(
-                            target: "reth::cli",
-                            "Table {} has {} entries (total size: {} KB)",
-                            table,
-                            stats.entries(),
-                            table_size / 1024
-                        );
+
+                        let mut row = Row::new();
+                        row.add_cell(Cell::new(table))
+                            .add_cell(Cell::new(stats.entries()))
+                            .add_cell(Cell::new(branch_pages))
+                            .add_cell(Cell::new(leaf_pages))
+                            .add_cell(Cell::new(overflow_pages))
+                            .add_cell(Cell::new(table_size / 1024));
+                        stats_table.add_row(row);
                     }
                     Ok::<(), eyre::Report>(())
                 })??;
+
+                println!("{stats_table}");
             }
             Subcommands::Seed { len } => {
                 tool.seed(*len)?;
             }
             Subcommands::List(args) => {
-                tool.list(args)?;
+                macro_rules! table_tui {
+                    ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
+                        match $arg {
+                            $(stringify!($table) => {
+                                tool.db.view(|tx| {
+                                    let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
+                                    let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+                                    let total_entries = stats.entries();
+                                    if $start > total_entries - 1 {
+                                        error!(
+                                            target: "reth::cli",
+                                            "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
+                                            start = $start,
+                                            final_entry_idx = total_entries - 1,
+                                            table = stringify!($table)
+                                        );
+                                        return Ok(());
+                                    }
+                                    let map = tool.list::<tables::$table>($start, $len)?;
+                                    tui::DbListTUI::<tables::$table>::show_tui(map, $start, total_entries)
+                                })??
+                            },)*
+                            _ => {
+                                error!(target: "reth::cli", "Unknown table.");
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+
+                table_tui!(args.table.as_str(), args.start, args.len => [
+                    CanonicalHeaders,
+                    HeaderTD,
+                    HeaderNumbers,
+                    Headers,
+                    BlockBodies,
+                    BlockOmmers,
+                    TxHashNumber,
+                    PlainAccountState,
+                    BlockTransitionIndex,
+                    TxTransitionIndex,
+                    SyncStage,
+                    Transactions
+                ]);
             }
             Subcommands::Drop => {
                 tool.drop(&self.db)?;
@@ -150,41 +213,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 
-    /// Lists the given table data
-    fn list(&mut self, args: &ListArgs) -> Result<()> {
-        macro_rules! list_tables {
-            ($arg:expr, $start:expr, $len:expr  => [$($table:ident,)*]) => {
-                match $arg {
-                    $(stringify!($table) => {
-                        self.list_table::<tables::$table>($start, $len)?
-                    },)*
-                    _ => {
-                        tracing::error!(target: "reth::cli", "Unknown table.");
-                        return Ok(())
-                    }
-                }
-            };
-        }
-
-        list_tables!(args.table.as_str(), args.start, args.len => [
-            CanonicalHeaders,
-            HeaderTD,
-            HeaderNumbers,
-            Headers,
-            BlockBodies,
-            BlockOmmers,
-            TxHashNumber,
-            PlainAccountState,
-            BlockTransitionIndex,
-            TxTransitionIndex,
-            SyncStage,
-            Transactions,
-        ]);
-
-        Ok(())
-    }
-
-    fn list_table<T: Table>(&mut self, start: usize, len: usize) -> Result<()> {
+    /// Grabs the contents of the table within a certain index range and places the
+    /// entries into a [HashMap].
+    fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<BTreeMap<T::Key, T::Value>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
@@ -195,8 +226,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             walker.skip(start).take(len).collect::<Vec<_>>()
         })?;
 
-        println!("{data:?}");
-        Ok(())
+        data.into_iter()
+            .collect::<Result<BTreeMap<T::Key, T::Value>, _>>()
+            .map_err(|e| eyre::eyre!(e))
     }
 
     fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
