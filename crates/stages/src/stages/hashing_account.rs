@@ -175,7 +175,7 @@ mod tests {
     use reth_provider::insert_canonical_block;
     use test_utils::*;
 
-    stage_test_suite_ext!(AccountHashingTestRunner);
+    stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
     async fn execute_below_clean_threshold() {

@@ -295,7 +295,7 @@ mod tests {
     use reth_interfaces::{p2p::error::RequestError, test_utils::generators::random_header};
     use test_runner::HeadersTestRunner;
 
-    stage_test_suite!(HeadersTestRunner);
+    stage_test_suite!(HeadersTestRunner, headers);
 
     /// Check that the execution errors on empty database or
     /// prev progress missing from the database.
