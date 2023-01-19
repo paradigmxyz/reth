@@ -467,7 +467,7 @@ mod tests {
         }
     }
 
-    stage_test_suite!(HeadersTestRunner);
+    stage_test_suite!(HeadersTestRunner, headers);
 
     /// Check that the execution errors on empty database or
     /// prev progress missing from the database.
