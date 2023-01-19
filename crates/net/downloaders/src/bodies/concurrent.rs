@@ -626,9 +626,9 @@ impl Default for ConcurrentDownloaderBuilder {
     fn default() -> Self {
         Self {
             request_batch_size: 100,
-            stream_batch_size: 100,
-            max_concurrent_requests: 10,
-            max_buffered_responses: 1000,
+            stream_batch_size: 1000,
+            max_concurrent_requests: 100,
+            max_buffered_responses: 10000,
         }
     }
 }
