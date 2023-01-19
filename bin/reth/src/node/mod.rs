@@ -162,13 +162,9 @@ impl Command {
             })
             .push(BodyStage {
                 downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        consensus.clone(),
-                    )
-                    .with_batch_size(config.stages.bodies.downloader_batch_size)
-                    .with_retries(config.stages.bodies.downloader_retries)
-                    .with_concurrency(config.stages.bodies.downloader_concurrency),
+                    bodies::concurrent::ConcurrentDownloaderBuilder::default()
+                        // TODO: config properly
+                        .build(fetch_client.clone(), consensus.clone()),
                 ),
                 consensus: consensus.clone(),
                 commit_threshold: config.stages.bodies.commit_threshold,
