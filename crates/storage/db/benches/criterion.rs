@@ -136,6 +136,7 @@ where
             let tx = db.tx_mut().expect("tx");
             let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
+            let timer = Instant::now();
             black_box({
                 for (k, _, v, _) in pair {
                     crsr.append(k, v).expect("submit");
