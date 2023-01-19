@@ -278,7 +278,7 @@ mod tests {
     use std::collections::HashMap;
     use test_utils::*;
 
-    stage_test_suite_ext!(BodyTestRunner);
+    stage_test_suite_ext!(BodyTestRunner, body);
 
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]
