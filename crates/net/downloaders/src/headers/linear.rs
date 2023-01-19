@@ -25,7 +25,7 @@ use std::{
 };
 use tracing::trace;
 
-/// Download headers concurrently.
+/// Downloads headers concurrently.
 ///
 /// This [Downloader] downloads headers using the configured [HeadersClient].
 /// Headers can be requested by hash or block number and take a `limit` parameter. This downloader
@@ -74,8 +74,6 @@ pub struct LinearDownloader<C, H> {
     ///
     /// Note: headers are sorted from high to low
     queued_validated_headers: Vec<SealedHeader>,
-    /// Whether this stream is terminated
-    is_terminated: bool,
 }
 
 // === impl LinearDownloader ===
@@ -444,7 +442,6 @@ where
 
     /// Marks the stream as terminated
     fn terminate(&mut self) {
-        self.is_terminated = true;
         self.clear();
     }
 
@@ -549,10 +546,6 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if this.is_terminated {
-            return Poll::Ready(None)
-        }
-
         // If we have a new tip request we need to complete that first before we send batched
         // requests
         while let Some(mut req) = this.sync_target_request.take() {
@@ -628,7 +621,6 @@ where
         if this.in_progress_queue.is_empty() {
             let next_batch = this.split_next_batch();
             if next_batch.is_empty() {
-                this.terminate();
                 return Poll::Ready(None)
             }
             return Poll::Ready(Some(next_batch))
