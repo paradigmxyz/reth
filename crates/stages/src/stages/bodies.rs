@@ -444,41 +444,6 @@ mod tests {
         assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
     }
 
-    // TODO:
-    // /// Checks that the stage exits if the downloader times out
-    // /// TODO: We should probably just exit as "OK", commit the blocks we downloaded successfully
-    // and /// try again?
-    // #[tokio::test]
-    // async fn downloader_timeout() {
-    //     let (stage_progress, previous_stage) = (1, 2);
-
-    //     // Set up test runner
-    //     let mut runner = BodyTestRunner::default();
-    //     let input = ExecInput {
-    //         previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-    //         stage_progress: Some(stage_progress),
-    //     };
-    //     let blocks = runner.seed_execution(input).expect("failed to seed execution");
-
-    //     // overwrite responses
-    //     let header = blocks.last().unwrap();
-    //     runner.set_responses(HashMap::from([(
-    //         header.hash(),
-    //         Err(DownloadError::RequestError(RequestError::Timeout)),
-    //     )]));
-
-    //     // Run the stage
-    //     let rx = runner.execute(input);
-
-    //     // Check that the error bubbles up
-    //     assert_matches!(
-    //         rx.await.unwrap(),
-    //         Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
-    //             if out_stage_progress == stage_progress
-    //     );
-    //     assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
-    // }
-
     mod test_utils {
         use crate::{
             stages::bodies::BodyStage,
