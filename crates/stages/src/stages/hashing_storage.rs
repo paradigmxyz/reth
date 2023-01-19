@@ -294,10 +294,10 @@ mod tests {
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
-            let mut iter = blocks.iter();
+            let iter = blocks.iter();
             let (mut transition_id, mut tx_id) = (0, 0);
 
-            while let Some(progress) = iter.next() {
+            for progress in iter {
                 // Insert last progress data
                 self.tx.commit(|tx| {
                     let key: BlockNumHash = (progress.number, progress.hash()).into();
@@ -423,9 +423,9 @@ mod tests {
             let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
             let prev_entry = storage_cursor
                 .seek_by_key_subkey(tid_address.address(), entry.key)?
-                .and_then(|e| {
+                .map(|e| {
                     storage_cursor.delete_current().expect("failed to delete entry");
-                    Some(e)
+                    e
                 })
                 .unwrap_or(StorageEntry { key: entry.key, value: U256::from(0) });
             if hash {
