@@ -1,5 +1,6 @@
 use crate::Error;
 use bytes::Bytes;
+use serde::Serialize;
 use std::{
     fmt::Debug,
     marker::{Send, Sync},
@@ -36,14 +37,14 @@ pub trait Decode: Send + Sync + Sized + Debug {
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
-pub trait Key: Encode + Decode {}
+pub trait Key: Encode + Decode + Ord {}
 
-impl<T> Key for T where T: Encode + Decode {}
+impl<T> Key for T where T: Encode + Decode + Ord {}
 
 /// Generic trait that enforces the database value to implement [`Compress`] and [`Decompress`].
-pub trait Value: Compress + Decompress {}
+pub trait Value: Compress + Decompress + Serialize {}
 
-impl<T> Value for T where T: Compress + Decompress {}
+impl<T> Value for T where T: Compress + Decompress + Serialize {}
 
 /// Generic trait that a database table should follow.
 ///

@@ -23,6 +23,7 @@ tracing = "0.1"
 pin-project-lite = "0.2.9"
 tokio = { version = "1", features = ["time"] }
 thiserror = "1.0"
+serde_with = "2.1.0"
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }

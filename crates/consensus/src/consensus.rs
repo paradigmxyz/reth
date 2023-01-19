@@ -1,7 +1,7 @@
 //! Consensus for ethereum network
-use crate::{verification, Config};
+use crate::verification;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, H256};
+use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader, H256};
 use tokio::sync::{watch, watch::error::SendError};
 
 /// Ethereum beacon consensus
@@ -12,19 +12,19 @@ pub struct BeaconConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Configuration
-    config: Config,
+    chain_spec: ChainSpec,
 }
 
 impl BeaconConsensus {
     /// Create a new instance of [BeaconConsensus]
-    pub fn new(config: Config) -> Self {
+    pub fn new(chain_spec: ChainSpec) -> Self {
         Self {
             channel: watch::channel(ForkchoiceState {
                 head_block_hash: H256::zero(),
                 finalized_block_hash: H256::zero(),
                 safe_block_hash: H256::zero(),
             }),
-            config,
+            chain_spec,
         }
     }
 
@@ -43,10 +43,10 @@ impl Consensus for BeaconConsensus {
     }
 
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
-        verification::validate_header_standalone(header, &self.config)?;
-        verification::validate_header_regarding_parent(parent, header, &self.config)?;
+        verification::validate_header_standalone(header, &self.chain_spec)?;
+        verification::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
 
-        if header.number < self.config.paris_block {
+        if Some(header.number) < self.chain_spec.paris_status().block_number() {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
@@ -59,6 +59,6 @@ impl Consensus for BeaconConsensus {
     }
 
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        block_num < self.config.paris_block
+        Some(block_num) < self.chain_spec.paris_status().block_number()
     }
 }
