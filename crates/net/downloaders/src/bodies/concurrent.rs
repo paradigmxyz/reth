@@ -521,11 +521,13 @@ where
                             continue
                         }
 
-                        if bodies.len() > this.hashes_to_download.len() {
+                        let request_len = this.hashes_to_download.len();
+                        let response_len = bodies.len();
+                        if response_len > request_len {
                             this.on_error(
                                 BodyRequestError::TooManyBodies {
-                                    expected: this.hashes_to_download.len(),
-                                    received: bodies.len(),
+                                    expected: request_len,
+                                    received: response_len,
                                 },
                                 Some(peer_id),
                             );
@@ -533,9 +535,9 @@ where
                         }
 
                         tracing::trace!(
-                            target: "downloaders::bodies", request_len = this.hashes_to_download.len(), response_len = bodies.len(), ?peer_id, "Received bodies"
+                            target: "downloaders::bodies", request_len, response_len, ?peer_id, "Received bodies"
                         );
-                        this.hashes_to_download.drain(..bodies.len());
+                        this.hashes_to_download.drain(..response_len);
                         this.buffer.extend(bodies.into_iter().map(|b| (peer_id, b)));
 
                         if !this.hashes_to_download.is_empty() {
