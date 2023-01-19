@@ -1,5 +1,5 @@
 use crate::{
-    clique::{block_to_header, CliqueGethBuilder},
+    clique::CliqueGethBuilder,
     reth_builder::{RethBuilder, RethTestInstance},
 };
 use ethers_core::types::{
@@ -7,13 +7,13 @@ use ethers_core::types::{
 };
 use ethers_providers::Middleware;
 use reth_cli_utils::init::init_db;
-use reth_consensus::{constants::EIP1559_INITIAL_BASE_FEE, BeaconConsensus};
+use reth_consensus::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_network::{
     test_utils::{unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
     NetworkConfig, NetworkManager,
 };
-use reth_primitives::{ChainSpec, Hardfork, Header, PeerId};
+use reth_primitives::{ChainSpec, Hardfork, Header, PeerId, SealedHeader, constants::EIP1559_INITIAL_BASE_FEE};
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -49,8 +49,7 @@ async fn sync_from_clique_geth() {
 
         // get the chainspec from the genesis we configured for geth
         let chainspec: ChainSpec = clique_instance.genesis.clone().into();
-        let remote_genesis = block_to_header(clique_instance.genesis().await);
-        // let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
+        let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
 
@@ -177,7 +176,7 @@ async fn geth_clique_keepalive() {
 
         // get the chainspec from the genesis we configured for geth
         let chainspec: ChainSpec = clique_instance.genesis.clone().into();
-        let remote_genesis = block_to_header(clique_instance.genesis().await);
+        let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
 

@@ -8,10 +8,9 @@ use ethers_core::{
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Middleware, Provider, Ws};
 use ethers_signers::{LocalWallet, Signer, Wallet};
-use reth_consensus::constants::EIP1559_INITIAL_BASE_FEE;
-use reth_eth_wire::{EthVersion, Status};
+use reth_eth_wire::Status;
 use reth_network::test_utils::{enr_to_peer_id, unused_port};
-use reth_primitives::{Chain, ChainSpec, Hardfork, Header, PeerId, SealedHeader};
+use reth_primitives::PeerId;
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader},
@@ -19,64 +18,6 @@ use std::{
     time::Duration,
 };
 use tracing::trace;
-
-/// Obtains an initial [`Status`](reth_eth_wire::Status) from an ethers
-/// [`Genesis`](ethers_core::utils::Genesis).
-///
-/// Sets the `blockhash` and `genesis` fields to the genesis block hash, and initializes the
-/// `total_difficulty` as zero.
-pub(crate) fn extract_status(genesis: &Genesis) -> Status {
-    let mut chainspec = ChainSpec::from(genesis.clone());
-    let mut header = Header::from(chainspec.genesis().clone());
-
-    let hardforks = chainspec.hardforks();
-
-    // set initial base fee depending on eip-1559
-    if Some(&0u64) == hardforks.get(&Hardfork::London) {
-        header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
-    }
-
-    // calculate the hash
-    let sealed_header = header.seal();
-
-    // set the new genesis hash after modifying the base fee
-    chainspec.genesis_hash = sealed_header.hash();
-
-    // we need to calculate the fork id AFTER re-setting the genesis hash
-    let forkid = chainspec.fork_id(0);
-
-    Status {
-        version: EthVersion::Eth67 as u8,
-        chain: Chain::Id(genesis.config.chain_id),
-        total_difficulty: genesis.difficulty.into(),
-        blockhash: sealed_header.hash(),
-        genesis: sealed_header.hash(),
-        forkid,
-    }
-}
-
-/// Converts an ethers [`Block`](ethers_core::types::Block) into a reth
-/// [`SealedHeader`](reth_primitives::SealedHeader).
-pub(crate) fn block_to_header(block: ethers_core::types::Block<H256>) -> SealedHeader {
-    let header = Header {
-        number: block.number.unwrap().as_u64(),
-        gas_limit: block.gas_limit.as_u64(),
-        difficulty: block.difficulty.into(),
-        nonce: block.nonce.unwrap().to_low_u64_be(),
-        extra_data: block.extra_data.0.into(),
-        state_root: block.state_root.0.into(),
-        timestamp: block.timestamp.as_u64(),
-        mix_hash: block.mix_hash.unwrap().0.into(),
-        beneficiary: block.author.unwrap().0.into(),
-        base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
-        ..Default::default()
-    };
-    let hash = match block.hash {
-        Some(hash) => hash.0.into(),
-        None => header.hash_slow(),
-    };
-    SealedHeader::new(header, hash)
-}
 
 /// Creates a chain config using the given chain id.
 /// Funds the given address with max coins.
@@ -258,7 +199,7 @@ impl CliqueGethBuilder {
             .insecure_unlock();
 
         // create a compatible status
-        let status = extract_status(&genesis);
+        let status = Status::from(genesis.clone());
 
         CliqueGethInstance::new(geth, signer, status, genesis).await
     }

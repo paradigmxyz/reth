@@ -19,7 +19,7 @@ reth-consensus = { path = "../consensus" }
 reth-cli-utils = { path = "../cli/utils" }
 reth-interfaces = { path = "../interfaces" }
 reth-downloaders = { path = "../net/downloaders" }
-reth-network = { path = "../net/network", features = ["test-utils"] }
+reth-network = { path = "../net/network", features = ["test-utils", "serde"] }
 reth-eth-wire = { path = "../net/eth-wire" }
 reth-executor = { path = "../executor" }
 reth-provider = { path = "../storage/provider"}
