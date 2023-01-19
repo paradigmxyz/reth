@@ -140,12 +140,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> Walker<'cursor, 'tx, T,
 
     /// convert current [`Walker`] to [`ReverseWalker`] which iterates reversely
     pub fn rev(self) -> ReverseWalker<'cursor, 'tx, T, CURSOR> {
-        let start = if self.start.is_none() {
-            self.cursor.current().transpose()
-        } else {
-            self.cursor.last().transpose()
-        };
-
+        let start = self.cursor.current().transpose();
         ReverseWalker::new(self.cursor, start)
     }
 }
