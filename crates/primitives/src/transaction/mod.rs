@@ -454,13 +454,8 @@ impl Encodable for Transaction {
                 self.encode_fields(out);
                 self.encode_eip155_fields(out);
             }
-            Transaction::Eip2930 { .. } => {
-                out.put_u8(1);
-                Header { list: true, payload_length: self.fields_len() }.encode(out);
-                self.encode_fields(out);
-            }
-            Transaction::Eip1559 { .. } => {
-                out.put_u8(2);
+            _ => {
+                out.put_u8(self.tx_type() as u8);
                 Header { list: true, payload_length: self.fields_len() }.encode(out);
                 self.encode_fields(out);
             }
