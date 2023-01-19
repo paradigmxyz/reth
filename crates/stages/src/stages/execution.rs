@@ -209,7 +209,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         for results in block_change_patches.into_iter() {
             // insert state change set
             for result in results.changesets.into_iter() {
-                // TODO insert to transitionId to tx_index
                 for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
@@ -217,38 +216,60 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
                     account.apply_to_db(&**tx, address, current_transition_id)?;
 
-                    // wipe storage
-                    if wipe_storage {
-                        // TODO insert all changes to StorageChangeSet
-                        tx.delete::<tables::PlainStorageState>(address, None)?;
-                    }
-                    // insert storage changeset
                     let storage_id = TransitionIdAddress((current_transition_id, address));
-                    for (key, (old_value, new_value)) in storage {
-                        let hkey = H256(key.to_be_bytes());
 
-                        trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
+                    // cast key to H256 and trace the change
+                    let storage = storage
+                        .into_iter()
+                        .map(|(key, (old_value,new_value))| {
+                            let hkey = H256(key.to_be_bytes());
+                            trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
+                            (hkey, old_value,new_value)
+                        })
+                        .collect::<Vec<_>>();
 
-                        // insert into StorageChangeSet
-                        tx.put::<tables::StorageChangeSet>(
-                            storage_id.clone(),
-                            StorageEntry { key: hkey, value: old_value },
-                        )?;
-                        tracing::debug!(
-                            target = "sync::stages::execution",
-                            "{address} setting storage:{key} ({old_value} -> {new_value})"
-                        );
+                    let mut cursor_storage_changeset =
+                        tx.cursor_write::<tables::StorageChangeSet>()?;
 
-                        // Always delete old value as duplicate table, put will not override it
-                        tx.delete::<tables::PlainStorageState>(
-                            address,
-                            Some(StorageEntry { key: hkey, value: old_value }),
-                        )?;
-                        if new_value != U256::ZERO {
-                            tx.put::<tables::PlainStorageState>(
-                                address,
-                                StorageEntry { key: hkey, value: new_value },
-                            )?;
+                    if wipe_storage {
+                        // iterate over storage and save them before entry is deleted.
+                        tx.cursor_read::<tables::PlainStorageState>()?
+                            .walk(address)?
+                            .take_while(|res| {
+                                res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
+                            })
+                            .try_for_each(|entry| {
+                                let (_, old_value) = entry?;
+                                cursor_storage_changeset.append(storage_id.clone(), old_value)
+                            })?;
+
+                        // delete all entries
+                        tx.delete::<tables::PlainStorageState>(address, None)?;
+
+                        // insert storage changeset
+                        for (key, _, new_value) in storage {
+                            // old values are already cleared.
+                            if new_value != U256::ZERO {
+                                tx.put::<tables::PlainStorageState>(
+                                    address,
+                                    StorageEntry { key, value: new_value },
+                                )?;
+                            }
+                        }
+                    } else {
+                        // insert storage changeset
+                        for (key, old_value, new_value) in storage {
+                            let old_entry = StorageEntry { key, value: old_value };
+                            let new_entry = StorageEntry { key, value: new_value };
+                            // insert into StorageChangeSet
+                            cursor_storage_changeset
+                                .append(storage_id.clone(), old_entry.clone())?;
+
+                            // Always delete old value as duplicate table, put will not override it
+                            tx.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
+                            if new_value != U256::ZERO {
+                                tx.put::<tables::PlainStorageState>(address, new_entry)?;
+                            }
                         }
                     }
                     current_transition_id += 1;
