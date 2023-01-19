@@ -160,6 +160,16 @@ impl NetworkHandle {
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
     }
+
+    pub fn shutdown(&self) {
+        // stop connecting to peers
+
+        // drop pending connections
+
+        // tell incoming connections that we will shut down
+
+        // send disconnect reason to all connected peers
+    }
 }
 
 // === API Implementations ===
