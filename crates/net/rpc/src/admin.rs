@@ -52,7 +52,10 @@ impl AdminApiServer for AdminApi {
 
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enr = self.network.local_node_record();
-        let status = self.network.network_status().await.expect("Could not fetch status");
+        let status = match self.network.network_status().await {
+            Ok(status) => status,
+            Err(e) => return RpcResult::Err(jsonrpsee::core::Error::Custom(e.to_string())),
+        };
 
         Ok(NodeInfo::new(enr, status))
     }
