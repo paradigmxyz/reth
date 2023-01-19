@@ -16,8 +16,8 @@ criterion_main!(benches);
 
 pub fn db(c: &mut Criterion) {
     let mut group = c.benchmark_group("tables_db");
-    group.measurement_time(std::time::Duration::from_millis(100));
-    group.warm_up_time(std::time::Duration::from_millis(100));
+    group.measurement_time(std::time::Duration::from_millis(200));
+    group.warm_up_time(std::time::Duration::from_millis(200));
 
     measure_table_db::<CanonicalHeaders>(&mut group);
     measure_table_db::<HeaderTD>(&mut group);
@@ -36,8 +36,8 @@ pub fn db(c: &mut Criterion) {
 
 pub fn serialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("tables_serialization");
-    group.measurement_time(std::time::Duration::from_millis(100));
-    group.warm_up_time(std::time::Duration::from_millis(100));
+    group.measurement_time(std::time::Duration::from_millis(200));
+    group.warm_up_time(std::time::Duration::from_millis(200));
 
     measure_table_serialization::<CanonicalHeaders>(&mut group);
     measure_table_serialization::<HeaderTD>(&mut group);
