@@ -123,13 +123,18 @@ where
         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
+        // TODO: experimental
+        let mut non_empty_headers = 0;
         let mut headers = Vec::<SealedHeader>::default();
         let mut canonical_entry = canonical_cursor.seek_exact(start)?;
         while let Some((number, hash)) = canonical_entry {
             let key = (number, hash).into();
             let (_, header) = header_cursor.seek_exact(key)?.expect("database corrupted");
+            if !header.is_empty() {
+                non_empty_headers += 1;
+            }
             headers.push(SealedHeader::new(header, key.hash()));
-            if headers.len() >= count {
+            if non_empty_headers >= count || non_empty_headers > self.stream_batch_size {
                 break
             }
             canonical_entry = canonical_cursor.next()?;
