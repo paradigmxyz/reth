@@ -2,12 +2,12 @@ use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use reth_db::{
-    cursor::DbCursorRW,
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
     table::*,
     tables::*,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use std::{path::Path, time::Instant};
 
@@ -126,7 +126,6 @@ where
     group.bench_function(format!("{}.SeqWrite", T::NAME), |b| {
         b.iter_custom(|_| {
             let pair = pair.clone();
-            let timer = Instant::now();
 
             // Reset DB
             let _ = std::fs::remove_dir_all(bench_db_path);
@@ -143,6 +142,35 @@ where
                 }
 
                 tx.inner.commit().unwrap();
+            });
+            timer.elapsed()
+        })
+    });
+
+    group.bench_function(format!("{}.SeqRead", T::NAME), |b| {
+        // Reset DB
+        let _ = std::fs::remove_dir_all(bench_db_path);
+        let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, &bench_db_path);
+
+        // Prepare data to be read
+        let tx = db.tx_mut().expect("tx");
+        let mut cursor = tx.cursor_write::<T>().expect("cursor");
+        for (k, _, v, _) in pair.clone() {
+            cursor.append(k, v).expect("submit");
+        }
+        tx.inner.commit().unwrap();
+
+        b.iter_custom(|_| {
+            // Create TX
+            let tx = db.tx().expect("tx");
+
+            let timer = Instant::now();
+            black_box({
+                let mut cursor = tx.cursor_read::<T>().expect("cursor");
+                let walker = cursor.walk(pair.first().unwrap().0.clone()).unwrap();
+                for element in walker {
+                    element.unwrap();
+                }
             });
             timer.elapsed()
         })
