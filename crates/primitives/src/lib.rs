@@ -15,7 +15,7 @@ mod block;
 pub mod bloom;
 mod chain;
 mod chain_spec;
-mod constants;
+pub mod constants;
 mod error;
 mod forkid;
 mod genesis;
