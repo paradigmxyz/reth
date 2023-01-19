@@ -10,6 +10,12 @@ readme = "README.md"
 # reth libs
 reth-stages = { path = "../stages" }
 reth-primitives = { path = "../primitives" }
+reth-consensus = { path = "../consensus" }
+reth-tracing = { path = "../tracing" }
+reth-discv4 = { path = "../net/discv4" }
+reth-downloaders = { path = "../net/downloaders" }
+reth-net-nat = { path = "../net/nat" }
+reth-network = { path = "../net/network", features = ["serde"] }
 reth-interfaces = { path = "../interfaces" }
 reth-executor = { path = "../executor" }
 reth-rlp = { path = "../common/rlp" }
@@ -31,6 +37,7 @@ rayon = "1.6.0"
 eyre = "0.6.8"
 shellexpand = "3.0.0"
 serde_json = "1.0.91"
+serde = { version = "1.0.152", features = ["derive"] }
 
 [dev-dependencies]
 # reth

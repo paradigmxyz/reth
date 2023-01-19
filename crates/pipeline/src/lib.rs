@@ -26,3 +26,6 @@ pub mod builder;
 
 /// Utilities for initializing a pipeline e.g. chainspecs/genesis
 pub mod utils;
+
+/// Configuration of the pipeline
+pub mod config;
