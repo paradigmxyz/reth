@@ -5,7 +5,7 @@ use std::{
 };
 
 use reth_db::{
-    cursor::{DbCursorRO, ReverseWalker},
+    cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
     models::{BlockNumHash, StoredBlockBody},
     table::Table,
@@ -196,12 +196,13 @@ where
         F: FnMut(T::Key) -> BlockNumber,
     {
         let mut cursor = self.cursor_write::<T>()?;
-        let mut reverse_walker = ReverseWalker::new(&mut cursor, None);
+        let mut reverse_walker = cursor.walk_back(None)?;
 
         while let Some(Ok((key, _))) = reverse_walker.next() {
-            if selector(key) <= block {
+            if selector(key.clone()) <= block {
                 break
             }
+            self.delete::<T>(key, None)?;
         }
         Ok(())
     }

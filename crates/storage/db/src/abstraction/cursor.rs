@@ -34,6 +34,16 @@ pub trait DbCursorRO<'tx, T: Table> {
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;
+
+    /// Returns an iterator that walks backwards through the table. If `start_key`
+    /// is None, starts from the last entry of the table. If it not, starts at a key
+    /// greater or equal than the key value wrapped inside Some().
+    fn walk_back<'cursor>(
+        &'cursor mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
 }
 
 /// Read only cursor over DupSort table.
@@ -130,7 +140,12 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> Walker<'cursor, 'tx, T,
 
     /// convert current [`Walker`] to [`ReverseWalker`] which iterates reversely
     pub fn rev(self) -> ReverseWalker<'cursor, 'tx, T, CURSOR> {
-        let start = self.cursor.current().transpose();
+        let start = if self.start.is_none() {
+            self.cursor.current().transpose()
+        } else {
+            self.cursor.last().transpose()
+        };
+
         ReverseWalker::new(self.cursor, start)
     }
 }
