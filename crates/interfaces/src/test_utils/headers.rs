@@ -34,12 +34,19 @@ pub struct TestHeaderDownloader {
     consensus: Arc<TestConsensus>,
     limit: u64,
     download: Option<TestDownload>,
+    queued_headers: Vec<SealedHeader>,
+    batch_size: usize,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>, limit: u64) -> Self {
-        Self { client, consensus, limit, download: None }
+    pub fn new(
+        client: Arc<TestHeadersClient>,
+        consensus: Arc<TestConsensus>,
+        limit: u64,
+        batch_size: usize,
+    ) -> Self {
+        Self { client, consensus, limit, download: None, batch_size, queued_headers: Vec::new() }
     }
 
     fn create_download(&self) -> TestDownload {
@@ -72,7 +79,9 @@ impl HeaderDownloader for TestHeaderDownloader {
 
     fn update_sync_target(&mut self, _target: SyncTarget) {}
 
-    fn set_batch_size(&mut self, _limit: usize) {}
+    fn set_batch_size(&mut self, limit: usize) {
+        self.batch_size = limit;
+    }
 }
 
 impl Stream for TestHeaderDownloader {
@@ -80,9 +89,19 @@ impl Stream for TestHeaderDownloader {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        let download = this.download.get_or_insert(this.create_download());
-        let res = ready!(download.poll_next_unpin(cx));
-        Poll::Ready(res.map(|res| vec![res.unwrap()]))
+        loop {
+            if this.queued_headers.len() == this.batch_size {
+                return Poll::Ready(Some(std::mem::take(&mut this.queued_headers)))
+            }
+            if this.download.is_none() {
+                this.download.insert(this.create_download());
+            }
+
+            match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
+                None => return Poll::Ready(Some(std::mem::take(&mut this.queued_headers))),
+                Some(header) => this.queued_headers.push(header.unwrap()),
+            }
+        }
     }
 }
 

@@ -441,7 +441,6 @@ where
         self.in_progress_queue.clear();
     }
 
-
     /// Splits off the next batch of headers
     fn split_next_batch(&mut self) -> Vec<SealedHeader> {
         let batch_size = self.stream_batch_size.min(self.queued_validated_headers.len());
@@ -564,7 +563,6 @@ where
 
         // this will submit new requests and poll them
         loop {
-
             // poll requests
             while let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
                 // handle response
@@ -910,7 +908,7 @@ mod tests {
 
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
-        next.number+=1;
+        next.number += 1;
         downloader.update_local_head(SealedHeader::new(next, H256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }

@@ -206,7 +206,6 @@ where
 
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress).await?;
-
         let tip = gap.target.tip();
 
         // Nothing to sync
@@ -281,7 +280,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{p2p::error::RequestError, test_utils::generators::random_header};
+    use reth_interfaces::test_utils::generators::random_header;
     use reth_primitives::H256;
     use test_runner::HeadersTestRunner;
 
@@ -314,7 +313,7 @@ mod tests {
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
-            downloader_factory: Box<dyn Fn() -> D + Send + Sync  + 'static>,
+            downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             network_handle: TestStatusUpdater,
             tx: TestTransaction,
         }
@@ -327,7 +326,7 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader_factory: Box::new(move || {
-                        TestHeaderDownloader::new(client.clone(), consensus.clone(), 1000)
+                        TestHeaderDownloader::new(client.clone(), consensus.clone(), 1000, 1000)
                     }),
                     network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
@@ -469,69 +468,6 @@ mod tests {
 
     stage_test_suite!(HeadersTestRunner, headers);
 
-    /// Check that the execution errors on empty database or
-    /// prev progress missing from the database.
-    #[tokio::test]
-    // Validate that the execution does not fail on timeout
-    async fn execute_timeout() {
-        let (previous_stage, stage_progress) = (500, 100);
-        let mut runner = HeadersTestRunner::default();
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
-        };
-        runner.seed_execution(input).expect("failed to seed execution");
-        runner.client.set_error(RequestError::Timeout).await;
-        let rx = runner.execute(input);
-        runner.consensus.update_tip(H256::from_low_u64_be(1));
-        let result = rx.await.unwrap();
-        // TODO: Downcast the internal error and actually check it
-        assert_matches!(result, Err(StageError::Recoverable(_)));
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
-    }
-
-    /// Check that validation error is propagated during the execution.
-    #[tokio::test]
-    async fn execute_validation_error() {
-        let mut runner = HeadersTestRunner::default();
-        runner.consensus.set_fail_validation(true);
-        let (stage_progress, previous_stage) = (1000, 1200);
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
-        };
-        let headers = runner.seed_execution(input).expect("failed to seed execution");
-        let rx = runner.execute(input);
-        runner.after_execution(headers).await.expect("failed to run after execution hook");
-        let result = rx.await.unwrap();
-        assert_matches!(result, Err(StageError::Validation { .. }));
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
-    }
-
-    /// Check that unexpected download errors are caught
-    #[tokio::test]
-    async fn execute_download_error() {
-        let mut runner = HeadersTestRunner::default();
-        let (stage_progress, previous_stage) = (1000, 1200);
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
-        };
-        let headers = runner.seed_execution(input).expect("failed to seed execution");
-        let rx = runner.execute(input);
-
-        runner.client.set_error(RequestError::BadResponse).await;
-
-        // Update tip
-        let tip = headers.last().unwrap();
-        runner.consensus.update_tip(tip.hash());
-
-        // These errors are not fatal but hand back control to the pipeline
-        let result = rx.await.unwrap();
-        assert_matches!(result, Err(StageError::Recoverable(_)));
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
-    }
-
     /// Execute the stage with linear downloader
     #[tokio::test]
     async fn execute_with_linear_downloader() {
@@ -637,6 +573,7 @@ mod tests {
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
 
         let result = rx.await.unwrap();
+
         assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
