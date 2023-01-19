@@ -22,7 +22,9 @@ pub struct HeadersRequest {
 pub trait HeadersClient: DownloadClient {
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders>;
+    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
+        self.get_headers_with_priority(request, Priority::Normal).await
+    }
 
     /// Sends the header request to the p2p network with priroity set and returns the header
     /// response received from a peer.

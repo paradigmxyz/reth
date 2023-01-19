@@ -80,16 +80,6 @@ impl DownloadClient for FetchClient {
 #[async_trait::async_trait]
 impl HeadersClient for FetchClient {
     /// Sends a `GetBlockHeaders` request to an available peer.
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
-        let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders {
-            request,
-            response,
-            priority: Priority::Normal,
-        })?;
-        rx.await?.map(WithPeerId::transform)
-    }
-
     async fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
@@ -103,16 +93,7 @@ impl HeadersClient for FetchClient {
 
 #[async_trait::async_trait]
 impl BodiesClient for FetchClient {
-    async fn get_block_bodies(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
-        let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockBodies {
-            request,
-            response,
-            priority: Priority::Normal,
-        })?;
-        rx.await?
-    }
-
+    /// Sends a `GetBlockBodies` request to an available peer.
     async fn get_block_bodies_with_priority(
         &self,
         request: Vec<H256>,
