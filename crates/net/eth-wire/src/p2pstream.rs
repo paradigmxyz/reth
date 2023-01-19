@@ -412,7 +412,7 @@ where
 
                 // check if the buffer is full
                 if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                    return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
+                    return Poll::Ready(Err(P2PStreamError::SendBufferFull))
                 }
 
                 // if the sink is not ready, buffer the message
@@ -423,7 +423,7 @@ where
                 this.start_disconnect(DisconnectReason::PingTimeout)?;
 
                 // End the stream after ping related error
-                return Poll::Ready(None)
+                return Poll::Ready(Ok(()))
             }
         }
 
