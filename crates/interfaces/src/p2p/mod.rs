@@ -15,3 +15,6 @@ pub mod headers;
 /// Error types broadly used by p2p interfaces for any operation which may produce an error when
 /// interacting with the network implementation
 pub mod error;
+
+/// Priority enum for BlockHeader and BlockBody requests
+pub mod priority;

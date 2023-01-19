@@ -9,4 +9,11 @@ use reth_primitives::H256;
 pub trait BodiesClient: DownloadClient {
     /// Fetches the block body for the requested block.
     async fn get_block_bodies(&self, hashes: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>>;
+
+    /// Fetches the block body for the requested block with priority
+    async fn get_block_bodies_with_priority(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> PeerRequestResult<BlockHeaders>;
 }
