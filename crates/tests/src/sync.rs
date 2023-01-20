@@ -98,7 +98,7 @@ async fn sync_from_clique_geth() {
         let config = NetworkConfig::<Arc<NoopProvider>>::builder(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
-            .status(clique_instance.status)
+            .chain_spec(chainspec.clone())
             .build(Arc::new(NoopProvider::default()));
 
         let network = NetworkManager::new(config).await.unwrap();
@@ -222,7 +222,7 @@ async fn geth_clique_keepalive() {
         let config = NetworkConfig::<Arc<NoopProvider>>::builder(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
-            .status(clique_instance.status)
+            .chain_spec(chainspec.clone())
             .build(Arc::new(NoopProvider::default()));
 
         let network = NetworkManager::new(config).await.unwrap();
