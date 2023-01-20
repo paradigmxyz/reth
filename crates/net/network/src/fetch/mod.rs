@@ -225,7 +225,7 @@ impl StateFetcher {
             .as_ref()
             .map(|headers| {
                 resp.as_ref()
-                    .map(|r| Self::is_likely_bad_message(&r.request, &headers))
+                    .map(|r| Self::is_likely_bad_message(&r.request, headers))
                     .unwrap_or_default()
             })
             .unwrap_or_default();
