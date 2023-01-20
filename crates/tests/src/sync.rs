@@ -259,7 +259,7 @@ async fn geth_clique_keepalive() {
             _ = events.next_session_closed() => {
                 panic!("session closed before keepalive timeout");
             },
-            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+            _ = tokio::time::sleep(Duration::from_secs(30)) => {}
         );
 
         // cleanup (delete the data_dir at dir_path)
