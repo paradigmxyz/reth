@@ -10,6 +10,7 @@ use reth_interfaces::p2p::{
     downloader::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
+    priority::Priority,
 };
 use reth_primitives::{PeerId, WithPeerId, H256};
 use std::sync::{
@@ -79,18 +80,27 @@ impl DownloadClient for FetchClient {
 #[async_trait::async_trait]
 impl HeadersClient for FetchClient {
     /// Sends a `GetBlockHeaders` request to an available peer.
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
+    async fn get_headers_with_priority(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> PeerRequestResult<BlockHeaders> {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response })?;
+        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response, priority })?;
         rx.await?.map(WithPeerId::transform)
     }
 }
 
 #[async_trait::async_trait]
 impl BodiesClient for FetchClient {
-    async fn get_block_bodies(&self, request: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    /// Sends a `GetBlockBodies` request to an available peer.
+    async fn get_block_bodies_with_priority(
+        &self,
+        request: Vec<H256>,
+        priority: Priority,
+    ) -> PeerRequestResult<Vec<BlockBody>> {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockBodies { request, response })?;
+        self.request_tx.send(DownloadRequest::GetBlockBodies { request, response, priority })?;
         rx.await?
     }
 }
