@@ -2,6 +2,8 @@
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
 /// Alias type for a `(key, value)` result coming from an iterator.
 pub type IterPairResult<T> = Option<Result<(<T as Table>::Key, <T as Table>::Value), Error>>;
+/// Alias type for a vector of `(key, value)`
+pub type VecPairResult<T> = Result<Vec<(<T as Table>::Key, <T as Table>::Value)>, Error>;
 /// Alias type for a value result coming from a cursor without its key.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, Error>;
 

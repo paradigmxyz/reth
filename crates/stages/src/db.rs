@@ -5,7 +5,8 @@ use std::{
 };
 
 use reth_db::{
-    cursor::DbCursorRO,
+    common::VecPairResult,
+    cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
     models::{BlockNumHash, StoredBlockBody},
     table::Table,
@@ -166,12 +167,7 @@ where
 
     /// Get the result vector with range [start_key:end_key).
     /// Please note that start_key is inclusive and end_key is expclusive.
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn get_range<T: Table>(
-        &self,
-        start_key: T::Key,
-        end_key: T::Key,
-    ) -> Result<Vec<(T::Key, T::Value)>, Error>
+    pub(crate) fn get_range<T: Table>(&self, start_key: T::Key, end_key: T::Key) -> VecPairResult<T>
     where
         T: Table,
     {
