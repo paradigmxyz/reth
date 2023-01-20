@@ -29,7 +29,7 @@ use proc_macro::TokenStream;
 pub fn encodable(input: TokenStream) -> TokenStream {
     let ast = match syn::parse(input) {
         Ok(ast) => ast,
-        Err(err) => return err.to_compile_error().into()
+        Err(err) => return err.to_compile_error().into(),
     };
     let gen = impl_encodable(&ast);
     gen.into()
@@ -40,7 +40,7 @@ pub fn encodable(input: TokenStream) -> TokenStream {
 pub fn encodable_wrapper(input: TokenStream) -> TokenStream {
     let ast = match syn::parse(input) {
         Ok(ast) => ast,
-        Err(err) => return err.to_compile_error().into()
+        Err(err) => return err.to_compile_error().into(),
     };
     let gen = impl_encodable_wrapper(&ast);
     gen.into()
@@ -51,26 +51,28 @@ pub fn encodable_wrapper(input: TokenStream) -> TokenStream {
 pub fn max_encoded_len(input: TokenStream) -> TokenStream {
     let ast = match syn::parse(input) {
         Ok(ast) => ast,
-        Err(err) => return err.to_compile_error().into()
+        Err(err) => return err.to_compile_error().into(),
     };
     let gen = impl_max_encoded_len(&ast);
     gen.into()
 }
 
-/// Derives `Decodable` for the type whose implementation expects an rlp-list input: `<rlp-header, fields...>`
+/// Derives `Decodable` for the type whose implementation expects an rlp-list input: `<rlp-header,
+/// fields...>`
 ///
 /// This is the inverse of `RlpEncodable`.
 #[proc_macro_derive(RlpDecodable, attributes(rlp))]
 pub fn decodable(input: TokenStream) -> TokenStream {
     let ast = match syn::parse(input) {
         Ok(ast) => ast,
-        Err(err) => return err.to_compile_error().into()
+        Err(err) => return err.to_compile_error().into(),
     };
     let gen = impl_decodable(&ast);
     gen.into()
 }
 
-/// Derives `Decodable` for the type whose implementation expects only the individual fields encoded: `<fields...>`
+/// Derives `Decodable` for the type whose implementation expects only the individual fields
+/// encoded: `<fields...>`
 ///
 /// This is the inverse of `RlpEncodableWrapper`.
 #[proc_macro_derive(RlpDecodableWrapper, attributes(rlp))]
