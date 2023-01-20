@@ -3959,7 +3959,6 @@ name = "reth"
 version = "0.1.0"
 dependencies = [
  "backon",
- "bincode",
  "clap 4.0.32",
  "comfy-table",
  "confy",
@@ -4059,7 +4058,6 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "async-trait",
- "bincode",
  "bytes",
  "criterion",
  "futures",
@@ -4079,6 +4077,7 @@ dependencies = [
  "reth-primitives",
  "secp256k1 0.24.2",
  "serde",
+ "serde_json",
  "tempfile",
  "test-fuzz",
  "thiserror",

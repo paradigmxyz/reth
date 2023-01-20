@@ -1,4 +1,3 @@
-use bincode::serialize_into;
 use eyre::Result;
 use proptest::{
     arbitrary::Arbitrary,
@@ -56,10 +55,11 @@ where
     rows.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Save them to file
-    let mut f = std::io::BufWriter::new(
-        std::fs::File::create(format!("{VECTORS_FOLDER}/{}", T::NAME)).unwrap(),
-    );
-    serialize_into(&mut f, &rows)?;
-
-    Ok(())
+    serde_json::to_writer_pretty(
+        std::io::BufWriter::new(
+            std::fs::File::create(format!("{VECTORS_FOLDER}/{}.json", T::NAME)).unwrap(),
+        ),
+        &rows,
+    )
+    .map_err(|e| eyre::eyre!({ e }))
 }
