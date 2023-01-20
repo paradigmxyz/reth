@@ -117,7 +117,6 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::initialize(listen_addr)?;
-            HeaderMetrics::describe();
         }
 
         let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
