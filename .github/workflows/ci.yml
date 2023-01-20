@@ -171,6 +171,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Install Valgrind
+        run: |
+          sudo apt install valgrind
+
       - name: cargo bench
         uses: actions-rs/cargo@v1
         with:
