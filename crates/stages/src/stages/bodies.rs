@@ -106,6 +106,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             }
         };
 
+        trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
         for response in downloaded_bodies {
             // Write block
             let block_header = response.header();
@@ -113,8 +114,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             match response {
                 BlockResponse::Full(block) => {
-                    trace!(target: "sync::stages::bodies", ommers = block.ommers.len(), txs = block.body.len(), ?numhash, "Writing full block");
-
                     body_cursor.append(
                         numhash,
                         StoredBlockBody {
@@ -145,7 +144,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     }
                 }
                 BlockResponse::Empty(_) => {
-                    trace!(target: "sync::stages::bodies", ?numhash, "Writing empty block");
                     body_cursor.append(
                         numhash,
                         StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
@@ -158,7 +156,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
             let has_reward = self.consensus.has_block_reward(numhash.number());
-            trace!(target: "sync::stages::bodies", has_reward, ?numhash, "Block reward");
             if has_reward {
                 transition_id += 1;
             }
