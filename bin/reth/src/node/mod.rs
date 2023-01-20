@@ -21,7 +21,6 @@ use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
 use reth_stages::{
-    metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
         hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
