@@ -44,6 +44,9 @@ reference-trie = "0.26.0"
 memory-db = "0.31.0"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 bytes = "1.2.1"
+triehash = "0.8"
+cita_trie = "4.0.0"
+hasher = "0.1.4"
 
 [dev-dependencies]
 # reth

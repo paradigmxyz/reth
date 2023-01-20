@@ -27,6 +27,7 @@ use trie_db::{
     CError, ChildReference, HashDB, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout,
     TrieMut,
 };
+use triehash::sec_trie_root;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub(crate) enum TrieError {
@@ -246,8 +247,8 @@ struct DBTrieLoader;
 impl DBTrieLoader {
     // Result<H256>
     pub(crate) fn calculate_root<DB: Database>(&mut self, tx: &Transaction<'_, DB>) -> H256 {
-        let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>().unwrap();
-        let mut walker = accounts_cursor.walk(Address::zero()).unwrap();
+        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>().unwrap();
+        let mut walker = accounts_cursor.walk(H256::zero()).unwrap();
         // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
 
         let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
@@ -258,15 +259,14 @@ impl DBTrieLoader {
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
-        while let Some((address, account)) = walker.next().transpose().unwrap() {
+        while let Some((hashed_address, account)) = walker.next().transpose().unwrap() {
             let mut value = EthAccount::from(account);
 
-            // storage_root
-            value.storage_root = self.calculate_storage_root(tx, address);
+            value.storage_root = dbg!(self.calculate_storage_root(tx, hashed_address));
 
             let mut bytes = BytesMut::new();
             Encodable::encode(&value, &mut bytes);
-            trie.insert(keccak256(address).as_bytes(), bytes.as_ref()).unwrap();
+            trie.insert(hashed_address.as_bytes(), bytes.as_ref()).unwrap();
         }
 
         *trie.root()
@@ -276,7 +276,7 @@ impl DBTrieLoader {
     fn calculate_storage_root<DB: Database>(
         &mut self,
         tx: &Transaction<'_, DB>,
-        address: Address,
+        address: H256,
     ) -> H256 {
         let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
             RLPNodeCodec::<KeccakHasher>::empty_node(),
@@ -286,16 +286,15 @@ impl DBTrieLoader {
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
-        let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>().unwrap();
+        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>().unwrap();
         let mut walker = storage_cursor.walk_dup(address, H256::zero()).unwrap();
 
         while let Some((_, StorageEntry { key: storage_key, value })) =
             walker.next().transpose().unwrap()
         {
             let mut bytes = BytesMut::new();
-            let location = [H256::from(address).as_bytes(), storage_key.as_bytes()].concat();
             Encodable::encode(&value, &mut bytes);
-            trie.insert(keccak256(location).as_bytes(), &bytes).unwrap();
+            trie.insert(storage_key.as_bytes(), &bytes).unwrap();
         }
 
         *trie.root()
@@ -305,6 +304,8 @@ impl DBTrieLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cita_trie::{PatriciaTrie, Trie};
+    use hasher::HasherKeccak;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, WriteMap},
         tables,
@@ -316,8 +317,9 @@ mod tests {
         Address, ChainSpec, GenesisAccount, KECCAK_EMPTY,
     };
     use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
-    use std::str::FromStr;
+    use std::{str::FromStr, sync::Arc};
     use trie_db::TrieDBMutBuilder;
+    use triehash::trie_root;
 
     #[test]
     fn empty_trie() {
@@ -334,8 +336,8 @@ mod tests {
         let tx = Transaction::new(db.as_ref()).unwrap();
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let account = GenesisAccount { nonce: None, balance: U256::MAX, code: None, storage: None };
-        tx.put::<tables::PlainAccountState>(
-            address,
+        tx.put::<tables::HashedAccount>(
+            keccak256(address),
             Account {
                 nonce: account.nonce.unwrap_or_default(),
                 balance: account.balance,
@@ -376,8 +378,8 @@ mod tests {
             ),
         ];
         for (address, account) in accounts.clone() {
-            tx.put::<tables::PlainAccountState>(
-                address,
+            tx.put::<tables::HashedAccount>(
+                keccak256(address),
                 Account {
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
@@ -390,6 +392,91 @@ mod tests {
     }
 
     #[test]
+    fn single_storage_trie() {
+        let mut trie = DBTrieLoader {};
+        let db = create_test_rw_db::<WriteMap>();
+        let tx = Transaction::new(db.as_ref()).unwrap();
+
+        let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
+        let hashed_address = keccak256(address);
+
+        let storage = Vec::from([(keccak256(H256::from_low_u64_be(2)), U256::from(1))]);
+        let encoded_storage = storage
+            .iter()
+            .map(|(k, v)| {
+                let mut bytes = BytesMut::new();
+                v.encode(&mut bytes);
+                (k.as_bytes(), bytes.freeze())
+            })
+            .collect_vec();
+        for (k, v) in storage.clone() {
+            tx.put::<tables::HashedStorage>(hashed_address, StorageEntry { key: k, value: v })
+                .unwrap();
+        }
+        assert_eq!(
+            trie.calculate_storage_root(&tx, hashed_address),
+            calculate_root(encoded_storage)
+        );
+    }
+
+    fn calculate_root<K: Into<Vec<u8>>, V: Into<Vec<u8>>>(storage: Vec<(K, V)>) -> H256 {
+        let memdb = Arc::new(cita_trie::MemoryDB::new(true));
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let mut trie = PatriciaTrie::new(Arc::clone(&memdb), Arc::clone(&hasher));
+
+        for (key, value) in storage {
+            trie.insert(key.into(), value.into()).unwrap();
+        }
+        H256::from_slice(trie.root().unwrap().as_slice())
+    }
+
+    #[test]
+    fn single_account_with_storage_trie() {
+        let mut trie = DBTrieLoader {};
+        let db = create_test_rw_db::<WriteMap>();
+        let tx = Transaction::new(db.as_ref()).unwrap();
+
+        let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
+        let hashed_address = keccak256(address);
+
+        let storage = HashMap::from([
+            (keccak256(H256::zero()), U256::from(3)),
+            (keccak256(H256::from_low_u64_be(2)), U256::from(1)),
+        ]);
+        let code = "el buen fla";
+        let account = Account {
+            nonce: 155,
+            balance: U256::from(414241124u32),
+            bytecode_hash: Some(keccak256(code)),
+        };
+        tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
+
+        for (k, v) in storage.clone() {
+            tx.put::<tables::HashedStorage>(hashed_address, StorageEntry { key: k, value: v })
+                .unwrap();
+        }
+        let mut bytes = Vec::new();
+        let mut eth_account = EthAccount::from(account);
+
+        let encoded_storage = storage
+            .iter()
+            .map(|(k, v)| {
+                let mut bytes = BytesMut::new();
+                v.encode(&mut bytes);
+                (k.as_bytes(), bytes.freeze())
+            })
+            .collect_vec();
+
+        eth_account.storage_root = dbg!(calculate_root(encoded_storage));
+        eth_account.encode(&mut bytes);
+        assert_eq!(
+            trie.calculate_root(&tx),
+            calculate_root(vec![(hashed_address.to_fixed_bytes(), bytes)])
+        );
+    }
+
+    #[test]
     fn verify_genesis() {
         let mut trie = DBTrieLoader {};
         let db = create_test_rw_db::<WriteMap>();
@@ -398,8 +485,8 @@ mod tests {
 
         // Insert account state
         for (address, account) in &genesis.alloc {
-            tx.put::<tables::PlainAccountState>(
-                *address,
+            tx.put::<tables::HashedAccount>(
+                keccak256(address),
                 Account {
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
