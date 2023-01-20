@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-pub fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
+pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
     let body = if let syn::Data::Struct(s) = &ast.data {
         s
     } else {
@@ -51,7 +51,7 @@ pub fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
     }
 }
 
-pub fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
+pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
     let body = if let syn::Data::Struct(s) = &ast.data {
         s
     } else {
