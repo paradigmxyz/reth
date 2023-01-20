@@ -209,7 +209,7 @@ where
         let tip = gap.target.tip();
 
         // Nothing to sync
-        if gap.local_head.hash() == tip {
+        if gap.is_closed() {
             info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
             return Ok(ExecOutput { stage_progress: current_progress, done: true })
         }
@@ -270,6 +270,16 @@ where
 struct SyncGap {
     local_head: SealedHeader,
     target: SyncTarget,
+}
+
+// === impl SyncGap ===
+
+impl SyncGap {
+    /// Returns `true` if the gap from the head to the target was closed
+    #[inline]
+    fn is_closed(&self) -> bool {
+        self.local_head.hash() == self.target.tip()
+    }
 }
 
 #[cfg(test)]

@@ -150,7 +150,7 @@ impl Command {
             .with_channel(sender)
             .push(HeaderStage {
                 downloader: headers::linear::LinearDownloadBuilder::default()
-                    .request_batch_size(config.stages.headers.downloader_batch_size)
+                    .request_limit(config.stages.headers.downloader_batch_size)
                     .stream_batch_size(config.stages.headers.commit_threshold as usize)
                     // NOTE: the head and target will be set from inside the stage before the
                     // downloader is called

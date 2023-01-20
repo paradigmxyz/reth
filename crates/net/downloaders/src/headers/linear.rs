@@ -25,6 +25,11 @@ use std::{
 };
 use tracing::trace;
 
+/// A heuristic that is used to determine the number of requests that should be prepared for a peer.
+/// This should ensure that there are always requests lined up for peers to handle while the
+/// downloader is yielding a next batch of headers that is being committed to the database.
+const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
+
 /// Downloads headers concurrently.
 ///
 /// This [Downloader] downloads headers using the configured [HeadersClient].
@@ -99,7 +104,7 @@ where
 
         // we try to keep more requests than available peers active so that there's always a
         // followup request available for a peer
-        let dynamic_target = num_peers * 4;
+        let dynamic_target = num_peers * REQUESTS_PER_PEER_MULTIPLIER;
         let max_dynamic = dynamic_target.max(self.min_concurrent_requests);
 
         // If only a few peers are connected we keep it low
@@ -561,7 +566,14 @@ where
             }
         }
 
-        // this will submit new requests and poll them
+        // this loop will submit new requests and poll them, if a new batch is ready it is returned
+        // The actual work is done by the receiver of the request channel, this means, polling the
+        // request future is just reading from a `oneshot::Receiver`. Hence, this loop tries to keep
+        // the downloader at capacity at all times The order of loops is as follows:
+        // 1. poll futures to make room for followup requests (this will also prepare validated
+        // headers for 3.) 2. exhaust all capacity by sending requests
+        // 3. return batch, if enough validated
+        // 4. return Pending if 2.) did not submit a new request, else continue
         loop {
             // poll requests
             while let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
@@ -752,31 +764,47 @@ impl Default for LinearDownloadBuilder {
 }
 
 impl LinearDownloadBuilder {
-    /// Set the request batch size
-    pub fn request_batch_size(mut self, size: u64) -> Self {
-        self.request_batch_size = size;
+    /// Set the request batch size.
+    ///
+    /// This determines the `limit` for a [GetHeaders](reth_eth_wire::GetBlockHeaders) requests, the
+    /// number of headers we ask for.
+    pub fn request_limit(mut self, limit: u64) -> Self {
+        self.request_batch_size = limit;
         self
     }
 
-    /// Set the request batch size
+    /// Set the stream batch size
+    ///
+    /// This determines the number of headers the [LinearDownloader] will yield on `Stream::next`.
+    /// This will be the amount of headers the headers stage will commit at a time.
     pub fn stream_batch_size(mut self, size: usize) -> Self {
         self.stream_batch_size = size;
         self
     }
 
     /// Set the min amount of concurrent requests.
+    ///
+    /// If there's capacity the [LinearDownloader] will keep at least this many requests active at a
+    /// time.
     pub fn min_concurrent_requests(mut self, min_concurrent_requests: usize) -> Self {
         self.min_concurrent_requests = min_concurrent_requests;
         self
     }
 
     /// Set the max amount of concurrent requests.
+    ///
+    /// The downloader's concurrent requests won't exceed the given amount.
     pub fn max_concurrent_requests(mut self, max_concurrent_requests: usize) -> Self {
         self.max_concurrent_requests = max_concurrent_requests;
         self
     }
 
-    /// How many responses to buffer internally
+    /// How many responses to buffer internally.
+    ///
+    /// This essentially determines how much memory the downloader can use for buffering responses
+    /// that arrive out of order. The total number of buffered headers is `request_limit *
+    /// max_buffered_responses`. If the [LinearDownloader]'s buffered responses exceeds this
+    /// threshold it waits until there's capacity again before sending new requests.
     pub fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
         self.max_buffered_responses = max_buffered_responses;
         self
@@ -942,7 +970,7 @@ mod tests {
 
         let batch_size = 99;
         let start = 1000;
-        let mut downloader = LinearDownloadBuilder::default().request_batch_size(batch_size).build(
+        let mut downloader = LinearDownloadBuilder::default().request_limit(batch_size).build(
             CONSENSUS.clone(),
             Arc::clone(&client),
             genesis,
@@ -962,17 +990,17 @@ mod tests {
     #[test]
     fn test_resp_order() {
         let mut heap = BinaryHeap::new();
-        let lo = 0u64;
-        heap.push(OrderedHeadersResponse {
-            headers: vec![],
-            request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
-            peer_id: Default::default(),
-        });
-
         let hi = 1u64;
         heap.push(OrderedHeadersResponse {
             headers: vec![],
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
+            peer_id: Default::default(),
+        });
+
+        let lo = 0u64;
+        heap.push(OrderedHeadersResponse {
+            headers: vec![],
+            request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
         });
 
@@ -993,7 +1021,7 @@ mod tests {
 
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(3)
-            .request_batch_size(3)
+            .request_limit(3)
             .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
@@ -1023,7 +1051,7 @@ mod tests {
         let client = Arc::new(TestHeadersClient::default());
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
-            .request_batch_size(1)
+            .request_limit(1)
             .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
