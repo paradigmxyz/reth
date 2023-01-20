@@ -14,6 +14,7 @@ use reth_eth_wire::{
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
+    Error,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{EthProtocolInfo, NetworkInfo, NetworkStatus, PeersInfo};
@@ -227,14 +228,17 @@ impl PeersInfo for NetworkHandle {
 
 #[async_trait]
 impl NetworkInfo for NetworkHandle {
-    type Error = oneshot::error::RecvError;
+    type Error = Error;
 
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
     }
 
-    async fn network_status(&self) -> Result<NetworkStatus, Self::Error> {
-        let status = self.get_status().await?;
+    async fn network_status(&self) -> reth_interfaces::Result<NetworkStatus> {
+        let status = match self.get_status().await {
+            Ok(status) => status,
+            Err(_err) => return Err(reth_interfaces::network::Error::SenderDropped.into()),
+        };
 
         Ok(NetworkStatus {
             client_name: "Reth".to_string(),

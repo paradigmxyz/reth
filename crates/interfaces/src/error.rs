@@ -16,4 +16,7 @@ pub enum Error {
 
     #[error(transparent)]
     Provider(#[from] crate::provider::Error),
+
+    #[error(transparent)]
+    Network(#[from] crate::network::Error),
 }

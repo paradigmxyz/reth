@@ -25,6 +25,9 @@ pub mod p2p;
 /// Syncing related traits.
 pub mod sync;
 
+/// Network error
+pub mod network;
+
 /// Possible errors when interacting with the chain.
 mod error;
 
