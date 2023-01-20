@@ -166,6 +166,7 @@ where
 
     /// Get the result vector with range [start_key:end_key).
     /// Please note that start_key is inclusive and end_key is expclusive.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn get_range<T: Table>(
         &self,
         start_key: T::Key,
