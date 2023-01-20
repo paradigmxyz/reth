@@ -4146,6 +4146,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-rpc-types",
+ "reth-tracing",
  "tokio",
  "tracing",
 ]

@@ -150,13 +150,19 @@ impl Command {
             .with_channel(sender)
             .push(HeaderStage {
                 downloader: headers::linear::LinearDownloadBuilder::default()
-                    .batch_size(config.stages.headers.downloader_batch_size)
-                    .retries(config.stages.headers.downloader_retries)
-                    .build(consensus.clone(), fetch_client.clone()),
+                    .request_limit(config.stages.headers.downloader_batch_size)
+                    .stream_batch_size(config.stages.headers.commit_threshold as usize)
+                    // NOTE: the head and target will be set from inside the stage before the
+                    // downloader is called
+                    .build(
+                        consensus.clone(),
+                        fetch_client.clone(),
+                        Default::default(),
+                        Default::default(),
+                    ),
                 consensus: consensus.clone(),
                 client: fetch_client.clone(),
                 network_handle: network.clone(),
-                commit_threshold: config.stages.headers.commit_threshold,
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {

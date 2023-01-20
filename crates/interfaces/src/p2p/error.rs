@@ -104,6 +104,22 @@ pub enum DownloadError {
         /// The hash of the expected tip
         expected: H256,
     },
+    /// Received a response to a request with unexpected start block
+    #[error("Headers response starts at unexpected block: {received:?}. Expected {expected:?}.")]
+    HeadersResponseStartBlockMismatch {
+        /// The block number of the received tip
+        received: u64,
+        /// The hash of the expected tip
+        expected: u64,
+    },
+    /// Received headers with less than expected items.
+    #[error("Received less headers than expected: {received:?}. Expected {expected:?}.")]
+    HeadersResponseTooShort {
+        /// How many headers we received.
+        received: u64,
+        /// How many headers we expected.
+        expected: u64,
+    },
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
