@@ -10,7 +10,7 @@ use reth_interfaces::p2p::{
     downloader::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
-    priority,
+    priority::Priority,
 };
 use reth_primitives::{PeerId, WithPeerId, H256};
 use std::sync::{

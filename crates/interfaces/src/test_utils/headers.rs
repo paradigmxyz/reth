@@ -8,7 +8,7 @@ use crate::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
             downloader::HeaderDownloader,
         },
-        priority::{self, Priority},
+        priority::Priority,
     },
 };
 use futures::{Future, FutureExt, Stream};

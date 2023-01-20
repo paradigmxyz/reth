@@ -191,7 +191,7 @@ impl StateFetcher {
         }
 
         match req {
-            DownloadRequest::GetBlockHeaders { request, response } => {
+            DownloadRequest::GetBlockHeaders { request, response, .. } => {
                 let inflight = Request { request: request.clone(), response };
                 self.inflight_headers_requests.insert(peer_id, inflight);
                 let HeadersRequest { start, limit, direction } = request;
@@ -202,7 +202,7 @@ impl StateFetcher {
                     direction,
                 })
             }
-            DownloadRequest::GetBlockBodies { request, response } => {
+            DownloadRequest::GetBlockBodies { request, response, .. } => {
                 let inflight = Request { request: request.clone(), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
@@ -371,10 +371,10 @@ impl DownloadRequest {
         }
     }
 
-    fn get_priority(&self) -> Priority {
+    fn get_priority(&self) -> &Priority {
         match self {
-            DownloadRequest::GetBlockHeaders { request, response, priority } => priority,
-            DownloadRequest::GetBlockBodies { request, response, priority } => priority,
+            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
+            DownloadRequest::GetBlockBodies { priority, .. } => priority,
         }
     }
 }
@@ -416,9 +416,11 @@ mod tests {
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
             let (tx, _rx) = oneshot::channel();
-            fetcher
-                .queued_requests
-                .push_back(DownloadRequest::GetBlockBodies { request: vec![], response: tx });
+            fetcher.queued_requests.push_back(DownloadRequest::GetBlockBodies {
+                request: vec![],
+                response: tx,
+                priority: Priority::default(),
+            });
             assert!(fetcher.poll(cx).is_pending());
 
             Poll::Ready(())
