@@ -42,8 +42,8 @@ pub struct ConcurrentDownloader<B, C, DB> {
     request_batch_size: usize,
     /// The number of block bodies to return at once
     stream_batch_size: usize,
-    /// The maximum number of requests to send concurrently.
-    max_concurrent_requests: usize,
+    /// The allowed range for number of concurrent requests.
+    concurrent_requests_range: RangeInclusive<usize>,
     /// Maximum amount of received headers to buffer internally.
     max_buffered_responses: usize,
     /// The range of headers for body download.
@@ -72,8 +72,8 @@ where
         db: Arc<DB>,
         request_batch_size: usize,
         stream_batch_size: usize,
-        max_concurrent_requests: usize,
         max_buffered_responses: usize,
+        concurrent_requests_range: RangeInclusive<usize>,
     ) -> Self {
         Self {
             client,
@@ -81,8 +81,8 @@ where
             db,
             request_batch_size,
             stream_batch_size,
-            max_concurrent_requests,
             max_buffered_responses,
+            concurrent_requests_range,
             header_range: Default::default(),
             last_requested_block_number: None,
             latest_queued_block_number: None,
@@ -150,9 +150,25 @@ where
         }
     }
 
-    fn has_capacity(&self) -> bool {
-        self.in_progress_queue.len() < self.max_concurrent_requests &&
-            self.buffered_responses.len() < self.max_buffered_responses
+    /// Max requests to handle at the same time
+    ///
+    /// This depends on the number of active peers but will always be
+    /// [`min_concurrent_requests`..`max_concurrent_requests`]
+    #[inline]
+    fn concurrent_request_limit(&self) -> usize {
+        let num_peers = self.client.num_connected_peers();
+
+        // we try to keep more requests than available peers active so that there's always a
+        // followup request available for a peer
+        let dynamic_target = num_peers * 4;
+        let max_dynamic = dynamic_target.max(*self.concurrent_requests_range.start());
+
+        // If only a few peers are connected we keep it low
+        if num_peers < *self.concurrent_requests_range.start() {
+            return max_dynamic
+        }
+
+        max_dynamic.min(*self.concurrent_requests_range.end())
     }
 
     fn is_terminated(&self) -> bool {
@@ -325,8 +341,11 @@ where
 
         // Submit new requests and poll any in progress
         loop {
+            let concurrent_requests_limit = this.concurrent_request_limit();
             // Submit new requests
-            while this.has_capacity() {
+            while this.in_progress_queue.len() < concurrent_requests_limit &&
+                this.buffered_responses.len() < this.max_buffered_responses
+            {
                 match this.next_request_fut() {
                     Ok(Some(fut)) => this.in_progress_queue.push(fut),
                     Ok(None) => break, // no more requests
@@ -623,10 +642,10 @@ pub struct ConcurrentDownloaderBuilder {
     request_batch_size: usize,
     /// The number of block bodies to return at once
     stream_batch_size: usize,
-    /// The maximum number of requests to send concurrently.
-    max_concurrent_requests: usize,
     /// Maximum amount of received headers to buffer internally.
     max_buffered_responses: usize,
+    /// The maximum number of requests to send concurrently.
+    concurrent_requests_range: RangeInclusive<usize>,
 }
 
 impl Default for ConcurrentDownloaderBuilder {
@@ -634,8 +653,8 @@ impl Default for ConcurrentDownloaderBuilder {
         Self {
             request_batch_size: 100,
             stream_batch_size: 1000,
-            max_concurrent_requests: 100,
             max_buffered_responses: 10000,
+            concurrent_requests_range: 5..=100,
         }
     }
 }
@@ -654,8 +673,11 @@ impl ConcurrentDownloaderBuilder {
     }
 
     /// Set on the downloader.
-    pub fn with_max_concurrent_requests(mut self, max_concurrent_requests: usize) -> Self {
-        self.max_concurrent_requests = max_concurrent_requests;
+    pub fn with_concurrent_requests_range(
+        mut self,
+        concurrent_requests_range: RangeInclusive<usize>,
+    ) -> Self {
+        self.concurrent_requests_range = concurrent_requests_range;
         self
     }
 
@@ -683,8 +705,8 @@ impl ConcurrentDownloaderBuilder {
             db,
             self.request_batch_size,
             self.stream_batch_size,
-            self.max_concurrent_requests,
             self.max_buffered_responses,
+            self.concurrent_requests_range,
         )
     }
 }

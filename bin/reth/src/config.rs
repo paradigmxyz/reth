@@ -100,10 +100,12 @@ pub struct BodiesConfig {
     pub downloader_request_batch_size: usize,
     /// The number of block bodies to return at once
     pub downloader_stream_batch_size: usize,
-    /// The maximum number of requests to send concurrently.
-    pub downloader_max_concurrent_requests: usize,
     /// Maximum amount of received headers to buffer internally.
     pub downloader_max_buffered_responses: usize,
+    /// The minimum number of requests to send concurrently.
+    pub downloader_min_concurrent_requests: usize,
+    /// The maximum number of requests to send concurrently.
+    pub downloader_max_concurrent_requests: usize,
 }
 
 impl Default for BodiesConfig {
@@ -111,8 +113,9 @@ impl Default for BodiesConfig {
         Self {
             downloader_request_batch_size: 100,
             downloader_stream_batch_size: 1000,
-            downloader_max_concurrent_requests: 100,
             downloader_max_buffered_responses: 10000,
+            downloader_min_concurrent_requests: 5,
+            downloader_max_concurrent_requests: 100,
         }
     }
 }

@@ -166,11 +166,12 @@ impl Command {
                 downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
                     .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
                     .with_request_batch_size(config.stages.bodies.downloader_request_batch_size)
-                    .with_max_concurrent_requests(
-                        config.stages.bodies.downloader_max_concurrent_requests,
-                    )
                     .with_max_buffered_responses(
                         config.stages.bodies.downloader_max_buffered_responses,
+                    )
+                    .with_concurrent_requests_range(
+                        config.stages.bodies.downloader_min_concurrent_requests..=
+                            config.stages.bodies.downloader_max_concurrent_requests,
                     )
                     .build(fetch_client.clone(), consensus.clone(), db.clone()),
                 consensus: consensus.clone(),
