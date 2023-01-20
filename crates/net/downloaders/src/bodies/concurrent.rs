@@ -253,34 +253,36 @@ where
 
         let bodies = buffered_bodies.into_sorted_vec(); // ascending
 
+        // TODO: fix this
         // Dispatch requests for missing bodies
-        if let Some(last_requested) = self.in_progress_queue.last_requested_block_number {
-            let mut request_range = Range::default();
-            // TODO: fix this
-            for num in range.start..=last_requested {
-                // Check if block is already in the buffer
-                if bodies.iter().any(|b| num == b.block_number()) {
-                    continue
-                }
+        if let Some(latest_queued) = self.latest_queued_block_number {
+            if range.start <= latest_queued {
+                let mut request_range = Range::default();
+                for num in range.start..=latest_queued {
+                    // Check if block is already in the buffer
+                    if bodies.iter().any(|b| num == b.block_number()) {
+                        continue
+                    }
 
-                // Check if block is already in progress
-                if self.in_progress_queue.contains_block(num) {
-                    continue
-                }
+                    // Check if block is already in progress
+                    if self.in_progress_queue.contains_block(num) {
+                        continue
+                    }
 
-                if range.is_empty() {
-                    request_range.start = num;
-                } else if request_range.end + 1 == num {
-                    request_range.end = num;
-                } else {
-                    // Dispatch contiguous request.
-                    self.in_progress_queue.push_new_request(
-                        Arc::clone(&self.client),
-                        Arc::clone(&self.consensus),
-                        self.query_headers(request_range.start, request_range.count())?,
-                    );
-                    // Clear the current request range
-                    request_range = Range::default();
+                    if range.is_empty() {
+                        request_range.start = num;
+                    } else if request_range.end + 1 == num {
+                        request_range.end = num;
+                    } else {
+                        // Dispatch contiguous request.
+                        self.in_progress_queue.push_new_request(
+                            Arc::clone(&self.client),
+                            Arc::clone(&self.consensus),
+                            self.query_headers(request_range.start, request_range.count())?,
+                        );
+                        // Clear the current request range
+                        request_range = Range::default();
+                    }
                 }
             }
         }
