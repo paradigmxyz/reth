@@ -5,7 +5,6 @@ use syn::{
     punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Lit, LitBool, LitStr,
     MetaNameValue, Result, Token,
 };
-use unzip_n::unzip_n;
 
 use crate::{metric::Metric, with_attrs::WithAttrs};
 
@@ -13,8 +12,6 @@ use crate::{metric::Metric, with_attrs::WithAttrs};
 /// https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 static METRIC_NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$").unwrap());
-
-unzip_n!(3);
 
 pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let ty = &node.ident;
@@ -54,7 +51,12 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .unzip_n_vec();
+                .fold((vec![], vec![], vec![]), |mut acc, x| {
+                    acc.0.push(x.0);
+                    acc.1.push(x.1);
+                    acc.2.push(x.2);
+                    acc
+                });
 
             quote! {
                 impl Default for #ty {
@@ -109,7 +111,12 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .unzip_n_vec();
+                .fold((vec![], vec![], vec![]), |mut acc, x| {
+                    acc.0.push(x.0);
+                    acc.1.push(x.1);
+                    acc.2.push(x.2);
+                    acc
+                });
 
             quote! {
                 impl #ty {

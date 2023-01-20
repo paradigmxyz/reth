@@ -3943,7 +3943,6 @@ dependencies = [
  "serial_test",
  "syn 1.0.107",
  "trybuild",
- "unzip-n",
 ]
 
 [[package]]

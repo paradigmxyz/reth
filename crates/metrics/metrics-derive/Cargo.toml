@@ -15,7 +15,6 @@ syn = { version = "1.0", features = ["extra-traits"] }
 quote = "1.0"
 regex = "1.6.0"
 once_cell = "1.17.0"
-unzip-n = "0.1.2"
 
 [dev-dependencies]
 metrics = "0.20.1"
