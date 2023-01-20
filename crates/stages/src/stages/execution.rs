@@ -145,7 +145,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
+                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into());
                 }
                 transactions.push(tx);
             }
@@ -161,7 +161,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Signer gap");
                     return Err(
                         DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
-                    )
+                    );
                 }
                 signers.push(tx);
             }
@@ -272,7 +272,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             }
                         }
                     }
-                    current_transition_id += 1;
                 }
                 // insert bytecode
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
@@ -285,6 +284,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // NOTE: bytecode bytes are not inserted in change set and can be found in
                     // separate table
                 }
+                current_transition_id += 1;
             }
 
             // If there is block reward we will add account changeset to db
@@ -326,7 +326,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to })
+            return Ok(UnwindOutput { stage_progress: input.unwind_to });
         }
 
         // get all batches for account change
@@ -372,7 +372,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = account_changeset.last()?;
         while let Some((transition_id, _)) = entry {
             if transition_id < from_transition_rev {
-                break
+                break;
             }
             account_changeset.delete_current()?;
             entry = account_changeset.prev()?;
@@ -381,7 +381,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut entry = storage_changeset.last()?;
         while let Some((key, _)) = entry {
             if key.transition_id() < from_transition_rev {
-                break
+                break;
             }
             storage_changeset.delete_current()?;
             entry = storage_changeset.prev()?;
@@ -395,7 +395,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 mod tests {
     use std::ops::{Deref, DerefMut};
 
-    use crate::test_utils::PREV_STAGE_ID;
+    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
 
     use super::*;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
@@ -505,7 +505,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: None,
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             /// The progress of this stage the last time it was executed.
             stage_progress: None,
         };
@@ -534,7 +534,6 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-
         let mut execution_stage = ExecutionStage {
             chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
             ..Default::default()
@@ -568,5 +567,77 @@ mod tests {
             Ok(None),
             "Third account should be unwinded"
         );
+    }
+
+    #[tokio::test]
+    async fn test_selfdestruct() {
+        let test_tx = TestTransaction::default();
+        let mut tx = test_tx.inner();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, 1)),
+            /// The progress of this stage the last time it was executed.
+            stage_progress: None,
+        };
+        let mut genesis_rlp = hex!("f901f8f901f3a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0c9ceb8372c88cb461724d8d3d87e8b933f6fc5f679d4841800e662f4428ffd0da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080830f4240808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        insert_canonical_block(tx.deref_mut(), &genesis, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), &block, true).unwrap();
+        tx.commit().unwrap();
+
+        // variables
+        let caller_address = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let destroyed_address = H160(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87"));
+
+        let code = hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00");
+        let balance = U256::from(0x0de0b6b3a7640000u64);
+        let code_hash = keccak256(code);
+
+        // pre state
+        let db_tx = tx.deref_mut();
+        let caller_info = Account { nonce: 0, balance, bytecode_hash: None };
+        let destroyed_info =
+            Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+
+        // set account
+        db_tx.put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
+        db_tx.put::<tables::PlainAccountState>(destroyed_address, destroyed_info).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
+        // set storage to check when account gets destroyed.
+        db_tx
+            .put::<tables::PlainStorageState>(
+                destroyed_address,
+                StorageEntry { key: H256::zero(), value: U256::ZERO },
+            )
+            .unwrap();
+
+        tx.commit().unwrap();
+
+        // execute
+        let mut execution_stage = ExecutionStage {
+            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
+            ..Default::default()
+        };
+        let _ = execution_stage.execute(&mut tx, input).await.unwrap();
+        tx.commit().unwrap();
+
+        // assert unwind stage
+        let db_tx = tx.deref();
+        assert_eq!(
+            db_tx.get::<tables::PlainAccountState>(destroyed_address),
+            Ok(None),
+            "Account was destroyed"
+        );
+
+        assert_eq!(
+            db_tx.get::<tables::PlainStorageState>(destroyed_address),
+            Ok(None),
+            "There is storage for destroyed account"
+        );
+
+        let account_changesets = test_tx.table::<tables::AccountChangeSet>().unwrap();
+        let storge_changesets = test_tx.table::<tables::StorageChangeSet>().unwrap();
+
     }
 }

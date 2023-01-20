@@ -8,7 +8,7 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, sync::Arc, collections::BTreeMap};
 
 use crate::db::Transaction;
 
@@ -65,6 +65,18 @@ impl TestTransaction {
         self.query(|tx| {
             let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
+        })
+    }
+
+    /// Return full table as BTreeMap
+    pub(crate) fn table<T: Table>(&self) -> Result<BTreeMap<T::Key, T::Value>, DbError>
+    where
+        T::Key: Default + Ord,
+    {
+        self.query(|tx| {
+            tx.cursor_read::<T>()?
+                .walk(T::Key::default())?
+                .collect::<Result<BTreeMap<_, _>, DbError>>()
         })
     }
 
