@@ -1,10 +1,9 @@
 //! Builder for a reth test instance.
 
 use reth_cli_utils::init::init_genesis;
-use reth_consensus::BeaconConsensus;
 use reth_db::database::Database;
 use reth_downloaders::{bodies, headers};
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_interfaces::test_utils::TestConsensus;
 use reth_network::NetworkHandle;
 use reth_primitives::{ChainSpec, H256};
 use reth_stages::{
@@ -17,13 +16,12 @@ use reth_stages::{
 };
 use reth_tracing::tracing::{debug, info};
 use std::sync::Arc;
-use tokio::sync::watch::error::SendError;
 
 use crate::stage_config::StageConfig;
 
 /// Reth test instance
 pub(crate) struct RethTestInstance<DB> {
-    pub(crate) consensus: Arc<BeaconConsensus>,
+    pub(crate) consensus: Arc<TestConsensus>,
     pub(crate) network: NetworkHandle,
     pub(crate) db: Arc<DB>,
     pub(crate) chain_spec: ChainSpec,
@@ -38,7 +36,10 @@ where
     /// Start the reth sync pipeline
     pub(crate) async fn start(&self) -> Result<(), RethTestInstanceError> {
         // make sure to init genesis if not done already
-        let _genesis_hash = init_genesis(self.db.clone(), self.chain_spec.genesis().clone())?;
+        let genesis_hash = init_genesis(self.db.clone(), self.chain_spec.clone())?;
+        if genesis_hash != self.chain_spec.genesis_hash() {
+            return Err(RethTestInstanceError::GenesisMismatch)
+        }
 
         // start pipeline
         let fetch_client = Arc::new(self.network.fetch_client().await.unwrap());
@@ -78,20 +79,18 @@ where
             .push(ExecutionStage {
                 chain_spec: self.chain_spec.clone(),
                 commit_threshold: self.config.execution.commit_threshold,
-            });
+            })
+            .with_max_block(Some(0));
 
         if let Some(tip) = self.tip {
             debug!("Tip manually set: {}", tip);
-            self.consensus.notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: tip,
-                safe_block_hash: tip,
-                finalized_block_hash: tip,
-            })?;
+            self.consensus.update_tip(tip);
         }
 
         // Run pipeline
         info!("Starting pipeline");
         pipeline.run(self.db.clone()).await?;
+        info!("Pipeline finished");
         Ok(())
     }
 }
@@ -103,20 +102,20 @@ pub(crate) enum RethTestInstanceError {
     #[error("Error while initializing the genesis block: {0}")]
     GenesisInitError(#[from] reth_db::Error),
 
-    /// Error while notifying consensus listeners of a fork choice state update.
-    #[error("Error while notifying consensus listeners of a fork choice state update: {0}")]
-    ForkChoiceStateUpdateError(#[from] SendError<ForkchoiceState>),
-
     /// Error while running the reth pipeline.
     #[error("Error while running the reth pipeline: {0}")]
     PipelineError(#[from] reth_stages::PipelineError),
+
+    /// The genesis hash of the written genesis block does not match the chain spec genesis hash.
+    #[error("Written genesis hash does not match chain spec genesis hash")]
+    GenesisMismatch,
 }
 
 // TODO: config
 /// Builder for a reth test instance.
 pub(crate) struct RethBuilder<DB> {
     network: Option<NetworkHandle>,
-    consensus: Option<Arc<BeaconConsensus>>,
+    consensus: Option<Arc<TestConsensus>>,
     db: Option<Arc<DB>>,
     chain_spec: Option<ChainSpec>,
     tip: Option<H256>,
@@ -145,7 +144,7 @@ impl<DB> RethBuilder<DB> {
 
     /// Sets the consensus handle.
     #[must_use]
-    pub(crate) fn consensus(mut self, consensus: Arc<BeaconConsensus>) -> Self {
+    pub(crate) fn consensus(mut self, consensus: Arc<TestConsensus>) -> Self {
         self.consensus = Some(consensus);
         self
     }

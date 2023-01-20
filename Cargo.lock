@@ -4647,6 +4647,7 @@ dependencies = [
  "reth-stages",
  "reth-tracing",
  "secp256k1 0.24.3",
+ "serial_test",
  "tempfile",
  "thiserror",
  "tokio",

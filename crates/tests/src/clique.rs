@@ -8,14 +8,12 @@ use ethers_core::{
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Middleware, Provider, Ws};
 use ethers_signers::{LocalWallet, Signer, Wallet};
-use reth_eth_wire::Status;
 use reth_network::test_utils::{enr_to_peer_id, unused_port};
 use reth_primitives::PeerId;
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader},
     net::SocketAddr,
-    time::Duration,
 };
 use tracing::trace;
 
@@ -198,10 +196,7 @@ impl CliqueGethBuilder {
             .disable_discovery()
             .insecure_unlock();
 
-        // create a compatible status
-        let status = Status::from(genesis.clone());
-
-        CliqueGethInstance::new(geth, signer, status, genesis).await
+        CliqueGethInstance::new(geth, signer, genesis).await
     }
 }
 
@@ -216,10 +211,6 @@ pub(crate) struct CliqueGethInstance {
 
     /// The private key used for signing clique blocks and transactions.
     pub(crate) signer: SigningKey,
-
-    /// The [`Status`](reth_eth_wire::Status) extracted from the configured geth
-    /// [`Genesis`](ethers_core::utils::Genesis).
-    pub(crate) status: Status,
 
     /// The local [`Genesis`](ethers_core::utils::Genesis) used to configure geth.
     pub(crate) genesis: Genesis,
@@ -238,12 +229,7 @@ impl CliqueGethInstance {
     /// block production.
     ///
     /// This also spawns the geth instance.
-    pub(crate) async fn new(
-        geth: Geth,
-        signer: SigningKey,
-        status: Status,
-        genesis: Genesis,
-    ) -> Self {
+    pub(crate) async fn new(geth: Geth, signer: SigningKey, genesis: Genesis) -> Self {
         // spawn the geth instance
         let instance = geth.spawn();
 
@@ -256,7 +242,7 @@ impl CliqueGethInstance {
         let provider =
             SignerMiddleware::new_with_provider_chain(provider, wallet.clone()).await.unwrap();
 
-        Self { instance, signer, status, genesis, provider }
+        Self { instance, signer, genesis, provider }
     }
 
     /// Enable mining on the clique geth instance by importing and unlocking the signer account
@@ -289,22 +275,48 @@ impl CliqueGethInstance {
 
     /// Prints the logs of the [`Geth`](ethers_core::utils::Geth) instance in a new
     /// [`task`](tokio::task).
-    pub(crate) fn print_logs(&mut self) {
+    pub(crate) async fn print_logs(&mut self) {
         // take the stderr of the geth instance and print it
         let stderr = self.instance.stderr().unwrap();
 
         // print logs in a new task
-        tokio::task::spawn(async move {
-            let mut err_reader = BufReader::new(stderr);
+        let mut err_reader = BufReader::new(stderr);
 
+        tokio::spawn(async move {
             loop {
-                let mut buf = String::new();
-                if let Ok(line) = err_reader.read_line(&mut buf) {
+                if let (Ok(line), line_str) = {
+                    let mut buf = String::new();
+                    (err_reader.read_line(&mut buf), buf.clone())
+                } {
                     if line == 0 {
-                        tokio::time::sleep(Duration::from_nanos(1)).await;
-                        continue
+                        break
                     }
-                    dbg!(buf);
+                    if !line_str.is_empty() {
+                        dbg!(line_str);
+                    }
+                }
+            }
+        });
+    }
+
+    /// Prevents the [`Geth`](ethers_core::utils::Geth) instance from blocking due to the `stderr`
+    /// filling up.
+    pub(crate) async fn prevent_blocking(&mut self) {
+        // take the stderr of the geth instance and print it
+        let stderr = self.instance.stderr().unwrap();
+
+        // print logs in a new task
+        let mut err_reader = BufReader::new(stderr);
+
+        tokio::spawn(async move {
+            loop {
+                if let (Ok(line), _line_str) = {
+                    let mut buf = String::new();
+                    (err_reader.read_line(&mut buf), buf.clone())
+                } {
+                    if line == 0 {
+                        break
+                    }
                 }
             }
         });
@@ -351,6 +363,7 @@ impl CliqueGethInstance {
 
     /// Returns the chain tip hash of the [`Geth`](ethers_core::utils::Geth) instance by calling
     /// from geth's `eth_getBlock`.
+    #[allow(dead_code)]
     pub(crate) async fn tip_hash(&self) -> reth_primitives::H256 {
         self.tip().await.hash.unwrap().0.into()
     }

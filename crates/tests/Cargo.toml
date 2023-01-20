@@ -17,7 +17,7 @@ reth-stages = { path = "../stages" }
 reth-db = { path = "../storage/db" }
 reth-consensus = { path = "../consensus" }
 reth-cli-utils = { path = "../cli/utils" }
-reth-interfaces = { path = "../interfaces" }
+reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-network = { path = "../net/network", features = ["test-utils", "serde"] }
 reth-eth-wire = { path = "../net/eth-wire" }
@@ -55,3 +55,4 @@ tracing = "0.1"
 # misc
 hex = "0.4"
 tempfile = "3.3"
+serial_test = "0.10"

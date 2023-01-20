@@ -7,8 +7,8 @@ use ethers_core::types::{
 };
 use ethers_providers::Middleware;
 use reth_cli_utils::init::init_db;
-use reth_consensus::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
+use reth_interfaces::test_utils::TestConsensus;
 use reth_network::{
     test_utils::{unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
     NetworkConfig, NetworkManager,
@@ -25,6 +25,7 @@ use tokio::fs;
 ///
 /// Tests that are run against a real `geth` node use geth's Clique functionality to create blocks.
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn sync_from_clique_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -40,18 +41,21 @@ async fn sync_from_clique_geth() {
 
         // build the funded geth
         let mut clique_instance = clique_geth.build().await;
+        tracing::info!("clique instance built");
 
         // print the logs in a new task
-        clique_instance.print_logs();
+        clique_instance.print_logs().await;
 
         // get geth to start producing blocks - use a blank password
         clique_instance.enable_mining("".into()).await;
+        tracing::info!("enabled mining");
 
         // === check that we have the same genesis hash ===
 
         // get the chainspec from the genesis we configured for geth
         let mut chainspec: ChainSpec = clique_instance.genesis.clone().into();
         let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
+        tracing::info!("got remote genesis");
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
 
@@ -79,16 +83,23 @@ async fn sync_from_clique_geth() {
                     .value(1u64)
                     .nonce(nonce))
             });
+        tracing::info!("generated tranactions");
 
         // finally send the txs to geth
         clique_instance.send_requests(txs).await;
+        tracing::info!("sent requests");
 
         // wait for a certain number of blocks to be mined
         let block = clique_instance.provider.get_block_number().await.unwrap();
         assert!(block > U64::zero());
 
         // get the current tip hash for pipeline configuration
-        let tip_hash = clique_instance.tip_hash().await;
+        let tip = clique_instance.tip().await;
+        let tip_hash = tip.hash.unwrap().0.into();
+
+        tracing::info!(genesis_hash = ?chainspec.genesis_hash, "genesis hash");
+        tracing::info!(tip_hash = ?tip_hash, "tip hash");
+        tracing::info!(tip_number = ?tip.number, "tip number");
 
         // === initialize reth networking stack ===
 
@@ -114,7 +125,7 @@ async fn sync_from_clique_geth() {
         let db = Arc::new(init_db(reth_temp_dir.path()).unwrap());
 
         // initialize consensus
-        let consensus = Arc::new(BeaconConsensus::new(chainspec.clone()));
+        let consensus = Arc::new(TestConsensus::default());
 
         // build reth and start the pipeline
         let reth: RethTestInstance<Env<WriteMap>> = RethBuilder::new()
@@ -126,7 +137,10 @@ async fn sync_from_clique_geth() {
             .build();
 
         // start reth then manually connect geth
-        let pipeline_handle = tokio::task::spawn(async move { reth.start().await });
+        let pipeline_handle = tokio::task::spawn(async move {
+            reth.start().await.unwrap();
+        });
+
         tokio::task::spawn(network);
 
         // create networkeventstream to get the next session established event easily
@@ -145,7 +159,10 @@ async fn sync_from_clique_geth() {
         // wait for the session to be established
         let _peer_id = events.peer_added_and_established().await.unwrap();
 
-        pipeline_handle.await.unwrap().unwrap();
+        tracing::info!("waiting for pipeline to finish");
+        pipeline_handle.await.unwrap();
+
+        drop(clique_instance);
 
         // cleanup (delete the data_dir at dir_path)
         fs::remove_dir_all(dir_path).await.unwrap();
@@ -155,6 +172,7 @@ async fn sync_from_clique_geth() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn geth_clique_keepalive() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -172,7 +190,7 @@ async fn geth_clique_keepalive() {
         let mut clique_instance = clique_geth.build().await;
 
         // print the logs in a new task
-        clique_instance.print_logs();
+        clique_instance.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
         clique_instance.enable_mining("".into()).await;
