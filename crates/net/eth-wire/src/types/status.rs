@@ -1,6 +1,11 @@
 use crate::{EthVersion, StatusBuilder};
 
-use reth_primitives::{Chain, ForkId, Hardfork, H256, MAINNET_GENESIS, U256};
+use ethers_core::utils::Genesis;
+use reth_codecs::derive_arbitrary;
+use reth_primitives::{
+    constants::EIP1559_INITIAL_BASE_FEE, Chain, ChainSpec, ForkId, Hardfork, Header, H256, MAINNET,
+    U256,
+};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -10,6 +15,7 @@ use std::fmt::{Debug, Display};
 ///
 /// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
 /// hash. This information should be treated as untrusted.
+#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
@@ -35,6 +41,40 @@ pub struct Status {
     /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
     /// This was added in [`eth/64`](https://eips.ethereum.org/EIPS/eip-2364)
     pub forkid: ForkId,
+}
+
+impl From<Genesis> for Status {
+    fn from(genesis: Genesis) -> Status {
+        let chain = genesis.config.chain_id;
+        let total_difficulty = genesis.difficulty.into();
+        let mut chainspec = ChainSpec::from(genesis);
+        let mut header = Header::from(chainspec.genesis().clone());
+
+        let hardforks = chainspec.hardforks();
+
+        // set initial base fee depending on eip-1559
+        if Some(&0u64) == hardforks.get(&Hardfork::London) {
+            header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
+        }
+
+        // calculate the hash
+        let sealed_header = header.seal();
+
+        // set the new genesis hash after modifying the base fee
+        chainspec.genesis_hash = sealed_header.hash();
+
+        // we need to calculate the fork id AFTER re-setting the genesis hash
+        let forkid = chainspec.fork_id(0);
+
+        Status {
+            version: EthVersion::Eth67 as u8,
+            chain: Chain::Id(chain),
+            total_difficulty,
+            blockhash: sealed_header.hash(),
+            genesis: sealed_header.hash(),
+            forkid,
+        }
+    }
 }
 
 impl Status {
@@ -98,9 +138,11 @@ impl Default for Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
-            blockhash: MAINNET_GENESIS,
-            genesis: MAINNET_GENESIS,
-            forkid: Hardfork::Frontier.fork_id(),
+            blockhash: MAINNET.genesis_hash(),
+            genesis: MAINNET.genesis_hash(),
+            forkid: Hardfork::Frontier
+                .fork_id(&MAINNET)
+                .expect("The Frontier hardfork should always exist"),
         }
     }
 }

@@ -20,7 +20,10 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize},
+        Arc,
+    },
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -69,8 +72,9 @@ where
         discovery: Discovery,
         peers_manager: PeersManager,
         genesis_hash: H256,
+        num_active_peers: Arc<AtomicUsize>,
     ) -> Self {
-        let state_fetcher = StateFetcher::new(peers_manager.handle());
+        let state_fetcher = StateFetcher::new(peers_manager.handle(), num_active_peers);
         Self {
             active_peers: Default::default(),
             peers_manager,
@@ -351,6 +355,10 @@ where
     }
 
     /// Invoked when received a response from a connected peer.
+    ///
+    /// Delegates the response result to the fetcher which may return an outcome specific
+    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
@@ -525,7 +533,7 @@ mod tests {
             client: Arc::new(NoopProvider::default()),
             discovery: Discovery::noop(),
             genesis_hash: Default::default(),
-            state_fetcher: StateFetcher::new(handle),
+            state_fetcher: StateFetcher::new(handle, Default::default()),
         }
     }
 

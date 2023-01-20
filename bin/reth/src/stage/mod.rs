@@ -5,15 +5,14 @@ use crate::{
     config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{
-        chainspec::{chain_spec_value_parser, ChainSpecification},
-        init::{init_db, init_genesis},
-    },
+    utils::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
-use reth_executor::Config as ExecutorConfig;
+
+use reth_net_nat::NatResolver;
+use reth_primitives::ChainSpec;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
@@ -56,7 +55,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpecification,
+    chain: ChainSpec,
 
     /// Enable Prometheus metrics.
     ///
@@ -86,6 +85,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
@@ -126,9 +128,8 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let chain_id = self.chain.consensus.chain_id;
-                let consensus = Arc::new(BeaconConsensus::new(self.chain.consensus.clone()));
-                let genesis_hash = init_genesis(db.clone(), self.chain.genesis.clone())?;
+                let consensus: Arc<BeaconConsensus> =
+                    Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -141,9 +142,10 @@ impl Command {
                 let network = config
                     .network_config(
                         db.clone(),
-                        chain_id,
-                        genesis_hash,
+                        self.chain.clone(),
                         self.network.disable_discovery,
+                        None,
+                        self.nat,
                     )
                     .start_network()
                     .await?;
@@ -178,10 +180,8 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                let mut stage = ExecutionStage {
-                    config: ExecutorConfig::new_ethereum(),
-                    commit_threshold: num_blocks,
-                };
+                let mut stage =
+                    ExecutionStage { chain_spec: self.chain.clone(), commit_threshold: num_blocks };
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

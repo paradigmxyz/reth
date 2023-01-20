@@ -4,8 +4,8 @@ use crate::{
     BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
 use bytes::{BufMut, BytesMut};
-use ethers_core::types::H64;
-use reth_codecs::{main_codec, Compact};
+use ethers_core::types::{Block, H256 as EthersH256, H64};
+use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -217,6 +217,29 @@ pub struct SealedHeader {
     hash: BlockHash,
 }
 
+impl From<Block<EthersH256>> for SealedHeader {
+    fn from(block: Block<EthersH256>) -> Self {
+        let header = Header {
+            number: block.number.unwrap().as_u64(),
+            gas_limit: block.gas_limit.as_u64(),
+            difficulty: block.difficulty.into(),
+            nonce: block.nonce.unwrap().to_low_u64_be(),
+            extra_data: block.extra_data.0.into(),
+            state_root: block.state_root.0.into(),
+            timestamp: block.timestamp.as_u64(),
+            mix_hash: block.mix_hash.unwrap().0.into(),
+            beneficiary: block.author.unwrap().0.into(),
+            base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
+            ..Default::default()
+        };
+        let hash = match block.hash {
+            Some(hash) => hash.0.into(),
+            None => header.hash_slow(),
+        };
+        SealedHeader::new(header, hash)
+    }
+}
+
 impl Default for SealedHeader {
     fn default() -> Self {
         let header = Header::default();
@@ -290,6 +313,7 @@ impl SealedHeader {
 /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
+#[derive_arbitrary(rlp)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadersDirection {
     /// Falling block number.
@@ -433,6 +457,13 @@ mod tests {
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
         assert_eq!(header, expected);
+
+        // make sure the hash matches
+        let expected_hash = H256::from_slice(
+            &hex::decode("8c2f2af15b7b563b6ab1e09bed0e9caade7ed730aec98b70a993597a797579a9")
+                .unwrap(),
+        );
+        assert_eq!(header.hash_slow(), expected_hash);
     }
 
     #[test]

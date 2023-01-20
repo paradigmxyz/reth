@@ -1,12 +1,14 @@
 //! Disconnect
 
 use bytes::Buf;
+use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
 
 /// RLPx disconnect reason.
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.

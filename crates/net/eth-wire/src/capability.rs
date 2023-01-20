@@ -2,9 +2,16 @@
 
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use bytes::{BufMut, Bytes};
+use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    arbitrary::{any_with, ParamsFor},
+    strategy::{BoxedStrategy, Strategy},
+};
 
 /// A Capability message consisting of the message-id and the payload
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +33,7 @@ pub enum CapabilityMessage {
 }
 
 /// A message indicating a supported capability and capability version.
+#[add_arbitrary_tests(rlp)]
 #[derive(
     Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default, Hash,
 )]
@@ -52,6 +60,30 @@ impl Capability {
     #[inline]
     pub fn is_eth_v67(&self) -> bool {
         self.name == "eth" && self.version == 67
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Capability {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let version = u.int_in_range(0..=32)?; // TODO: What's the max?
+        let name: SmolStr = String::arbitrary(u)?.into(); // TODO: what possible values?
+        Ok(Self { name, version })
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Capability {
+    type Parameters = ParamsFor<String>;
+    type Strategy = BoxedStrategy<Capability>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        any_with::<String>(args) // TODO: what possible values?
+            .prop_flat_map(move |name| {
+                any_with::<usize>(()) // TODO: What's the max?
+                    .prop_map(move |version| Capability { name: name.clone().into(), version })
+            })
+            .boxed()
     }
 }
 

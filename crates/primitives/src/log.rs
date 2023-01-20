@@ -3,7 +3,7 @@ use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// Ethereum Log
-#[main_codec]
+#[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
 pub struct Log {
     /// Contract that emitted this log.

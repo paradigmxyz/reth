@@ -2,7 +2,7 @@ use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 pub use signature::Signature;
 pub use tx_type::TxType;
@@ -185,6 +185,15 @@ impl Transaction {
         let mut buf = BytesMut::new();
         self.encode(&mut buf);
         keccak256(&buf)
+    }
+
+    /// Get chain_id.
+    pub fn chain_id(&self) -> Option<&u64> {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => chain_id.as_ref(),
+            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(chain_id),
+            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(chain_id),
+        }
     }
 
     /// Sets the transaction's chain id to the provided value.
@@ -525,7 +534,8 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[main_codec]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSigned {
     /// Transaction hash
@@ -536,6 +546,53 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    prelude::{any, Strategy},
+    strategy::BoxedStrategy,
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for TransactionSigned {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<TransactionSigned>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        any::<(Transaction, Signature)>()
+            .prop_map(move |(mut transaction, sig)| {
+                if let Some(chain_id) = transaction.chain_id().cloned() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+                let mut tx =
+                    TransactionSigned { hash: Default::default(), signature: sig, transaction };
+                tx.hash = tx.recalculate_hash();
+                tx
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut transaction = Transaction::arbitrary(u)?;
+        if let Some(chain_id) = transaction.chain_id().cloned() {
+            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        let mut tx = TransactionSigned {
+            hash: Default::default(),
+            signature: Signature::arbitrary(u)?,
+            transaction,
+        };
+        tx.hash = tx.recalculate_hash();
+
+        Ok(tx)
+    }
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
@@ -570,9 +627,7 @@ impl Decodable for TransactionSigned {
             // For eip2728 types transaction header is not used inside hash
             let original_encoding = *buf;
 
-            let tx_type = *buf
-                .first()
-                .ok_or(DecodeError::Custom("typed tx cannot be decoded from an empty slice"))?;
+            let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
             buf.advance(1);
             // decode the list header for the rest of the transaction
             let header = Header::decode(buf)?;
@@ -840,8 +895,15 @@ mod tests {
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
-    use reth_rlp::{Decodable, Encodable};
+    use reth_rlp::{Decodable, DecodeError, Encodable};
     use std::str::FromStr;
+
+    #[test]
+    fn test_decode_empty_typed_tx() {
+        let input = [0x80u8];
+        let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
+        assert_eq!(DecodeError::InputTooShort, res);
+    }
 
     #[test]
     fn test_decode_create() {

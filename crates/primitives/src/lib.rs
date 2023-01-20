@@ -10,12 +10,15 @@
 //! This crate contains Ethereum primitive types and helper functions.
 
 mod account;
+mod bits;
 mod block;
 pub mod bloom;
 mod chain;
-mod constants;
+mod chain_spec;
+pub mod constants;
 mod error;
 mod forkid;
+mod genesis;
 mod hardfork;
 mod header;
 mod hex_bytes;
@@ -32,11 +35,14 @@ mod transaction;
 pub mod proofs;
 
 pub use account::Account;
+pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::Chain;
+pub use chain_spec::{ChainSpec, ChainSpecBuilder, ParisStatus, GOERLI, MAINNET, SEPOLIA};
 pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
+pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
@@ -77,9 +83,9 @@ pub type TransitionId = u64;
 
 pub use ethers_core::{
     types as rpc,
-    types::{BigEndianHash, H128, H512, H64, U128, U64},
+    types::{BigEndianHash, H128, H64, U64},
 };
-pub use revm_interpreter::{B160 as H160, B256 as H256, U256};
+pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 
 #[doc(hidden)]
 mod __reexport {

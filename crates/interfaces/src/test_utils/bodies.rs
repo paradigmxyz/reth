@@ -22,6 +22,10 @@ impl<F: Sync + Send> DownloadClient for TestBodiesClient<F> {
     fn report_bad_message(&self, _peer_id: reth_primitives::PeerId) {
         // noop
     }
+
+    fn num_connected_peers(&self) -> usize {
+        0
+    }
 }
 
 #[async_trait]

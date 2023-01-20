@@ -10,19 +10,19 @@ pub(crate) const DEFAULT_REPUTATION: Reputation = 0;
 const REPUTATION_UNIT: i32 = -1024;
 
 /// The reputation value below which new connection from/to peers are rejected.
-pub(crate) const BANNED_REPUTATION: i32 = 100 * REPUTATION_UNIT;
+pub(crate) const BANNED_REPUTATION: i32 = 50 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that dropped the connection.
 const REMOTE_DISCONNECT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that we failed to connect to.
-const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 24 * REPUTATION_UNIT;
+const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 25 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that failed to respond in time.
-const TIMEOUT_REPUTATION_CHANGE: i32 = REPUTATION_UNIT;
+const TIMEOUT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that sent a bad message.
-const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 8 * REPUTATION_UNIT;
+const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;

@@ -420,6 +420,34 @@ async fn fetch_bodies(
 }
 ```
 
+It's worth noting that once the node starts downloading either headers or bodies from a given peer, it does _not_ necessarily stick with that peer, as this would preclude the ability to effectively support concurrent requests.
+
+When `FetchClient.get_headers` or `FetchClient.get_block_bodies` is called, those `DownloadRequest`s are sent into the `StateFetcher.download_requests_tx` channel, and are processed as the `StateFetcher` gets polled.
+
+Every time the `StateFetcher` is polled, it finds the next idle peer available to service the current request (for either a block header, or a block body). In this context, "idle" means any peer that is not currently handling a request from the node:
+
+[File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/fetch/mod.rs)
+```rust,ignore
+/// Returns the next action to return
+fn poll_action(&mut self) -> PollAction {
+    // we only check and not pop here since we don't know yet whether a peer is available.
+    if self.queued_requests.is_empty() {
+        return PollAction::NoRequests
+    }
+
+    let peer_id = if let Some(peer_id) = self.next_peer() {
+        peer_id
+    } else {
+        return PollAction::NoPeersAvailable
+    };
+
+    let request = self.queued_requests.pop_front().expect("not empty; qed");
+    let request = self.prepare_block_request(peer_id, request);
+
+    PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+}
+```
+
 ---
 
 ## ETH Requests Task

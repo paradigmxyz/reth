@@ -9,6 +9,8 @@ use std::time::Duration;
 pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionsConfig {
     /// Size of the session command buffer (per session task).
     pub session_command_buffer: usize,
@@ -55,6 +57,7 @@ impl SessionsConfig {
 ///
 /// By default, no session limits will be enforced
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionLimits {
     max_pending_inbound: Option<u32>,
     max_pending_outbound: Option<u32>,

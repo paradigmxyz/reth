@@ -5,6 +5,7 @@
 
 use crate::{BlockNumber, H256};
 use crc::crc32;
+use reth_codecs::derive_arbitrary;
 use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,6 +16,7 @@ use std::{
 use thiserror::Error;
 
 /// `CRC32` hash of all previous forks starting from genesis block.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Copy,
@@ -58,6 +60,7 @@ impl Add<BlockNumber> for ForkHash {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
+#[derive_arbitrary(rlp)]
 #[derive(
     Clone,
     Copy,
@@ -103,7 +106,7 @@ pub enum ValidationError {
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
 /// compatibility.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkFilter {
     forks: BTreeMap<BlockNumber, ForkHash>,
 
@@ -253,7 +256,7 @@ pub struct ForkTransition {
     pub past: ForkId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Cache {
     // An epoch is a period between forks.
     // When we progress from one fork to the next one we move to the next epoch.
