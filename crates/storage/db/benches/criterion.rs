@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, non_snake_case)]
+
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
