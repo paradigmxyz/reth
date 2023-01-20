@@ -110,7 +110,7 @@ async fn test_get_header() {
         mock_provider.add_header(hash, header.clone());
 
         let req =
-            HeadersRequest { start: start.into(), limit: 1, direction: HeadersDirection::Falling };
+            HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Falling };
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok());

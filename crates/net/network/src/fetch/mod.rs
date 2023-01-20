@@ -256,8 +256,15 @@ impl StateFetcher {
     }
 
     fn is_likely_bad_message(request: &HeadersRequest, headers: &[Header]) -> bool {
-        request.limit != headers.len() as u64 ||
-            Some(request.start) != headers.get(0).map(|h| BlockHashOrNumber::Number(h.number))
+        if request.limit != headers.len() as u64 {
+            return true
+        }
+
+        if let BlockHashOrNumber::Number(block_number) = request.start {
+            return Some(block_number) != headers.get(0).map(|h| h.number)
+        }
+
+        return false
     }
 
     /// Called on a `GetBlockBodies` response from a peer
