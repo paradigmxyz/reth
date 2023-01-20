@@ -13,7 +13,9 @@ use reth_network::{
     test_utils::{unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
     NetworkConfig, NetworkManager,
 };
-use reth_primitives::{ChainSpec, Hardfork, Header, PeerId, SealedHeader, constants::EIP1559_INITIAL_BASE_FEE};
+use reth_primitives::{
+    constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, Hardfork, Header, PeerId, SealedHeader,
+};
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -48,7 +50,7 @@ async fn sync_from_clique_geth() {
         // === check that we have the same genesis hash ===
 
         // get the chainspec from the genesis we configured for geth
-        let chainspec: ChainSpec = clique_instance.genesis.clone().into();
+        let mut chainspec: ChainSpec = clique_instance.genesis.clone().into();
         let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
@@ -62,6 +64,9 @@ async fn sync_from_clique_geth() {
 
         let local_genesis = local_genesis_header.seal();
         assert_eq!(local_genesis, remote_genesis, "genesis blocks should match, we computed {local_genesis:#?} but geth computed {remote_genesis:#?}");
+
+        // set the chainspec genesis hash
+        chainspec.genesis_hash = local_genesis.hash();
 
         // === create many blocks ===
 
@@ -175,7 +180,7 @@ async fn geth_clique_keepalive() {
         // === check that we have the same genesis hash ===
 
         // get the chainspec from the genesis we configured for geth
-        let chainspec: ChainSpec = clique_instance.genesis.clone().into();
+        let mut chainspec: ChainSpec = clique_instance.genesis.clone().into();
         let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
@@ -189,6 +194,9 @@ async fn geth_clique_keepalive() {
 
         let local_genesis = local_genesis_header.seal();
         assert_eq!(local_genesis, remote_genesis, "genesis blocks should match, we computed {local_genesis:#?} but geth computed {remote_genesis:#?}");
+
+        // set the chainspec genesis hash
+        chainspec.genesis_hash = local_genesis.hash();
 
         // === create many blocks ===
 
