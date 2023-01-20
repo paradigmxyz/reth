@@ -14,7 +14,6 @@ use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
 use reth_stages::{
-    metrics::HeaderMetrics,
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
     ExecInput, Stage, StageId, Transaction, UnwindInput,
 };
@@ -108,7 +107,6 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
-            HeaderMetrics::describe();
         }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
