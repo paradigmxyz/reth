@@ -164,6 +164,25 @@ where
         Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
+    /// Get the result vector with range [start_key:end_key).
+    /// Please note that start_key is inclusive and end_key is expclusive.
+    pub(crate) fn get_range<T: Table>(
+        &self,
+        start_key: T::Key,
+        end_key: T::Key,
+    ) -> Result<Vec<(T::Key, T::Value)>, Error>
+    where
+        T: Table,
+    {
+        self.cursor_read::<T>()?
+            .walk(start_key)?
+            .take_while(|res| match res {
+                Ok((key, _)) => *key < end_key,
+                Err(_) => false,
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
+
     /// Unwind table by some number key
     #[inline]
     pub(crate) fn unwind_table_by_num<T>(&self, num: u64) -> Result<(), Error>

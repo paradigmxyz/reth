@@ -5,7 +5,7 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+    models::{StoredBlockBody, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -88,8 +88,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
-        // Get next canonical block hashes to execute.
-        let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
         let mut headers = tx.cursor_read::<tables::Headers>()?;
         // Get bodies with canonical hashes.
@@ -102,28 +100,25 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
 
         // get canonical blocks (num,hash)
-        let canonical_batch = canonicals
-            .walk(start_block)?
-            .take_while(|entry| entry.as_ref().map(|e| e.0 <= end_block).unwrap_or_default())
-            .map(|i| i.map(BlockNumHash))
-            .collect::<Result<Vec<_>, _>>()?;
+        let canonical_batch =
+            tx.get_range::<tables::CanonicalHeaders>(start_block, end_block + 1)?;
+        let canonical_batch_len = canonical_batch.len();
 
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
-            .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
+            .into_iter()
+            .map(|(number, hash)| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
                 // NOTE: It probably will be faster to fetch all items from one table with cursor,
                 // but to reduce complexity we are using `seek_exact` to skip some
                 // edge cases that can happen.
-                let (_, header) =
-                    headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
-                        number: key.number(),
-                        hash: key.hash(),
-                    })?;
+                let key = (number, hash).into();
+                let (_, header) = headers
+                    .seek_exact(key)?
+                    .ok_or(DatabaseIntegrityError::Header { number, hash })?;
                 let (_, body) = bodies_cursor
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
+                    .seek_exact(key)?
+                    .ok_or(DatabaseIntegrityError::BlockBody { number })?;
+                let (_, stored_ommers) = ommers_cursor.seek_exact(key)?.unwrap_or_default();
 
                 Ok((header, body, stored_ommers.ommers))
             })
@@ -133,7 +128,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
+        let mut block_change_patches = Vec::with_capacity(canonical_batch_len);
         for (header, body, ommers) in block_batch.iter() {
             let num = header.number;
             tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
@@ -332,12 +327,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch = account_changeset
-            .walk(from_transition_rev)?
-            .take_while(|item| {
-                item.as_ref().map(|(num, _)| *num < to_transition_rev).unwrap_or_default()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let account_changeset_batch =
+            tx.get_range::<tables::AccountChangeSet>(from_transition_rev, to_transition_rev)?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
@@ -350,14 +341,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // get all batches for storage change
-        let storage_changeset_batch = storage_changeset
-            .walk((from_transition_rev, Address::zero()).into())?
-            .take_while(|item| {
-                item.as_ref()
-                    .map(|(key, _)| key.transition_id() < to_transition_rev)
-                    .unwrap_or_default()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let storage_changeset_batch = tx.get_range::<tables::StorageChangeSet>(
+            (from_transition_rev, Address::zero()).into(),
+            (to_transition_rev, Address::zero()).into(),
+        )?;
 
         // revert all changes to PlainStorage
         for (key, storage) in storage_changeset_batch.into_iter().rev() {

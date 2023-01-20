@@ -4,13 +4,7 @@ use crate::{
 };
 use itertools::Itertools;
 use rayon::prelude::*;
-use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    tables,
-    transaction::{DbTx, DbTxMut},
-    Error as DbError,
-};
+use reth_db::{cursor::DbCursorRW, database::Database, tables, transaction::DbTxMut};
 use reth_primitives::TxNumber;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -84,17 +78,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
-        // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-        // Walk the transactions from start to end index (inclusive)
-        let entries = tx_cursor
-            .walk(start_tx_index)?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
+        // Walk the transactions from start to end index
+        let entries = tx.get_range::<tables::Transactions>(start_tx_index, end_tx_index + 1)?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
-        for chunk in &entries.chunks(self.batch_size) {
-            let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
+        for chunk in &entries.into_iter().chunks(self.batch_size) {
+            let transactions = chunk.collect::<Vec<_>>();
             // Recover signers for the chunk in parallel
             let recovered = transactions
                 .into_par_iter()

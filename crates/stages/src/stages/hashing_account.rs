@@ -91,10 +91,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         } else {
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
-            tx.cursor_read::<tables::AccountChangeSet>()?
-                .walk(from_transition)?
-                .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition).unwrap_or_default())
-                .collect::<Result<Vec<_>, _>>()?
+            tx.get_range::<tables::AccountChangeSet>(from_transition, to_transition)?
                 .into_iter()
                 // fold all account to one set of changed accounts
                 .fold(BTreeSet::new(), |mut accounts: BTreeSet<Address>, (_, account_before)| {
@@ -135,10 +132,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 
         // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.cursor_read::<tables::AccountChangeSet>()?
-            .walk(from_transition_rev)?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition_rev).unwrap_or_default())
-            .collect::<Result<Vec<_>, _>>()?
+        tx.get_range::<tables::AccountChangeSet>(from_transition_rev, to_transition_rev)?
             .into_iter()
             .rev()
             // fold all account to get the old balance/nonces and account that needs to be removed
