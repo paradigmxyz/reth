@@ -71,6 +71,19 @@ pub enum BlockHashOrNumber {
     Number(u64),
 }
 
+// === impl BlockHashOrNumber ===
+
+impl BlockHashOrNumber {
+    /// Returns the block number if it is a [`BlockHashOrNumber::Number`].
+    #[inline]
+    pub fn as_number(self) -> Option<u64> {
+        match self {
+            BlockHashOrNumber::Hash(_) => None,
+            BlockHashOrNumber::Number(num) => Some(num),
+        }
+    }
+}
+
 impl From<H256> for BlockHashOrNumber {
     fn from(value: H256) -> Self {
         BlockHashOrNumber::Hash(value)

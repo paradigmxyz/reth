@@ -2,21 +2,22 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadClient, DownloadStream, Downloader},
+        downloader::{DownloadClient, Downloader},
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
-            downloader::HeaderDownloader,
+            downloader::{HeaderDownloader, SyncTarget},
         },
     },
 };
-use futures::{Future, FutureExt, Stream};
+use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
+    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
+    fmt,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -32,12 +33,20 @@ pub struct TestHeaderDownloader {
     client: Arc<TestHeadersClient>,
     consensus: Arc<TestConsensus>,
     limit: u64,
+    download: Option<TestDownload>,
+    queued_headers: Vec<SealedHeader>,
+    batch_size: usize,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>, limit: u64) -> Self {
-        Self { client, consensus, limit }
+    pub fn new(
+        client: Arc<TestHeadersClient>,
+        consensus: Arc<TestConsensus>,
+        limit: u64,
+        batch_size: usize,
+    ) -> Self {
+        Self { client, consensus, limit, download: None, batch_size, queued_headers: Vec::new() }
     }
 
     fn create_download(&self) -> TestDownload {
@@ -53,22 +62,46 @@ impl TestHeaderDownloader {
 }
 
 impl Downloader for TestHeaderDownloader {
-    type Consensus = TestConsensus;
     type Client = TestHeadersClient;
-
-    fn consensus(&self) -> &Self::Consensus {
-        &self.consensus
-    }
+    type Consensus = TestConsensus;
 
     fn client(&self) -> &Self::Client {
         &self.client
     }
+
+    fn consensus(&self) -> &Self::Consensus {
+        &self.consensus
+    }
 }
 
-#[async_trait::async_trait]
 impl HeaderDownloader for TestHeaderDownloader {
-    fn stream(&self, _head: SealedHeader, _tip: H256) -> DownloadStream<'_, SealedHeader> {
-        Box::pin(self.create_download())
+    fn update_local_head(&mut self, _head: SealedHeader) {}
+
+    fn update_sync_target(&mut self, _target: SyncTarget) {}
+
+    fn set_batch_size(&mut self, limit: usize) {
+        self.batch_size = limit;
+    }
+}
+
+impl Stream for TestHeaderDownloader {
+    type Item = Vec<SealedHeader>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            if this.queued_headers.len() == this.batch_size {
+                return Poll::Ready(Some(std::mem::take(&mut this.queued_headers)))
+            }
+            if this.download.is_none() {
+                this.download.insert(this.create_download());
+            }
+
+            match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
+                None => return Poll::Ready(Some(std::mem::take(&mut this.queued_headers))),
+                Some(header) => this.queued_headers.push(header.unwrap()),
+            }
+        }
     }
 }
 
@@ -83,6 +116,9 @@ struct TestDownload {
     done: bool,
 }
 
+/// SAFETY: All the mutations are performed through an exclusive reference on `poll`
+unsafe impl Sync for TestDownload {}
+
 impl TestDownload {
     fn get_or_init_fut(&mut self) -> &mut TestHeadersFut {
         if self.fut.is_none() {
@@ -95,6 +131,18 @@ impl TestDownload {
             self.fut = Some(Box::pin(async move { client.get_headers(request).await }));
         }
         self.fut.as_mut().unwrap()
+    }
+}
+
+impl fmt::Debug for TestDownload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TestDownload")
+            .field("client", &self.client)
+            .field("consensus", &self.consensus)
+            .field("limit", &self.limit)
+            .field("buffer", &self.buffer)
+            .field("done", &self.done)
+            .finish_non_exhaustive()
     }
 }
 
