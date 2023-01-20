@@ -473,7 +473,7 @@ where
     }
 
     fn on_error(&mut self, error: BodyRequestError, peer_id: Option<PeerId>) {
-        tracing::error!(target: "downloaders::bodies", ?peer_id, request = ?self.hashes_to_download, %error, "Error requesting bodies");
+        tracing::error!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
         if let Some(peer_id) = peer_id {
             self.client.report_bad_message(peer_id);
         }
@@ -483,7 +483,7 @@ where
     fn submit_request(&mut self) {
         let client = Arc::clone(&self.client);
         let request = self.hashes_to_download.clone();
-        tracing::trace!(target: "downloaders::bodies", ?request, request_len = request.len(), "Requesting bodies");
+        tracing::trace!(target: "downloaders::bodies", request_len = request.len(), "Requesting bodies");
         self.fut = Some(Box::pin(async move { client.get_block_bodies(request).await }));
     }
 
