@@ -4066,6 +4066,7 @@ dependencies = [
  "modular-bitfield",
  "page_size",
  "parity-scale-codec",
+ "paste",
  "postcard",
  "proptest",
  "proptest-derive",
