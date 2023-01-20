@@ -137,7 +137,7 @@ mod tests {
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
-    stage_test_suite_ext!(SenderRecoveryTestRunner);
+    stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
 
     /// Execute a block range with a single transaction
     #[tokio::test]

@@ -37,5 +37,5 @@ pub trait AdminApi {
 
     /// Returns the ENR of the node.
     #[method(name = "admin_nodeInfo")]
-    fn node_info(&self) -> Result<NodeInfo>;
+    async fn node_info(&self) -> Result<NodeInfo>;
 }
