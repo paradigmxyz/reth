@@ -237,6 +237,7 @@ where
             return Ok(())
         }
 
+        tracing::trace!(target: "downloaders::bodies", ?range, "Setting new header range");
         // Collect buffered bodies from queue and buffer
         let mut buffered_bodies = BinaryHeap::<OrderedBlockResponse>::default();
 
@@ -248,6 +249,7 @@ where
                 }
             }
         }
+        tracing::trace!(target: "downloaders::bodies", len = buffered_bodies.len(), "Evicted bodies from the buffer");
 
         // Drain queued bodies.
         for queued in self.queued_bodies.drain(..) {
@@ -255,6 +257,7 @@ where
                 buffered_bodies.push(queued.into());
             }
         }
+        tracing::trace!(target: "downloaders::bodies", len = buffered_bodies.len(), "Evicted bodies from the queue");
 
         let bodies = buffered_bodies.into_sorted_vec(); // ascending
 
@@ -314,6 +317,7 @@ where
 
         self.header_range = range;
         self.latest_queued_block_number = None;
+        tracing::trace!(target: "downloaders::bodies", range = ?self.header_range, "New header range set");
         Ok(())
     }
 }

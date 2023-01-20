@@ -111,9 +111,9 @@ pub struct BodiesConfig {
 impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
-            downloader_request_batch_size: 100,
-            downloader_stream_batch_size: 1000,
-            downloader_max_buffered_responses: 10000,
+            downloader_request_batch_size: 200,
+            downloader_stream_batch_size: 10000,
+            downloader_max_buffered_responses: 100000,
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
