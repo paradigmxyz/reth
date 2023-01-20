@@ -264,7 +264,7 @@ impl StateFetcher {
             return Some(block_number) != headers.get(0).map(|h| h.number)
         }
 
-        return false
+        false
     }
 
     /// Called on a `GetBlockBodies` response from a peer
