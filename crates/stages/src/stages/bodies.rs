@@ -534,6 +534,7 @@ mod tests {
                 },
                 downloader::{DownloadClient, DownloadStream, Downloader},
                 error::{DownloadResult, PeerRequestResult},
+                priority::Priority,
             },
             test_utils::{
                 generators::{random_block_range, random_signed_tx},
@@ -790,7 +791,11 @@ mod tests {
 
         #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
-            async fn get_block_bodies(&self, _: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+            async fn get_block_bodies_with_priority(
+                &self,
+                _hashes: Vec<H256>,
+                _priority: Priority,
+            ) -> PeerRequestResult<Vec<BlockBody>> {
                 panic!("Noop client should not be called")
             }
         }
