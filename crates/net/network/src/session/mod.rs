@@ -36,7 +36,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{instrument, trace, warn};
+use tracing::{instrument, trace};
 
 mod active;
 mod config;
@@ -460,7 +460,7 @@ impl SessionManager {
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
                 self.remove_pending_session(&session_id);
-                warn!(
+                trace!(
                     target : "net::session",
                     ?error,
                     ?session_id,
