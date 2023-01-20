@@ -108,7 +108,6 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
-            HeaderMetrics::describe();
         }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
