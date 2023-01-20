@@ -28,7 +28,7 @@ mod __reexport {
 pub use __reexport::*;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, Status};
+use reth_eth_wire::{BlockHashNumber, HelloMessage, Status};
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
@@ -146,14 +146,10 @@ pub struct NetworkConfigBuilder {
     /// The executor to use for spawning tasks.
     #[serde(skip)]
     executor: Option<TaskExecutor>,
-    /// The `Status` message to send to peers at the beginning.
-    status: Option<Status>,
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
-    /// The [`ForkFilter`] to use at launch for authenticating sessions.
-    fork_filter: Option<ForkFilter>,
-    /// Head used to start set for the fork filter
-    head: Option<u64>,
+    /// Head used to start set for the fork filter and status.
+    head: Option<BlockHashNumber>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -173,9 +169,7 @@ impl NetworkConfigBuilder {
             chain_spec: MAINNET.clone(),
             network_mode: Default::default(),
             executor: None,
-            status: None,
             hello_message: None,
-            fork_filter: None,
             head: None,
         }
     }
@@ -183,22 +177,6 @@ impl NetworkConfigBuilder {
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
         pk2id(&self.secret_key.public_key(SECP256K1))
-    }
-
-    /// Sets the `Status` message to send when connecting to peers.
-    ///
-    /// ```
-    /// # use reth_eth_wire::Status;
-    /// # use reth_network::NetworkConfigBuilder;
-    /// # fn builder<C>(builder: NetworkConfigBuilder<C>) {
-    ///     builder.status(
-    ///         Status::builder().build()
-    /// );
-    /// # }
-    /// ```
-    pub fn status(mut self, status: Status) -> Self {
-        self.status = Some(status);
-        self
     }
 
     /// Sets the chain spec.
@@ -301,9 +279,7 @@ impl NetworkConfigBuilder {
             chain_spec,
             network_mode,
             executor,
-            status,
             hello_message,
-            fork_filter,
             head,
         } = self;
 
@@ -315,11 +291,13 @@ impl NetworkConfigBuilder {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        // get the fork filter
-        let fork_filter = fork_filter.unwrap_or_else(|| {
-            let head = head.unwrap_or_default();
-            chain_spec.fork_filter(head)
-        });
+        let head = head.unwrap_or(BlockHashNumber { hash: chain_spec.genesis_hash(), number: 0 });
+
+        // set the status
+        let status = Status::spec_builder(&chain_spec, &head).build();
+
+        // set a fork filter based on the chain spec and head
+        let fork_filter = chain_spec.fork_filter(head.number);
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
@@ -348,7 +326,7 @@ impl NetworkConfigBuilder {
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode,
             executor,
-            status: status.unwrap_or_default(),
+            status,
             hello_message,
             fork_filter,
         }
@@ -383,8 +361,9 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::Chain;
+    use reth_primitives::{Chain, ForkHash};
     use reth_provider::test_utils::NoopProvider;
+    use std::collections::BTreeMap;
 
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut thread_rng());
@@ -401,5 +380,32 @@ mod tests {
             Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
         assert!(bootstrap_nodes.contains(&mainnet_dns));
         assert_eq!(bootstrap_nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_network_fork_filter_default() {
+        let mut chain_spec = MAINNET.clone();
+
+        // remove any `next` fields we would have by removing all hardforks
+        chain_spec.hardforks = BTreeMap::new();
+
+        // check that the forkid is initialized with the genesis and no other forks
+        let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
+
+        // enforce that the fork_id set in the status is consistent with the generated fork filter
+        let config = builder().chain_spec(chain_spec).build(Arc::new(NoopProvider::default()));
+
+        let status = config.status;
+        let fork_filter = config.fork_filter;
+
+        // assert that there are no other forks
+        assert_eq!(status.forkid.next, 0);
+
+        // assert the same thing for the fork_filter
+        assert_eq!(fork_filter.current().next, 0);
+
+        // check status and fork_filter forkhash
+        assert_eq!(status.forkid.hash, genesis_fork_hash);
+        assert_eq!(fork_filter.current().hash, genesis_fork_hash);
     }
 }

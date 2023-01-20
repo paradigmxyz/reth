@@ -101,6 +101,11 @@ where
         &self.incoming
     }
 
+    /// Access to the [`SessionManager`].
+    pub(crate) fn sessions(&self) -> &SessionManager {
+        &self.sessions
+    }
+
     /// Mutable access to the [`SessionManager`].
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
