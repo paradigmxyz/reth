@@ -155,10 +155,9 @@ impl TestTransaction {
     {
         self.query(|tx| {
             let mut cursor = tx.cursor_read::<T>()?;
-            let mut entry = cursor.last()?;
-            while let Some((_, value)) = entry {
+            let mut rev_walker = cursor.walk_back(None)?;
+            while let Some((_, value)) = rev_walker.next().transpose()? {
                 assert!(selector(value) <= num);
-                entry = cursor.prev()?;
             }
             Ok(())
         })
