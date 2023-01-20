@@ -1,4 +1,18 @@
-use reth_db::table::{Compress, Encode};
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
+    table::*,
+    tables::*,
+    transaction::{DbTx, DbTxMut},
+};
+use std::path::Path;
+
+#[allow(dead_code)]
+const BENCH_DB_PATH: &str = "/tmp/reth-benches";
+
+#[allow(dead_code)]
+const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
 ///
@@ -30,4 +44,31 @@ where
             )
         })
         .collect::<Vec<_>>()
+}
+
+#[allow(dead_code)]
+fn set_up_db<T>(
+    bench_db_path: &Path,
+    pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,
+) -> reth_db::mdbx::Env<WriteMap>
+where
+    T: Table + Default,
+    T::Key: Default + Clone,
+    T::Value: Default + Clone,
+{
+    // Reset DB
+    let _ = std::fs::remove_dir_all(bench_db_path);
+    let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+
+    {
+        // Prepare data to be read
+        let tx = db.tx_mut().expect("tx");
+        let mut cursor = tx.cursor_write::<T>().expect("cursor");
+        for (k, _, v, _) in pair.clone() {
+            cursor.append(k, v).expect("submit");
+        }
+        tx.inner.commit().unwrap();
+    }
+
+    db
 }

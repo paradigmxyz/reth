@@ -1,20 +1,10 @@
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
-    table::*,
-    tables::*,
-    transaction::{DbTx, DbTxMut},
-};
-use std::{path::Path, time::Instant};
+use std::time::Instant;
 
 criterion_group!(benches, db, serialization);
 criterion_main!(benches);
-
-const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 pub fn db(c: &mut Criterion) {
     let mut group = c.benchmark_group("tables_db");
@@ -123,7 +113,7 @@ where
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
     let pair = &load_vectors::<T>();
-    let bench_db_path = Path::new("/tmp/reth-benches");
+    let bench_db_path = Path::new(BENCH_DB_PATH);
 
     group.bench_function(format!("{}.SeqWrite", T::NAME), |b| {
         b.iter_custom(|_| {
@@ -215,32 +205,6 @@ where
             timer.elapsed()
         })
     });
-}
-
-fn set_up_db<T>(
-    bench_db_path: &Path,
-    pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,
-) -> reth_db::mdbx::Env<WriteMap>
-where
-    T: Table + Default,
-    T::Key: Default + Clone,
-    T::Value: Default + Clone,
-{
-    // Reset DB
-    let _ = std::fs::remove_dir_all(bench_db_path);
-    let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
-
-    {
-        // Prepare data to be read
-        let tx = db.tx_mut().expect("tx");
-        let mut cursor = tx.cursor_write::<T>().expect("cursor");
-        for (k, _, v, _) in pair.clone() {
-            cursor.append(k, v).expect("submit");
-        }
-        tx.inner.commit().unwrap();
-    }
-
-    db
 }
 
 include!("./utils.rs");
