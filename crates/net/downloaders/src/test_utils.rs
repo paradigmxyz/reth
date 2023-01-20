@@ -3,7 +3,10 @@
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult},
+    p2p::{
+        bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+        priority::Priority,
+    },
     test_utils::generators::random_block_range,
 };
 use reth_primitives::{PeerId, SealedHeader, H256};
@@ -69,7 +72,11 @@ where
     F: FnMut(Vec<H256>) -> Fut + Send + Sync,
     Fut: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send,
 {
-    async fn get_block_bodies(&self, hash: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    async fn get_block_bodies_with_priority(
+        &self,
+        hash: Vec<H256>,
+        _priority: Priority,
+    ) -> PeerRequestResult<Vec<BlockBody>> {
         let f = &mut *self.0.lock().await;
         (f)(hash).await
     }

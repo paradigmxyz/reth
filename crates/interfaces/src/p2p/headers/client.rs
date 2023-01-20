@@ -1,4 +1,4 @@
-use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult};
+use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult, priority::Priority};
 use async_trait::async_trait;
 pub use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
@@ -22,7 +22,17 @@ pub struct HeadersRequest {
 pub trait HeadersClient: DownloadClient {
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders>;
+    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
+        self.get_headers_with_priority(request, Priority::Normal).await
+    }
+
+    /// Sends the header request to the p2p network with priroity set and returns the header
+    /// response received from a peer.
+    async fn get_headers_with_priority(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> PeerRequestResult<BlockHeaders>;
 }
 
 /// The status updater for updating the status of the p2p node

@@ -1,5 +1,6 @@
 use crate::p2p::{
     bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+    priority::Priority,
 };
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
@@ -33,7 +34,11 @@ impl<F> BodiesClient for TestBodiesClient<F>
 where
     F: Fn(Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
-    async fn get_block_bodies(&self, hashes: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    async fn get_block_bodies_with_priority(
+        &self,
+        hashes: Vec<H256>,
+        _priority: Priority,
+    ) -> PeerRequestResult<Vec<BlockBody>> {
         (self.responder)(hashes)
     }
 }
