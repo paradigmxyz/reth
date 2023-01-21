@@ -36,4 +36,10 @@ struct NetworkOpts {
     /// Connect only to trusted peers
     #[arg(long)]
     trusted_only: bool,
+
+    /// Bootnodes to connect to initially.
+    ///
+    /// Will fall back to a network-specific default if not specified.
+    #[arg(long, value_delimiter = ',')]
+    bootnodes: Option<Vec<NodeRecord>>,
 }
