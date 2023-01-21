@@ -1,9 +1,8 @@
+use super::error::DownloadResult;
 use crate::consensus::Consensus;
 use futures::Stream;
 use reth_primitives::PeerId;
 use std::{fmt::Debug, pin::Pin};
-
-use super::error::DownloadResult;
 
 /// A stream for downloading response.
 pub type DownloadStream<'a, T> = Pin<Box<dyn Stream<Item = DownloadResult<T>> + Send + 'a>>;
@@ -20,7 +19,6 @@ pub trait DownloadClient: Send + Sync + Debug {
 
 /// The generic trait for requesting and verifying data
 /// over p2p network client
-#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait Downloader: Send + Sync {
     /// The client used to fetch necessary data
     type Client: DownloadClient;

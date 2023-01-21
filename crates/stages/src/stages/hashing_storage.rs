@@ -223,7 +223,7 @@ mod tests {
         SealedBlock, StorageEntry, Transaction, TransactionKind, TxLegacy, H256, U256,
     };
 
-    stage_test_suite_ext!(StorageHashingTestRunner);
+    stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
@@ -294,10 +294,10 @@ mod tests {
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
-            let mut iter = blocks.iter();
+            let iter = blocks.iter();
             let (mut transition_id, mut tx_id) = (0, 0);
 
-            while let Some(progress) = iter.next() {
+            for progress in iter {
                 // Insert last progress data
                 self.tx.commit(|tx| {
                     let key: BlockNumHash = (progress.number, progress.hash()).into();
@@ -423,9 +423,9 @@ mod tests {
             let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
             let prev_entry = storage_cursor
                 .seek_by_key_subkey(tid_address.address(), entry.key)?
-                .and_then(|e| {
+                .map(|e| {
                     storage_cursor.delete_current().expect("failed to delete entry");
-                    Some(e)
+                    e
                 })
                 .unwrap_or(StorageEntry { key: entry.key, value: U256::from(0) });
             if hash {
@@ -451,9 +451,10 @@ mod tests {
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
-                let mut row = changeset_cursor.last()?;
 
-                while let Some((tid_address, entry)) = row {
+                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
+
+                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
                     if tid_address.transition_id() <= target_transition {
                         break
                     }
@@ -464,8 +465,6 @@ mod tests {
                     if entry.value != U256::ZERO {
                         storage_cursor.append_dup(tid_address.address(), entry)?;
                     }
-
-                    row = changeset_cursor.prev()?;
                 }
                 Ok(())
             })?;

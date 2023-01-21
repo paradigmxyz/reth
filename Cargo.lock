@@ -447,12 +447,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build_const"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ae4235e6dac0694637c763029ecea1a2ec9e4e06ec2729bd21ba4d9c863eb7"
-
-[[package]]
 name = "bumpalo"
 version = "3.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -834,12 +828,18 @@ dependencies = [
 
 [[package]]
 name = "crc"
-version = "1.8.1"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d663548de7f5cca343f1e0a48d14dcfb0e9eb4e079ec58883b7251539fa10aeb"
+checksum = "53757d12b596c16c78b83458d732a5d1a17ab3f53f2f7412f6fb57cc8a140ab3"
 dependencies = [
- "build_const",
+ "crc-catalog",
 ]
+
+[[package]]
+name = "crc-catalog"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cace84e55f07e7301bae1c519df89cdad8cc3cd868413d3fdbdeca9ff3db484"
 
 [[package]]
 name = "criterion"
@@ -4146,6 +4146,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-rpc-types",
+ "reth-tracing",
  "tokio",
  "tracing",
 ]
@@ -4408,7 +4409,9 @@ dependencies = [
 name = "reth-network-api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "reth-primitives",
+ "serde",
 ]
 
 [[package]]
@@ -4560,6 +4563,7 @@ name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "reth-network-api",
  "reth-primitives",
  "reth-rlp",
  "serde",
@@ -4576,6 +4580,7 @@ dependencies = [
  "futures-util",
  "itertools 0.10.5",
  "metrics",
+ "paste",
  "rand 0.8.5",
  "rayon",
  "reth-db",
