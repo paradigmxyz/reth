@@ -4142,12 +4142,14 @@ dependencies = [
  "futures",
  "futures-util",
  "once_cell",
+ "pin-project",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
  "reth-rpc-types",
  "reth-tracing",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
