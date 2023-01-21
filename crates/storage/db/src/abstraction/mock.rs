@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     common::{PairResult, ValueOnlyResult},
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
+    cursor::{
+        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, ReverseWalker, Walker,
+    },
     database::{Database, DatabaseGAT},
     table::{DupSort, Table},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
@@ -127,6 +129,16 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
         &'cursor mut self,
         _start_key: T::Key,
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+
+    fn walk_back<'cursor>(
+        &'cursor mut self,
+        _start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,
     {

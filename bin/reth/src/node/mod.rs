@@ -19,7 +19,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
+use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -83,9 +83,6 @@ pub struct Command {
     #[clap(flatten)]
     network: NetworkOpts,
 
-    #[arg(long, value_delimiter = ',')]
-    bootnodes: Option<Vec<NodeRecord>>,
-
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 }
@@ -117,7 +114,6 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::initialize(listen_addr)?;
-            HeaderMetrics::describe();
         }
 
         let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
@@ -130,7 +126,7 @@ impl Command {
                 db.clone(),
                 self.chain.clone(),
                 self.network.disable_discovery,
-                self.bootnodes.clone(),
+                self.network.bootnodes.clone(),
                 self.nat,
             )
             .start_network()
@@ -150,13 +146,19 @@ impl Command {
             .with_channel(sender)
             .push(HeaderStage {
                 downloader: headers::linear::LinearDownloadBuilder::default()
-                    .batch_size(config.stages.headers.downloader_batch_size)
-                    .retries(config.stages.headers.downloader_retries)
-                    .build(consensus.clone(), fetch_client.clone()),
+                    .request_limit(config.stages.headers.downloader_batch_size)
+                    .stream_batch_size(config.stages.headers.commit_threshold as usize)
+                    // NOTE: the head and target will be set from inside the stage before the
+                    // downloader is called
+                    .build(
+                        consensus.clone(),
+                        fetch_client.clone(),
+                        Default::default(),
+                        Default::default(),
+                    ),
                 consensus: consensus.clone(),
                 client: fetch_client.clone(),
                 network_handle: network.clone(),
-                commit_threshold: config.stages.headers.commit_threshold,
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {

@@ -94,5 +94,6 @@ tempfile = "3.3"
 serial_test = "0.10"
 
 [features]
+default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde"]
 test-utils = ["reth-provider/test-utils", "dep:enr", "dep:ethers-core", "dep:tempfile"]

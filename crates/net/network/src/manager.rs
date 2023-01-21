@@ -307,6 +307,11 @@ where
         self.swarm.state().fetch_client()
     }
 
+    /// Returns the current [`Status`] for the local node.
+    pub fn status(&self) -> Status {
+        self.swarm.sessions().status()
+    }
+
     /// Event hook for an unexpected message from the peer.
     fn on_invalid_message(
         &mut self,
@@ -499,6 +504,9 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
+            NetworkHandleMessage::GetStatus(tx) => {
+                let _ = tx.send(self.status());
+            }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
                 if let Some(transition) =
                     self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty)
@@ -681,7 +689,7 @@ where
                         .set(this.swarm.state().peers().num_inbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
-                    warn!(
+                    trace!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -708,7 +716,7 @@ where
                         .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
-                    warn!(
+                    trace!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,

@@ -95,7 +95,7 @@ mod tests {
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
-    stage_test_suite_ext!(TotalDifficultyTestRunner);
+    stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
 
     #[tokio::test]
     async fn execute_with_intermediate_commit() {

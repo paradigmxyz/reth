@@ -6,14 +6,17 @@ use crate::{
     session::PeerInfo,
     FetchClient,
 };
+use async_trait::async_trait;
 use parking_lot::Mutex;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{
+    DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions, Status,
+};
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_network_api::{EthProtocolInfo, NetworkInfo, NetworkStatus, PeersInfo};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -126,6 +129,13 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
     }
 
+    /// Get the current status of the node.
+    pub async fn get_status(&self) -> Result<Status, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
+        rx.await
+    }
+
     /// Announce a block over devp2p
     ///
     /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
@@ -215,9 +225,26 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
+#[async_trait]
 impl NetworkInfo for NetworkHandle {
+    type Error = oneshot::error::RecvError;
+
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
+    }
+
+    async fn network_status(&self) -> Result<NetworkStatus, Self::Error> {
+        let status = self.get_status().await?;
+
+        Ok(NetworkStatus {
+            client_name: "Reth".to_string(),
+            eth_protocol_info: EthProtocolInfo {
+                difficulty: status.total_difficulty,
+                head: status.blockhash,
+                network: status.chain.id(),
+                genesis: status.genesis,
+            },
+        })
     }
 }
 
@@ -251,7 +278,7 @@ struct NetworkInner {
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
     local_peer_id: PeerId,
-    /// Access to the all the nodes
+    /// Access to the all the nodes.
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
@@ -291,6 +318,8 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
+    /// Get the currenet status
+    GetStatus(oneshot::Sender<Status>),
     /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer

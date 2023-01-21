@@ -3,7 +3,9 @@
 use std::{borrow::Cow, marker::PhantomData};
 
 use crate::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
+    cursor::{
+        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, ReverseWalker, Walker,
+    },
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
     Error,
@@ -80,6 +82,27 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             .map(decoder::<T>);
 
         Ok(Walker::new(self, start))
+    }
+
+    fn walk_back<'cursor>(
+        &'cursor mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        if let Some(start_key) = start_key {
+            let start = self
+                .inner
+                .set_range(start_key.encode().as_ref())
+                .map_err(|e| Error::Read(e.into()))?
+                .map(decoder::<T>);
+
+            return Ok(ReverseWalker::new(self, start))
+        }
+
+        let start = self.last().transpose();
+        Ok(ReverseWalker::new(self, start))
     }
 }
 

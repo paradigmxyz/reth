@@ -3,7 +3,10 @@
 use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult},
+    p2p::{
+        bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+        priority::Priority,
+    },
     test_utils::generators::random_block_range,
 };
 use reth_primitives::{PeerId, SealedHeader, H256};
@@ -80,7 +83,11 @@ impl DownloadClient for TestBodiesClient {
 
 #[async_trait]
 impl BodiesClient for TestBodiesClient {
-    async fn get_block_bodies(&self, hashes: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
+    async fn get_block_bodies_with_priority(
+        &self,
+        hashes: Vec<H256>,
+        _priority: Priority,
+    ) -> PeerRequestResult<Vec<BlockBody>> {
         if self.should_delay {
             tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100)).await;
         }
