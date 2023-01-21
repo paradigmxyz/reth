@@ -667,8 +667,8 @@ impl Decodable for TransactionSigned {
                 s: Decodable::decode(buf)?,
             };
 
-            let mut signed = TransactionSigned { transaction, hash: Default::default(), signature };
-            signed.hash = keccak256(&original_encoding[..first_header.payload_length]);
+            let hash = keccak256(&original_encoding[..first_header.payload_length]);
+            let signed = TransactionSigned { transaction, hash, signature };
             Ok(signed)
         } else {
             let mut transaction = Transaction::Legacy(TxLegacy {
