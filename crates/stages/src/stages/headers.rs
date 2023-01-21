@@ -59,7 +59,7 @@ where
     H: HeadersClient,
     S: StatusUpdater,
 {
-    async fn update_head<DB: Database>(
+    fn update_head<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         height: BlockNumber,
@@ -202,7 +202,7 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let current_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(tx, current_progress).await?;
+        self.update_head::<DB>(tx, current_progress)?;
 
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress).await?;
