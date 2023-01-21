@@ -251,7 +251,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             )?;
                         }
                     }
-                    current_transition_id += 1;
                 }
                 // insert bytecode
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
@@ -264,6 +263,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // NOTE: bytecode bytes are not inserted in change set and can be found in
                     // separate table
                 }
+                current_transition_id += 1;
             }
 
             // If there is block reward we will add account changeset to db
@@ -482,7 +482,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: None,
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             /// The progress of this stage the last time it was executed.
             stage_progress: None,
         };
