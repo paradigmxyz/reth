@@ -23,7 +23,6 @@ reth-rlp = { path = "../../crates/common/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-network-api = {path = "../../crates/net/network-api" }
 reth-downloaders = {path = "../../crates/net/downloaders" }
-reth-cli-utils = { path = "../../crates/cli/utils" }
 reth-tracing = { path = "../../crates/tracing" }
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-discv4 = { path = "../../crates/net/discv4" }
@@ -36,7 +35,7 @@ fdlimit = "0.2.1"
 walkdir = "2.3"
 serde = "1.0"
 serde_json = "1.0"
-shellexpand = "2.1"
+shellexpand = "3.0.0"
 dirs-next = "2.0.0"
 confy = "0.5"
 
