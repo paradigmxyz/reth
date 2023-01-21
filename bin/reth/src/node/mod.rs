@@ -83,9 +83,6 @@ pub struct Command {
     #[clap(flatten)]
     network: NetworkOpts,
 
-    #[arg(long, value_delimiter = ',')]
-    bootnodes: Option<Vec<NodeRecord>>,
-
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 }
@@ -129,7 +126,7 @@ impl Command {
                 db.clone(),
                 self.chain.clone(),
                 self.network.disable_discovery,
-                self.bootnodes.clone(),
+                self.network.bootnodes.clone(),
                 self.nat,
             )
             .start_network()
