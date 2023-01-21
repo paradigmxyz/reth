@@ -177,6 +177,12 @@ where
                             continue
                         }
 
+                        // TODO: fix this. temp stub for testing
+                        if request_len != 1 && response_len == 1 {
+                            this.on_error(BodyRequestError::EmptyResponse, Some(peer_id));
+                            continue
+                        }
+
                         tracing::trace!(
                             target: "downloaders::bodies", request_len, response_len, ?peer_id, "Received bodies"
                         );
