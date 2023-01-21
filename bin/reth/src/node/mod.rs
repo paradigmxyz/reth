@@ -19,7 +19,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
+use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
