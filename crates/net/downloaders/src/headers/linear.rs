@@ -512,7 +512,7 @@ where
 
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
                     self.sync_target_request =
-                        Some(self.request_fut(self.get_sync_target_request(), Priority::Normal));
+                        Some(self.request_fut(self.get_sync_target_request(), Priority::High));
                 }
             }
             SyncTarget::Gap(existing) => {
@@ -854,7 +854,7 @@ impl LinearDownloadBuilder {
         };
 
         downloader.sync_target_request =
-            Some(downloader.request_fut(downloader.get_sync_target_request(), Priority::Normal));
+            Some(downloader.request_fut(downloader.get_sync_target_request(), Priority::High));
 
         downloader
     }
