@@ -1,6 +1,3 @@
-/// The generic downloader trait for implementing data downloaders over P2P.
-pub mod downloader;
-
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
