@@ -6,11 +6,7 @@ use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     db,
     p2p::{
-        bodies::{
-            client::BodiesClient,
-            downloader::BodyDownloader,
-            response::{BlockResponse, OrderedBlockResponse},
-        },
+        bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
         downloader::Downloader,
     },
 };
