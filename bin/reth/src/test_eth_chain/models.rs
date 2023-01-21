@@ -114,6 +114,8 @@ pub struct Block {
     pub uncle_headers: Option<Vec<Header>>,
     /// Transaction Sequence
     pub transaction_sequence: Option<Vec<TransactionSequence>>,
+    /// Withdrawals
+    pub withdrawals: Option<Vec<()>>,
 }
 
 /// Transaction Sequence in block
@@ -359,6 +361,8 @@ mod test {
                             }
                         ],
                         "uncleHeaders" : [
+                        ],
+                        "withdrawals" : [
                         ]
                     }
                 ],
