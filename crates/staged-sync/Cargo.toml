@@ -15,8 +15,10 @@ reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-primitives = { path = "../../crates/primitives" }
+reth-downloaders = { path = "../../crates/net/downloaders" }
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
+
 reth-stages = { path = "../stages" }
 
 # io

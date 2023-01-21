@@ -4565,6 +4565,7 @@ dependencies = [
  "eyre",
  "reth-db",
  "reth-discv4",
+ "reth-downloaders",
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
