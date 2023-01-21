@@ -274,7 +274,9 @@ where
         }
 
         // Put queued bodies into the buffer
-        self.buffered_responses.push(OrderedBodiesResponse(queued_bodies));
+        if !queued_bodies.is_empty() {
+            self.buffered_responses.push(OrderedBodiesResponse(queued_bodies));
+        }
 
         self.download_range = range;
         self.latest_queued_block_number = None;
