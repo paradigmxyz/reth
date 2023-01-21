@@ -1,5 +1,5 @@
 //! reth data directories.
-use reth_cli_utils::parse_path;
+use reth_staged_sync::utils::parse_path;
 use std::{
     env::VarError,
     fmt::{Debug, Display, Formatter},

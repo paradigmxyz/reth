@@ -3970,7 +3970,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
- "reth-cli-utils",
  "reth-consensus",
  "reth-db",
  "reth-discv4",
@@ -3983,6 +3982,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "reth-staged-sync",
  "reth-stages",
  "reth-tracing",
  "reth-transaction-pool",
@@ -3995,19 +3995,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tui",
- "walkdir",
-]
-
-[[package]]
-name = "reth-cli-utils"
-version = "0.1.0"
-dependencies = [
- "eyre",
- "reth-db",
- "reth-primitives",
- "serde_json",
- "shellexpand",
- "tracing",
  "walkdir",
 ]
 
@@ -4568,6 +4555,25 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "reth-staged-sync"
+version = "0.1.0"
+dependencies = [
+ "confy",
+ "eyre",
+ "reth-db",
+ "reth-discv4",
+ "reth-net-nat",
+ "reth-network",
+ "reth-primitives",
+ "reth-provider",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]
@@ -5251,9 +5257,9 @@ dependencies = [
 
 [[package]]
 name = "shellexpand"
-version = "2.1.2"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ccc8076840c4da029af4f87e4e8daeb0fca6b87bbb02e10cb60b791450e11e4"
+checksum = "dd1c7ddea665294d484c39fd0c0d2b7e35bbfe10035c5fe1854741a57f6880e1"
 dependencies = [
  "dirs",
 ]
