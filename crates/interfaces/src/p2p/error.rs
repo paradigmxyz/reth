@@ -23,7 +23,7 @@ impl RequestValidation for RequestResult<Vec<Header>> {
             Ok(headers) => {
                 let request_length = headers.len() as u64;
 
-                if request_length < 1 && request.limit != request_length {
+                if request_length <= 1 && request.limit != request_length {
                     return true
                 }
 
