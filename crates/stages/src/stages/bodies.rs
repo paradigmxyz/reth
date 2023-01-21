@@ -81,7 +81,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         };
 
         // Update the header range on the downloader
-        self.downloader.set_header_range(start_block..end_block + 1)?;
+        self.downloader.set_download_range(start_block..end_block + 1)?;
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
@@ -736,7 +736,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn set_header_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
+            fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
                 self.headers = VecDeque::from(self.db.view(|tx| {
                     let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
