@@ -4569,6 +4569,7 @@ dependencies = [
  "reth-network",
  "reth-primitives",
  "reth-provider",
+ "reth-stages",
  "serde",
  "serde_json",
  "shellexpand",

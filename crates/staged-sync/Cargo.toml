@@ -17,6 +17,7 @@ reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-primitives = { path = "../../crates/primitives" }
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
+reth-stages = { path = "../stages" }
 
 # io
 serde = "1.0"
