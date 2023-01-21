@@ -186,7 +186,12 @@ where
 
             if next_block_rng.contains(&expected) {
                 return self.buffered_responses.pop().map(|buffered| {
-                    buffered.0.into_iter().skip_while(|b| b.block_number() < expected).collect()
+                    buffered
+                        .0
+                        .into_iter()
+                        .skip_while(|b| b.block_number() < expected)
+                        .take_while(|b| self.download_range.contains(&b.block_number()))
+                        .collect()
                 })
             }
 
@@ -230,42 +235,27 @@ where
         }
 
         tracing::trace!(target: "downloaders::bodies", ?range, "Setting new header range");
-        // Collect buffered bodies from queue and buffer
-        let mut buffered_bodies = BinaryHeap::<OrderedBlockResponse>::default();
-
-        // Drain currently buffered responses. Retain requested bodies.
-        for buffered in self.buffered_responses.drain() {
-            for body in buffered.0 {
-                if range.contains(&body.block_number()) {
-                    buffered_bodies.push(body.into());
-                }
-            }
-        }
-        tracing::trace!(target: "downloaders::bodies", len = buffered_bodies.len(), "Evicted bodies from the buffer");
 
         // Drain queued bodies.
-        for queued in self.queued_bodies.drain(..) {
-            if range.contains(&queued.block_number()) {
-                buffered_bodies.push(queued.into());
-            }
-        }
-        tracing::trace!(target: "downloaders::bodies", len = buffered_bodies.len(), "Evicted bodies from the queue");
+        let queued_bodies = std::mem::take(&mut self.queued_bodies)
+            .into_iter()
+            .filter(|b| range.contains(&b.block_number()))
+            .collect::<Vec<_>>();
+        tracing::trace!(target: "downloaders::bodies", len = queued_bodies.len(), "Evicted bodies from the queue");
 
-        let bodies = buffered_bodies.into_sorted_vec(); // ascending
-
-        // TODO: fix this
         // Dispatch requests for missing bodies
         if let Some(latest_queued) = self.latest_queued_block_number {
             if range.start <= latest_queued {
+                let queued_bodies_range = match (queued_bodies.first(), queued_bodies.last()) {
+                    (Some(first), Some(last)) => first.block_number()..last.block_number() + 1,
+                    _ => Range::default(),
+                };
                 let mut request_range = Range::default();
                 for num in range.start..=latest_queued {
-                    // Check if block is already in the buffer
-                    if bodies.iter().any(|b| num == b.block_number()) {
-                        continue
-                    }
-
-                    // Check if block is already in progress
-                    if self.in_progress_queue.contains_block(num) {
+                    // Check if block is already in the buffer or in progress
+                    if queued_bodies_range.contains(&num) ||
+                        self.in_progress_queue.contains_block(num)
+                    {
                         continue
                     }
 
@@ -287,20 +277,8 @@ where
             }
         }
 
-        // Put buffered bodies back into the buffer.
-        let mut bodies = bodies.into_iter().peekable();
-        while bodies.peek().is_some() {
-            let mut contigious_batch = Vec::from([bodies.next().unwrap().0]);
-            while bodies
-                .peek()
-                .map(|b| b.block_number() == contigious_batch.last().unwrap().block_number() + 1)
-                .unwrap_or_default()
-            {
-                contigious_batch.push(bodies.next().unwrap().0);
-            }
-
-            self.buffered_responses.push(OrderedBodiesResponse(contigious_batch));
-        }
+        // Put queued bodies into the buffer
+        self.buffered_responses.push(OrderedBodiesResponse(queued_bodies));
 
         self.download_range = range;
         self.latest_queued_block_number = None;
