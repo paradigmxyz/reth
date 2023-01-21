@@ -7,7 +7,6 @@
 //! Rust Ethereum (reth) binary executable.
 
 pub mod cli;
-pub mod config;
 pub mod db;
 pub mod dirs;
 pub mod node;

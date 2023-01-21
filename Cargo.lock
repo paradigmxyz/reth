@@ -3983,6 +3983,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "reth-staged-sync",
  "reth-stages",
  "reth-tracing",
  "reth-transaction-pool",
@@ -4568,6 +4569,20 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "reth-staged-sync"
+version = "0.1.0"
+dependencies = [
+ "confy",
+ "reth-db",
+ "reth-discv4",
+ "reth-net-nat",
+ "reth-network",
+ "reth-primitives",
+ "reth-provider",
+ "serde",
 ]
 
 [[package]]

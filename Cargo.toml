@@ -22,6 +22,7 @@ members = [
     "crates/net/rpc-types",
     "crates/net/downloaders",
     "crates/primitives",
+    "crates/staged-sync",
     "crates/stages",
     "crates/storage/codecs",
     "crates/storage/db",

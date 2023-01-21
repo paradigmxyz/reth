@@ -2,7 +2,6 @@
 //!
 //! Starts the client
 use crate::{
-    config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
@@ -20,6 +19,7 @@ use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
+use reth_staged_sync::Config;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
