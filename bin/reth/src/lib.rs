@@ -7,7 +7,6 @@
 //! Rust Ethereum (reth) binary executable.
 
 pub mod cli;
-pub mod config;
 pub mod db;
 pub mod dirs;
 pub mod node;
@@ -15,7 +14,7 @@ pub mod p2p;
 pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
-pub use reth_cli_utils as utils;
+pub use reth_staged_sync::utils;
 
 use clap::Args;
 use reth_primitives::NodeRecord;

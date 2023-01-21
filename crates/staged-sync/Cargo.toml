@@ -1,0 +1,30 @@
+[package]
+name = "reth-staged-sync"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "Puts together all the Reth stages in a unified abstraction"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# reth
+reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
+reth-discv4 = { path = "../../crates/net/discv4" }
+reth-network = {path = "../../crates/net/network", features = ["serde"] }
+reth-primitives = { path = "../../crates/primitives" }
+reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
+reth-net-nat = { path = "../../crates/net/nat" }
+
+# io
+serde = "1.0"
+
+#[dev-dependencies]
+confy = "0.5"
+walkdir = "2.3.2"
+serde_json = "1.0.91"
+eyre = "0.6.8"
+shellexpand = "3.0.0"
+tracing = "0.1.37"

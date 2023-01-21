@@ -1,6 +1,5 @@
 //! P2P Debugging tool
 use crate::{
-    config::Config,
     dirs::{ConfigPath, PlatformPath},
     utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
 };
@@ -14,6 +13,7 @@ use reth_interfaces::p2p::{
 };
 use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
+use reth_staged_sync::Config;
 use std::sync::Arc;
 
 /// `reth p2p` command
