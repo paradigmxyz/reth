@@ -4,10 +4,10 @@ use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
-    error::{PeerRequestResult, RequestError, RequestResult},
+    error::{PeerRequestResult, RequestError, RequestResult, RequestValidation},
     headers::client::HeadersRequest,
 };
-use reth_primitives::{BlockHashOrNumber, Header, PeerId, H256};
+use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -221,14 +221,8 @@ impl StateFetcher {
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         let resp = self.inflight_headers_requests.remove(&peer_id);
-        let is_likely_a_bad_message = res
-            .as_ref()
-            .map(|headers| {
-                resp.as_ref()
-                    .map(|r| Self::is_likely_bad_message(&r.request, headers))
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
+        let is_likely_a_bad_message =
+            resp.as_ref().map(|r| res.is_likely_a_bad_message(&r.request)).unwrap_or_default();
 
         if let Some(resp) = resp {
             let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
@@ -253,18 +247,6 @@ impl StateFetcher {
         }
 
         None
-    }
-
-    fn is_likely_bad_message(request: &HeadersRequest, headers: &[Header]) -> bool {
-        if request.limit != headers.len() as u64 {
-            return true
-        }
-
-        if let BlockHashOrNumber::Number(block_number) = request.start {
-            return Some(block_number) != headers.get(0).map(|h| h.number)
-        }
-
-        false
     }
 
     /// Called on a `GetBlockBodies` response from a peer
