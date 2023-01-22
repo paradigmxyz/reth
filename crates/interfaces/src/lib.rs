@@ -22,9 +22,6 @@ pub mod db;
 /// P2P traits.
 pub mod p2p;
 
-/// Network error
-pub mod network;
-
 /// Syncing related traits.
 pub mod sync;
 

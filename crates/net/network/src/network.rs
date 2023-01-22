@@ -12,12 +12,11 @@ use reth_eth_wire::{
     DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions, Status,
 };
 use reth_interfaces::{
-    network::Error,
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkInfo, NetworkStatus, PeersInfo};
+use reth_network_api::{EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -232,7 +231,7 @@ impl NetworkInfo for NetworkHandle {
         *self.inner.listener_address.lock()
     }
 
-    async fn network_status(&self) -> Result<NetworkStatus, Error> {
+    async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
         let status = self.get_status().await?;
 
         Ok(NetworkStatus {
