@@ -219,3 +219,54 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        bodies::test_utils::zip_blocks,
+        test_utils::{generate_bodies, TestBodiesClient},
+    };
+    use reth_interfaces::{
+        p2p::bodies::response::BlockResponse,
+        test_utils::{generators::random_header_range, TestConsensus},
+    };
+    use reth_primitives::H256;
+    use std::sync::Arc;
+
+    /// Check if future returns empty bodies without dispathing any requests.
+    #[tokio::test]
+    async fn request_returns_empty_bodies() {
+        let headers = random_header_range(0..20, H256::zero());
+
+        let client = Arc::new(TestBodiesClient::default());
+        let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
+            .with_headers(headers.clone());
+
+        assert_eq!(
+            fut.await,
+            headers.into_iter().map(|h| BlockResponse::Empty(h)).collect::<Vec<_>>()
+        );
+        assert_eq!(client.times_requested(), 0);
+    }
+
+    /// Check that the request future
+    #[tokio::test]
+    async fn request_retries_until_fullfilled() {
+        // Generate some random blocks
+        let (headers, mut bodies) = generate_bodies(0..20);
+
+        let batch_size = 1;
+        let client = Arc::new(
+            TestBodiesClient::default().with_bodies(bodies.clone()).with_max_batch_size(batch_size),
+        );
+        let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
+            .with_headers(headers.clone());
+
+        assert_eq!(fut.await, zip_blocks(headers.iter(), &mut bodies));
+        assert_eq!(
+            client.times_requested(),
+            headers.into_iter().filter(|h| !h.is_empty()).count() as u64
+        );
+    }
+}

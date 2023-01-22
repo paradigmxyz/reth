@@ -308,32 +308,40 @@ where
 
         // Submit new requests and poll any in progress
         loop {
-            let concurrent_requests_limit = this.concurrent_request_limit();
+            // Poll requests
+            if let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
+                let response = OrderedBodiesResponse(response);
+                this.buffered_responses.push(response);
+            }
+
+            // Loop exit condition
+            let mut new_request_submitted = false;
             // Submit new requests
-            while this.in_progress_queue.len() < concurrent_requests_limit &&
+            let concurrent_requests_limit = this.concurrent_request_limit();
+            'inner: while this.in_progress_queue.len() < concurrent_requests_limit &&
                 this.buffered_responses.len() < this.max_buffered_responses
             {
                 match this.next_headers_request() {
-                    Ok(Some(request)) => this.in_progress_queue.push_new_request(
-                        Arc::clone(&this.client),
-                        Arc::clone(&this.consensus),
-                        request,
-                    ),
-                    Ok(None) => break, // no more requests
+                    Ok(Some(request)) => {
+                        this.in_progress_queue.push_new_request(
+                            Arc::clone(&this.client),
+                            Arc::clone(&this.consensus),
+                            request,
+                        );
+                        new_request_submitted = true;
+                    }
+                    Ok(None) => break 'inner,
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", ?error, "Failed to form next request");
                     }
                 };
             }
 
-            // Poll requests
-            if let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
-                let response = OrderedBodiesResponse(response);
-                this.buffered_responses.push(response);
-                while let Some(buf_response) = this.try_next_buffered() {
-                    this.queue_bodies(buf_response);
-                }
-            } else {
+            while let Some(buf_response) = this.try_next_buffered() {
+                this.queue_bodies(buf_response);
+            }
+
+            if !new_request_submitted {
                 break
             }
         }
@@ -346,7 +354,8 @@ where
 
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size);
-            return Poll::Ready(Some(next_batch.collect()))
+            let resp = next_batch.collect::<Vec<_>>();
+            return Poll::Ready(Some(resp))
         }
 
         Poll::Pending
@@ -487,75 +496,29 @@ impl ConcurrentDownloaderBuilder {
 mod tests {
     use super::*;
     use crate::{
-        bodies::request::BodiesRequestFuture,
+        bodies::test_utils::zip_blocks,
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::{
-        mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
+        mdbx::{test_utils::create_test_db, Env, EnvKind, WriteMap},
         transaction::DbTxMut,
     };
-    use reth_eth_wire::BlockBody;
-    use reth_interfaces::test_utils::{generators::random_header_range, TestConsensus};
-    use reth_primitives::{SealedBlock, H256};
-    use std::{collections::HashMap, sync::Arc};
+    use reth_interfaces::test_utils::TestConsensus;
+    use std::sync::Arc;
 
-    fn zip_blocks(
-        headers: Vec<SealedHeader>,
-        mut bodies: HashMap<H256, BlockBody>,
-    ) -> Vec<BlockResponse> {
-        headers
-            .into_iter()
-            .map(|header| {
-                let body = bodies.remove(&header.hash()).unwrap();
-                if header.is_empty() {
-                    BlockResponse::Empty(header)
-                } else {
-                    BlockResponse::Full(SealedBlock {
-                        header,
-                        body: body.transactions,
-                        ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
-                    })
-                }
-            })
-            .collect()
-    }
-
-    /// Check if future returns empty bodies without dispathing any requests.
-    #[tokio::test]
-    async fn request_returns_empty_bodies() {
-        let headers = random_header_range(0..20, H256::zero());
-
-        let client = Arc::new(TestBodiesClient::default());
-        let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
-            .with_headers(headers.clone());
-
-        assert_eq!(
-            fut.await,
-            headers.into_iter().map(|h| BlockResponse::Empty(h)).collect::<Vec<_>>()
-        );
-        assert_eq!(client.times_requested(), 0);
-    }
-
-    /// Check that the request future
-    #[tokio::test]
-    async fn request_retries_until_fullfilled() {
-        // Generate some random blocks
-        let (headers, bodies) = generate_bodies(0..20);
-
-        let batch_size = 1;
-        let client = Arc::new(
-            TestBodiesClient::default().with_bodies(bodies.clone()).with_max_batch_size(batch_size),
-        );
-        let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
-            .with_headers(headers.clone());
-
-        assert_eq!(fut.await, zip_blocks(headers.clone(), bodies));
-        assert_eq!(
-            client.times_requested(),
-            headers.into_iter().filter(|h| !h.is_empty()).count() as u64
-        );
+    #[inline]
+    fn insert_headers(db: &Env<WriteMap>, headers: &[SealedHeader]) {
+        db.update(|tx| -> Result<(), db::Error> {
+            for header in headers {
+                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+                tx.put::<tables::Headers>(header.num_hash().into(), header.clone().unseal())?;
+            }
+            Ok(())
+        })
+        .expect("failed to commit")
+        .expect("failed to insert headers");
     }
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -564,17 +527,9 @@ mod tests {
     async fn streams_bodies_in_order() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..20);
 
-        db.update(|tx| -> Result<(), db::Error> {
-            for header in headers.iter() {
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-                tx.put::<tables::Headers>(header.num_hash().into(), header.clone().unseal())?;
-            }
-            Ok(())
-        })
-        .expect("failed to commit")
-        .expect("failed to insert headers");
+        insert_headers(db.borrow(), &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -586,7 +541,46 @@ mod tests {
         );
         downloader.set_download_range(0..20).expect("failed to set header range");
 
-        assert_matches!(downloader.next().await, Some(res) => assert_eq!(res, zip_blocks(headers, bodies)));
+        assert_matches!(
+            downloader.next().await,
+            Some(res) => assert_eq!(res, zip_blocks(headers.iter(),&mut bodies))
+        );
         assert_eq!(client.times_requested(), 1);
+    }
+
+    // Check TODO:
+    #[tokio::test]
+    async fn streams_bodies_in_order_after_range_reset() {
+        // Generate some random blocks
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let (headers, mut bodies) = generate_bodies(0..100);
+
+        insert_headers(db.borrow(), &headers);
+
+        let stream_batch_size = 20;
+        let request_batch_size = 10;
+        let client = Arc::new(
+            TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
+        );
+        let mut downloader = ConcurrentDownloaderBuilder::default()
+            .with_stream_batch_size(stream_batch_size)
+            .with_request_batch_size(request_batch_size)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+
+        let mut range_start = 0;
+        while range_start < 100 {
+            downloader.set_download_range(range_start..100).expect("failed to set header range");
+
+            assert_matches!(
+                downloader.next().await,
+                Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
+            );
+            range_start += stream_batch_size as u64;
+        }
+        assert_eq!(
+            client.times_requested(),
+            // div_ceil
+            ((headers.iter().filter(|x| !x.is_empty()).count() + 9) / 10) as u64,
+        );
     }
 }
