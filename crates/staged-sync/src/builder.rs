@@ -1,18 +1,32 @@
+use crate::config::BodiesConfig;
+
 use super::config::HeadersConfig;
 use reth_db::database::Database;
-use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
+use reth_downloaders::{
+    bodies::concurrent::ConcurrentDownloader,
+    headers::linear::{LinearDownloadBuilder, LinearDownloader},
+};
 use reth_interfaces::consensus::Consensus;
 use reth_network::{FetchClient, NetworkHandle};
-use reth_stages::{metrics::HeaderMetrics, stages::headers::HeaderStage, Pipeline};
+use reth_stages::{
+    metrics::HeaderMetrics,
+    stages::{bodies::BodyStage, headers::HeaderStage},
+    Pipeline,
+};
 
 use std::sync::Arc;
 
 use eyre::Result;
 
+/// Rough API usage:
+///
+/// 1. To launch the pipeline
 /// RethBuilder::new(..).online(..).with_headers(..).with_bodies(..).with_execution(..).build()
 /// RethBuilder::new(..).with_execution(..).build()
 ///
 /// OR
+///
+/// 2. To make it easy to run an individual stage:
 ///
 /// let builder = RethBuilder::new(..).online(..).with_headers(..);
 /// let header = builder.headers_stage().await?.expect("should be configured");
@@ -22,8 +36,6 @@ use eyre::Result;
 ///     stage_progress: Some(self.from),
 /// };
 /// stage.execute(&mut tx, input).await?;
-
-///
 #[must_use = "need to call `build` on this struct"]
 pub struct RethBuilder<DB> {
     db: Arc<DB>,
@@ -44,12 +56,14 @@ pub struct OnlineRethBuilder<C, N, DB> {
     builder: RethBuilder<DB>,
     consensus: Arc<C>,
     network: N,
+
     headers: Option<HeadersConfig>,
+    bodies: Option<BodiesConfig>,
 }
 
 impl<C, N, DB: Database> OnlineRethBuilder<C, N, DB> {
     pub fn new(builder: RethBuilder<DB>, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
-        Self { builder, consensus: Arc::new(consensus), network, headers: None }
+        Self { builder, consensus: Arc::new(consensus), network, headers: None, bodies: None }
     }
 }
 
@@ -60,6 +74,11 @@ where
 {
     pub fn with_headers_downloader(mut self, config: HeadersConfig) -> Self {
         self.headers = Some(config);
+        self
+    }
+
+    pub fn with_bodies_downloader(mut self, config: BodiesConfig) -> Self {
+        self.bodies = Some(config);
         self
     }
 
@@ -92,9 +111,29 @@ where
         }))
     }
 
+    /// Returns the currently configured `BodyStage` if a `BodiesConfig` has been provided.
+    pub async fn bodies_stage(
+        &self,
+    ) -> Result<Option<BodyStage<ConcurrentDownloader<FetchClient, C>, C>>> {
+        let fetch_client = Arc::new(self.network.fetch_client().await?);
+        Ok::<_, eyre::Error>(self.bodies.as_ref().map(|config| {
+            let downloader =
+                ConcurrentDownloader::new(fetch_client.clone(), self.consensus.clone())
+                    .with_batch_size(config.downloader_batch_size)
+                    .with_retries(config.downloader_retries)
+                    .with_concurrency(config.downloader_concurrency);
+
+            BodyStage {
+                downloader: Arc::new(downloader),
+                consensus: self.consensus.clone(),
+                commit_threshold: config.commit_threshold,
+            }
+        }))
+    }
+
     pub async fn build(&self) -> Result<()> {
         // TODO: Add bodies.
-        if self.headers.is_none() {
+        if self.headers.is_none() && self.bodies.is_none() {
             return Err(eyre::eyre!("No online stages configured, cnosider removing the `online` call from your builder or add a stage"));
         }
 
@@ -103,6 +142,10 @@ where
             Pipeline::<DB, _>::default().with_sync_state_updater(self.network.clone());
 
         if let Some(stage) = self.headers_stage().await? {
+            pipeline = pipeline.push(stage);
+        }
+
+        if let Some(stage) = self.bodies_stage().await? {
             pipeline = pipeline.push(stage);
         }
 
