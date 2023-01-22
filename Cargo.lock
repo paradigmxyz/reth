@@ -1607,7 +1607,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#eaaa01a7d6d7da93fa359dc5113c545d37442dcf"
+source = "git+https://github.com/rjected/ethers-rs?branch=use-different-tempdir#f86cb67ac7f9e4739357d0f08535b0f84cee697b"
 dependencies = [
  "ethers-core",
  "ethers-providers",
@@ -1623,7 +1623,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#eaaa01a7d6d7da93fa359dc5113c545d37442dcf"
+source = "git+https://github.com/rjected/ethers-rs?branch=use-different-tempdir#f86cb67ac7f9e4739357d0f08535b0f84cee697b"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1644,6 +1644,7 @@ dependencies = [
  "serde_json",
  "strum",
  "syn 1.0.107",
+ "tempfile",
  "thiserror",
  "tiny-keccak",
  "unicode-xid 0.2.4",
@@ -1652,7 +1653,7 @@ dependencies = [
 [[package]]
 name = "ethers-etherscan"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#eaaa01a7d6d7da93fa359dc5113c545d37442dcf"
+source = "git+https://github.com/rjected/ethers-rs?branch=use-different-tempdir#f86cb67ac7f9e4739357d0f08535b0f84cee697b"
 dependencies = [
  "ethers-core",
  "getrandom 0.2.8",
@@ -1668,7 +1669,7 @@ dependencies = [
 [[package]]
 name = "ethers-middleware"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#eaaa01a7d6d7da93fa359dc5113c545d37442dcf"
+source = "git+https://github.com/rjected/ethers-rs?branch=use-different-tempdir#f86cb67ac7f9e4739357d0f08535b0f84cee697b"
 dependencies = [
  "async-trait",
  "auto_impl 0.5.0",
@@ -1693,7 +1694,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#eaaa01a7d6d7da93fa359dc5113c545d37442dcf"
+source = "git+https://github.com/rjected/ethers-rs?branch=use-different-tempdir#f86cb67ac7f9e4739357d0f08535b0f84cee697b"
 dependencies = [
  "async-trait",
  "auto_impl 1.0.1",
@@ -1730,7 +1731,7 @@ dependencies = [
 [[package]]
 name = "ethers-signers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#eaaa01a7d6d7da93fa359dc5113c545d37442dcf"
+source = "git+https://github.com/rjected/ethers-rs?branch=use-different-tempdir#f86cb67ac7f9e4739357d0f08535b0f84cee697b"
 dependencies = [
  "async-trait",
  "coins-bip32",

@@ -25,14 +25,17 @@ use tokio::fs;
 ///
 /// Tests that are run against a real `geth` node use geth's Clique functionality to create blocks.
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
 async fn sync_from_clique_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         // first create a signer that we will fund so we can make transactions
-        let chain_id = 13337u64;
+        let chain_id = 13338u64;
         let data_dir = tempfile::tempdir().expect("should be able to create temp geth datadir");
         let dir_path = data_dir.into_path();
+        tracing::info!(
+            data_dir=?dir_path,
+            "initializing geth instance"
+        );
 
         // this creates a funded geth
         let clique_geth = CliqueGethBuilder::new()
@@ -40,24 +43,28 @@ async fn sync_from_clique_geth() {
             .data_dir(dir_path.to_str().unwrap().into());
 
         // build the funded geth
-        let mut clique_instance = clique_geth.build().await;
-        tracing::info!("clique instance built");
+        let mut clique = clique_geth.build().await;
+        let geth_p2p_port = clique.instance.p2p_port().expect("geth should be configured with a p2p port");
+        tracing::info!(
+            p2p_port=%geth_p2p_port,
+            rpc_port=%clique.instance.port(),
+            "configured clique geth instance in sync test"
+        );
 
-        // print the logs in a new task
-        clique_instance.print_logs().await;
+        // don't print logs, but drain the stderr
+        clique.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
-        clique_instance.enable_mining("".into()).await;
-        tracing::info!("enabled mining");
+        clique.enable_mining("".into()).await;
+        tracing::info!("enabled block production");
 
         // === check that we have the same genesis hash ===
 
         // get the chainspec from the genesis we configured for geth
-        let mut chainspec: ChainSpec = clique_instance.genesis.clone().into();
-        let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
-        tracing::info!("got remote genesis");
+        let mut chainspec: ChainSpec = clique.genesis.clone().into();
+        let remote_genesis = SealedHeader::from(clique.remote_genesis().await);
 
-        let mut local_genesis_header = Header::from(chainspec.genesis().clone());
+        let mut local_genesis_header: Header = chainspec.genesis().clone().into();
 
         let hardforks = chainspec.hardforks();
 
@@ -83,18 +90,15 @@ async fn sync_from_clique_geth() {
                     .value(1u64)
                     .nonce(nonce))
             });
-        tracing::info!("generated tranactions");
 
         // finally send the txs to geth
-        clique_instance.send_requests(txs).await;
-        tracing::info!("sent requests");
+        clique.send_requests(txs).await;
 
-        // wait for a certain number of blocks to be mined
-        let block = clique_instance.provider.get_block_number().await.unwrap();
+        let block = clique.provider.get_block_number().await.unwrap();
         assert!(block > U64::zero());
 
         // get the current tip hash for pipeline configuration
-        let tip = clique_instance.tip().await;
+        let tip = clique.tip().await;
         let tip_hash = tip.hash.unwrap().0.into();
 
         tracing::info!(genesis_hash = ?chainspec.genesis_hash, "genesis hash");
@@ -105,12 +109,12 @@ async fn sync_from_clique_geth() {
 
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let (reth_p2p, reth_disc) = unused_tcp_udp();
+        tracing::info!(
+            %reth_p2p,
+            %reth_disc,
+            "setting up reth networking stack in sync test"
+        );
 
-        // may not need to set up a hello as we should be advertising compatible capabilities and
-        // protocol versions anyways
-        // TODO: it's sort of redundant setting BOTH the status and the genesis hash, since they
-        // both contain the genesis hash. a discrepancy is probably an error. could we enforce this
-        // somethow?
         let config = NetworkConfig::<Arc<NoopProvider>>::builder(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
@@ -145,13 +149,12 @@ async fn sync_from_clique_geth() {
 
         // create networkeventstream to get the next session established event easily
         let mut events = NetworkEventStream::new(handle.event_listener());
-        let geth_p2p_port = clique_instance.p2p_port();
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
 
         // === ensure p2p is active ===
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId = clique_instance.peer_id().await;
+        let geth_peer_id: PeerId = clique.peer_id().await;
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);
@@ -162,7 +165,7 @@ async fn sync_from_clique_geth() {
         tracing::info!("waiting for pipeline to finish");
         pipeline_handle.await.unwrap();
 
-        drop(clique_instance);
+        drop(clique);
 
         // cleanup (delete the data_dir at dir_path)
         fs::remove_dir_all(dir_path).await.unwrap();
@@ -172,7 +175,6 @@ async fn sync_from_clique_geth() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
 async fn geth_clique_keepalive() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -180,6 +182,10 @@ async fn geth_clique_keepalive() {
         let chain_id = 13337u64;
         let data_dir = tempfile::tempdir().expect("should be able to create temp geth datadir");
         let dir_path = data_dir.into_path();
+        tracing::info!(
+            data_dir=?dir_path,
+            "initializing geth instance"
+        );
 
         // this creates a funded geth
         let clique_geth = CliqueGethBuilder::new()
@@ -188,8 +194,14 @@ async fn geth_clique_keepalive() {
 
         // build the funded geth
         let mut clique_instance = clique_geth.build().await;
+        let geth_p2p_port = clique_instance.instance.p2p_port().expect("geth should be configured with a p2p port");
+        tracing::info!(
+            p2p_port=%geth_p2p_port,
+            rpc_port=%clique_instance.instance.port(),
+            "configured clique geth instance in keepalive test"
+        );
 
-        // print the logs in a new task
+        // don't print logs, but drain the stderr
         clique_instance.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
@@ -199,7 +211,7 @@ async fn geth_clique_keepalive() {
 
         // get the chainspec from the genesis we configured for geth
         let mut chainspec: ChainSpec = clique_instance.genesis.clone().into();
-        let remote_genesis = SealedHeader::from(clique_instance.genesis().await);
+        let remote_genesis = SealedHeader::from(clique_instance.remote_genesis().await);
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
 
@@ -227,11 +239,11 @@ async fn geth_clique_keepalive() {
                     .value(1u64)
                     .nonce(nonce))
             });
+        tracing::info!("generated transactions for blocks");
 
         // finally send the txs to geth
         clique_instance.send_requests(txs).await;
 
-        // wait for a certain number of blocks to be mined
         let block = clique_instance.provider.get_block_number().await.unwrap();
         assert!(block > U64::zero());
 
@@ -239,12 +251,12 @@ async fn geth_clique_keepalive() {
 
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let (reth_p2p, reth_disc) = unused_tcp_udp();
+        tracing::info!(
+            %reth_p2p,
+            %reth_disc,
+            "setting up reth networking stack in keepalive test"
+        );
 
-        // may not need to set up a hello as we should be advertising compatible capabilities and
-        // protocol versions anyways
-        // TODO: it's sort of redundant setting BOTH the status and the genesis hash, since they
-        // both contain the genesis hash. a discrepancy is probably an error. could we enforce this
-        // somethow?
         let config = NetworkConfig::<Arc<NoopProvider>>::builder(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
@@ -258,10 +270,7 @@ async fn geth_clique_keepalive() {
 
         // create networkeventstream to get the next session established event easily
         let mut events = NetworkEventStream::new(handle.event_listener());
-        let geth_p2p_port = clique_instance.p2p_port();
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
-
-        // === ensure p2p is active ===
 
         // get the peer id we should be expecting
         let geth_peer_id: PeerId = clique_instance.peer_id().await;

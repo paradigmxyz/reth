@@ -37,3 +37,9 @@ members = [
     "crates/metrics/common",
 ]
 default-members = ["bin/reth"]
+
+[patch."https://github.com/gakonst/ethers-rs"]
+ethers-core = { git = "https://github.com/rjected/ethers-rs", branch = "use-different-tempdir" }
+ethers-providers = { git = "https://github.com/rjected/ethers-rs", branch = "use-different-tempdir" }
+ethers-signers = { git = "https://github.com/rjected/ethers-rs", branch = "use-different-tempdir" }
+ethers-middleware = { git = "https://github.com/rjected/ethers-rs", branch = "use-different-tempdir" }

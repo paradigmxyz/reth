@@ -1,81 +1,18 @@
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::{
-    types::{
-        transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, Bytes, H256, U64,
-    },
-    utils::{ChainConfig, CliqueConfig, Genesis, GenesisAccount, Geth, GethInstance},
+    types::{transaction::eip2718::TypedTransaction, Block, BlockNumber, Bytes, H256},
+    utils::{Genesis, Geth, GethInstance},
 };
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Middleware, Provider, Ws};
 use ethers_signers::{LocalWallet, Signer, Wallet};
-use reth_network::test_utils::{enr_to_peer_id, unused_port};
+use reth_network::test_utils::enr_to_peer_id;
 use reth_primitives::PeerId;
 use std::{
-    collections::HashMap,
     io::{BufRead, BufReader},
     net::SocketAddr,
 };
 use tracing::trace;
-
-/// Creates a chain config using the given chain id.
-/// Funds the given address with max coins.
-///
-/// Enables all hard forks up to London at genesis.
-pub(crate) fn genesis_funded(chain_id: u64, signer_addr: Address) -> Genesis {
-    // set up a clique config with an instant sealing period and short (8 block) epoch
-    let clique_config = CliqueConfig { period: 0, epoch: 8 };
-
-    let config = ChainConfig {
-        chain_id,
-        eip155_block: Some(0),
-        eip150_block: Some(0),
-        eip158_block: Some(0),
-
-        homestead_block: Some(0),
-        byzantium_block: Some(0),
-        constantinople_block: Some(0),
-        petersburg_block: Some(0),
-        istanbul_block: Some(0),
-        muir_glacier_block: Some(0),
-        berlin_block: Some(0),
-        london_block: Some(0),
-        clique: Some(clique_config),
-        ..Default::default()
-    };
-
-    // fund account
-    let mut alloc = HashMap::new();
-    alloc.insert(
-        signer_addr,
-        GenesisAccount {
-            balance: ethers_core::types::U256::MAX,
-            nonce: None,
-            code: None,
-            storage: None,
-        },
-    );
-
-    // put signer address in the extra data, padded by the required amount of zeros
-    // Clique issue: https://github.com/ethereum/EIPs/issues/225
-    // Clique EIP: https://eips.ethereum.org/EIPS/eip-225
-    //
-    // The first 32 bytes are vanity data, so we will populate it with zeros
-    // This is followed by the signer address, which is 20 bytes
-    // There are 65 bytes of zeros after the signer address, which is usually populated with the
-    // proposer signature. Because the genesis does not have a proposer signature, it will be
-    // populated with zeros.
-    let extra_data_bytes = [&[0u8; 32][..], signer_addr.as_bytes(), &[0u8; 65][..]].concat();
-    let extra_data = Bytes::from(extra_data_bytes);
-
-    Genesis {
-        config,
-        alloc,
-        difficulty: ethers_core::types::U256::one(),
-        gas_limit: U64::from(5000000),
-        extra_data,
-        ..Default::default()
-    }
-}
 
 /// Builder for setting up a [`Geth`](ethers_core::utils::Geth) instance configured with Clique
 /// and a custom [`Genesis`](ethers_core::utils::Genesis).
@@ -163,38 +100,16 @@ impl CliqueGethBuilder {
         let wallet: LocalWallet = signer.clone().into();
         let our_address = wallet.address();
 
-        // modify the provided genesis to configure clique, or generate a funded genesis
-        let genesis = match self.genesis {
-            Some(genesis) => {
-                // overwrite the extraData field
-                let mut genesis = genesis;
-
-                // set up a clique config with an instant sealing period and short (8 block) epoch
-                let clique_config = CliqueConfig { period: 0, epoch: 8 };
-                genesis.config.clique = Some(clique_config);
-
-                // set the extraData field
-                let extra_data_bytes =
-                    [&[0u8; 32][..], our_address.as_bytes(), &[0u8; 65][..]].concat();
-                let extra_data = Bytes::from(extra_data_bytes);
-                genesis.extra_data = extra_data;
-                genesis
-            }
-            None => genesis_funded(self.chain_id, our_address),
-        };
-
         let geth = if let Some(data_dir) = self.data_dir {
             Geth::new().data_dir(data_dir)
         } else {
             Geth::new()
         };
 
-        let geth = geth
-            .genesis(genesis.clone())
-            .chain_id(self.chain_id)
-            .p2p_port(unused_port())
-            .disable_discovery()
-            .insecure_unlock();
+        // ensure the genesis is populated
+        let genesis = self.genesis.unwrap_or_else(|| Genesis::new(self.chain_id, our_address));
+
+        let geth = geth.chain_id(self.chain_id).set_clique_private_key(signer.clone());
 
         CliqueGethInstance::new(geth, signer, genesis).await
     }
@@ -242,7 +157,7 @@ impl CliqueGethInstance {
         let provider =
             SignerMiddleware::new_with_provider_chain(provider, wallet.clone()).await.unwrap();
 
-        Self { instance, signer, genesis, provider }
+        Self { instance, signer, provider, genesis }
     }
 
     /// Enable mining on the clique geth instance by importing and unlocking the signer account
@@ -330,11 +245,6 @@ impl CliqueGethInstance {
         }
     }
 
-    /// Returns the [`Geth`](ethers_core::utils::Geth) instance p2p port.
-    pub(crate) fn p2p_port(&self) -> u16 {
-        self.instance.p2p_port().unwrap()
-    }
-
     /// Returns the [`Geth`](ethers_core::utils::Geth) instance [`PeerId`](reth_primitives::PeerId)
     /// by calling geth's `admin_nodeInfo`.
     pub(crate) async fn peer_id(&self) -> PeerId {
@@ -343,7 +253,7 @@ impl CliqueGethInstance {
 
     /// Returns the genesis block of the [`Geth`](ethers_core::utils::Geth) instance by calling
     /// geth's `eth_getBlock`.
-    pub(crate) async fn genesis(&self) -> Block<H256> {
+    pub(crate) async fn remote_genesis(&self) -> Block<H256> {
         self.provider
             .get_block(BlockNumber::Earliest)
             .await
@@ -372,6 +282,6 @@ impl CliqueGethInstance {
     /// geth's `eth_getBlock`.
     #[allow(dead_code)]
     pub(crate) async fn genesis_hash(&self) -> reth_primitives::H256 {
-        self.genesis().await.hash.unwrap().0.into()
+        self.remote_genesis().await.hash.unwrap().0.into()
     }
 }

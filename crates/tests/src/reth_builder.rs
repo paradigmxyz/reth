@@ -46,14 +46,15 @@ where
         let mut pipeline = Pipeline::default()
             .with_sync_state_updater(self.network.clone())
             .push(HeaderStage {
-                downloader: headers::linear::LinearDownloadBuilder::default()
-                    .batch_size(self.config.headers.downloader_batch_size)
-                    .retries(self.config.headers.downloader_retries)
-                    .build(self.consensus.clone(), fetch_client.clone()),
+                downloader: headers::linear::LinearDownloadBuilder::default().build(
+                    self.consensus.clone(),
+                    fetch_client.clone(),
+                    Default::default(),
+                    Default::default(),
+                ),
                 consensus: self.consensus.clone(),
                 client: fetch_client.clone(),
                 network_handle: self.network.clone(),
-                commit_threshold: self.config.headers.commit_threshold,
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
