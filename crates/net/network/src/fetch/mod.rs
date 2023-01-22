@@ -4,7 +4,7 @@ use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
-    error::{PeerRequestResult, RequestError, RequestResult},
+    error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
@@ -226,7 +226,14 @@ impl StateFetcher {
         res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
-        if let Some(resp) = self.inflight_headers_requests.remove(&peer_id) {
+
+        let resp = self.inflight_headers_requests.remove(&peer_id);
+        let is_likely_bad_response = resp
+            .as_ref()
+            .map(|r| res.is_likely_bad_headers_response(&r.request))
+            .unwrap_or_default();
+
+        if let Some(resp) = resp {
             let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
         }
 
@@ -241,10 +248,11 @@ impl StateFetcher {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // If the peer is still ready to be accept new requests, we try to send a followup
             // request immediately.
-            if peer.state.on_request_finished() {
+            if peer.state.on_request_finished() && !is_likely_bad_response {
                 return self.followup_request(peer_id)
             }
         }
+
         None
     }
 
