@@ -7,8 +7,6 @@
 /// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct StageConfig {
-    /// Header stage configuration.
-    pub(crate) headers: HeadersConfig,
     /// Total difficulty stage configuration
     pub(crate) total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
@@ -17,23 +15,6 @@ pub(crate) struct StageConfig {
     pub(crate) sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub(crate) execution: ExecutionConfig,
-}
-
-/// Header stage configuration.
-#[derive(Debug, Clone)]
-pub(crate) struct HeadersConfig {
-    /// The maximum number of headers to download before committing progress to the database.
-    pub(crate) commit_threshold: u64,
-    /// The maximum number of headers to request from a peer at a time.
-    pub(crate) downloader_batch_size: u64,
-    /// The number of times to retry downloading a set of headers.
-    pub(crate) downloader_retries: usize,
-}
-
-impl Default for HeadersConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
-    }
 }
 
 /// Total difficulty stage configuration
@@ -55,25 +36,11 @@ impl Default for TotalDifficultyConfig {
 pub(crate) struct BodiesConfig {
     /// The maximum number of bodies to download before committing progress to the database.
     pub(crate) commit_threshold: u64,
-    /// The maximum number of bodies to request from a peer at a time.
-    pub(crate) downloader_batch_size: usize,
-    /// The number of times to retry downloading a set of bodies.
-    pub(crate) downloader_retries: usize,
-    /// The maximum number of body requests to have in flight at a time.
-    ///
-    /// The maximum number of bodies downloaded at the same time is `downloader_batch_size *
-    /// downloader_concurrency`.
-    pub(crate) downloader_concurrency: usize,
 }
 
 impl Default for BodiesConfig {
     fn default() -> Self {
-        Self {
-            commit_threshold: 5_000,
-            downloader_batch_size: 100,
-            downloader_retries: 5,
-            downloader_concurrency: 10,
-        }
+        Self { commit_threshold: 5_000 }
     }
 }
 

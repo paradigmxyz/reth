@@ -190,6 +190,7 @@ impl CliqueGethInstance {
 
     /// Prints the logs of the [`Geth`](ethers_core::utils::Geth) instance in a new
     /// [`task`](tokio::task).
+    #[allow(dead_code)]
     pub(crate) async fn print_logs(&mut self) {
         // take the stderr of the geth instance and print it
         let stderr = self.instance.stderr().unwrap();
