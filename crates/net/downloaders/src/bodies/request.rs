@@ -115,7 +115,8 @@ where
     ///
     /// If the number of buffered bodies does not equal the number of non empty headers.
     fn try_construct_blocks(&mut self) -> Result<Vec<BlockResponse>, (PeerId, BodyRequestError)> {
-        let mut bodies = self.buffer.drain(..);
+        // Optimistically, the allocated memory will not be reused.
+        let mut bodies = std::mem::take(&mut self.buffer).into_iter();
         let mut results = Vec::default();
         for header in self.headers.iter().cloned() {
             if header.is_empty() {
