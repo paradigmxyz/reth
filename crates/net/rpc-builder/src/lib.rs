@@ -7,7 +7,11 @@
 
 //! Configure reth RPC
 
-use jsonrpsee::{server::ServerBuilder, RpcModule};
+use jsonrpsee::{
+    core::{server::rpc_module::Methods, Error as RpcError},
+    server::ServerBuilder,
+    RpcModule,
+};
 use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::{BlockProvider, StateProviderFactory};
@@ -86,6 +90,8 @@ where
     Network: NetworkInfo + PeersInfo + 'static,
 {
     /// Configures the [RpcModule] which can be used to start the server(s).
+    ///
+    /// See also [RpcServer::start]
     pub fn build(self) -> RpcModule<()> {
         let Self { client: _, pool: _, network: _, config: _ } = self;
         let _io = RpcModule::new(());
@@ -119,14 +125,16 @@ pub enum RpcModuleConfig {
 pub enum RethRpcModule {
     /// `admin_` module
     Admin,
-    /// `eth_` module
-    Eth,
-    /// `web3_` module
-    Web3,
-    /// `trace_` module
-    Trace,
     /// `debug_` module
     Debug,
+    /// `eth_` module
+    Eth,
+    /// `net_` module
+    Net,
+    /// `trace_` module
+    Trace,
+    /// `web3_` module
+    Web3,
 }
 
 impl fmt::Display for RethRpcModule {
@@ -164,4 +172,74 @@ pub struct RpcServerBuilder {
     pub ipc_server_config: Option<IpcServerBuilder>,
     /// The Endpoint where to launch the ipc server
     pub ipc_server_path: Option<Endpoint>,
+}
+
+/// === impl RpcServerBuilder ===
+
+impl RpcServerBuilder {
+    /// Finalize the configuration of the server(s).
+    ///
+    /// This consumes the builder and returns a server.
+    ///
+    /// Note: The server ist not started and does nothing unless polled, See also
+    pub async fn build(self) -> Result<RpcServer, RpcError> {
+        todo!()
+    }
+}
+
+/// Container type for the configured RPC server(s): http,ws,ipc
+pub struct RpcServer {}
+
+// === impl RpcServer ===
+
+impl RpcServer {
+    /// Starts the configured server by spawning the servers on the tokio runtime.
+    ///
+    /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
+    /// stopped or the [RpcServerHandle] is dropped.
+    pub fn start(self, _methods: impl Into<Methods>) -> Result<RpcServerHandle, RpcError> {
+        todo!()
+    }
+}
+
+/// A handle to the spawned servers.
+///
+/// When stop has been called the server will be stopped.
+#[derive(Debug, Clone)]
+pub struct RpcServerHandle {}
+
+// === impl RpcServerHandle ===
+
+impl RpcServerHandle {
+    /// Tell the server to stop without waiting for the server to stop.
+    pub fn stop(&self) -> Result<(), RpcError> {
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rpc_module_str() {
+        macro_rules! assert_rpc_module {
+            ($($s:expr => $v:expr,)*) => {
+                $(
+                    let val: RethRpcModule  = $s.parse().unwrap();
+                    assert_eq!(val, $v);
+                    assert_eq!(val.to_string().as_str(), $s);
+                )*
+            };
+        }
+        assert_rpc_module!
+        (
+                "admin" =>  RethRpcModule::Admin,
+                "debug" =>  RethRpcModule::Debug,
+                "eth" =>  RethRpcModule::Eth,
+                "net" =>  RethRpcModule::Net,
+                "trace" =>  RethRpcModule::Trace,
+                "web3" =>  RethRpcModule::Web3,
+            );
+    }
 }
