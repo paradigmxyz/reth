@@ -12,22 +12,12 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::BeaconConsensus;
-use reth_downloaders::{bodies, headers};
-use reth_interfaces::consensus::ForkchoiceState;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
-use reth_staged_sync::{utils::init::init_genesis, Config};
-use reth_stages::{
-    metrics::HeaderMetrics,
-    stages::{
-        bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
-        hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
-        sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
-    },
-    PipelineEvent, StageId,
-};
+use reth_staged_sync::{builder::RethBuilder, utils::init::init_genesis, Config};
+use reth_stages::{PipelineEvent, StageId};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::select;
 use tokio_stream::wrappers::ReceiverStream;
@@ -139,74 +129,27 @@ impl Command {
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
-        let fetch_client = Arc::new(network.fetch_client().await?);
-        let mut pipeline = reth_stages::Pipeline::default()
-            .with_sync_state_updater(network.clone())
+        let mut builder = RethBuilder::new(db)
             .with_channel(sender)
-            .push(HeaderStage {
-                downloader: headers::linear::LinearDownloadBuilder::default()
-                    .request_limit(config.stages.headers.downloader_batch_size)
-                    .stream_batch_size(config.stages.headers.commit_threshold as usize)
-                    // NOTE: the head and target will be set from inside the stage before the
-                    // downloader is called
-                    .build(
-                        consensus.clone(),
-                        fetch_client.clone(),
-                        Default::default(),
-                        Default::default(),
-                    ),
-                consensus: consensus.clone(),
-                client: fetch_client.clone(),
-                network_handle: network.clone(),
-                metrics: HeaderMetrics::default(),
-            })
-            .push(TotalDifficultyStage {
-                commit_threshold: config.stages.total_difficulty.commit_threshold,
-            })
-            .push(BodyStage {
-                downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        consensus.clone(),
-                    )
-                    .with_batch_size(config.stages.bodies.downloader_batch_size)
-                    .with_retries(config.stages.bodies.downloader_retries)
-                    .with_concurrency(config.stages.bodies.downloader_concurrency),
-                ),
-                consensus: consensus.clone(),
-                commit_threshold: config.stages.bodies.commit_threshold,
-            })
-            .push(SenderRecoveryStage {
-                batch_size: config.stages.sender_recovery.batch_size,
-                commit_threshold: config.stages.sender_recovery.commit_threshold,
-            })
-            .push(ExecutionStage {
-                chain_spec: self.chain.clone(),
-                commit_threshold: config.stages.execution.commit_threshold,
-            })
-            // This Merkle stage is used only on unwind
-            .push(MerkleStage { is_execute: false })
-            .push(AccountHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
-            .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
-            // This merkle stage is used only for execute
-            .push(MerkleStage { is_execute: true });
+            .with_chain_spec(self.chain.clone())
+            .with_execution(config.stages.execution)
+            .with_senders_recovery(config.stages.sender_recovery)
+            .with_merklization()
+            .online(consensus.clone(), network.clone())
+            .with_headers_downloader(config.stages.headers)
+            .with_bodies_downloader(config.stages.bodies);
 
         if let Some(tip) = self.tip {
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            consensus.notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: tip,
-                safe_block_hash: tip,
-                finalized_block_hash: tip,
-            })?;
+            builder = builder.with_tip(tip)?;
+            debug!(%tip, "Tip manually set");
         } else {
             warn!(target: "reth::cli", "No tip specified. reth cannot communicate with consensus clients, so a tip must manually be provided for the online stages with --debug.tip <HASH>.");
         }
 
-        // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
-        pipeline.run(db.clone()).await?;
-
+        builder.run().await?;
         info!(target: "reth::cli", "Finishing up");
+
         Ok(())
     }
 }
