@@ -8,15 +8,11 @@ use crate::{
     NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
-use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
 use reth_staged_sync::{builder::RethBuilder, Config};
-use reth_stages::{
-    stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
-    ExecInput, Stage, StageId, Transaction, UnwindInput,
-};
+use reth_stages::{ExecInput, Stage, StageId, Transaction, UnwindInput};
 
 use clap::{Parser, ValueEnum};
 use std::{net::SocketAddr, sync::Arc};

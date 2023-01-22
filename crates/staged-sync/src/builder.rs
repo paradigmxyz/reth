@@ -47,6 +47,7 @@ use eyre::Result;
 /// };
 /// stage.execute(&mut tx, input).await?;
 #[must_use = "need to call `build` on this struct"]
+#[derive(Debug, Default)]
 pub struct RethBuilder {
     senders_recovery: Option<SenderRecoveryConfig>,
 
@@ -59,14 +60,9 @@ pub struct RethBuilder {
 }
 
 impl RethBuilder {
+    /// Instantiates the builder with the [`Default`] implementation.
     pub fn new() -> Self {
-        Self {
-            senders_recovery: None,
-            execution: None,
-            chain_spec: None,
-            merklize: false,
-            channel: None,
-        }
+        Self::default()
     }
 
     /// Converts the RethBuilder to an online one to be integrated with the Headers/Bodies stages
