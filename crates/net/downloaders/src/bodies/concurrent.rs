@@ -300,16 +300,10 @@ where
             return Poll::Ready(None)
         }
 
-        // Yield next batch
-        if this.queued_bodies.len() > this.stream_batch_size {
-            let next_batch = this.queued_bodies.drain(..this.stream_batch_size);
-            return Poll::Ready(Some(next_batch.collect()))
-        }
-
         // Submit new requests and poll any in progress
         loop {
             // Poll requests
-            if let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
+            while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
                 let response = OrderedBodiesResponse(response);
                 this.buffered_responses.push(response);
             }
@@ -341,6 +335,12 @@ where
                 this.queue_bodies(buf_response);
             }
 
+            // Yield next batch
+            if this.queued_bodies.len() >= this.stream_batch_size {
+                let next_batch = this.queued_bodies.drain(..this.stream_batch_size);
+                return Poll::Ready(Some(next_batch.collect()))
+            }
+
             if !new_request_submitted {
                 break
             }
@@ -354,8 +354,7 @@ where
 
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size);
-            let resp = next_batch.collect::<Vec<_>>();
-            return Poll::Ready(Some(resp))
+            return Poll::Ready(Some(next_batch.collect()))
         }
 
         Poll::Pending
@@ -570,16 +569,19 @@ mod tests {
         let mut range_start = 0;
         while range_start < 100 {
             downloader.set_download_range(range_start..100).expect("failed to set header range");
+            assert_eq!(downloader.latest_queued_block_number, None);
 
             assert_matches!(
                 downloader.next().await,
                 Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
             );
+            assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
         }
+
         assert_eq!(
             client.times_requested(),
-            // div_ceil
+            // div_ceil equivalent
             ((headers.iter().filter(|x| !x.is_empty()).count() + 9) / 10) as u64,
         );
     }
