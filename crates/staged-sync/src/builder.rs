@@ -1,4 +1,4 @@
-use crate::config::BodiesConfig;
+use crate::config::{BodiesConfig, SenderRecoveryConfig};
 
 use super::config::HeadersConfig;
 use reth_db::database::Database;
@@ -6,11 +6,14 @@ use reth_downloaders::{
     bodies::concurrent::ConcurrentDownloader,
     headers::linear::{LinearDownloadBuilder, LinearDownloader},
 };
-use reth_interfaces::consensus::Consensus;
+use reth_interfaces::{
+    consensus::Consensus,
+    sync::{NoopSyncStateUpdate, SyncStateUpdater},
+};
 use reth_network::{FetchClient, NetworkHandle};
 use reth_stages::{
     metrics::HeaderMetrics,
-    stages::{bodies::BodyStage, headers::HeaderStage},
+    stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
     Pipeline,
 };
 
@@ -39,11 +42,36 @@ use eyre::Result;
 #[must_use = "need to call `build` on this struct"]
 pub struct RethBuilder<DB> {
     db: Arc<DB>,
+
+    senders_recovery: Option<SenderRecoveryConfig>,
 }
 
 impl<DB: Database> RethBuilder<DB> {
     pub fn new(db: DB) -> Self {
-        Self { db: Arc::new(db) }
+        Self { db: Arc::new(db), senders_recovery: None }
+    }
+
+    pub fn with_senders_recovery(mut self, config: SenderRecoveryConfig) -> Self {
+        self.senders_recovery = Some(config);
+        self
+    }
+
+    pub fn senders_recovery(&self) -> Option<SenderRecoveryStage> {
+        self.senders_recovery.as_ref().map(|config| SenderRecoveryStage {
+            batch_size: config.batch_size,
+            commit_threshold: config.commit_threshold,
+        })
+    }
+
+    pub fn configure_pipeline<U: SyncStateUpdater>(
+        &self,
+        mut pipeline: Pipeline<DB, U>,
+    ) -> Pipeline<DB, U> {
+        if let Some(stage) = self.senders_recovery() {
+            pipeline = pipeline.push(stage);
+        }
+
+        pipeline
     }
 
     pub fn online<C, N>(self, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
@@ -148,6 +176,8 @@ where
         if let Some(stage) = self.bodies_stage().await? {
             pipeline = pipeline.push(stage);
         }
+
+        pipeline = self.builder.configure_pipeline(pipeline);
 
         pipeline.run(self.builder.db.clone()).await?;
 
