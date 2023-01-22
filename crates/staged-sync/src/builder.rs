@@ -1,13 +1,14 @@
 use crate::config::{BodiesConfig, ExecutionConfig, SenderRecoveryConfig, TotalDifficultyConfig};
 
 use super::config::HeadersConfig;
+use reth_consensus::BeaconConsensus;
 use reth_db::database::Database;
 use reth_downloaders::{
     bodies::concurrent::ConcurrentDownloader,
     headers::linear::{LinearDownloadBuilder, LinearDownloader},
 };
 use reth_interfaces::{
-    consensus::Consensus,
+    consensus::{Consensus, ForkchoiceState},
     sync::{NoopSyncStateUpdate, SyncStateUpdater},
 };
 use reth_network::{FetchClient, NetworkHandle};
@@ -19,10 +20,11 @@ use reth_stages::{
         hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
         sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
-    Pipeline,
+    Pipeline, PipelineEvent,
 };
 
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 
 use eyre::Result;
 
@@ -54,16 +56,19 @@ pub struct RethBuilder<DB> {
     execution: Option<ExecutionConfig>,
 
     merklize: bool,
+
+    channel: Option<Sender<PipelineEvent>>,
 }
 
 impl<DB: Database> RethBuilder<DB> {
-    pub fn new(db: DB) -> Self {
+    pub fn new(db: Arc<DB>) -> Self {
         Self {
-            db: Arc::new(db),
+            db,
             senders_recovery: None,
             execution: None,
             chain_spec: None,
             merklize: false,
+            channel: None,
         }
     }
 
@@ -93,9 +98,15 @@ impl<DB: Database> RethBuilder<DB> {
         self
     }
 
-    /// Retrieves the [`ExecutionStage`] if it was configured
+    /// Configures [`ExecutionStage`]'s [`ChainSpec`]
     pub fn with_chain_spec(mut self, chain_spec: ChainSpec) -> Self {
         self.chain_spec = Some(chain_spec);
+        self
+    }
+
+    /// Set a channel the pipeline will transmit events over (see [PipelineEvent]).
+    pub fn with_channel(mut self, sender: Sender<PipelineEvent>) -> Self {
+        self.channel = Some(sender);
         self
     }
 
@@ -140,6 +151,10 @@ impl<DB: Database> RethBuilder<DB> {
                 .push(MerkleStage { is_execute: true });
         }
 
+        if let Some(ref channel) = self.channel {
+            pipeline = pipeline.with_channel(channel.clone());
+        }
+
         pipeline
     }
 
@@ -174,6 +189,24 @@ impl<C, N, DB: Database> OnlineRethBuilder<C, N, DB> {
             total_difficulty: None,
             bodies: None,
         }
+    }
+}
+
+impl<U, DB> OnlineRethBuilder<Arc<BeaconConsensus>, U, DB>
+where
+    DB: Database,
+{
+    /// When downloading from the Beacon Chain, headers are downloaded in reverse.
+    /// Normally, the Consensus Layer (CL) would feed us with a tip, however we can also
+    /// manually set it via this function to sync without a CL.
+    pub fn with_tip(self, tip: reth_primitives::H256) -> Result<Self> {
+        self.consensus.notify_fork_choice_state(ForkchoiceState {
+            head_block_hash: tip,
+            safe_block_hash: tip,
+            finalized_block_hash: tip,
+        })?;
+
+        Ok(self)
     }
 }
 
