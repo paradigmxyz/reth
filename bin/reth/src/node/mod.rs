@@ -12,7 +12,6 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::BeaconConsensus;
-use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
@@ -71,34 +70,29 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
 }
 
 impl Command {
     /// Execute `node` command
     // TODO: RPC
     pub async fn execute(&self) -> eyre::Result<()> {
+        info!(target: "reth::cli", "reth {} starting", crate_version!());
+
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config =
-            confy::load_path(&self.config).wrap_err("Could not load config")?;
-        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-
-        if !self.network.trusted_peers.is_empty() {
-            self.network.trusted_peers.iter().for_each(|peer| {
-                config.peers.trusted_nodes.insert(*peer);
-            });
-        }
-
-        info!(target: "reth::cli", "reth {} starting", crate_version!());
-
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
+
+        let mut config: Config =
+            confy::load_path(&self.config).wrap_err("Could not load config")?;
+        let network = self
+            .network
+            .config(&mut config, self.chain.clone(), db.clone())
+            .start_network()
+            .await?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
@@ -109,17 +103,6 @@ impl Command {
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
         let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
-
-        let network = config
-            .network_config(
-                db.clone(),
-                self.chain.clone(),
-                self.network.disable_discovery,
-                self.network.bootnodes.clone(),
-                self.nat,
-            )
-            .start_network()
-            .await?;
 
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         tokio::spawn(handle_events(stream_select(

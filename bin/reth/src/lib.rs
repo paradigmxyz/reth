@@ -14,10 +14,17 @@ pub mod p2p;
 pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
+use reth_db::database::Database;
+use reth_network::NetworkConfig;
+use reth_provider::ProviderImpl;
 pub use reth_staged_sync::utils;
+use reth_staged_sync::Config;
 
 use clap::Args;
-use reth_primitives::NodeRecord;
+use reth_primitives::{ChainSpec, NodeRecord};
+
+use reth_net_nat::NatResolver;
+use std::sync::Arc;
 
 /// Parameters for configuring the network more granularly via CLI
 #[derive(Debug, Args)]
@@ -41,4 +48,26 @@ struct NetworkOpts {
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
     bootnodes: Option<Vec<NodeRecord>>,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
+}
+
+impl NetworkOpts {
+    pub(crate) fn config<DB: Database>(
+        &self,
+        config: &mut Config,
+        chain: ChainSpec,
+        db: Arc<DB>,
+    ) -> NetworkConfig<ProviderImpl<DB>> {
+        config.peers.connect_trusted_nodes_only = self.trusted_only;
+
+        if !self.trusted_peers.is_empty() {
+            self.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
+        config.network_config(db, chain, self.disable_discovery, self.bootnodes.clone(), self.nat)
+    }
 }

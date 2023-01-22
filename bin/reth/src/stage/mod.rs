@@ -126,21 +126,9 @@ impl Command {
                     Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                 let mut config = config;
-                config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-                if !self.network.trusted_peers.is_empty() {
-                    self.network.trusted_peers.iter().for_each(|peer| {
-                        config.peers.trusted_nodes.insert(*peer);
-                    });
-                }
-
-                let network = config
-                    .network_config(
-                        db.clone(),
-                        self.chain.clone(),
-                        self.network.disable_discovery,
-                        None,
-                        self.nat,
-                    )
+                let network = self
+                    .network
+                    .config(&mut config, self.chain.clone(), db.clone())
                     .start_network()
                     .await?;
 
