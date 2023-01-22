@@ -695,8 +695,8 @@ impl TransactionSigned {
         match self.transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
                 // do nothing w/ with_header
-                let payload_length =
-                    self.transaction.fields_len() + self.signature.payload_len_with_eip155_chain_id(chain_id);
+                let payload_length = self.transaction.fields_len() +
+                    self.signature.payload_len_with_eip155_chain_id(chain_id);
                 let header = Header { list: true, payload_length };
                 header.encode(out);
                 self.transaction.encode_fields(out);
@@ -725,8 +725,8 @@ impl TransactionSigned {
     pub(crate) fn payload_len_inner(&self) -> usize {
         match self.transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                let payload_length =
-                    self.transaction.fields_len() + self.signature.payload_len_with_eip155_chain_id(chain_id);
+                let payload_length = self.transaction.fields_len() +
+                    self.signature.payload_len_with_eip155_chain_id(chain_id);
                 // 'header length' + 'payload length'
                 length_of_length(payload_length) + payload_length
             }

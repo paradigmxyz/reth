@@ -25,7 +25,11 @@ impl Signature {
 
     /// Encode the `v`, `r`, `s` values without a RLP header.
     /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on chain_id.
-    pub(crate) fn encode_with_eip155_chain_id(&self, out: &mut dyn reth_rlp::BufMut, chain_id: Option<u64>) {
+    pub(crate) fn encode_with_eip155_chain_id(
+        &self,
+        out: &mut dyn reth_rlp::BufMut,
+        chain_id: Option<u64>,
+    ) {
         self.v(chain_id).encode(out);
         self.r.encode(out);
         self.s.encode(out);
@@ -44,7 +48,9 @@ impl Signature {
 
     /// Decodes the `v`, `r`, `s` values without a RLP header.
     /// This will return a chain ID if the `v` value is EIP-155 compatible.
-    pub(crate) fn decode_with_eip155_chain_id(buf: &mut &[u8]) -> Result<(Self, Option<u64>), DecodeError> {
+    pub(crate) fn decode_with_eip155_chain_id(
+        buf: &mut &[u8],
+    ) -> Result<(Self, Option<u64>), DecodeError> {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
