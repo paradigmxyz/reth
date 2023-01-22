@@ -32,8 +32,8 @@ pub struct ConcurrentDownloader<B, C, DB> {
     consensus: Arc<C>,
     /// The database handle
     db: Arc<DB>,
-    /// The batch size of non-empty blocks per one request
-    request_batch_size: usize,
+    /// The maximum number of non-empty blocks per one request
+    request_limit: usize,
     /// The maximum number of block bodies returned at once from the stream
     stream_batch_size: usize,
     /// The allowed range for number of concurrent requests.
@@ -62,7 +62,7 @@ where
         client: Arc<B>,
         consensus: Arc<C>,
         db: Arc<DB>,
-        request_batch_size: usize,
+        request_limit: usize,
         stream_batch_size: usize,
         max_buffered_responses: usize,
         concurrent_requests_range: RangeInclusive<usize>,
@@ -71,7 +71,7 @@ where
             client,
             consensus,
             db,
-            request_batch_size,
+            request_limit,
             stream_batch_size,
             max_buffered_responses,
             concurrent_requests_range,
@@ -90,7 +90,7 @@ where
             None => self.download_range.start,
         };
 
-        let request = self.query_headers(start_at, self.request_batch_size)?;
+        let request = self.query_headers(start_at, self.request_limit)?;
 
         if request.is_empty() {
             return Ok(None)
@@ -419,7 +419,7 @@ impl Ord for OrderedBodiesResponse {
 /// Builder for [ConcurrentDownloader].
 pub struct ConcurrentDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
-    request_batch_size: usize,
+    request_limit: usize,
     /// The maximum number of block bodies returned at once from the stream
     stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
@@ -431,7 +431,7 @@ pub struct ConcurrentDownloaderBuilder {
 impl Default for ConcurrentDownloaderBuilder {
     fn default() -> Self {
         Self {
-            request_batch_size: 100,
+            request_limit: 100,
             stream_batch_size: 1000,
             max_buffered_responses: 10000,
             concurrent_requests_range: 5..=100,
@@ -441,8 +441,8 @@ impl Default for ConcurrentDownloaderBuilder {
 
 impl ConcurrentDownloaderBuilder {
     /// Set request batch size on the downloader.
-    pub fn with_request_batch_size(mut self, request_batch_size: usize) -> Self {
-        self.request_batch_size = request_batch_size;
+    pub fn with_request_limit(mut self, request_limit: usize) -> Self {
+        self.request_limit = request_limit;
         self
     }
 
@@ -483,7 +483,7 @@ impl ConcurrentDownloaderBuilder {
             client,
             consensus,
             db,
-            self.request_batch_size,
+            self.request_limit,
             self.stream_batch_size,
             self.max_buffered_responses,
             self.concurrent_requests_range,
@@ -547,7 +547,8 @@ mod tests {
         assert_eq!(client.times_requested(), 1);
     }
 
-    // Check TODO:
+    // Check that bodies are returned in correct order
+    // after resetting the download range multiple times.
     #[tokio::test]
     async fn streams_bodies_in_order_after_range_reset() {
         // Generate some random blocks
@@ -557,13 +558,13 @@ mod tests {
         insert_headers(db.borrow(), &headers);
 
         let stream_batch_size = 20;
-        let request_batch_size = 10;
+        let request_limit = 10;
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
         let mut downloader = ConcurrentDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
-            .with_request_batch_size(request_batch_size)
+            .with_request_limit(request_limit)
             .build(client.clone(), Arc::new(TestConsensus::default()), db);
 
         let mut range_start = 0;

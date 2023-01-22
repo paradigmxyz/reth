@@ -152,7 +152,7 @@ impl Command {
                 let mut stage = BodyStage {
                     downloader: ConcurrentDownloaderBuilder::default()
                         .with_stream_batch_size(num_blocks as usize)
-                        .with_request_batch_size(config.stages.bodies.downloader_request_batch_size)
+                        .with_request_limit(config.stages.bodies.downloader_request_limit)
                         .with_max_buffered_responses(
                             config.stages.bodies.downloader_max_buffered_responses,
                         )

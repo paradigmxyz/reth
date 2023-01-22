@@ -97,7 +97,7 @@ impl Default for TotalDifficultyConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
-    pub downloader_request_batch_size: usize,
+    pub downloader_request_limit: usize,
     /// The maximum number of block bodies returned at once from the stream
     pub downloader_stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
@@ -111,7 +111,7 @@ pub struct BodiesConfig {
 impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
-            downloader_request_batch_size: 200,
+            downloader_request_limit: 200,
             downloader_stream_batch_size: 10000,
             downloader_max_buffered_responses: 100000,
             downloader_min_concurrent_requests: 5,

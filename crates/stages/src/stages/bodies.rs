@@ -107,18 +107,10 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         };
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
-        let mut debug_block = None;
         for response in downloaded_bodies {
             // Write block
             let block_header = response.header();
             let numhash: BlockNumHash = block_header.num_hash().into();
-
-            // TODO: remove
-            debug_assert_eq!(
-                block_header.number,
-                debug_block.map(|b| b + 1).unwrap_or(start_block)
-            );
-            debug_block = Some(block_header.number);
 
             match response {
                 BlockResponse::Full(block) => {
