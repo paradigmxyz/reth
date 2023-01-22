@@ -72,7 +72,8 @@ use state::*;
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
-    stages: Vec<QueuedStage<DB>>,
+    /// The stages that are part of the pipeline
+    pub stages: Vec<QueuedStage<DB>>,
     max_block: Option<BlockNumber>,
     events_sender: MaybeSender<PipelineEvent>,
     sync_state_updater: Option<U>,
@@ -285,7 +286,8 @@ impl PipelineProgress {
 }
 
 /// A container for a queued stage.
-struct QueuedStage<DB: Database> {
+#[allow(missing_debug_implementations)]
+pub struct QueuedStage<DB: Database> {
     /// The actual stage to execute.
     stage: Box<dyn Stage<DB>>,
 }
