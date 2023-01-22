@@ -1,4 +1,4 @@
-use crate::config::{BodiesConfig, SenderRecoveryConfig};
+use crate::config::{BodiesConfig, ExecutionConfig, SenderRecoveryConfig};
 
 use super::config::HeadersConfig;
 use reth_db::database::Database;
@@ -11,9 +11,13 @@ use reth_interfaces::{
     sync::{NoopSyncStateUpdate, SyncStateUpdater},
 };
 use reth_network::{FetchClient, NetworkHandle};
+use reth_primitives::{ChainSpec, ChainSpecBuilder};
 use reth_stages::{
     metrics::HeaderMetrics,
-    stages::{bodies::BodyStage, headers::HeaderStage, sender_recovery::SenderRecoveryStage},
+    stages::{
+        bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
+        sender_recovery::SenderRecoveryStage,
+    },
     Pipeline,
 };
 
@@ -44,11 +48,14 @@ pub struct RethBuilder<DB> {
     db: Arc<DB>,
 
     senders_recovery: Option<SenderRecoveryConfig>,
+
+    chain_spec: Option<ChainSpec>,
+    execution: Option<ExecutionConfig>,
 }
 
 impl<DB: Database> RethBuilder<DB> {
     pub fn new(db: DB) -> Self {
-        Self { db: Arc::new(db), senders_recovery: None }
+        Self { db: Arc::new(db), senders_recovery: None, execution: None, chain_spec: None }
     }
 
     pub fn with_senders_recovery(mut self, config: SenderRecoveryConfig) -> Self {
@@ -63,11 +70,32 @@ impl<DB: Database> RethBuilder<DB> {
         })
     }
 
+    pub fn with_execution(mut self, config: ExecutionConfig) -> Self {
+        self.execution = Some(config);
+        self
+    }
+
+    pub fn with_chain_spec(mut self, chain_spec: ChainSpec) -> Self {
+        self.chain_spec = Some(chain_spec);
+        self
+    }
+
+    pub fn execution(&self) -> Option<ExecutionStage> {
+        let chain_spec = self.chain_spec.unwrap_or(ChainSpecBuilder::mainnet().build());
+        self.execution
+            .as_ref()
+            .map(|config| ExecutionStage { chain_spec, commit_threshold: config.commit_threshold })
+    }
+
     pub fn configure_pipeline<U: SyncStateUpdater>(
         &self,
         mut pipeline: Pipeline<DB, U>,
     ) -> Pipeline<DB, U> {
         if let Some(stage) = self.senders_recovery() {
+            pipeline = pipeline.push(stage);
+        }
+
+        if let Some(stage) = self.execution() {
             pipeline = pipeline.push(stage);
         }
 
