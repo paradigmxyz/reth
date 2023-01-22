@@ -1,8 +1,8 @@
 use super::config::HeadersConfig;
 use reth_db::database::Database;
-use reth_downloaders::headers::linear::LinearDownloadBuilder;
+use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
 use reth_interfaces::consensus::Consensus;
-use reth_network::NetworkHandle;
+use reth_network::{FetchClient, NetworkHandle};
 use reth_stages::{metrics::HeaderMetrics, stages::headers::HeaderStage, Pipeline};
 
 use std::sync::Arc;
@@ -50,20 +50,13 @@ where
         self
     }
 
-    pub async fn build(&self) -> Result<()> {
-        // TODO: Add bodies.
-        if self.headers.is_none() {
-            return Err(eyre::eyre!("No online stages configured, cnosider removing the `online` call from your builder or add a stage"));
-        }
-
-        // Instantiate the networked pipeline
-        let mut pipeline =
-            Pipeline::<DB, _>::default().with_sync_state_updater(self.network.clone());
-
-        let fetch_client = self.network.fetch_client().await?;
-        let fetch_client = Arc::new(fetch_client);
-
-        if let Some(ref config) = self.headers {
+    /// Returns the currently configured `HeaderStage` if a `HeadersConfig` has been provided.
+    pub async fn headers_stage(
+        &self,
+    ) -> Result<Option<HeaderStage<LinearDownloader<C, FetchClient>, C, FetchClient, NetworkHandle>>>
+    {
+        let fetch_client = Arc::new(self.network.fetch_client().await?);
+        Ok::<_, eyre::Error>(self.headers.as_ref().map(|config| {
             let downloader = LinearDownloadBuilder::default()
                 .request_limit(config.downloader_batch_size)
                 .stream_batch_size(config.commit_threshold as usize)
@@ -76,14 +69,27 @@ where
                     Default::default(),
                 );
 
-            let stage = HeaderStage {
+            HeaderStage {
                 downloader,
                 consensus: self.consensus.clone(),
                 client: fetch_client.clone(),
                 network_handle: self.network.clone(),
                 metrics: HeaderMetrics::default(),
-            };
+            }
+        }))
+    }
 
+    pub async fn build(&self) -> Result<()> {
+        // TODO: Add bodies.
+        if self.headers.is_none() {
+            return Err(eyre::eyre!("No online stages configured, cnosider removing the `online` call from your builder or add a stage"));
+        }
+
+        // Instantiate the networked pipeline
+        let mut pipeline =
+            Pipeline::<DB, _>::default().with_sync_state_updater(self.network.clone());
+
+        if let Some(stage) = self.headers_stage().await? {
             pipeline = pipeline.push(stage);
         }
 
