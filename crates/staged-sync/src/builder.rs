@@ -47,9 +47,7 @@ use eyre::Result;
 /// };
 /// stage.execute(&mut tx, input).await?;
 #[must_use = "need to call `build` on this struct"]
-pub struct RethBuilder<DB> {
-    db: Arc<DB>,
-
+pub struct RethBuilder {
     senders_recovery: Option<SenderRecoveryConfig>,
 
     chain_spec: Option<ChainSpec>,
@@ -60,10 +58,9 @@ pub struct RethBuilder<DB> {
     channel: Option<Sender<PipelineEvent>>,
 }
 
-impl<DB: Database> RethBuilder<DB> {
-    pub fn new(db: Arc<DB>) -> Self {
+impl RethBuilder {
+    pub fn new() -> Self {
         Self {
-            db,
             senders_recovery: None,
             execution: None,
             chain_spec: None,
@@ -73,7 +70,7 @@ impl<DB: Database> RethBuilder<DB> {
     }
 
     /// Converts the RethBuilder to an online one to be integrated with the Headers/Bodies stages
-    pub fn online<C, N>(self, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
+    pub fn online<C, N>(self, consensus: C, network: N) -> OnlineRethBuilder<C, N> {
         OnlineRethBuilder::new(self, consensus, network)
     }
 
@@ -127,7 +124,7 @@ impl<DB: Database> RethBuilder<DB> {
     }
 
     /// Given a [`Pipeline`] it proceeds to push the internally configured stages to it.
-    pub fn configure_pipeline<U: SyncStateUpdater>(
+    pub fn configure_pipeline<DB: Database, U: SyncStateUpdater>(
         &self,
         mut pipeline: Pipeline<DB, U>,
     ) -> Pipeline<DB, U> {
@@ -159,18 +156,18 @@ impl<DB: Database> RethBuilder<DB> {
     }
 
     /// Builds and runs the pipeline
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run<DB: Database>(&self, db: Arc<DB>) -> Result<()> {
         // Instantiate the networked pipeline
         let pipeline = Pipeline::<DB, NoopSyncStateUpdate>::default();
         let mut pipeline = self.configure_pipeline(pipeline);
-        pipeline.run(self.db.clone()).await?;
+        pipeline.run(db).await?;
         Ok(())
     }
 }
 
 #[must_use = "need to call `build` on this struct"]
-pub struct OnlineRethBuilder<C, N, DB> {
-    builder: RethBuilder<DB>,
+pub struct OnlineRethBuilder<C, N> {
+    builder: RethBuilder,
     consensus: Arc<C>,
     network: N,
 
@@ -179,8 +176,8 @@ pub struct OnlineRethBuilder<C, N, DB> {
     bodies: Option<BodiesConfig>,
 }
 
-impl<C, N, DB: Database> OnlineRethBuilder<C, N, DB> {
-    pub fn new(builder: RethBuilder<DB>, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
+impl<C, N> OnlineRethBuilder<C, N> {
+    pub fn new(builder: RethBuilder, consensus: C, network: N) -> OnlineRethBuilder<C, N> {
         Self {
             builder,
             consensus: Arc::new(consensus),
@@ -192,10 +189,7 @@ impl<C, N, DB: Database> OnlineRethBuilder<C, N, DB> {
     }
 }
 
-impl<U, DB> OnlineRethBuilder<Arc<BeaconConsensus>, U, DB>
-where
-    DB: Database,
-{
+impl<U> OnlineRethBuilder<Arc<BeaconConsensus>, U> {
     /// When downloading from the Beacon Chain, headers are downloaded in reverse.
     /// Normally, the Consensus Layer (CL) would feed us with a tip, however we can also
     /// manually set it via this function to sync without a CL.
@@ -210,10 +204,9 @@ where
     }
 }
 
-impl<C, DB> OnlineRethBuilder<C, NetworkHandle, DB>
+impl<C> OnlineRethBuilder<C, NetworkHandle>
 where
     C: Consensus + 'static,
-    DB: Database,
 {
     /// Configures the [`HeaderStage`]
     pub fn with_headers_downloader(mut self, config: HeadersConfig) -> Self {
@@ -290,7 +283,7 @@ where
     }
 
     /// Given a [`Pipeline`] it proceeds to push the internally configured stages to it.
-    pub async fn configure_pipeline<U: SyncStateUpdater>(
+    pub async fn configure_pipeline<DB: Database, U: SyncStateUpdater>(
         &self,
         mut pipeline: Pipeline<DB, U>,
     ) -> Result<Pipeline<DB, U>> {
@@ -314,7 +307,7 @@ where
     }
 
     /// Builds and runs the pipeline
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run<DB: Database>(&self, db: Arc<DB>) -> Result<()> {
         // Instantiate the networked pipeline
         let mut pipeline =
             Pipeline::<DB, _>::default().with_sync_state_updater(self.network.clone());
@@ -325,7 +318,7 @@ where
         // Set the offline stages
         pipeline = self.builder.configure_pipeline(pipeline);
 
-        pipeline.run(self.builder.db.clone()).await?;
+        pipeline.run(db).await?;
 
         Ok(())
     }

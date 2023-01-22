@@ -129,7 +129,7 @@ impl Command {
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
-        let mut builder = RethBuilder::new(db)
+        let mut builder = RethBuilder::new()
             .with_channel(sender)
             .with_chain_spec(self.chain.clone())
             .with_execution(config.stages.execution)
@@ -147,7 +147,7 @@ impl Command {
         }
 
         info!(target: "reth::cli", "Starting sync pipeline");
-        builder.run().await?;
+        builder.run(db).await?;
         info!(target: "reth::cli", "Finishing up");
 
         Ok(())
