@@ -11,14 +11,14 @@ pub type RequestResult<T> = Result<T, RequestError>;
 /// Result with [PeerId]
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
-/// Trait used to validate requests
-pub trait RequestValidation {
-    /// Determine whether the response matches what we requested in request
-    fn is_likely_a_bad_message(&self, request: &HeadersRequest) -> bool;
+/// Helper trait used to validate responses.
+pub trait EthResponseValidator {
+    /// Determine whether the response matches what we requested in [HeadersRequest]
+    fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool;
 }
 
-impl RequestValidation for RequestResult<Vec<Header>> {
-    fn is_likely_a_bad_message(&self, request: &HeadersRequest) -> bool {
+impl EthResponseValidator for RequestResult<Vec<Header>> {
+    fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool {
         match self {
             Ok(headers) => {
                 let request_length = headers.len() as u64;
@@ -28,10 +28,11 @@ impl RequestValidation for RequestResult<Vec<Header>> {
                 }
 
                 match request.start {
-                    BlockHashOrNumber::Number(block_number) => {
-                        Some(block_number) != headers.get(0).map(|h| h.number)
+                    BlockHashOrNumber::Number(block_number) => block_number != headers[0].number,
+                    BlockHashOrNumber::Hash(_) => {
+                        // we don't want to hash the header
+                        false
                     }
-                    BlockHashOrNumber::Hash(_) => false,
                 }
             }
             Err(_) => true,
