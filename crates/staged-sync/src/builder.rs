@@ -299,10 +299,6 @@ where
             pipeline = pipeline.push(stage);
         }
 
-        if pipeline.stages.is_empty() {
-            return Err(eyre::eyre!("No online stages configured, cnosider removing the `online` call from your builder or add a stage"));
-        }
-
         Ok(pipeline)
     }
 
