@@ -1,4 +1,4 @@
-use crate::config::{BodiesConfig, ExecutionConfig, SenderRecoveryConfig};
+use crate::config::{BodiesConfig, ExecutionConfig, SenderRecoveryConfig, TotalDifficultyConfig};
 
 use super::config::HeadersConfig;
 use reth_db::database::Database;
@@ -16,7 +16,7 @@ use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
-        sender_recovery::SenderRecoveryStage,
+        sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
     Pipeline,
 };
@@ -132,12 +132,20 @@ pub struct OnlineRethBuilder<C, N, DB> {
     network: N,
 
     headers: Option<HeadersConfig>,
+    total_difficulty: Option<TotalDifficultyConfig>,
     bodies: Option<BodiesConfig>,
 }
 
 impl<C, N, DB: Database> OnlineRethBuilder<C, N, DB> {
     pub fn new(builder: RethBuilder<DB>, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
-        Self { builder, consensus: Arc::new(consensus), network, headers: None, bodies: None }
+        Self {
+            builder,
+            consensus: Arc::new(consensus),
+            network,
+            headers: None,
+            total_difficulty: None,
+            bodies: None,
+        }
     }
 }
 
@@ -149,6 +157,12 @@ where
     /// Configures the [`HeaderStage`]
     pub fn with_headers_downloader(mut self, config: HeadersConfig) -> Self {
         self.headers = Some(config);
+        self
+    }
+
+    /// Configures the [`TotalDifficultyStage`]
+    pub fn with_total_difficulty(mut self, config: TotalDifficultyConfig) -> Self {
+        self.total_difficulty = Some(config);
         self
     }
 
@@ -187,6 +201,13 @@ where
         }))
     }
 
+    /// Retrieves the [`TotalDifficultyStage`] if it was configured
+    pub fn total_difficulty_stage(&self) -> Option<TotalDifficultyStage> {
+        self.total_difficulty
+            .as_ref()
+            .map(|config| TotalDifficultyStage { commit_threshold: config.commit_threshold })
+    }
+
     /// Returns the currently configured `BodyStage` if a `BodiesConfig` has been provided.
     pub async fn bodies_stage(
         &self,
@@ -213,6 +234,10 @@ where
         mut pipeline: Pipeline<DB, U>,
     ) -> Result<Pipeline<DB, U>> {
         if let Some(stage) = self.headers_stage().await? {
+            pipeline = pipeline.push(stage);
+        }
+
+        if let Some(stage) = self.total_difficulty_stage() {
             pipeline = pipeline.push(stage);
         }
 
