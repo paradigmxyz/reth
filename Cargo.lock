@@ -4563,9 +4563,11 @@ version = "0.1.0"
 dependencies = [
  "confy",
  "eyre",
+ "reth-consensus",
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
+ "reth-interfaces",
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
