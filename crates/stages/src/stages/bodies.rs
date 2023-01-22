@@ -40,7 +40,6 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 ///
 /// - [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers]
 /// - [`Transactions`][reth_interfaces::db::tables::Transactions]
-/// - [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber]
 ///
 /// # Genesis
 ///
@@ -50,7 +49,6 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 /// - The [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers] table
 /// - The [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount] table
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
-/// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
@@ -137,8 +135,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
                     // Write transactions
                     for transaction in block.body {
-                        // Insert the transaction hash to number mapping
-                        tx.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
                         // Append the transaction
                         tx_cursor.append(current_tx_id, transaction)?;
                         tx_transition_cursor.append(current_tx_id, transition_id)?;
@@ -184,11 +180,10 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
-        // Cursors to unwind bodies, ommers, transactions and tx hash to number
+        // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
-        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         // Cursors to unwind transitions
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
@@ -211,12 +206,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
 
             // Delete all transactions that belong to this block
             for tx_id in body.tx_id_range() {
-                // First delete the transaction and hash to id mapping
-                if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
+                // First delete the transaction
+                if let Some((_, _)) = transaction_cursor.seek_exact(tx_id)? {
                     transaction_cursor.delete_current()?;
-                    if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
-                        tx_hash_number_cursor.delete_current()?;
-                    }
                 }
                 // Delete the transaction transition if any
                 if tx_transition_cursor.seek_exact(tx_id)?.is_some() {
@@ -455,7 +447,6 @@ mod tests {
                 let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
                 let (_, transaction) = tx_cursor.last()?.expect("Could not read last transaction");
                 tx_cursor.delete_current()?;
-                tx.delete::<tables::TxHashNumber>(transaction.hash, None)?;
                 Ok(())
             })
             .expect("Could not delete a transaction");
@@ -623,7 +614,6 @@ mod tests {
                         };
                         body.tx_id_range().try_for_each(|tx_id| {
                             let transaction = random_signed_tx();
-                            tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
                             tx.put::<tables::Transactions>(tx_id, transaction)?;
                             tx.put::<tables::TxTransitionIndex>(tx_id, tx_id)
                         })?;
@@ -674,10 +664,6 @@ mod tests {
                         last_tx_id,
                         |key| key,
                     )?;
-                    self.tx.check_no_entry_above_by_value::<tables::TxHashNumber, _>(
-                        last_tx_id,
-                        |value| value,
-                    )?;
                 }
                 Ok(())
             }
@@ -710,7 +696,6 @@ mod tests {
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
-                    let mut tx_hash_num_cursor = tx.cursor_read::<tables::TxHashNumber>()?;
                     let mut tx_transition_cursor = tx.cursor_read::<tables::TxTransitionIndex>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
@@ -748,11 +733,6 @@ mod tests {
                                 tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present").1, current_transition_id
                             );
                             current_transition_id += 1;
-                            assert_matches!(
-                                tx_hash_num_cursor.seek_exact(tx_entry.unwrap().1.hash),
-                                Ok(Some(_)),
-                                "Transaction hash to index mapping is missing."
-                            );
                         }
 
                         // for block reward
