@@ -107,7 +107,7 @@ pub(crate) enum RethTestInstanceError {
     GenesisMismatch,
 }
 
-// TODO: config
+// TODO: refactor with RethBuilder
 /// Builder for a reth test instance.
 pub(crate) struct RethBuilder<DB> {
     network: Option<NetworkHandle>,
