@@ -11,6 +11,19 @@ use eyre::Result;
 
 /// RethBuilder::new(..).online(..).with_headers(..).with_bodies(..).with_execution(..).build()
 /// RethBuilder::new(..).with_execution(..).build()
+///
+/// OR
+///
+/// let builder = RethBuilder::new(..).online(..).with_headers(..);
+/// let header = builder.headers_stage().await?.expect("should be configured");
+/// let tx = Transaction::new(builder.db());
+/// let input = ExecInput {
+///     previous_stage: Some((StageId("No Previous Stage"), self.to)),
+///     stage_progress: Some(self.from),
+/// };
+/// stage.execute(&mut tx, input).await?;
+
+///
 #[must_use = "need to call `build` on this struct"]
 pub struct RethBuilder<DB> {
     db: Arc<DB>,
