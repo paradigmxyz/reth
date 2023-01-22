@@ -156,8 +156,7 @@ impl Command {
                         Default::default(),
                     ),
                 consensus: consensus.clone(),
-                client: fetch_client.clone(),
-                network_handle: network.clone(),
+                sync_status_updates: network.clone(),
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
