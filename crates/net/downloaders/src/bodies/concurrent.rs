@@ -435,9 +435,9 @@ pub struct ConcurrentDownloaderBuilder {
 impl Default for ConcurrentDownloaderBuilder {
     fn default() -> Self {
         Self {
-            request_limit: 100,
+            request_limit: 200,
             stream_batch_size: 1000,
-            max_buffered_responses: 10000,
+            max_buffered_responses: 30000,
             concurrent_requests_range: 5..=100,
         }
     }
