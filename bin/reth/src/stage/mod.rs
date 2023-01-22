@@ -12,7 +12,7 @@ use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
 
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
-use reth_staged_sync::Config;
+use reth_staged_sync::{builder::RethBuilder, Config};
 use reth_stages::{
     stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
     ExecInput, Stage, StageId, Transaction, UnwindInput,
@@ -109,7 +109,7 @@ impl Command {
             prometheus_exporter::initialize(listen_addr)?;
         }
 
-        let config: Config = confy::load_path(&self.config).unwrap_or_default();
+        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
@@ -147,18 +147,14 @@ impl Command {
                     )
                     .start_network()
                     .await?;
-                let fetch_client = Arc::new(network.fetch_client().await?);
 
-                let mut stage = BodyStage {
-                    downloader: Arc::new(
-                        ConcurrentDownloader::new(fetch_client.clone(), consensus.clone())
-                            .with_batch_size(config.stages.bodies.downloader_batch_size)
-                            .with_retries(config.stages.bodies.downloader_retries)
-                            .with_concurrency(config.stages.bodies.downloader_concurrency),
-                    ),
-                    consensus: consensus.clone(),
-                    commit_threshold: num_blocks,
-                };
+                config.stages.bodies.commit_threshold = num_blocks;
+                let mut stage = RethBuilder::new()
+                    .online(consensus.clone(), network.clone())
+                    .with_bodies_downloader(config.stages.bodies)
+                    .bodies_stage()
+                    .await?
+                    .expect("bodies configured");
 
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
@@ -166,10 +162,11 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Senders => {
-                let mut stage = SenderRecoveryStage {
-                    batch_size: config.stages.sender_recovery.batch_size,
-                    commit_threshold: num_blocks,
-                };
+                config.stages.sender_recovery.commit_threshold = num_blocks;
+                let mut stage = RethBuilder::new()
+                    .with_senders_recovery(config.stages.sender_recovery)
+                    .senders_recovery()
+                    .expect("senders configured");
 
                 // Unwind first
                 if !self.skip_unwind {
@@ -178,8 +175,13 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                let mut stage =
-                    ExecutionStage { chain_spec: self.chain.clone(), commit_threshold: num_blocks };
+                config.stages.execution.commit_threshold = num_blocks;
+                let mut stage = RethBuilder::new()
+                    .with_chain_spec(self.chain.clone())
+                    .with_execution(config.stages.execution)
+                    .execution()
+                    .expect("execution configured");
+
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }
