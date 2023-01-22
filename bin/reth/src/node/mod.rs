@@ -115,7 +115,7 @@ impl Command {
             prometheus_exporter::initialize(listen_addr)?;
         }
 
-        let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
+        let genesis = init_genesis(db.clone(), self.chain.clone())?;
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
         let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
