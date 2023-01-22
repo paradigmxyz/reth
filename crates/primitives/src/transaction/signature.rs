@@ -19,13 +19,13 @@ pub struct Signature {
 impl Signature {
     /// Output the length of the signature without the length of the RLP header, using the legacy
     /// scheme with EIP-155 support depends on chain_id.
-    pub(crate) fn payload_len_legacy(&self, chain_id: Option<u64>) -> usize {
+    pub(crate) fn payload_len_with_eip155_chain_id(&self, chain_id: Option<u64>) -> usize {
         self.v(chain_id).length() + self.r.length() + self.s.length()
     }
 
     /// Encode the `v`, `r`, `s` values without a RLP header.
     /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on chain_id.
-    pub(crate) fn encode_legacy(&self, out: &mut dyn reth_rlp::BufMut, chain_id: Option<u64>) {
+    pub(crate) fn encode_with_eip155_chain_id(&self, out: &mut dyn reth_rlp::BufMut, chain_id: Option<u64>) {
         self.v(chain_id).encode(out);
         self.r.encode(out);
         self.s.encode(out);
@@ -44,7 +44,7 @@ impl Signature {
 
     /// Decodes the `v`, `r`, `s` values without a RLP header.
     /// This will return a chain ID if the `v` value is EIP-155 compatible.
-    pub(crate) fn decode_legacy(buf: &mut &[u8]) -> Result<(Self, Option<u64>), DecodeError> {
+    pub(crate) fn decode_with_eip155_chain_id(buf: &mut &[u8]) -> Result<(Self, Option<u64>), DecodeError> {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
@@ -104,12 +104,12 @@ mod tests {
     use crate::{Address, Signature, H256, U256};
 
     #[test]
-    fn test_payload_len_legacy() {
+    fn test_payload_len_with_eip155_chain_id() {
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
 
-        assert_eq!(3, signature.payload_len_legacy(None));
-        assert_eq!(3, signature.payload_len_legacy(Some(1)));
-        assert_eq!(4, signature.payload_len_legacy(Some(47)));
+        assert_eq!(3, signature.payload_len_with_eip155_chain_id(None));
+        assert_eq!(3, signature.payload_len_with_eip155_chain_id(Some(1)));
+        assert_eq!(4, signature.payload_len_with_eip155_chain_id(Some(47)));
     }
 
     #[test]
@@ -124,20 +124,20 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_and_decode_legacy() {
+    fn test_encode_and_decode_with_eip155_chain_id() {
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
 
         let mut encoded = BytesMut::new();
-        signature.encode_legacy(&mut encoded, None);
-        assert_eq!(encoded.len(), signature.payload_len_legacy(None));
-        let (decoded, chain_id) = Signature::decode_legacy(&mut &*encoded).unwrap();
+        signature.encode_with_eip155_chain_id(&mut encoded, None);
+        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(None));
+        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
         assert_eq!(signature, decoded);
         assert_eq!(None, chain_id);
 
         let mut encoded = BytesMut::new();
-        signature.encode_legacy(&mut encoded, Some(1));
-        assert_eq!(encoded.len(), signature.payload_len_legacy(Some(1)));
-        let (decoded, chain_id) = Signature::decode_legacy(&mut &*encoded).unwrap();
+        signature.encode_with_eip155_chain_id(&mut encoded, Some(1));
+        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(Some(1)));
+        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
         assert_eq!(signature, decoded);
         assert_eq!(Some(1), chain_id);
     }

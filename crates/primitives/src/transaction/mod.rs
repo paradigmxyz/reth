@@ -645,7 +645,7 @@ impl Decodable for TransactionSigned {
                 input: Bytes(Decodable::decode(buf)?),
                 chain_id: None,
             });
-            let (signature, extracted_id) = Signature::decode_legacy(buf)?;
+            let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(buf)?;
             if let Some(id) = extracted_id {
                 transaction.set_chain_id(id);
             }
@@ -696,11 +696,11 @@ impl TransactionSigned {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
                 // do nothing w/ with_header
                 let payload_length =
-                    self.transaction.fields_len() + self.signature.payload_len_legacy(chain_id);
+                    self.transaction.fields_len() + self.signature.payload_len_with_eip155_chain_id(chain_id);
                 let header = Header { list: true, payload_length };
                 header.encode(out);
                 self.transaction.encode_fields(out);
-                self.signature.encode_legacy(out, chain_id);
+                self.signature.encode_with_eip155_chain_id(out, chain_id);
             }
             _ => {
                 let payload_length = self.transaction.fields_len() + self.signature.payload_len();
@@ -726,7 +726,7 @@ impl TransactionSigned {
         match self.transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
                 let payload_length =
-                    self.transaction.fields_len() + self.signature.payload_len_legacy(chain_id);
+                    self.transaction.fields_len() + self.signature.payload_len_with_eip155_chain_id(chain_id);
                 // 'header length' + 'payload length'
                 length_of_length(payload_length) + payload_length
             }
