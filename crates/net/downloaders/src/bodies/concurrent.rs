@@ -224,6 +224,10 @@ where
     C: ConsensusTrait + 'static,
     DB: Database,
 {
+    /// Set a new download range (exclusive).
+    ///
+    /// This method will drain all queued bodies and re-request any
+    /// missing blocks with number less than the last queued block.
     fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
         if range.is_empty() {
             tracing::warn!(target: "downloaders::bodies", "New header range is empty");
