@@ -15,7 +15,8 @@ use reth_primitives::{ChainSpec, ChainSpecBuilder};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
-        bodies::BodyStage, execution::ExecutionStage, headers::HeaderStage,
+        bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
+        hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
         sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
     },
     Pipeline,
@@ -51,11 +52,19 @@ pub struct RethBuilder<DB> {
 
     chain_spec: Option<ChainSpec>,
     execution: Option<ExecutionConfig>,
+
+    merklize: bool,
 }
 
 impl<DB: Database> RethBuilder<DB> {
     pub fn new(db: DB) -> Self {
-        Self { db: Arc::new(db), senders_recovery: None, execution: None, chain_spec: None }
+        Self {
+            db: Arc::new(db),
+            senders_recovery: None,
+            execution: None,
+            chain_spec: None,
+            merklize: false,
+        }
     }
 
     /// Converts the RethBuilder to an online one to be integrated with the Headers/Bodies stages
@@ -90,6 +99,13 @@ impl<DB: Database> RethBuilder<DB> {
         self
     }
 
+    /// Configures the Merklization-related stages: MerkleStage, AccountHashingStage,
+    /// StorageHashingStage
+    pub fn with_merklization(mut self) -> Self {
+        self.merklize = true;
+        self
+    }
+
     /// Retrieves the [`ExecutionStage`] if it was configured
     pub fn execution(&self) -> Option<ExecutionStage> {
         let chain_spec =
@@ -110,6 +126,18 @@ impl<DB: Database> RethBuilder<DB> {
 
         if let Some(stage) = self.execution() {
             pipeline = pipeline.push(stage);
+        }
+
+        // Push all the merklization stages together
+        // TODO: Add config
+        if self.merklize {
+            // This Merkle stage is used only on unwind
+            pipeline = pipeline
+                .push(MerkleStage { is_execute: false })
+                .push(AccountHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
+                .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
+                // This merkle stage is used only for execute
+                .push(MerkleStage { is_execute: true });
         }
 
         pipeline
