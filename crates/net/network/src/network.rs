@@ -12,9 +12,9 @@ use reth_eth_wire::{
     DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions, Status,
 };
 use reth_interfaces::{
+    network::Error,
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
-    Error,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{EthProtocolInfo, NetworkInfo, NetworkStatus, PeersInfo};
@@ -228,17 +228,12 @@ impl PeersInfo for NetworkHandle {
 
 #[async_trait]
 impl NetworkInfo for NetworkHandle {
-    type Error = Error;
-
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
     }
 
-    async fn network_status(&self) -> reth_interfaces::Result<NetworkStatus> {
-        let status = match self.get_status().await {
-            Ok(status) => status,
-            Err(_err) => return Err(reth_interfaces::network::Error::SenderDropped.into()),
-        };
+    async fn network_status(&self) -> Result<NetworkStatus, Error> {
+        let status = self.get_status().await?;
 
         Ok(NetworkStatus {
             client_name: "Reth".to_string(),

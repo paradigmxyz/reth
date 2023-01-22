@@ -22,11 +22,11 @@ pub mod db;
 /// P2P traits.
 pub mod p2p;
 
-/// Syncing related traits.
-pub mod sync;
-
 /// Network error
 pub mod network;
+
+/// Syncing related traits.
+pub mod sync;
 
 /// Possible errors when interacting with the chain.
 mod error;

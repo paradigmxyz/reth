@@ -4253,6 +4253,7 @@ dependencies = [
  "reth-codecs",
  "reth-db",
  "reth-eth-wire",
+ "reth-network-api",
  "reth-primitives",
  "reth-rpc-types",
  "secp256k1 0.24.2",
@@ -4411,6 +4412,8 @@ dependencies = [
  "async-trait",
  "reth-primitives",
  "serde",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

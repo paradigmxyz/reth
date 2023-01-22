@@ -1,9 +1,4 @@
-use thiserror::Error;
+use reth_network_api::NetworkError;
 
-/// Network Errors
-#[allow(missing_docs)]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum Error {
-    #[error("Sender has been dropped")]
-    SenderDropped,
-}
+/// Error alias for Network error type
+pub type Error = NetworkError;
