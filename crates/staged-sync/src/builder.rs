@@ -28,7 +28,7 @@ use eyre::Result;
 /// Rough API usage:
 ///
 /// 1. To launch the pipeline
-/// RethBuilder::new(..).online(..).with_headers(..).with_bodies(..).with_execution(..).build()
+/// RethBuilder::new(..).with_execution(..).online(..).with_headers(..).with_bodies(..).build()
 /// RethBuilder::new(..).with_execution(..).build()
 ///
 /// OR
@@ -58,11 +58,18 @@ impl<DB: Database> RethBuilder<DB> {
         Self { db: Arc::new(db), senders_recovery: None, execution: None, chain_spec: None }
     }
 
+    /// Converts the RethBuilder to an online one to be integrated with the Headers/Bodies stages
+    pub fn online<C, N>(self, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
+        OnlineRethBuilder::new(self, consensus, network)
+    }
+
+    /// Configures the [`SenderRecoveryStage`]
     pub fn with_senders_recovery(mut self, config: SenderRecoveryConfig) -> Self {
         self.senders_recovery = Some(config);
         self
     }
 
+    /// Retrieves the [`SenderRecoveryStage`] if it was configured
     pub fn senders_recovery(&self) -> Option<SenderRecoveryStage> {
         self.senders_recovery.as_ref().map(|config| SenderRecoveryStage {
             batch_size: config.batch_size,
@@ -70,23 +77,29 @@ impl<DB: Database> RethBuilder<DB> {
         })
     }
 
+    /// Configures the [`ExecutionStage`] parameters. The Default chainspec is mainnet,
+    /// use [`Self::with_chain_spec`] to configure for other chains.
     pub fn with_execution(mut self, config: ExecutionConfig) -> Self {
         self.execution = Some(config);
         self
     }
 
+    /// Retrieves the [`ExecutionStage`] if it was configured
     pub fn with_chain_spec(mut self, chain_spec: ChainSpec) -> Self {
         self.chain_spec = Some(chain_spec);
         self
     }
 
+    /// Retrieves the [`ExecutionStage`] if it was configured
     pub fn execution(&self) -> Option<ExecutionStage> {
-        let chain_spec = self.chain_spec.unwrap_or(ChainSpecBuilder::mainnet().build());
+        let chain_spec =
+            self.chain_spec.clone().unwrap_or_else(|| ChainSpecBuilder::mainnet().build());
         self.execution
             .as_ref()
             .map(|config| ExecutionStage { chain_spec, commit_threshold: config.commit_threshold })
     }
 
+    /// Given a [`Pipeline`] it proceeds to push the internally configured stages to it.
     pub fn configure_pipeline<U: SyncStateUpdater>(
         &self,
         mut pipeline: Pipeline<DB, U>,
@@ -102,8 +115,13 @@ impl<DB: Database> RethBuilder<DB> {
         pipeline
     }
 
-    pub fn online<C, N>(self, consensus: C, network: N) -> OnlineRethBuilder<C, N, DB> {
-        OnlineRethBuilder::new(self, consensus, network)
+    /// Builds and runs the pipeline
+    pub async fn run(&self) -> Result<()> {
+        // Instantiate the networked pipeline
+        let pipeline = Pipeline::<DB, NoopSyncStateUpdate>::default();
+        let mut pipeline = self.configure_pipeline(pipeline);
+        pipeline.run(self.db.clone()).await?;
+        Ok(())
     }
 }
 
@@ -128,11 +146,13 @@ where
     C: Consensus + 'static,
     DB: Database,
 {
+    /// Configures the [`HeaderStage`]
     pub fn with_headers_downloader(mut self, config: HeadersConfig) -> Self {
         self.headers = Some(config);
         self
     }
 
+    /// Configures the [`BodyStage`]
     pub fn with_bodies_downloader(mut self, config: BodiesConfig) -> Self {
         self.bodies = Some(config);
         self
@@ -187,16 +207,11 @@ where
         }))
     }
 
-    pub async fn build(&self) -> Result<()> {
-        // TODO: Add bodies.
-        if self.headers.is_none() && self.bodies.is_none() {
-            return Err(eyre::eyre!("No online stages configured, cnosider removing the `online` call from your builder or add a stage"));
-        }
-
-        // Instantiate the networked pipeline
-        let mut pipeline =
-            Pipeline::<DB, _>::default().with_sync_state_updater(self.network.clone());
-
+    /// Given a [`Pipeline`] it proceeds to push the internally configured stages to it.
+    pub async fn configure_pipeline<U: SyncStateUpdater>(
+        &self,
+        mut pipeline: Pipeline<DB, U>,
+    ) -> Result<Pipeline<DB, U>> {
         if let Some(stage) = self.headers_stage().await? {
             pipeline = pipeline.push(stage);
         }
@@ -205,6 +220,23 @@ where
             pipeline = pipeline.push(stage);
         }
 
+        if pipeline.stages.is_empty() {
+            return Err(eyre::eyre!("No online stages configured, cnosider removing the `online` call from your builder or add a stage"));
+        }
+
+        Ok(pipeline)
+    }
+
+    /// Builds and runs the pipeline
+    pub async fn run(&self) -> Result<()> {
+        // Instantiate the networked pipeline
+        let mut pipeline =
+            Pipeline::<DB, _>::default().with_sync_state_updater(self.network.clone());
+
+        // Set the online stages
+        pipeline = self.configure_pipeline(pipeline).await?;
+
+        // Set the offline stages
         pipeline = self.builder.configure_pipeline(pipeline);
 
         pipeline.run(self.builder.db.clone()).await?;
