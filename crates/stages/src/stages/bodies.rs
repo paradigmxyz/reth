@@ -116,7 +116,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // TODO: remove
             debug_assert_eq!(
                 block_header.number,
-                debug_block.map(|b| b + 1).unwrap_or(highest_block)
+                debug_block.map(|b| b + 1).unwrap_or(start_block)
             );
             debug_block = Some(block_header.number);
 
