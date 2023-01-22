@@ -6,7 +6,6 @@ use ethers_core::types::{
     transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, U64,
 };
 use ethers_providers::Middleware;
-use reth_cli_utils::init::init_db;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_interfaces::test_utils::TestConsensus;
 use reth_network::{
@@ -17,6 +16,7 @@ use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, Hardfork, Header, PeerId, SealedHeader,
 };
 use reth_provider::test_utils::NoopProvider;
+use reth_staged_sync::utils::init::init_db;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::fs;
@@ -282,11 +282,12 @@ async fn geth_clique_keepalive() {
         let _peer_id = events.peer_added_and_established().await.unwrap();
 
         // wait for session to be closed OR the duration passes
+        let keepalive_duration = Duration::from_secs(30);
         tokio::select!(
             _ = events.next_session_closed() => {
                 panic!("session closed before keepalive timeout");
             },
-            _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+            _ = tokio::time::sleep(keepalive_duration) => {}
         );
 
         // cleanup (delete the data_dir at dir_path)

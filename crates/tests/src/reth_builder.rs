@@ -1,11 +1,11 @@
 //! Builder for a reth test instance.
 
-use reth_cli_utils::init::init_genesis;
 use reth_db::database::Database;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::test_utils::TestConsensus;
 use reth_network::NetworkHandle;
 use reth_primitives::{ChainSpec, H256};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -61,15 +61,10 @@ where
                 commit_threshold: self.config.total_difficulty.commit_threshold,
             })
             .push(BodyStage {
-                downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        self.consensus.clone(),
-                    )
-                    .with_batch_size(self.config.bodies.downloader_batch_size)
-                    .with_retries(self.config.bodies.downloader_retries)
-                    .with_concurrency(self.config.bodies.downloader_concurrency),
-                ),
+                downloader: Arc::new(bodies::concurrent::ConcurrentDownloader::new(
+                    fetch_client.clone(),
+                    self.consensus.clone(),
+                )),
                 consensus: self.consensus.clone(),
                 commit_threshold: self.config.bodies.commit_threshold,
             })
