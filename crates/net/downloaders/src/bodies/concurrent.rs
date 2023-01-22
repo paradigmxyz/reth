@@ -127,7 +127,7 @@ where
             canonical_entry = canonical_cursor.next()?;
         }
 
-        return Ok(headers)
+        Ok(headers)
     }
 
     fn next_expected_block_number(&self) -> BlockNumber {
