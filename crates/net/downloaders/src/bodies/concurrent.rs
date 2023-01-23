@@ -113,10 +113,20 @@ where
         Ok(Some(request))
     }
 
+    /// Retrieve a batch of headers from the database starting from provided block number.
+    ///
+    /// This method is going to return the batch as soon as one of the conditions below
+    /// is fullfilled:
+    ///     1. The number of non-empty headers in the batch equals requested.
+    ///     2. The total number of headers in the batch (both empty and non-empty)
+    ///        is greater than or equal to the stream batch size.
+    ///     3. There are no more headers in the database.
+    ///
+    /// NOTE: The batches returned have a variable length.
     fn query_headers(
         &self,
         start: BlockNumber,
-        count: u64,
+        max_non_empty: u64,
     ) -> Result<Vec<SealedHeader>, db::Error> {
         let tx = self.db.tx()?;
 
@@ -128,13 +138,13 @@ where
         let mut headers = Vec::<SealedHeader>::default();
         let mut canonical_entry = canonical_cursor.seek_exact(start)?;
         while let Some((number, hash)) = canonical_entry {
-            let key = (number, hash).into();
-            let (_, header) = header_cursor.seek_exact(key)?.expect("database corrupted");
+            let (_, header) =
+                header_cursor.seek_exact((number, hash).into())?.expect("database corrupted");
             if !header.is_empty() {
                 non_empty_headers += 1;
             }
-            headers.push(SealedHeader::new(header, key.hash()));
-            if non_empty_headers >= count || headers.len() >= self.stream_batch_size {
+            headers.push(SealedHeader::new(header, hash));
+            if non_empty_headers >= max_non_empty || headers.len() >= self.stream_batch_size {
                 break
             }
             canonical_entry = canonical_cursor.next()?;
@@ -143,6 +153,7 @@ where
         Ok(headers)
     }
 
+    /// Get the next expected block number for queueing.
     fn next_expected_block_number(&self) -> BlockNumber {
         match self.latest_queued_block_number {
             Some(num) => num + 1,
