@@ -362,7 +362,7 @@ impl SessionManager {
                         peer_id,
                         remote_addr,
                         direction,
-                    })
+                    });
                 }
 
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -596,7 +596,7 @@ pub(crate) enum PendingSessionHandshakeError {
 
 /// The direction of the connection.
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum Direction {
+pub enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.
@@ -672,7 +672,7 @@ async fn start_pending_outbound_session(
                     error,
                 })
                 .await;
-            return
+            return;
         }
     };
     authenticate(
@@ -716,7 +716,7 @@ async fn authenticate(
                         direction,
                     })
                     .await;
-                return
+                return;
             }
         },
         Direction::Outgoing(remote_peer_id) => {
@@ -731,7 +731,7 @@ async fn authenticate(
                             direction,
                         })
                         .await;
-                    return
+                    return;
                 }
             }
         }
