@@ -172,14 +172,14 @@ jobs:
         run: |
           sudo apt install valgrind
 
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-
       - name: Checkout PR sources
         uses: actions/checkout@v3
         with:
           submodules: true
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
 
       - name: Benchmark PR
         uses: actions-rs/cargo@v1
