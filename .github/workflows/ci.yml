@@ -163,7 +163,7 @@ jobs:
           args: --all --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  benches:
+  benchmarks:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
@@ -172,23 +172,27 @@ jobs:
         run: |
           sudo apt install valgrind
 
-      - name: Checkout sources
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Checkout PR sources
         uses: actions/checkout@v3
         with:
           submodules: true
 
-      - name: cargo bench
+      - name: Benchmark PR
         uses: actions-rs/cargo@v1
         with:
           command: bench
           args: --package reth-db --bench iai
 
-      - name: Checkout sources
+      - name: Checkout main sources
         uses: actions/checkout@v3
         with:
           ref: main
 
-      - name: cargo bench
+      - name: Compare main's benchmark
         uses: actions-rs/cargo@v1
         with:
           command: bench
