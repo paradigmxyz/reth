@@ -96,26 +96,26 @@ impl Default for TotalDifficultyConfig {
 /// Body stage configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BodiesConfig {
-    /// The maximum number of bodies to download before committing progress to the database.
-    pub commit_threshold: u64,
-    /// The maximum number of bodies to request from a peer at a time.
-    pub downloader_batch_size: usize,
-    /// The number of times to retry downloading a set of bodies.
-    pub downloader_retries: usize,
-    /// The maximum number of body requests to have in flight at a time.
-    ///
-    /// The maximum number of bodies downloaded at the same time is `downloader_batch_size *
-    /// downloader_concurrency`.
-    pub downloader_concurrency: usize,
+    /// The batch size of non-empty blocks per one request
+    pub downloader_request_limit: u64,
+    /// The maximum number of block bodies returned at once from the stream
+    pub downloader_stream_batch_size: usize,
+    /// Maximum amount of received bodies to buffer internally.
+    pub downloader_max_buffered_responses: usize,
+    /// The minimum number of requests to send concurrently.
+    pub downloader_min_concurrent_requests: usize,
+    /// The maximum number of requests to send concurrently.
+    pub downloader_max_concurrent_requests: usize,
 }
 
 impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
-            commit_threshold: 5_000,
-            downloader_batch_size: 100,
-            downloader_retries: 5,
-            downloader_concurrency: 10,
+            downloader_request_limit: 200,
+            downloader_stream_batch_size: 10000,
+            downloader_max_buffered_responses: 30000,
+            downloader_min_concurrent_requests: 5,
+            downloader_max_concurrent_requests: 100,
         }
     }
 }

@@ -12,9 +12,9 @@ use reth_interfaces::{
 use reth_primitives::{PeerId, SealedHeader, H256};
 use std::{
     collections::HashMap,
-    fmt::{Debug, Formatter},
-    future::Future,
-    sync::Arc,
+    fmt::Debug,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
 };
 use tokio::sync::Mutex;
 
@@ -42,21 +42,36 @@ pub(crate) fn generate_bodies(
 }
 
 /// A [BodiesClient] for testing.
-pub(crate) struct TestBodiesClient<F>(pub(crate) Arc<Mutex<F>>);
+#[derive(Debug, Default)]
+pub(crate) struct TestBodiesClient {
+    bodies: Mutex<HashMap<H256, BlockBody>>,
+    should_delay: bool,
+    max_batch_size: Option<usize>,
+    times_requested: AtomicU64,
+}
 
-impl<F> Debug for TestBodiesClient<F> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TestBodiesClient").finish_non_exhaustive()
+impl TestBodiesClient {
+    pub(crate) fn with_bodies(mut self, bodies: HashMap<H256, BlockBody>) -> Self {
+        self.bodies = Mutex::new(bodies);
+        self
+    }
+
+    pub(crate) fn with_should_delay(mut self, should_delay: bool) -> Self {
+        self.should_delay = should_delay;
+        self
+    }
+
+    pub(crate) fn with_max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = Some(max_batch_size);
+        self
+    }
+
+    pub(crate) fn times_requested(&self) -> u64 {
+        self.times_requested.load(Ordering::Relaxed)
     }
 }
 
-impl<F> TestBodiesClient<F> {
-    pub(crate) fn new(f: F) -> Self {
-        Self(Arc::new(Mutex::new(f)))
-    }
-}
-
-impl<F: Send + Sync> DownloadClient for TestBodiesClient<F> {
+impl DownloadClient for TestBodiesClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
         // noop
     }
@@ -67,17 +82,30 @@ impl<F: Send + Sync> DownloadClient for TestBodiesClient<F> {
 }
 
 #[async_trait]
-impl<F, Fut> BodiesClient for TestBodiesClient<F>
-where
-    F: FnMut(Vec<H256>) -> Fut + Send + Sync,
-    Fut: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send,
-{
+impl BodiesClient for TestBodiesClient {
     async fn get_block_bodies_with_priority(
         &self,
-        hash: Vec<H256>,
+        hashes: Vec<H256>,
         _priority: Priority,
     ) -> PeerRequestResult<Vec<BlockBody>> {
-        let f = &mut *self.0.lock().await;
-        (f)(hash).await
+        if self.should_delay {
+            tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100)).await;
+        }
+        self.times_requested.fetch_add(1, Ordering::Relaxed);
+        let bodies = &mut *self.bodies.lock().await;
+        println!("HASHES {}", hashes.len());
+        Ok((
+            PeerId::default(),
+            hashes
+                .into_iter()
+                .take(self.max_batch_size.unwrap_or(usize::MAX))
+                .map(|hash| {
+                    bodies
+                        .remove(&hash)
+                        .expect("Downloader asked for a block it should not ask for")
+                })
+                .collect(),
+        )
+            .into())
     }
 }

@@ -55,7 +55,7 @@ impl AdminApiServer for AdminApi {
 
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enr = self.network.local_node_record();
-        let status = self.network.network_status().await.map_internal_err(|e| e.to_string())?;
+        let status = self.network.network_status().await.to_rpc_result()?;
 
         Ok(NodeInfo::new(enr, status))
     }

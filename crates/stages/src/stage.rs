@@ -128,7 +128,17 @@ pub trait Stage<DB: Database>: Send + Sync {
 /// Get the next execute action for the stage. Return if the stage has no
 /// blocks to process.
 macro_rules! exec_or_return {
-    ($input: expr, $threshold: expr, $log_target: expr) => {
+    ($input: expr, $log_target: literal) => {
+        match $input.next_action(None) {
+            // Next action cannot be capped without a threshold.
+            ExecAction::Run { range, capped: _capped } => range.into_inner(),
+            ExecAction::Done { stage_progress, target } => {
+                info!(target: $log_target, stage_progress, target, "Target block already reached");
+                return Ok(ExecOutput { stage_progress, done: true })
+            }
+        }
+    };
+    ($input: expr, $threshold: expr, $log_target: literal) => {
         match $input.next_action(Some($threshold)) {
             ExecAction::Run { range, capped } => (range.into_inner(), capped),
             ExecAction::Done { stage_progress, target } => {
