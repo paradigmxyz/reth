@@ -513,6 +513,10 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
+            NetworkHandleMessage::Shutdown => {
+                // Disconnect all active connections
+                self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
+            }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
             }

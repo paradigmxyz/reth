@@ -265,6 +265,12 @@ impl SessionManager {
         }
     }
 
+    pub(crate) fn disconnect_all(&self, reason: Option<DisconnectReason>) {
+        for (_, session) in self.active_sessions.iter() {
+            session.disconnect(reason);
+        }
+    }
+
     /// Sends a message to the peer's session
     pub(crate) fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage) {
         if let Some(session) = self.active_sessions.get_mut(peer_id) {
