@@ -250,13 +250,17 @@ where
         // Dispatch requests for missing bodies
         if let Some(latest_queued) = self.latest_queued_block_number {
             if range.start <= latest_queued {
+                // Retrieve the range for checking whether the block has been downloaded.
+                // Since `queued_bodies` is a sorted contiguous collection of block responses,
+                // construct the range instead of iterating the array each time looking for the
+                // block number.
                 let queued_bodies_range = match (queued_bodies.first(), queued_bodies.last()) {
                     (Some(first), Some(last)) => first.block_number()..last.block_number() + 1,
                     _ => Range::default(),
                 };
                 let mut request_range = Range::default();
                 for num in range.start..=latest_queued {
-                    // Check if block is already in the buffer or in progress
+                    // Check if block has been downloaded or is currently in progress
                     if queued_bodies_range.contains(&num) ||
                         self.in_progress_queue.contains_block(num)
                     {
