@@ -6,8 +6,8 @@ use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
-    TransactionSignedEcRecovered, H160, H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, ForkDiscriminant, Hardfork, Header, Log,
+    Receipt, TransactionSignedEcRecovered, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -302,7 +302,14 @@ pub fn execute<DB: StateProvider>(
     let mut evm = EVM::new();
     evm.database(db);
 
-    let spec_id = revm_spec(chain_spec, header.number);
+    let spec_id = revm_spec(
+        chain_spec,
+        ForkDiscriminant::new(
+            header.number,
+            chain_spec.terminal_total_difficulty().unwrap_or_default(),
+            header.timestamp,
+        ),
+    );
     evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
     evm.env.cfg.spec_id = spec_id;
     evm.env.cfg.perf_all_precompiles_have_balance = false;
@@ -452,7 +459,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
     match header.number {
-        n if Some(n) >= chain_spec.paris_status().block_number() => None,
+        n if Some(n) >= chain_spec.fork_block(Hardfork::MergeNetsplit) => None,
         n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
         n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
         _ => Some(WEI_5ETH),
@@ -538,8 +545,8 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
-        StorageKey, H160, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkKind,
+        SealedBlock, StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -776,7 +783,7 @@ mod tests {
 
         let chain_spec = ChainSpecBuilder::from(&*MAINNET)
             .homestead_activated()
-            .with_fork(Hardfork::Dao, 1)
+            .with_fork(Hardfork::Dao, ForkKind::Block(1))
             .build();
 
         let mut db = SubState::new(State::new(db));

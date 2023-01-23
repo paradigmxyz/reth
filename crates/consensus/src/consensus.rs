@@ -1,7 +1,7 @@
 //! Consensus for ethereum network
 use crate::verification;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader, H256};
+use reth_primitives::{BlockNumber, ChainSpec, Hardfork, SealedBlock, SealedHeader, H256};
 use tokio::sync::{watch, watch::error::SendError};
 
 /// Ethereum beacon consensus
@@ -46,7 +46,7 @@ impl Consensus for BeaconConsensus {
         verification::validate_header_standalone(header, &self.chain_spec)?;
         verification::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
 
-        if Some(header.number) < self.chain_spec.paris_status().block_number() {
+        if !self.chain_spec.fork_active(Hardfork::MergeNetsplit, header.number.into()) {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
@@ -59,6 +59,6 @@ impl Consensus for BeaconConsensus {
     }
 
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        Some(block_num) < self.chain_spec.paris_status().block_number()
+        !self.chain_spec.fork_active(Hardfork::MergeNetsplit, block_num.into())
     }
 }
