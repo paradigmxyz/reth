@@ -21,6 +21,15 @@ use std::{
     task::{Context, Poll},
 };
 
+/// The multiplier for the number of connected peers.
+/// This might be used as an upper bound for determining the
+/// number of concurrent requests.
+///
+/// The multiplier is needed to optimistically increase the number
+/// of concurrent requests, since we are expecting to connect to more peers
+/// in the near future.
+const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
+
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
@@ -151,7 +160,7 @@ where
 
         // we try to keep more requests than available peers active so that there's always a
         // followup request available for a peer
-        let dynamic_target = num_peers * 4;
+        let dynamic_target = num_peers * CONCURRENCY_PEER_MULTIPLIER;
         let max_dynamic = dynamic_target.max(*self.concurrent_requests_range.start());
 
         // If only a few peers are connected we keep it low
