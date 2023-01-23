@@ -48,13 +48,9 @@ macro_rules! impl_iai_inner {
                             }
                         );
                     }
-                    #[allow(dead_code)]
                     pub fn $seqread() {}
-                    #[allow(dead_code)]
                     pub fn $randread() {}
-                    #[allow(dead_code)]
                     pub fn $seqwrite() {}
-                    #[allow(dead_code)]
                     pub fn $randwrite() {}
                 }
                 use $mod::*;
