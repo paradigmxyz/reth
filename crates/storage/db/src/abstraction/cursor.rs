@@ -34,6 +34,16 @@ pub trait DbCursorRO<'tx, T: Table> {
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;
+
+    /// Returns an iterator that walks backwards through the table. If `start_key`
+    /// is None, starts from the last entry of the table. If it not, starts at a key
+    /// greater or equal than the key value wrapped inside Some().
+    fn walk_back<'cursor>(
+        &'cursor mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
 }
 
 /// Read only cursor over DupSort table.

@@ -3,7 +3,7 @@ use crate::{
     Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     database::Database,
     models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     tables,
@@ -251,7 +251,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             )?;
                         }
                     }
-                    current_transition_id += 1;
                 }
                 // insert bytecode
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
@@ -264,6 +263,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // NOTE: bytecode bytes are not inserted in change set and can be found in
                     // separate table
                 }
+                current_transition_id += 1;
             }
 
             // If there is block reward we will add account changeset to db
@@ -348,22 +348,20 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         }
 
         // Discard unwinded changesets
-        let mut entry = account_changeset.last()?;
-        while let Some((transition_id, _)) = entry {
+        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
+        while let Some((transition_id, _)) = rev_acc_changeset_walker.next().transpose()? {
             if transition_id < from_transition_rev {
                 break
             }
-            account_changeset.delete_current()?;
-            entry = account_changeset.prev()?;
+            tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
         }
 
-        let mut entry = storage_changeset.last()?;
-        while let Some((key, _)) = entry {
+        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
+        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.transition_id() < from_transition_rev {
                 break
             }
-            storage_changeset.delete_current()?;
-            entry = storage_changeset.prev()?;
+            tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -484,7 +482,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: None,
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             /// The progress of this stage the last time it was executed.
             stage_progress: None,
         };

@@ -2,7 +2,6 @@
 //!
 //! Starts the client
 use crate::{
-    config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
@@ -12,14 +11,14 @@ use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
-use reth_cli_utils::init::init_genesis;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, NodeRecord, H256};
+use reth_primitives::{BlockNumber, ChainSpec, H256};
+use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -83,9 +82,6 @@ pub struct Command {
     #[clap(flatten)]
     network: NetworkOpts,
 
-    #[arg(long, value_delimiter = ',')]
-    bootnodes: Option<Vec<NodeRecord>>,
-
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 }
@@ -117,10 +113,9 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::initialize(listen_addr)?;
-            HeaderMetrics::describe();
         }
 
-        let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
+        let genesis = init_genesis(db.clone(), self.chain.clone())?;
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
         let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
@@ -130,7 +125,7 @@ impl Command {
                 db.clone(),
                 self.chain.clone(),
                 self.network.disable_discovery,
-                self.bootnodes.clone(),
+                self.network.bootnodes.clone(),
                 self.nat,
             )
             .start_network()
@@ -150,13 +145,18 @@ impl Command {
             .with_channel(sender)
             .push(HeaderStage {
                 downloader: headers::linear::LinearDownloadBuilder::default()
-                    .batch_size(config.stages.headers.downloader_batch_size)
-                    .retries(config.stages.headers.downloader_retries)
-                    .build(consensus.clone(), fetch_client.clone()),
+                    .request_limit(config.stages.headers.downloader_batch_size)
+                    .stream_batch_size(config.stages.headers.commit_threshold as usize)
+                    // NOTE: the head and target will be set from inside the stage before the
+                    // downloader is called
+                    .build(
+                        consensus.clone(),
+                        fetch_client.clone(),
+                        Default::default(),
+                        Default::default(),
+                    ),
                 consensus: consensus.clone(),
-                client: fetch_client.clone(),
-                network_handle: network.clone(),
-                commit_threshold: config.stages.headers.commit_threshold,
+                sync_status_updates: network.clone(),
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
