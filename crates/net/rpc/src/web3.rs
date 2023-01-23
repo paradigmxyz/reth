@@ -1,0 +1,36 @@
+use jsonrpsee::core::RpcResult;
+use reth_network::NetworkHandle;
+use reth_network_api::NetworkInfo;
+use reth_primitives::{Bytes, H256};
+use reth_rpc_api::Web3ApiServer;
+
+/// `web3` API implementation.
+///
+/// This type provides the functionality for handling `web3` related requests.
+pub struct Web3Api {
+    /// An interface to interact with the network
+    network: NetworkHandle,
+}
+
+impl Web3Api {
+    /// Creates a new instance of `Web3Api`.
+    pub fn new(network: NetworkHandle) -> Web3Api {
+        Web3Api { network }
+    }
+}
+
+impl Web3ApiServer for Web3Api {
+    fn client_version(&self) -> RpcResult<String> {
+        Ok(self.network.client_version())
+    }
+
+    fn sha3(&self, input: Bytes) -> RpcResult<H256> {
+        Ok(H256::from_slice(&input))
+    }
+}
+
+impl std::fmt::Debug for Web3Api {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Web3Api").finish_non_exhaustive()
+    }
+}

@@ -74,6 +74,8 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
+    /// The client version needed by Web3 rpc API
+    pub client_version: String,
 }
 
 // === impl NetworkConfig ===
@@ -148,6 +150,8 @@ pub struct NetworkConfigBuilder {
     executor: Option<TaskExecutor>,
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
+    /// The client version needed by Web3 rpc API
+    client_version: Option<String>,
     /// Head used to start set for the fork filter and status.
     head: Option<BlockHashNumber>,
 }
@@ -170,6 +174,7 @@ impl NetworkConfigBuilder {
             network_mode: Default::default(),
             executor: None,
             hello_message: None,
+            client_version: None,
             head: None,
         }
     }
@@ -199,6 +204,11 @@ impl NetworkConfigBuilder {
     /// ```
     pub fn hello_message(mut self, hello_message: HelloMessage) -> Self {
         self.hello_message = Some(hello_message);
+        self
+    }
+
+    pub fn client_version(mut self, client_version: String) -> Self {
+        self.client_version = Some(client_version);
         self
     }
 
@@ -280,6 +290,7 @@ impl NetworkConfigBuilder {
             network_mode,
             executor,
             hello_message,
+            client_version,
             head,
         } = self;
 
@@ -290,6 +301,8 @@ impl NetworkConfigBuilder {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+
+        let client_version = client_version.unwrap_or("reth/1.0.0".to_string());
 
         let head = head.unwrap_or(BlockHashNumber { hash: chain_spec.genesis_hash(), number: 0 });
 
@@ -328,6 +341,7 @@ impl NetworkConfigBuilder {
             executor,
             status,
             hello_message,
+            client_version,
             fork_filter,
         }
     }

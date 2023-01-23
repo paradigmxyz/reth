@@ -49,6 +49,7 @@ impl NetworkHandle {
         peers: PeersHandle,
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
+        client_version: String,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -59,6 +60,7 @@ impl NetworkHandle {
             network_mode,
             bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
+            client_version,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -244,6 +246,10 @@ impl NetworkInfo for NetworkHandle {
             },
         })
     }
+
+    fn client_version(&self) -> String {
+        self.inner.client_version.clone()
+    }
 }
 
 impl StatusUpdater for NetworkHandle {
@@ -284,6 +290,8 @@ struct NetworkInner {
     bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
+    /// The client version needed by Web3 rpc API
+    client_version: String,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
