@@ -235,7 +235,7 @@ impl NetworkInfo for NetworkHandle {
         let status = self.get_status().await?;
 
         Ok(NetworkStatus {
-            client_name: "Reth".to_string(),
+            client_version: "Reth".to_string(),
             eth_protocol_info: EthProtocolInfo {
                 difficulty: status.total_difficulty,
                 head: status.blockhash,

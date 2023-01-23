@@ -42,8 +42,8 @@ pub trait PeersInfo: Send + Sync {
 /// The status of the network being ran by the local node.
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct NetworkStatus {
-    /// The local node client name.
-    pub client_name: String,
+    /// The local node client version.
+    pub client_version: String,
     /// Information about the Ethereum Wire Protocol.
     pub eth_protocol_info: EthProtocolInfo,
 }
