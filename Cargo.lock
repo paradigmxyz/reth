@@ -4564,6 +4564,7 @@ dependencies = [
 name = "reth-staged-sync"
 version = "0.1.0"
 dependencies = [
+ "confy",
  "eyre",
  "reth-db",
  "reth-discv4",
