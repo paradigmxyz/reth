@@ -642,7 +642,7 @@ mod tests {
             Ok(None),
             "There is storage for destroyed account"
         );
-        // drops tx so that it return write privilege to test_tx
+        // drops tx so that it returns write privilege to test_tx
         drop(tx);
         let plain_accounts = test_tx.table::<tables::PlainAccountState>().unwrap();
         let plain_storage = test_tx.table::<tables::PlainStorageState>().unwrap();
