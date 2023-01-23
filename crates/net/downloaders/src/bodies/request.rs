@@ -116,7 +116,7 @@ where
     /// If the number of buffered bodies does not equal the number of non empty headers.
     #[allow(clippy::result_large_err)]
     fn try_construct_blocks(&mut self) -> Result<Vec<BlockResponse>, (PeerId, BodyRequestError)> {
-        // Optimistically, the allocated memory will not be reused.
+        // Drop the allocated memory for the buffer. Optimistically, it will not be reused.
         let mut bodies = std::mem::take(&mut self.buffer).into_iter();
         let mut results = Vec::default();
         for header in self.headers.iter().cloned() {
