@@ -250,8 +250,10 @@ where
 {
     /// Set a new download range (exclusive).
     ///
-    /// This method will drain all queued bodies and re-request any
-    /// missing blocks with number less than the last queued block.
+    /// This method will drain all queued bodies, filter out ones outside the range and put them
+    /// back into the buffer.
+    /// If there are any bodies between the range start and last queued body that have not been
+    /// downloaded or are not in progress, they will be re-requested.
     fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
         if range.is_empty() {
             tracing::warn!(target: "downloaders::bodies", "New header range is empty");
@@ -282,6 +284,7 @@ where
                 for num in range.start..=latest_queued {
                     // Check if block has been downloaded or is currently in progress
                     if queued_bodies_range.contains(&num) ||
+                        self.buffered_responses.iter().any(|r| r.block_range().contains(&num)) ||
                         self.in_progress_queue.contains_block(num)
                     {
                         continue
