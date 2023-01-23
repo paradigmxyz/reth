@@ -445,7 +445,7 @@ mod tests {
             .tx()
             .commit(|tx| {
                 let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-                let (_, transaction) = tx_cursor.last()?.expect("Could not read last transaction");
+                tx_cursor.last()?.expect("Could not read last transaction");
                 tx_cursor.delete_current()?;
                 Ok(())
             })

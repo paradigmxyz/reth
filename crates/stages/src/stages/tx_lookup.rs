@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -14,9 +14,9 @@ const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 
 /// The transaction lookup stage.
 ///
-/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a block
-/// to the correesponding `TransitionId` at each block. This is written to the [`tables::TxHashNumber`]
-/// This is used for looking up changesets via the transaction hash.
+/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
+/// block to the correesponding `TransitionId` at each block. This is written to the
+/// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
 #[derive(Debug)]
 pub struct TransactionLookupStage {
     /// The number of table entries to commit at once
@@ -43,7 +43,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-        let (mut current_tx_id, _) = tx.get_next_block_ids(start_block)?;
         let start_key = tx.get_block_numhash(start_block)?;
 
         let bodies = cursor_bodies
@@ -54,18 +53,16 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                     .map(|(block_num_hash, _)| block_num_hash.number() <= end_block)
                     .unwrap_or_default()
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        for body in bodies {
-            let (_, body) = body?;
-            let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
+        for (_, body) in bodies {
+            let transactions = tx_cursor
+                .walk(body.start_tx_id)?
+                .take(body.tx_count as usize)
+                .collect::<Result<Vec<_>, _>>()?;
 
-            // get next N transactions.
-            for _ in body.tx_id_range() {
-                let (_, transaction) =
-                    tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
-                tx.put::<tables::TxHashNumber>(transaction.hash(), current_tx_id)?;
-                current_tx_id += 1;
+            for (id, transaction) in transactions {
+                tx.put::<tables::TxHashNumber>(transaction.hash(), id)?;
             }
         }
 
@@ -88,7 +85,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((key, body)) = rev_walker.next().transpose()? {
             if key.number() <= input.unwind_to {
-                break;
+                break
             }
 
             // Delete all transactions that belong to this block

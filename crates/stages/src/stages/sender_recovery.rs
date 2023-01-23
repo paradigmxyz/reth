@@ -127,7 +127,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::models::StoredBlockBody;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{BlockNumber, SealedBlock, H256};
 
@@ -151,18 +150,13 @@ mod tests {
             stage_progress: Some(stage_progress),
         };
 
-        let mut current_tx_id = 0;
-        let stage_progress = input.stage_progress.unwrap_or_default();
         // Insert blocks with a single transaction at block `stage_progress + 10`
-        (stage_progress..input.previous_stage_progress() + 1)
-            .map(|number| -> Result<SealedBlock, TestRunnerError> {
-                let tx_count = Some((number == stage_progress + 10) as u8);
-                let block = random_block(number, None, tx_count, None);
-                current_tx_id = runner.insert_block(current_tx_id, &block, false)?;
-                Ok(block)
+        let blocks = (stage_progress..input.previous_stage_progress() + 1)
+            .map(|number| {
+                random_block(number, None, Some((number == stage_progress + 10) as u8), None)
             })
-            .collect::<Result<Vec<_>, _>>()
-            .expect("failed to insert blocks");
+            .collect::<Vec<_>>();
+        runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -254,12 +248,7 @@ mod tests {
             let end = input.previous_stage_progress() + 1;
 
             let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
-
-            let mut current_tx_id = 0;
-            blocks.iter().try_for_each(|b| -> Result<(), TestRunnerError> {
-                current_tx_id = self.insert_block(current_tx_id, b, b.number == stage_progress)?;
-                Ok(())
-            })?;
+            self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
 
@@ -323,40 +312,6 @@ mod tests {
             };
 
             Ok(())
-        }
-
-        fn insert_block(
-            &self,
-            tx_offset: u64,
-            block: &SealedBlock,
-            insert_senders: bool,
-        ) -> Result<u64, TestRunnerError> {
-            let mut current_tx_id = tx_offset;
-            let txs = block.body.clone();
-
-            self.tx.commit(|tx| {
-                let numhash = block.header.num_hash().into();
-                tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
-                tx.put::<tables::BlockBodies>(
-                    numhash,
-                    StoredBlockBody { start_tx_id: current_tx_id, tx_count: txs.len() as u64 },
-                )?;
-
-                for body_tx in txs {
-                    // Insert senders for previous stage progress
-                    if insert_senders {
-                        tx.put::<tables::TxSenders>(
-                            current_tx_id,
-                            body_tx.recover_signer().expect("failed to recover sender"),
-                        )?;
-                    }
-                    tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
-                    current_tx_id += 1;
-                }
-                Ok(())
-            })?;
-
-            Ok(current_tx_id)
         }
     }
 }
