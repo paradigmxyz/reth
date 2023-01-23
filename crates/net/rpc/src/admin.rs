@@ -1,10 +1,13 @@
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+
 use reth_network::{peers::PeerKind, NetworkHandle};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::NodeInfo;
+
+use crate::result::ToRpcResult;
 
 /// `admin` API implementation.
 ///
@@ -52,10 +55,7 @@ impl AdminApiServer for AdminApi {
 
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enr = self.network.local_node_record();
-        let status = match self.network.network_status().await {
-            Ok(status) => status,
-            Err(e) => return RpcResult::Err(jsonrpsee::core::Error::Custom(e.to_string())),
-        };
+        let status = self.network.network_status().await.map_internal_err(|e| e.to_string())?;
 
         Ok(NodeInfo::new(enr, status))
     }

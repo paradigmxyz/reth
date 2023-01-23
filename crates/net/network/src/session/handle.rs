@@ -64,6 +64,7 @@ impl ActiveSessionHandle {
     }
 }
 
+/// Info about an active peer session.
 #[derive(Debug)]
 #[allow(unused)]
 pub struct PeerInfo {
