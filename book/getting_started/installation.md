@@ -1,6 +1,6 @@
 ## Installation
 
-To use Reth, you must first install Geth. You can find instructions for installing Geth at the following link: https://geth.ethereum.org/docs/install-and-build/installing-geth.
+To use Reth, you must first install Geth. You can find instructions for installing Geth at the following link: [https://geth.ethereum.org/docs/install-and-build/installing-geth](https://geth.ethereum.org/docs/getting-started/installing-geth).
 
 ### Ubuntu
 Building the source
