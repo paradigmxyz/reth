@@ -41,6 +41,7 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,

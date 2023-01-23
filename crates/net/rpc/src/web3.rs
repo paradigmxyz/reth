@@ -1,7 +1,7 @@
 use jsonrpsee::core::RpcResult;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Bytes, H256};
+use reth_primitives::{keccak256, Bytes, H256};
 use reth_rpc_api::Web3ApiServer;
 
 /// `web3` API implementation.
@@ -25,7 +25,7 @@ impl Web3ApiServer for Web3Api {
     }
 
     fn sha3(&self, input: Bytes) -> RpcResult<H256> {
-        Ok(H256::from_slice(&input))
+        Ok(keccak256(input))
     }
 }
 
