@@ -638,8 +638,7 @@ mod tests {
             let session_id = self.next_id();
             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
-            let metered_stream =
-                MeteredStream::builder(stream);
+            let metered_stream = MeteredStream::builder(stream);
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,

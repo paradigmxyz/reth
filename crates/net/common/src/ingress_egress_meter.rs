@@ -102,8 +102,8 @@ pub struct IngressEgressMeterMetrics {
 
 impl IngressEgressMeterMetrics {
     /// Creates an instance of [`BandwidthMeterMetrics`] with the given scope
-    pub fn new(scope: &str) -> Self {
-        Self { inner: Arc::new(IngressEgressMeterMetricsInner::new(scope)) }
+    pub fn new(scope: &str, labels: impl metrics::IntoLabels + Clone) -> Self {
+        Self { inner: Arc::new(IngressEgressMeterMetricsInner::new_with_labels(scope, labels)) }
     }
 }
 
@@ -214,16 +214,11 @@ mod tests {
 
     fn create_metered_duplex<'a>(
         client_meter: IngressEgressMeter,
-        server_meter: IngressEgressMeter
-    ) -> (
-        MeteredStream<DuplexStream>,
-        MeteredStream<DuplexStream>,
-    ) {
+        server_meter: IngressEgressMeter,
+    ) -> (MeteredStream<DuplexStream>, MeteredStream<DuplexStream>) {
         let (client, server) = duplex(64);
-        let (mut metered_client, mut metered_server) = (
-            MeteredStream::builder(client),
-            MeteredStream::builder(server),
-        );
+        let (mut metered_client, mut metered_server) =
+            (MeteredStream::builder(client), MeteredStream::builder(server));
 
         metered_client.add_meter(client_meter);
         metered_server.add_meter(server_meter);
@@ -266,10 +261,8 @@ mod tests {
     async fn test_count_read_write() {
         // Taken in large part from https://docs.rs/tokio/latest/tokio/io/struct.DuplexStream.html#example
 
-        let (mut metered_client, mut metered_server) = create_metered_duplex(
-            IngressEgressMeter::default(),
-            IngressEgressMeter::default(),
-        );
+        let (mut metered_client, mut metered_server) =
+            create_metered_duplex(IngressEgressMeter::default(), IngressEgressMeter::default());
 
         duplex_stream_ping_pong(&mut metered_client, &mut metered_server).await;
 

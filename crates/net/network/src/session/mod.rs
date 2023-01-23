@@ -200,8 +200,10 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        let ingress_egress_metrics =
-            IngressEgressMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
+        let ingress_egress_metrics = IngressEgressMeterMetrics::new(
+            &format!("ingress_egress"),
+            &[("session_id", format!("{session_id}"))],
+        );
         let mut metered_stream = MeteredStream::builder(stream);
         metered_stream.add_metrics(ingress_egress_metrics);
         self.spawn(start_pending_incoming_session(
@@ -667,8 +669,10 @@ async fn start_pending_outbound_session(
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
-            let ingress_egress_metrics =
-                IngressEgressMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
+            let ingress_egress_metrics = IngressEgressMeterMetrics::new(
+                &format!("ingress_egress"),
+                &[("session_id", format!("{session_id}"))],
+            );
             let mut metered_stream = MeteredStream::builder(stream);
             metered_stream.add_metrics(ingress_egress_metrics);
             metered_stream
