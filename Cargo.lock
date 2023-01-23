@@ -604,17 +604,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cita_trie"
-version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afe7baab47f510f52ca8dc9c0eb9082020c627c7f22285bea30edc3511f7ee29"
-dependencies = [
- "hasher",
- "parking_lot 0.12.1",
- "rlp",
-]
-
-[[package]]
 name = "clang-sys"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2134,15 +2123,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
 
 [[package]]
-name = "hash256-std-hasher"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92c171d55b98633f4ed3860808f004099b36c1cc29c42cfc53aa8591b21efcf2"
-dependencies = [
- "crunchy",
-]
-
-[[package]]
 name = "hash32"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2177,15 +2157,6 @@ checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 dependencies = [
  "ahash 0.8.2",
  "serde",
-]
-
-[[package]]
-name = "hasher"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbba678b6567f27ce22870d951f4208e1dc2fef64993bd4521b1d497ef8a3aa"
-dependencies = [
- "tiny-keccak",
 ]
 
 [[package]]
@@ -2813,17 +2784,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3afef3b6eff9ce9d8ff9b3601125eec7f0c8cbac7abd14f355d053fa56c98768"
 dependencies = [
  "cpufeatures",
-]
-
-[[package]]
-name = "keccak-hasher"
-version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "711adba9940a039f4374fc5724c0a5eaca84a2d558cce62256bfe26f0dbef05e"
-dependencies = [
- "hash-db",
- "hash256-std-hasher",
- "tiny-keccak",
 ]
 
 [[package]]
@@ -3921,21 +3881,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reference-trie"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fe83fdbf388f84b2477801b291c85e8f3c20dc908fab7de10f8dbd5df79a8d3"
-dependencies = [
- "hash-db",
- "hash256-std-hasher",
- "hashbrown 0.12.3",
- "keccak-hasher",
- "parity-scale-codec",
- "trie-db",
- "trie-root",
-]
-
-[[package]]
 name = "regex"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4652,11 +4597,8 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bytes",
- "cita_trie",
  "futures-util",
  "hash-db",
- "hash256-std-hasher",
- "hasher",
  "itertools 0.10.5",
  "memory-db",
  "metrics",
@@ -4664,7 +4606,6 @@ dependencies = [
  "paste",
  "rand 0.8.5",
  "rayon",
- "reference-trie",
  "reth-db",
  "reth-downloaders",
  "reth-eth-wire",
@@ -6036,15 +5977,6 @@ dependencies = [
  "log",
  "rustc-hex",
  "smallvec",
-]
-
-[[package]]
-name = "trie-root"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a36c5ca3911ed3c9a5416ee6c679042064b93fc637ded67e25f92e68d783891"
-dependencies = [
- "hash-db",
 ]
 
 [[package]]
