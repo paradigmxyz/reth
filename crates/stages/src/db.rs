@@ -151,7 +151,7 @@ where
         key: Address,
     ) -> Result<Option<(ShardedKey<Address>, TransitionList)>, StageError> {
         let mut cursor = self.cursor_read::<tables::AccountHistory>()?;
-       cursor.seek_exact(ShardedKey::new(key, u64::MAX))?;
+        cursor.seek_exact(ShardedKey::new(key, u64::MAX))?;
 
         let ret = cursor.prev()?;
 
@@ -164,12 +164,14 @@ where
         storage_key: H256,
     ) -> Result<Option<(StorageShardedKey, TransitionList)>, StageError> {
         let mut cursor = self.cursor_read::<tables::StorageHistory>()?;
-        let _none =
-            cursor.seek_exact(StorageShardedKey::new(address_key, storage_key, u64::MAX))?;
+        cursor.seek_exact(StorageShardedKey::new(address_key, storage_key, u64::MAX))?;
 
         let ret = cursor.prev()?;
 
-        Ok(ret.filter(|sharded| sharded.address == address && sharded.sharded_key.key == storage_key))
+        Ok(ret.filter(|(storage_sharded_key, _)| {
+            storage_sharded_key.address == address_key &&
+                storage_sharded_key.sharded_key.key == storage_key
+        }))
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous

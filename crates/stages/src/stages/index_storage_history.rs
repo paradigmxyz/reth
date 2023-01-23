@@ -123,6 +123,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, "Unwinding");
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 

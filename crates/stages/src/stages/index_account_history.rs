@@ -5,7 +5,7 @@ use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::ShardedKey,
+    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey},
     tables,
     transaction::{DbTx, DbTxMut},
     TransitionList,
@@ -16,7 +16,6 @@ use tracing::*;
 
 const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistoryStage");
 
-const NUM_OF_INDICES_IN_SHARD: usize = 100;
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Debug)]
@@ -112,8 +111,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+
+        let mut cursor = tx.cursor_write::<tables::AccountHistory>()?;
 
         tx.cursor_read::<tables::AccountChangeSet>()?
             .walk(from_transition_rev)?
@@ -131,8 +133,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             .into_iter()
             // try to unwind the index
             .try_for_each(|(address, rem_index)| -> Result<(), StageError> {
-                let mut cursor = tx.cursor_write::<tables::AccountHistory>()?;
-                let _last_shard = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+                cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
 
                 let mut boundary = None;
                 while let Some((sharded_key, list)) = cursor.prev()? {
