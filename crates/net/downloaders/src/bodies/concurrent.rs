@@ -30,6 +30,7 @@ pub struct ConcurrentDownloader<B, C, DB> {
     client: Arc<B>,
     /// The consensus client
     consensus: Arc<C>,
+    // TODO: make this a [HeaderProvider]
     /// The database handle
     db: Arc<DB>,
     /// The maximum number of non-empty blocks per one request
