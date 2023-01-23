@@ -423,7 +423,7 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, Header, MAINNET, GOERLI, SEPOLIA};
+    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, Header, GOERLI, MAINNET, SEPOLIA};
 
     #[test]
     fn test_empty_forkid() {
