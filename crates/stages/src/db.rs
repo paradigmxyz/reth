@@ -155,11 +155,7 @@ where
 
         let ret = cursor.prev()?;
 
-        match ret {
-            None => Ok(None),
-            Some((sharded_key, _)) if sharded_key.key != key => Ok(None),
-            Some(_) => Ok(ret),
-        }
+        Ok(ret.filter(|(sharded_key, _)| sharded_key.key == key))
     }
 
     pub(crate) fn get_storage_history_biggest_sharded_index(
