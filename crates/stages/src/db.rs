@@ -151,7 +151,7 @@ where
         key: Address,
     ) -> Result<Option<(ShardedKey<Address>, TransitionList)>, StageError> {
         let mut cursor = self.cursor_read::<tables::AccountHistory>()?;
-        let _none = cursor.seek_exact(ShardedKey::new(key, u64::MAX))?;
+       cursor.seek_exact(ShardedKey::new(key, u64::MAX))?;
 
         let ret = cursor.prev()?;
 
