@@ -65,19 +65,18 @@ impl ActiveSessionHandle {
 }
 
 /// Info about an active peer session.
-#[derive(Debug)]
-#[allow(unused)]
+#[derive(Debug, Clone)]
 pub struct PeerInfo {
     /// Announced capabilities of the peer
-    pub(crate) capabilities: Arc<Capabilities>,
+    pub capabilities: Arc<Capabilities>,
     /// The identifier of the remote peer
-    pub(crate) remote_id: PeerId,
+    pub remote_id: PeerId,
     /// The client's name and version
-    pub(crate) client_version: String,
+    pub client_version: String,
     /// The address we're connected to
-    pub(crate) remote_addr: SocketAddr,
+    pub remote_addr: SocketAddr,
     /// The direction of the session
-    pub(crate) direction: Direction,
+    pub direction: Direction,
 }
 
 /// Events a pending session can produce.
