@@ -39,7 +39,7 @@ enum BodyRequestError {
 /// the future will start over.
 ///
 /// The future will filter out any empty headers (see [SealedHeader::is_empty]) from the request.
-/// If [BodiesRequestFuture] was initialiazed with all empty headers, no request will be dispatched
+/// If [BodiesRequestFuture] was initialized with all empty headers, no request will be dispatched
 /// and they will be immediately returned upon polling.
 ///
 /// NB: This assumes that peers respond with bodies in the order that they were requested.
@@ -188,6 +188,8 @@ where
                         tracing::trace!(
                             target: "downloaders::bodies", request_len, response_len, ?peer_id, "Received bodies"
                         );
+                        // Draining the hashes here so that on the next `submit_request` call we only
+                        // request the remaining bodies, instead of the ones we already received
                         this.hashes_to_download.drain(..response_len);
                         this.buffer.extend(bodies.into_iter().map(|b| (peer_id, b)));
 
