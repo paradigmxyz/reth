@@ -20,11 +20,10 @@ reth-net-nat = { path = "../../crates/net/nat" }
 
 # io
 serde = "1.0"
-
-#[dev-dependencies]
-confy = "0.5"
-walkdir = "2.3.2"
 serde_json = "1.0.91"
+
+# misc
+walkdir = "2.3.2"
 eyre = "0.6.8"
 shellexpand = "3.0.0"
 tracing = "0.1.37"
