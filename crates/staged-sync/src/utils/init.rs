@@ -53,7 +53,7 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
     let mut header: Header = genesis.clone().into();
 
     // set base fee if EIP-1559 is enabled
-    if chain.fork_active(Hardfork::London, 0) {
+    if chain.fork_active(Hardfork::London, 0.into()) {
         header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
     }
 
